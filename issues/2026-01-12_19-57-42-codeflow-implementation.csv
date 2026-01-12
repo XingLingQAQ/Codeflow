@@ -1,0 +1,2 @@
+﻿id,priority,phase,area,title,description,acceptance_criteria,test_mcp,review_initial_requirements,review_regression_requirements,dev_state,review_initial_state,review_regression_state,git_state,owner,refs,notes
+CF-010,P0,1.1,both,项目脚手架初始化,创建 Monorepo 结构,1. pnpm workspace 配置正确,AUTOE2E,检查 tsconfig.json 继承关系,全量构建无报错,已完成,已完成,已完成,已提交,,plan/2026-01-12_19-52-13-codeflow-implementation.md:22-27,"done_at:2026-01-12;验收通过:pnpm workspace配置正确,packages三层目录存在,TypeScript编译通过,ESLint规则生效"
