@@ -55,14 +55,8 @@ export const ChatList: React.FC<ChatListProps> = ({ messages, onRetry }) => {
   return (
     <div ref={containerRef} style={containerStyle}>
       {messages.map((message, index) => (
-        <div
-          key={message.id}
-          ref={index === messages.length - 1 ? lastMessageRef : undefined}
-        >
-          <ChatBubble
-            message={message}
-            isStreaming={isLastMessageStreaming(index, message)}
-          />
+        <div key={message.id} ref={index === messages.length - 1 ? lastMessageRef : undefined}>
+          <ChatBubble message={message} isStreaming={isLastMessageStreaming(index, message)} />
         </div>
       ))}
     </div>
