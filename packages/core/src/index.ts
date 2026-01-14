@@ -6,3 +6,4 @@ export * from './git/index.js';
 export * from './commander/index.js';
 export * from './summarizer/index.js';
 export * from './memory/index.js';
+export * from './retriever/index.js';
