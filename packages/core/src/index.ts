@@ -5,3 +5,4 @@ export * from './config/index.js';
 export * from './git/index.js';
 export * from './commander/index.js';
 export * from './summarizer/index.js';
+export * from './memory/index.js';
