@@ -10,3 +10,4 @@ export * from './retriever/index.js';
 export * from './mapagent/index.js';
 export * from './samg/index.js';
 export * from './disclosure/index.js';
+export * from './hotswap/index.js';
