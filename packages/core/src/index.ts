@@ -14,3 +14,5 @@ export * from './hotswap/index.js';
 export * from './ast/index.js';
 export * from './cache/index.js';
 export * from './isolation/index.js';
+export * from './privacy/index.js';
+export * from './audit/index.js';
