@@ -12,6 +12,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.20.0",
   "dependencies": {
+    "@codeflow/core": "workspace:*",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
