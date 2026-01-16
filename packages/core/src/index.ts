@@ -12,3 +12,4 @@ export * from './samg/index.js';
 export * from './disclosure/index.js';
 export * from './hotswap/index.js';
 export * from './ast/index.js';
+export * from './cache/index.js';
