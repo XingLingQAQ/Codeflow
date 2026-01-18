@@ -6,4 +6,5 @@ export * from './MemoryIndicator';
 export * from './MemoryDashboard';
 export * from './ContextBuilder';
 export * from './SemanticSearch';
+export * from './NestedConversation';
 //# sourceMappingURL=index.js.map
