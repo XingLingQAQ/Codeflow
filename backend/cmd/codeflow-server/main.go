@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
+
+	"github.com/codeflow/backend/internal/api"
 )
 
 const version = "0.1.0"
@@ -10,7 +13,6 @@ const version = "0.1.0"
 func main() {
 	fmt.Printf("CodeFlow Backend Server v%s\n", version)
 	fmt.Println("Go-based backend for CodeFlow IDE")
-	fmt.Println("Status: Initialization complete")
 
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -18,14 +20,47 @@ func main() {
 }
 
 func run() error {
-	fmt.Println("\n✓ Project structure initialized")
-	fmt.Println("✓ Configuration system ready")
-	fmt.Println("✓ Build system configured")
+	// Get port from environment or use default
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Implement Memory module (SQLite vector store)")
-	fmt.Println("  2. Implement Privacy module (AES-256-CBC encryption)")
-	fmt.Println("  3. Implement Audit module (JSONL audit logs)")
+	// Get allowed origins from environment or use defaults
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"http://localhost:5173",
+	}
+	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {
+		// Could parse comma-separated origins here
+		allowedOrigins = append(allowedOrigins, origins)
+	}
 
-	return nil
+	// Check if debug mode is enabled
+	debugMode := os.Getenv("DEBUG") == "true"
+
+	// Create API server
+	config := &api.Config{
+		Port:            port,
+		AllowedOrigins:  allowedOrigins,
+		EnableDebugMode: debugMode,
+	}
+
+	server := api.NewServer(config)
+
+	fmt.Printf("\n✓ API server starting on port %s\n", port)
+	fmt.Println("✓ CORS enabled for frontend origins")
+	fmt.Println("✓ Request logging enabled")
+	fmt.Printf("\nEndpoints:\n")
+	fmt.Println("  GET  /health              - Health check")
+	fmt.Println("  GET  /api/v1/memory/*     - Memory management")
+	fmt.Println("  POST /api/v1/search/*     - Semantic search")
+	fmt.Println("  GET  /api/v1/context/*    - Context builder")
+	fmt.Println("  GET  /api/v1/agents/*     - Agent management")
+	fmt.Println("  GET  /api/v1/blackboard/* - Blackboard collaboration")
+	fmt.Println("  POST /api/v1/debates/*    - Debate validation")
+	fmt.Println("  GET  /api/v1/plans/*      - Plan management")
+	fmt.Printf("\nListening on http://localhost:%s\n", port)
+
+	return server.Run()
 }
