@@ -7,3 +7,6 @@ export * from './MemoryDashboard';
 export * from './ContextBuilder';
 export * from './SemanticSearch';
 export * from './NestedConversation';
+export * from './AgentBoard';
+export * from './DebateView';
+export * from './PlanBoard';
