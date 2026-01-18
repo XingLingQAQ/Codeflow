@@ -1,0 +1,1467 @@
+openapi: 3.0.3
+info:
+  title: CodeFlow Backend API
+  description: |
+    CodeFlow Backend API provides endpoints for memory management, search, context analysis,
+    agent management, blackboard collaboration, debate system, and task planning.
+  version: 0.1.0
+  contact:
+    name: CodeFlow Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Memory
+    description: STM/LTM memory management
+  - name: Search
+    description: Vector, fulltext, graph, and hybrid search
+  - name: Context
+    description: File tree, AST parsing, and token calculation
+  - name: Agents
+    description: Agent management and monitoring
+  - name: Conversations
+    description: Conversation management and streaming
+  - name: Blackboard
+    description: Multi-agent collaboration blackboard
+  - name: Votes
+    description: BFT consensus voting
+  - name: Debates
+    description: Generator/Critic debate system
+  - name: Plans
+    description: Task planning and management
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/memory/items:
+    get:
+      tags: [Memory]
+      summary: List memory items
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [stm, ltm]
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [created_at, heat, surprise]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of memory items
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryListResponse'
+    post:
+      tags: [Memory]
+      summary: Create memory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryCreateRequest'
+      responses:
+        '201':
+          description: Memory item created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryItem'
+
+  /api/v1/memory/items/{id}:
+    patch:
+      tags: [Memory]
+      summary: Update memory item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryUpdateRequest'
+      responses:
+        '200':
+          description: Memory item updated
+    delete:
+      tags: [Memory]
+      summary: Delete memory item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Memory item deleted
+
+  /api/v1/memory/items/{id}/archive:
+    post:
+      tags: [Memory]
+      summary: Archive memory item (STM to LTM)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Memory item archived
+
+  /api/v1/memory/items/{id}/restore:
+    post:
+      tags: [Memory]
+      summary: Restore memory item (LTM to STM)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Memory item restored
+
+  /api/v1/search/vector:
+    post:
+      tags: [Search]
+      summary: Vector similarity search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorSearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  /api/v1/search/fulltext:
+    post:
+      tags: [Search]
+      summary: Full-text search with highlighting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FulltextSearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  /api/v1/search/graph:
+    post:
+      tags: [Search]
+      summary: Graph/triple search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GraphSearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphSearchResponse'
+
+  /api/v1/search/hybrid:
+    post:
+      tags: [Search]
+      summary: Hybrid search combining vector, fulltext, and graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HybridSearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+
+  /api/v1/context/files:
+    get:
+      tags: [Context]
+      summary: Get file tree
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: max_depth
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: File tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileTreeResponse'
+
+  /api/v1/context/ast:
+    post:
+      tags: [Context]
+      summary: Parse AST from file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ASTRequest'
+      responses:
+        '200':
+          description: AST nodes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASTResponse'
+
+  /api/v1/context/tokens:
+    post:
+      tags: [Context]
+      summary: Calculate token count
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+      responses:
+        '200':
+          description: Token count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+
+  /api/v1/context/presets:
+    get:
+      tags: [Context]
+      summary: List context presets
+      responses:
+        '200':
+          description: List of presets
+    post:
+      tags: [Context]
+      summary: Create context preset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresetCreateRequest'
+      responses:
+        '201':
+          description: Preset created
+
+  /api/v1/context/presets/{id}:
+    delete:
+      tags: [Context]
+      summary: Delete context preset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Preset deleted
+
+  /api/v1/agents:
+    get:
+      tags: [Agents]
+      summary: List active agents
+      responses:
+        '200':
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentListResponse'
+
+  /api/v1/agents/{id}/logs:
+    get:
+      tags: [Agents]
+      summary: Get agent logs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Agent logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentLogsResponse'
+
+  /api/v1/conversations/{sessionId}/trace:
+    get:
+      tags: [Conversations]
+      summary: Get conversation call trace
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Call trace
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallTraceResponse'
+
+  /api/v1/conversations/{sessionId}/stop:
+    post:
+      tags: [Conversations]
+      summary: Stop conversation
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversation stopped
+
+  /api/v1/conversations/{sessionId}/retry:
+    post:
+      tags: [Conversations]
+      summary: Retry conversation
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversation retried
+
+  /api/v1/conversations/{sessionId}/stream:
+    get:
+      tags: [Conversations]
+      summary: WebSocket stream for conversation
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+  /api/v1/blackboard/entries:
+    get:
+      tags: [Blackboard]
+      summary: List blackboard entries
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [state, proposal, decision, artifact]
+        - name: author
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntryListResponse'
+    post:
+      tags: [Blackboard]
+      summary: Create blackboard entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntryCreateRequest'
+      responses:
+        '201':
+          description: Entry created
+
+  /api/v1/blackboard/entries/{id}:
+    patch:
+      tags: [Blackboard]
+      summary: Update blackboard entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntryUpdateRequest'
+      responses:
+        '200':
+          description: Entry updated
+    delete:
+      tags: [Blackboard]
+      summary: Delete blackboard entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entry deleted
+
+  /api/v1/votes:
+    post:
+      tags: [Votes]
+      summary: Create vote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoteCreateRequest'
+      responses:
+        '201':
+          description: Vote created
+
+  /api/v1/votes/{id}:
+    get:
+      tags: [Votes]
+      summary: Get vote status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Vote status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoteResponse'
+
+  /api/v1/votes/{id}/cast:
+    post:
+      tags: [Votes]
+      summary: Cast vote
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoteCastRequest'
+      responses:
+        '200':
+          description: Vote cast
+
+  /api/v1/debates:
+    post:
+      tags: [Debates]
+      summary: Create debate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebateCreateRequest'
+      responses:
+        '201':
+          description: Debate created
+
+  /api/v1/debates/{id}:
+    get:
+      tags: [Debates]
+      summary: Get debate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Debate details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Debate'
+
+  /api/v1/debates/{id}/next-round:
+    post:
+      tags: [Debates]
+      summary: Advance to next debate round
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NextRoundRequest'
+      responses:
+        '200':
+          description: Round advanced
+
+  /api/v1/debates/{id}/conflicts/{cid}/resolve:
+    post:
+      tags: [Debates]
+      summary: Resolve conflict
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveConflictRequest'
+      responses:
+        '200':
+          description: Conflict resolved
+
+  /api/v1/debates/{id}/select-solution:
+    post:
+      tags: [Debates]
+      summary: Select solution and resolve debate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectSolutionRequest'
+      responses:
+        '200':
+          description: Solution selected
+
+  /api/v1/debates/{id}/export:
+    get:
+      tags: [Debates]
+      summary: Export debate audit report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, markdown]
+            default: json
+      responses:
+        '200':
+          description: Audit report
+
+  /api/v1/debates/{id}/stream:
+    get:
+      tags: [Debates]
+      summary: WebSocket stream for debate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '101':
+          description: WebSocket upgrade
+
+  /api/v1/plans:
+    get:
+      tags: [Plans]
+      summary: List plans
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, completed, archived]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of plans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanListResponse'
+    post:
+      tags: [Plans]
+      summary: Create plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanCreateRequest'
+      responses:
+        '201':
+          description: Plan created
+
+  /api/v1/plans/{id}/tasks:
+    get:
+      tags: [Plans]
+      summary: List tasks in plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: priority
+          in: query
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [order, priority, created_at]
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+    post:
+      tags: [Plans]
+      summary: Create task in plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '201':
+          description: Task created
+
+  /api/v1/plans/{id}/tasks/{tid}:
+    patch:
+      tags: [Plans]
+      summary: Update task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskUpdateRequest'
+      responses:
+        '200':
+          description: Task updated
+    delete:
+      tags: [Plans]
+      summary: Delete task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task deleted
+
+  /api/v1/plans/{id}/tasks/{tid}/reorder:
+    post:
+      tags: [Plans]
+      summary: Reorder task
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskReorderRequest'
+      responses:
+        '200':
+          description: Task reordered
+
+  /api/v1/plans/{id}/tasks/batch-model:
+    post:
+      tags: [Plans]
+      summary: Batch update task models
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchModelRequest'
+      responses:
+        '200':
+          description: Models updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchModelResponse'
+
+components:
+  schemas:
+    Response:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+        error:
+          type: string
+
+    HealthResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            status:
+              type: string
+            version:
+              type: string
+
+    MemoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        type:
+          type: string
+          enum: [stm, ltm]
+        tags:
+          type: array
+          items:
+            type: string
+        heat:
+          type: number
+        surprise:
+          type: number
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
+    MemoryListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryItem'
+        total:
+          type: integer
+        has_more:
+          type: boolean
+
+    MemoryCreateRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+          enum: [stm, ltm]
+        tags:
+          type: array
+          items:
+            type: string
+
+    MemoryUpdateRequest:
+      type: object
+      properties:
+        content:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    VectorSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        limit:
+          type: integer
+          default: 10
+        threshold:
+          type: number
+
+    FulltextSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        highlight:
+          type: boolean
+        limit:
+          type: integer
+
+    GraphSearchRequest:
+      type: object
+      properties:
+        subject:
+          type: string
+        predicate:
+          type: string
+        object:
+          type: string
+        limit:
+          type: integer
+
+    HybridSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        vector_weight:
+          type: number
+        fulltext_weight:
+          type: number
+        graph_weight:
+          type: number
+        limit:
+          type: integer
+
+    SearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+
+    GraphSearchResponse:
+      type: object
+      properties:
+        triples:
+          type: array
+          items:
+            type: object
+            properties:
+              subject:
+                type: string
+              predicate:
+                type: string
+              object:
+                type: string
+              score:
+                type: number
+
+    FileTreeResponse:
+      type: object
+      properties:
+        root:
+          $ref: '#/components/schemas/FileNode'
+
+    FileNode:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        is_dir:
+          type: boolean
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileNode'
+
+    ASTRequest:
+      type: object
+      required: [file_path]
+      properties:
+        file_path:
+          type: string
+        language:
+          type: string
+
+    ASTResponse:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/ASTSymbol'
+
+    ASTSymbol:
+      type: object
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+        start_line:
+          type: integer
+        end_line:
+          type: integer
+
+    TokenRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        model:
+          type: string
+
+    TokenResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+
+    PresetCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        files:
+          type: array
+          items:
+            type: string
+        patterns:
+          type: array
+          items:
+            type: string
+
+    AgentListResponse:
+      type: object
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/Agent'
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        model:
+          type: string
+        started_at:
+          type: integer
+
+    AgentLogsResponse:
+      type: object
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogEntry'
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: integer
+        level:
+          type: string
+        message:
+          type: string
+
+    CallTraceResponse:
+      type: object
+      properties:
+        trace:
+          type: array
+          items:
+            $ref: '#/components/schemas/CallNode'
+
+    CallNode:
+      type: object
+      properties:
+        id:
+          type: string
+        parent_id:
+          type: string
+        agent_id:
+          type: string
+        action:
+          type: string
+        started_at:
+          type: integer
+        ended_at:
+          type: integer
+
+    EntryListResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/Entry'
+        total:
+          type: integer
+
+    Entry:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [state, proposal, decision, artifact]
+        content:
+          type: string
+        author:
+          type: string
+        version:
+          type: integer
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
+    EntryCreateRequest:
+      type: object
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          enum: [state, proposal, decision, artifact]
+        content:
+          type: string
+        author:
+          type: string
+
+    EntryUpdateRequest:
+      type: object
+      properties:
+        content:
+          type: string
+
+    VoteCreateRequest:
+      type: object
+      required: [entry_id, title, options]
+      properties:
+        entry_id:
+          type: string
+        title:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        threshold:
+          type: number
+        expires_in:
+          type: integer
+
+    VoteResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        entry_id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+        votes:
+          type: object
+        consensus_reached:
+          type: boolean
+
+    VoteCastRequest:
+      type: object
+      required: [voter, option]
+      properties:
+        voter:
+          type: string
+        option:
+          type: string
+
+    DebateCreateRequest:
+      type: object
+      required: [title, topic]
+      properties:
+        title:
+          type: string
+        topic:
+          type: string
+        max_rounds:
+          type: integer
+
+    Debate:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        topic:
+          type: string
+        status:
+          type: string
+        current_round:
+          type: integer
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conflict'
+        solutions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Solution'
+
+    Conflict:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        severity:
+          type: string
+        description:
+          type: string
+        resolution:
+          type: string
+
+    Solution:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        score:
+          type: number
+
+    NextRoundRequest:
+      type: object
+      properties:
+        generator_output:
+          type: string
+        critic_feedback:
+          type: string
+
+    ResolveConflictRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          type: string
+
+    SelectSolutionRequest:
+      type: object
+      required: [solution_id]
+      properties:
+        solution_id:
+          type: string
+
+    PlanListResponse:
+      type: object
+      properties:
+        plans:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+        total:
+          type: integer
+        has_more:
+          type: boolean
+
+    Plan:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        task_count:
+          type: integer
+        completed_count:
+          type: integer
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
+    PlanCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+
+    TaskListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        total:
+          type: integer
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        plan_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed, blocked, cancelled]
+        priority:
+          type: string
+          enum: [P0, P1, P2, P3]
+        model:
+          type: string
+        order:
+          type: integer
+        dependencies:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
+    TaskCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [P0, P1, P2, P3]
+        model:
+          type: string
+        dependencies:
+          type: array
+          items:
+            type: string
+
+    TaskUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        priority:
+          type: string
+        model:
+          type: string
+        dependencies:
+          type: array
+          items:
+            type: string
+
+    TaskReorderRequest:
+      type: object
+      required: [new_order]
+      properties:
+        new_order:
+          type: integer
+
+    BatchModelRequest:
+      type: object
+      required: [task_ids, model]
+      properties:
+        task_ids:
+          type: array
+          items:
+            type: string
+        model:
+          type: string
+
+    BatchModelResponse:
+      type: object
+      properties:
+        updated:
+          type: integer
+        failed:
+          type: array
+          items:
+            type: string
