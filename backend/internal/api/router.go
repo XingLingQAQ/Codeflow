@@ -102,6 +102,18 @@ func (s *Server) setupRoutes() {
 			search.POST("/hybrid", handlers.HybridSearch)
 		}
 
+		// Config routes
+		cfg := v1.Group("/config")
+		{
+			cfg.GET("/global", handlers.GetGlobalConfig)
+			cfg.PUT("/global", handlers.UpdateGlobalConfig)
+			cfg.GET("/sessions/:id", handlers.GetSessionConfig)
+			cfg.PUT("/sessions/:id", handlers.UpdateSessionConfig)
+			cfg.GET("/roles/:role", handlers.GetRoleConfig)
+			cfg.PUT("/roles/:role", handlers.UpdateRoleConfig)
+			cfg.GET("/resolve", handlers.ResolveConfig)
+		}
+
 		// Context routes
 		context := v1.Group("/context")
 		{
