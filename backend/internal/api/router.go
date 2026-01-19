@@ -72,6 +72,16 @@ func (s *Server) setupRoutes() {
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
 	{
+		// Snapshot routes
+		snapshots := v1.Group("/snapshots")
+		{
+			snapshots.POST("", handlers.CreateSnapshot)
+			snapshots.GET("", handlers.GetSnapshots)
+			snapshots.GET("/:id", handlers.GetSnapshot)
+			snapshots.POST("/:id/restore", handlers.RestoreSnapshot)
+			snapshots.DELETE("/:id", handlers.DeleteSnapshot)
+		}
+
 		// Memory routes
 		memory := v1.Group("/memory")
 		{
