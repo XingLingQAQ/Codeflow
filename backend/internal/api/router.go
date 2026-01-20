@@ -112,6 +112,16 @@ func (s *Server) setupRoutes() {
 			cfg.GET("/roles/:role", handlers.GetRoleConfig)
 			cfg.PUT("/roles/:role", handlers.UpdateRoleConfig)
 			cfg.GET("/resolve", handlers.ResolveConfig)
+
+			// PAPI routes
+			cfg.GET("/papi", handlers.GetPAPIVariables)
+			cfg.GET("/papi/:name", handlers.GetPAPIVariable)
+			cfg.POST("/papi", handlers.CreatePAPIVariable)
+			cfg.PUT("/papi/:name", handlers.UpdatePAPIVariable)
+			cfg.DELETE("/papi/:name", handlers.DeletePAPIVariable)
+			cfg.POST("/papi/resolve", handlers.ResolvePAPIByCategory)
+			cfg.POST("/papi/hotswap", handlers.HotSwapPAPI)
+			cfg.GET("/papi/conflicts", handlers.DetectPAPIConflicts)
 		}
 
 		// Context routes
