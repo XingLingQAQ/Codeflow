@@ -210,6 +210,14 @@ func (s *Server) setupRoutes() {
 			plans.POST("/:id/tasks/batch-model", handlers.BatchUpdateTaskModel)
 			plans.DELETE("/:id/tasks/:tid", handlers.DeletePlanTask)
 		}
+
+		// Summarize routes
+		summarizeGroup := v1.Group("/summarize")
+		{
+			summarizeGroup.POST("/conversation", handlers.SummarizeConversation)
+			summarizeGroup.POST("/context", handlers.CompressContext)
+			summarizeGroup.POST("/skeleton", handlers.GetDecisionSkeleton)
+		}
 	}
 }
 
