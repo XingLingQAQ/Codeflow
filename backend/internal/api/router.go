@@ -168,6 +168,19 @@ func (s *Server) setupRoutes() {
 			votes.POST("/:id/cast", handlers.CastVote)
 		}
 
+		// Hook routes
+		hooksGroup := v1.Group("/hooks")
+		{
+			hooksGroup.GET("", handlers.GetHooks)
+			hooksGroup.GET("/:name", handlers.GetHook)
+			hooksGroup.PUT("/:name/config", handlers.UpdateHookConfig)
+			hooksGroup.POST("/:name/enable", handlers.EnableHook)
+			hooksGroup.POST("/:name/disable", handlers.DisableHook)
+			hooksGroup.POST("/:name/trigger", handlers.TriggerHook)
+			hooksGroup.GET("/events", handlers.GetHookEvents)
+			hooksGroup.DELETE("/events", handlers.ClearHookEvents)
+		}
+
 		// Debate routes
 		debates := v1.Group("/debates")
 		{
