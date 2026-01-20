@@ -91,6 +91,11 @@ func (s *Server) setupRoutes() {
 			memory.DELETE("/items/:id", handlers.DeleteMemoryItem)
 			memory.POST("/items/:id/archive", handlers.ArchiveMemoryItem)
 			memory.POST("/items/:id/restore", handlers.RestoreMemoryItem)
+
+			// Memory Preflight routes
+			memory.POST("/preflight", handlers.MemoryPreflight)
+			memory.GET("/suggestions", handlers.GetMemorySuggestions)
+			memory.POST("/inject", handlers.InjectMemory)
 		}
 
 		// Search routes
