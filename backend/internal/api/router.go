@@ -218,6 +218,15 @@ func (s *Server) setupRoutes() {
 			summarizeGroup.POST("/context", handlers.CompressContext)
 			summarizeGroup.POST("/skeleton", handlers.GetDecisionSkeleton)
 		}
+
+		// Audit routes
+		auditGroup := v1.Group("/audit")
+		{
+			auditGroup.GET("/logs", handlers.GetAuditLogs)
+			auditGroup.POST("/verify", handlers.VerifyAuditChain)
+			auditGroup.GET("/statistics", handlers.GetAuditStatistics)
+			auditGroup.GET("/export", handlers.ExportAuditLogs)
+		}
 	}
 }
 
