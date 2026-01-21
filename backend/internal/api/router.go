@@ -263,6 +263,42 @@ func (s *Server) setupRoutes() {
 			isolationGroup.GET("/roles/:name/permissions", handlers.GetRolePermissions)
 			isolationGroup.POST("/roles/:name/check", handlers.CheckRolePermission)
 		}
+
+		// SAMG routes
+		samgGroup := v1.Group("/samg")
+		{
+			// Triple operations
+			samgGroup.GET("/triples", handlers.GetTriples)
+			samgGroup.POST("/triples", handlers.AddTriples)
+			samgGroup.GET("/triples/:id", handlers.GetTriple)
+			samgGroup.DELETE("/triples", handlers.DeleteTriples)
+			samgGroup.GET("/triples/:id/relations", handlers.GetRelations)
+
+			// Extraction
+			samgGroup.POST("/extract", handlers.ExtractTriples)
+
+			// Activation
+			samgGroup.POST("/activate", handlers.Activate)
+			samgGroup.POST("/paths", handlers.FindPaths)
+			samgGroup.GET("/activation", handlers.GetActivationConfig)
+			samgGroup.PUT("/activation", handlers.UpdateActivationConfig)
+
+			// Decay
+			samgGroup.GET("/decay", handlers.GetDecayConfig)
+			samgGroup.PUT("/decay", handlers.UpdateDecayConfig)
+			samgGroup.POST("/decay/apply", handlers.ApplyDecay)
+
+			// Nodes
+			samgGroup.GET("/nodes/visible", handlers.GetVisibleNodes)
+			samgGroup.GET("/nodes/hidden", handlers.GetHiddenNodes)
+			samgGroup.GET("/nodes/top", handlers.GetTopNodes)
+			samgGroup.POST("/nodes/:id/access", handlers.RecordAccess)
+
+			// Graph
+			samgGroup.GET("/graph/export", handlers.ExportGraph)
+			samgGroup.POST("/graph/import", handlers.ImportGraph)
+			samgGroup.GET("/stats", handlers.GetSAMGStats)
+		}
 	}
 }
 
