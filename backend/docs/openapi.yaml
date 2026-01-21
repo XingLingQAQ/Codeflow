@@ -19,6 +19,8 @@ tags:
     description: Health check endpoints
   - name: Memory
     description: STM/LTM memory management
+  - name: MemoryPreflight
+    description: Progressive memory disclosure with semantic preflight
   - name: Search
     description: Vector, fulltext, graph, and hybrid search
   - name: Context
@@ -35,6 +37,24 @@ tags:
     description: Generator/Critic debate system
   - name: Plans
     description: Task planning and management
+  - name: Snapshots
+    description: Atomic snapshot creation, restoration, and management
+  - name: Config
+    description: Multi-level configuration (Global/Session/Role)
+  - name: PAPI
+    description: PAPI variable routing and hot-swap
+  - name: Hooks
+    description: Lifecycle hook management
+  - name: Summarize
+    description: Conversation summarization and context compression
+  - name: Audit
+    description: Immutable audit logging with hash chain verification
+  - name: Privacy
+    description: Privacy-aware encryption, decryption, and PII redaction
+  - name: Isolation
+    description: Multi-agent permission isolation and RBAC
+  - name: SAMG
+    description: Semantic memory graph with spreading activation and decay
 
 paths:
   /health:
@@ -847,6 +867,1243 @@ paths:
               schema:
                 $ref: '#/components/schemas/BatchModelResponse'
 
+  # ==================== Snapshots ====================
+  /api/v1/snapshots:
+    post:
+      tags: [Snapshots]
+      summary: Create atomic snapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnapshotCreateRequest'
+      responses:
+        '201':
+          description: Snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+    get:
+      tags: [Snapshots]
+      summary: List snapshots
+      parameters:
+        - name: start_time
+          in: query
+          schema:
+            type: integer
+        - name: end_time
+          in: query
+          schema:
+            type: integer
+        - name: tags
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of snapshots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotListResponse'
+
+  /api/v1/snapshots/{id}:
+    get:
+      tags: [Snapshots]
+      summary: Get snapshot details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snapshot details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Snapshot'
+    delete:
+      tags: [Snapshots]
+      summary: Delete snapshot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snapshot deleted
+
+  /api/v1/snapshots/{id}/restore:
+    post:
+      tags: [Snapshots]
+      summary: Restore snapshot (full-stack rollback)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Snapshot restored
+
+  # ==================== Memory Preflight ====================
+  /api/v1/memory/preflight:
+    post:
+      tags: [MemoryPreflight]
+      summary: Semantic preflight check for memory matches
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreflightRequest'
+      responses:
+        '200':
+          description: Preflight results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreflightResponse'
+
+  /api/v1/memory/suggestions:
+    get:
+      tags: [MemoryPreflight]
+      summary: Get memory suggestions
+      parameters:
+        - name: context_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Memory suggestions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuggestionsResponse'
+
+  /api/v1/memory/inject:
+    post:
+      tags: [MemoryPreflight]
+      summary: Inject memory into context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InjectRequest'
+      responses:
+        '200':
+          description: Memory injected
+
+  # ==================== Config ====================
+  /api/v1/config/global:
+    get:
+      tags: [Config]
+      summary: Get global configuration
+      responses:
+        '200':
+          description: Global config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResponse'
+    put:
+      tags: [Config]
+      summary: Update global configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdateRequest'
+      responses:
+        '200':
+          description: Config updated
+
+  /api/v1/config/sessions/{id}:
+    get:
+      tags: [Config]
+      summary: Get session configuration
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session config
+    put:
+      tags: [Config]
+      summary: Update session configuration
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdateRequest'
+      responses:
+        '200':
+          description: Config updated
+
+  /api/v1/config/roles/{role}:
+    get:
+      tags: [Config]
+      summary: Get role configuration
+      parameters:
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [main, coder, sub]
+      responses:
+        '200':
+          description: Role config
+    put:
+      tags: [Config]
+      summary: Update role configuration
+      parameters:
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdateRequest'
+      responses:
+        '200':
+          description: Config updated
+
+  /api/v1/config/resolve:
+    get:
+      tags: [Config]
+      summary: Resolve effective configuration
+      parameters:
+        - name: session_id
+          in: query
+          schema:
+            type: string
+        - name: role
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Resolved config
+
+  # ==================== PAPI ====================
+  /api/v1/config/papi:
+    get:
+      tags: [PAPI]
+      summary: List PAPI variables
+      responses:
+        '200':
+          description: List of variables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PAPIVariableListResponse'
+    post:
+      tags: [PAPI]
+      summary: Create PAPI variable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PAPIVariableCreateRequest'
+      responses:
+        '201':
+          description: Variable created
+
+  /api/v1/config/papi/{name}:
+    get:
+      tags: [PAPI]
+      summary: Get PAPI variable
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Variable details
+    put:
+      tags: [PAPI]
+      summary: Update PAPI variable
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PAPIVariableUpdateRequest'
+      responses:
+        '200':
+          description: Variable updated
+    delete:
+      tags: [PAPI]
+      summary: Delete PAPI variable
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Variable deleted
+
+  /api/v1/config/papi/resolve:
+    post:
+      tags: [PAPI]
+      summary: Resolve PAPI by task category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PAPIResolveRequest'
+      responses:
+        '200':
+          description: Resolved configuration
+
+  /api/v1/config/papi/hotswap:
+    post:
+      tags: [PAPI]
+      summary: Hot-swap PAPI variable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PAPIHotSwapRequest'
+      responses:
+        '200':
+          description: Variable hot-swapped
+
+  /api/v1/config/papi/conflicts:
+    get:
+      tags: [PAPI]
+      summary: Detect PAPI conflicts
+      responses:
+        '200':
+          description: Conflict detection results
+
+  # ==================== Hooks ====================
+  /api/v1/hooks:
+    get:
+      tags: [Hooks]
+      summary: List all hooks
+      responses:
+        '200':
+          description: List of hooks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookListResponse'
+
+  /api/v1/hooks/{name}:
+    get:
+      tags: [Hooks]
+      summary: Get hook details
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Hook details
+
+  /api/v1/hooks/{name}/config:
+    put:
+      tags: [Hooks]
+      summary: Update hook configuration
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HookConfigRequest'
+      responses:
+        '200':
+          description: Config updated
+
+  /api/v1/hooks/{name}/enable:
+    post:
+      tags: [Hooks]
+      summary: Enable hook
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Hook enabled
+
+  /api/v1/hooks/{name}/disable:
+    post:
+      tags: [Hooks]
+      summary: Disable hook
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Hook disabled
+
+  /api/v1/hooks/{name}/trigger:
+    post:
+      tags: [Hooks]
+      summary: Manually trigger hook
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HookTriggerRequest'
+      responses:
+        '200':
+          description: Hook triggered
+
+  /api/v1/hooks/events:
+    get:
+      tags: [Hooks]
+      summary: Get hook execution events
+      parameters:
+        - name: hook_name
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: Hook events
+    delete:
+      tags: [Hooks]
+      summary: Clear hook events
+      responses:
+        '200':
+          description: Events cleared
+
+  # ==================== Summarize ====================
+  /api/v1/summarize/conversation:
+    post:
+      tags: [Summarize]
+      summary: Summarize conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummarizeConversationRequest'
+      responses:
+        '200':
+          description: Conversation summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummarizeResponse'
+
+  /api/v1/summarize/context:
+    post:
+      tags: [Summarize]
+      summary: Compress context (80/20 strategy)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompressContextRequest'
+      responses:
+        '200':
+          description: Compressed context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompressResponse'
+
+  /api/v1/summarize/skeleton:
+    post:
+      tags: [Summarize]
+      summary: Extract decision skeleton
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkeletonRequest'
+      responses:
+        '200':
+          description: Decision skeleton
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkeletonResponse'
+
+  # ==================== Audit ====================
+  /api/v1/audit/logs:
+    get:
+      tags: [Audit]
+      summary: Query audit logs
+      parameters:
+        - name: start_time
+          in: query
+          schema:
+            type: integer
+        - name: end_time
+          in: query
+          schema:
+            type: integer
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+        - name: resource
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLogResponse'
+
+  /api/v1/audit/verify:
+    post:
+      tags: [Audit]
+      summary: Verify audit chain integrity
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditVerifyRequest'
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditVerifyResponse'
+
+  /api/v1/audit/statistics:
+    get:
+      tags: [Audit]
+      summary: Get audit statistics
+      responses:
+        '200':
+          description: Audit statistics
+
+  /api/v1/audit/export:
+    get:
+      tags: [Audit]
+      summary: Export audit logs
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+        - name: start_time
+          in: query
+          schema:
+            type: integer
+        - name: end_time
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Exported audit logs
+
+  # ==================== Privacy ====================
+  /api/v1/privacy/encrypt:
+    post:
+      tags: [Privacy]
+      summary: Encrypt data (Method A or B)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptRequest'
+      responses:
+        '200':
+          description: Encrypted data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncryptResponse'
+
+  /api/v1/privacy/decrypt:
+    post:
+      tags: [Privacy]
+      summary: Decrypt data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecryptRequest'
+      responses:
+        '200':
+          description: Decrypted data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecryptResponse'
+
+  /api/v1/privacy/redact:
+    post:
+      tags: [Privacy]
+      summary: Redact PII from text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RedactRequest'
+      responses:
+        '200':
+          description: Redacted text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RedactResponse'
+
+  /api/v1/privacy/detect:
+    post:
+      tags: [Privacy]
+      summary: Detect PII in text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectPIIRequest'
+      responses:
+        '200':
+          description: Detected PII
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectPIIResponse'
+
+  /api/v1/privacy/keys:
+    get:
+      tags: [Privacy]
+      summary: List encryption keys
+      responses:
+        '200':
+          description: Key list
+    post:
+      tags: [Privacy]
+      summary: Manage encryption keys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeyManageRequest'
+      responses:
+        '200':
+          description: Key operation result
+
+  /api/v1/privacy/verify-chain:
+    post:
+      tags: [Privacy]
+      summary: Verify chain key derivation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyChainRequest'
+      responses:
+        '200':
+          description: Verification result
+
+  /api/v1/privacy/metrics:
+    get:
+      tags: [Privacy]
+      summary: Get privacy metrics
+      responses:
+        '200':
+          description: Privacy metrics
+
+  /api/v1/privacy/metrics/reset:
+    post:
+      tags: [Privacy]
+      summary: Reset privacy metrics
+      responses:
+        '200':
+          description: Metrics reset
+
+  # ==================== Isolation ====================
+  /api/v1/isolation/containers:
+    get:
+      tags: [Isolation]
+      summary: List isolation containers
+      responses:
+        '200':
+          description: Container list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContainerListResponse'
+    post:
+      tags: [Isolation]
+      summary: Create isolation container
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContainerCreateRequest'
+      responses:
+        '201':
+          description: Container created
+
+  /api/v1/isolation/containers/{id}:
+    get:
+      tags: [Isolation]
+      summary: Get container details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Container details
+    delete:
+      tags: [Isolation]
+      summary: Delete container
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Container deleted
+
+  /api/v1/isolation/containers/{id}/quota:
+    put:
+      tags: [Isolation]
+      summary: Set container quota
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaRequest'
+      responses:
+        '200':
+          description: Quota set
+
+  /api/v1/isolation/access/check:
+    post:
+      tags: [Isolation]
+      summary: Check access permission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessCheckRequest'
+      responses:
+        '200':
+          description: Access decision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessCheckResponse'
+
+  /api/v1/isolation/io/validate:
+    post:
+      tags: [Isolation]
+      summary: Validate I/O operation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IOValidateRequest'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IOValidateResponse'
+
+  /api/v1/isolation/roles:
+    get:
+      tags: [Isolation]
+      summary: List roles
+      responses:
+        '200':
+          description: Role list
+    post:
+      tags: [Isolation]
+      summary: Register role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleRegisterRequest'
+      responses:
+        '201':
+          description: Role registered
+
+  /api/v1/isolation/roles/{name}:
+    get:
+      tags: [Isolation]
+      summary: Get role details
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Role details
+
+  /api/v1/isolation/roles/{name}/permissions:
+    get:
+      tags: [Isolation]
+      summary: Get role permissions
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Role permissions
+
+  /api/v1/isolation/roles/{name}/check:
+    post:
+      tags: [Isolation]
+      summary: Check role permission
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleCheckRequest'
+      responses:
+        '200':
+          description: Permission check result
+
+  # ==================== SAMG ====================
+  /api/v1/samg/triples:
+    get:
+      tags: [SAMG]
+      summary: Query triples
+      parameters:
+        - name: subject
+          in: query
+          schema:
+            type: string
+        - name: predicate
+          in: query
+          schema:
+            type: string
+        - name: object
+          in: query
+          schema:
+            type: string
+        - name: min_confidence
+          in: query
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Triple list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripleListResponse'
+    post:
+      tags: [SAMG]
+      summary: Add triples
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTriplesRequest'
+      responses:
+        '201':
+          description: Triples added
+    delete:
+      tags: [SAMG]
+      summary: Delete triples
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteTriplesRequest'
+      responses:
+        '200':
+          description: Triples deleted
+
+  /api/v1/samg/triples/{id}:
+    get:
+      tags: [SAMG]
+      summary: Get triple by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Triple details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Triple'
+        '404':
+          description: Triple not found
+
+  /api/v1/samg/triples/{id}/relations:
+    get:
+      tags: [SAMG]
+      summary: Get node relations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node relations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationsResponse'
+
+  /api/v1/samg/extract:
+    post:
+      tags: [SAMG]
+      summary: Extract triples from text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractRequest'
+      responses:
+        '200':
+          description: Extracted triples
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractResponse'
+
+  /api/v1/samg/activate:
+    post:
+      tags: [SAMG]
+      summary: Spreading activation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateRequest'
+      responses:
+        '200':
+          description: Activation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationResult'
+
+  /api/v1/samg/paths:
+    post:
+      tags: [SAMG]
+      summary: Find paths between nodes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FindPathsRequest'
+      responses:
+        '200':
+          description: Found paths
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PathsResponse'
+
+  /api/v1/samg/activation:
+    get:
+      tags: [SAMG]
+      summary: Get activation config
+      responses:
+        '200':
+          description: Activation config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationConfig'
+    put:
+      tags: [SAMG]
+      summary: Update activation config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivationConfig'
+      responses:
+        '200':
+          description: Config updated
+
+  /api/v1/samg/decay:
+    get:
+      tags: [SAMG]
+      summary: Get decay config
+      responses:
+        '200':
+          description: Decay config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecayConfig'
+    put:
+      tags: [SAMG]
+      summary: Update decay config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecayConfig'
+      responses:
+        '200':
+          description: Config updated
+
+  /api/v1/samg/decay/apply:
+    post:
+      tags: [SAMG]
+      summary: Apply decay to all nodes
+      responses:
+        '200':
+          description: Decay applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecayApplyResponse'
+
+  /api/v1/samg/nodes/visible:
+    get:
+      tags: [SAMG]
+      summary: Get visible nodes
+      responses:
+        '200':
+          description: Visible nodes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesResponse'
+
+  /api/v1/samg/nodes/hidden:
+    get:
+      tags: [SAMG]
+      summary: Get hidden nodes
+      responses:
+        '200':
+          description: Hidden nodes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesResponse'
+
+  /api/v1/samg/nodes/top:
+    get:
+      tags: [SAMG]
+      summary: Get top N nodes by activation
+      parameters:
+        - name: n
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Top nodes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodesResponse'
+
+  /api/v1/samg/nodes/{id}/access:
+    post:
+      tags: [SAMG]
+      summary: Record node access
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Access recorded
+
+  /api/v1/samg/graph/export:
+    get:
+      tags: [SAMG]
+      summary: Export graph as JSON-LD
+      responses:
+        '200':
+          description: JSON-LD graph
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsonLdGraph'
+
+  /api/v1/samg/graph/import:
+    post:
+      tags: [SAMG]
+      summary: Import JSON-LD graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonLdGraph'
+      responses:
+        '200':
+          description: Graph imported
+
+  /api/v1/samg/stats:
+    get:
+      tags: [SAMG]
+      summary: Get SAMG statistics
+      responses:
+        '200':
+          description: SAMG statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SAMGStats'
+
 components:
   schemas:
     Response:
@@ -1465,3 +2722,841 @@ components:
           type: array
           items:
             type: string
+
+    # ==================== Snapshot Schemas ====================
+    Snapshot:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        git_hash:
+          type: string
+        conversation_state:
+          type: string
+        vector_pointer:
+          type: string
+        memory_graph_version:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: integer
+
+    SnapshotCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    SnapshotListResponse:
+      type: object
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Snapshot'
+        total:
+          type: integer
+
+    # ==================== Memory Preflight Schemas ====================
+    PreflightRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        max_results:
+          type: integer
+          default: 10
+        min_score:
+          type: number
+        sources:
+          type: array
+          items:
+            type: string
+
+    PreflightResponse:
+      type: object
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryMatch'
+        duration_ms:
+          type: number
+
+    MemoryMatch:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        source:
+          type: string
+        strength:
+          type: string
+          enum: [strong, weak]
+        score:
+          type: number
+        keywords:
+          type: array
+          items:
+            type: string
+
+    SuggestionsResponse:
+      type: object
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryMatch'
+
+    InjectRequest:
+      type: object
+      required: [context_id]
+      properties:
+        context_id:
+          type: string
+        memory_id:
+          type: string
+        memory_ids:
+          type: array
+          items:
+            type: string
+
+    # ==================== Config Schemas ====================
+    ConfigResponse:
+      type: object
+      properties:
+        config:
+          type: object
+        level:
+          type: string
+          enum: [global, session, role]
+
+    ConfigUpdateRequest:
+      type: object
+      properties:
+        config:
+          type: object
+
+    # ==================== PAPI Schemas ====================
+    PAPIVariable:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
+    PAPIVariableListResponse:
+      type: object
+      properties:
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/PAPIVariable'
+
+    PAPIVariableCreateRequest:
+      type: object
+      required: [name, value]
+      properties:
+        name:
+          type: string
+        value:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+
+    PAPIVariableUpdateRequest:
+      type: object
+      properties:
+        value:
+          type: string
+        category:
+          type: string
+        description:
+          type: string
+
+    PAPIResolveRequest:
+      type: object
+      required: [category]
+      properties:
+        category:
+          type: string
+        context:
+          type: object
+
+    PAPIHotSwapRequest:
+      type: object
+      required: [name, new_value]
+      properties:
+        name:
+          type: string
+        new_value:
+          type: string
+        session_id:
+          type: string
+
+    # ==================== Hook Schemas ====================
+    Hook:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+        timeout_ms:
+          type: integer
+        retry_count:
+          type: integer
+
+    HookListResponse:
+      type: object
+      properties:
+        hooks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Hook'
+
+    HookConfigRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+        timeout_ms:
+          type: integer
+        retry_count:
+          type: integer
+
+    HookTriggerRequest:
+      type: object
+      properties:
+        payload:
+          type: object
+
+    # ==================== Summarize Schemas ====================
+    SummarizeConversationRequest:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            type: object
+        max_length:
+          type: integer
+
+    SummarizeResponse:
+      type: object
+      properties:
+        summary:
+          type: string
+        original_tokens:
+          type: integer
+        summary_tokens:
+          type: integer
+        compression_ratio:
+          type: number
+
+    CompressContextRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        threshold:
+          type: number
+          default: 0.8
+
+    CompressResponse:
+      type: object
+      properties:
+        compressed:
+          type: string
+        summary_part:
+          type: string
+        original_part:
+          type: string
+        compression_ratio:
+          type: number
+
+    SkeletonRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    SkeletonResponse:
+      type: object
+      properties:
+        skeleton:
+          type: object
+          properties:
+            architecture_decisions:
+              type: array
+              items:
+                type: string
+            unfixed_bugs:
+              type: array
+              items:
+                type: string
+            variable_definitions:
+              type: array
+              items:
+                type: string
+            file_changes:
+              type: array
+              items:
+                type: string
+
+    # ==================== Audit Schemas ====================
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: integer
+        event_type:
+          type: string
+        actor:
+          type: string
+        resource:
+          type: string
+        action:
+          type: string
+        details:
+          type: object
+        hash:
+          type: string
+        prev_hash:
+          type: string
+
+    AuditLogResponse:
+      type: object
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditLog'
+        total:
+          type: integer
+
+    AuditVerifyRequest:
+      type: object
+      properties:
+        start_id:
+          type: string
+        end_id:
+          type: string
+
+    AuditVerifyResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        verified_count:
+          type: integer
+        first_invalid_id:
+          type: string
+
+    # ==================== Privacy Schemas ====================
+    EncryptRequest:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: string
+        method:
+          type: string
+          enum: [A, B]
+          default: A
+        key_id:
+          type: string
+
+    EncryptResponse:
+      type: object
+      properties:
+        encrypted:
+          type: string
+        key_id:
+          type: string
+        method:
+          type: string
+
+    DecryptRequest:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: string
+        key_id:
+          type: string
+
+    DecryptResponse:
+      type: object
+      properties:
+        decrypted:
+          type: string
+
+    RedactRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+        types:
+          type: array
+          items:
+            type: string
+
+    RedactResponse:
+      type: object
+      properties:
+        redacted:
+          type: string
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/PIIFinding'
+
+    DetectPIIRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+
+    DetectPIIResponse:
+      type: object
+      properties:
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/PIIFinding'
+
+    PIIFinding:
+      type: object
+      properties:
+        type:
+          type: string
+        value:
+          type: string
+        start:
+          type: integer
+        end:
+          type: integer
+
+    KeyManageRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [create, rotate, revoke]
+        key_id:
+          type: string
+
+    VerifyChainRequest:
+      type: object
+      required: [chain_id]
+      properties:
+        chain_id:
+          type: string
+
+    # ==================== Isolation Schemas ====================
+    Container:
+      type: object
+      properties:
+        id:
+          type: string
+        agent_id:
+          type: string
+        role:
+          type: string
+        quota:
+          $ref: '#/components/schemas/ResourceQuota'
+        created_at:
+          type: integer
+
+    ContainerListResponse:
+      type: object
+      properties:
+        containers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Container'
+
+    ContainerCreateRequest:
+      type: object
+      required: [agent_id, role]
+      properties:
+        agent_id:
+          type: string
+        role:
+          type: string
+        quota:
+          $ref: '#/components/schemas/ResourceQuota'
+
+    ResourceQuota:
+      type: object
+      properties:
+        max_memory_mb:
+          type: integer
+        max_cpu_percent:
+          type: number
+        max_tokens:
+          type: integer
+        max_api_calls:
+          type: integer
+
+    QuotaRequest:
+      type: object
+      properties:
+        quota:
+          $ref: '#/components/schemas/ResourceQuota'
+
+    AccessCheckRequest:
+      type: object
+      required: [agent_id, resource, action]
+      properties:
+        agent_id:
+          type: string
+        resource:
+          type: string
+        action:
+          type: string
+
+    AccessCheckResponse:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        reason:
+          type: string
+        latency_ms:
+          type: number
+
+    IOValidateRequest:
+      type: object
+      required: [agent_id, direction, content]
+      properties:
+        agent_id:
+          type: string
+        direction:
+          type: string
+          enum: [input, output]
+        content:
+          type: string
+
+    IOValidateResponse:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        sanitized:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    RoleRegisterRequest:
+      type: object
+      required: [name, permissions]
+      properties:
+        name:
+          type: string
+        parent:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+
+    RoleCheckRequest:
+      type: object
+      required: [permission]
+      properties:
+        permission:
+          type: string
+
+    # ==================== SAMG Schemas ====================
+    Triple:
+      type: object
+      properties:
+        id:
+          type: string
+        subject:
+          $ref: '#/components/schemas/Node'
+        predicate:
+          type: string
+        object:
+          type: object
+        confidence:
+          type: number
+        timestamp:
+          type: integer
+        source:
+          $ref: '#/components/schemas/TripleSource'
+
+    Node:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        label:
+          type: string
+
+    TripleSource:
+      type: object
+      properties:
+        session_id:
+          type: string
+        message_index:
+          type: integer
+        agent_role:
+          type: string
+        extraction_method:
+          type: string
+
+    TripleListResponse:
+      type: object
+      properties:
+        triples:
+          type: array
+          items:
+            $ref: '#/components/schemas/Triple'
+        count:
+          type: integer
+
+    AddTriplesRequest:
+      type: object
+      required: [triples]
+      properties:
+        triples:
+          type: array
+          items:
+            $ref: '#/components/schemas/Triple'
+
+    DeleteTriplesRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+
+    RelationsResponse:
+      type: object
+      properties:
+        node_id:
+          type: string
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Triple'
+        count:
+          type: integer
+
+    ExtractRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+        session_id:
+          type: string
+        message_index:
+          type: integer
+        agent_role:
+          type: string
+
+    ExtractResponse:
+      type: object
+      properties:
+        triples:
+          type: array
+          items:
+            $ref: '#/components/schemas/Triple'
+        count:
+          type: integer
+
+    ActivateRequest:
+      type: object
+      required: [source_ids]
+      properties:
+        source_ids:
+          type: array
+          items:
+            type: string
+
+    ActivationResult:
+      type: object
+      properties:
+        source_nodes:
+          type: array
+          items:
+            type: string
+        activated_nodes:
+          type: object
+          additionalProperties:
+            type: number
+        hops_used:
+          type: integer
+        duration_ms:
+          type: number
+
+    FindPathsRequest:
+      type: object
+      required: [source_id, target_id]
+      properties:
+        source_id:
+          type: string
+        target_id:
+          type: string
+        max_hops:
+          type: integer
+          default: 3
+
+    PathsResponse:
+      type: object
+      properties:
+        source_id:
+          type: string
+        target_id:
+          type: string
+        paths:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        count:
+          type: integer
+
+    ActivationConfig:
+      type: object
+      properties:
+        initial_activation:
+          type: number
+        decay_factor:
+          type: number
+        firing_threshold:
+          type: number
+        max_hops:
+          type: integer
+        max_activated_nodes:
+          type: integer
+        spreading_factor:
+          type: number
+
+    DecayConfig:
+      type: object
+      properties:
+        decay_rate:
+          type: number
+        base_activation:
+          type: number
+        min_activation:
+          type: number
+        hide_threshold:
+          type: number
+        boost_on_access:
+          type: number
+        time_unit:
+          type: integer
+        enable_auto_decay:
+          type: boolean
+
+    DecayApplyResponse:
+      type: object
+      properties:
+        decayed_nodes:
+          type: integer
+        hidden_nodes:
+          type: integer
+
+    NodesResponse:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              activation:
+                type: number
+              last_access:
+                type: integer
+        count:
+          type: integer
+
+    JsonLdGraph:
+      type: object
+      properties:
+        '@context':
+          type: object
+        '@id':
+          type: string
+        '@type':
+          type: string
+        '@graph':
+          type: array
+          items:
+            $ref: '#/components/schemas/Triple'
+
+    SAMGStats:
+      type: object
+      properties:
+        graph_stats:
+          type: object
+          properties:
+            total_triples:
+              type: integer
+            total_nodes:
+              type: integer
+            total_predicates:
+              type: integer
+        decay_stats:
+          type: object
+          properties:
+            visible_nodes:
+              type: integer
+            hidden_nodes:
+              type: integer
+            avg_activation:
+              type: number
