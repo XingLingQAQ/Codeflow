@@ -241,6 +241,28 @@ func (s *Server) setupRoutes() {
 			privacyGroup.GET("/metrics", handlers.GetPrivacyMetrics)
 			privacyGroup.POST("/metrics/reset", handlers.ResetPrivacyMetrics)
 		}
+
+		// Isolation routes
+		isolationGroup := v1.Group("/isolation")
+		{
+			// Container management
+			isolationGroup.GET("/containers", handlers.GetContainers)
+			isolationGroup.POST("/containers", handlers.CreateContainer)
+			isolationGroup.GET("/containers/:id", handlers.GetContainer)
+			isolationGroup.DELETE("/containers/:id", handlers.DeleteContainer)
+			isolationGroup.PUT("/containers/:id/quota", handlers.SetContainerQuota)
+
+			// Access control
+			isolationGroup.POST("/access/check", handlers.CheckAccess)
+			isolationGroup.POST("/io/validate", handlers.ValidateIO)
+
+			// Role management
+			isolationGroup.GET("/roles", handlers.GetRoles)
+			isolationGroup.POST("/roles", handlers.RegisterRole)
+			isolationGroup.GET("/roles/:name", handlers.GetRole)
+			isolationGroup.GET("/roles/:name/permissions", handlers.GetRolePermissions)
+			isolationGroup.POST("/roles/:name/check", handlers.CheckRolePermission)
+		}
 	}
 }
 
