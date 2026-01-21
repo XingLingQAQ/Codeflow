@@ -227,6 +227,20 @@ func (s *Server) setupRoutes() {
 			auditGroup.GET("/statistics", handlers.GetAuditStatistics)
 			auditGroup.GET("/export", handlers.ExportAuditLogs)
 		}
+
+		// Privacy routes
+		privacyGroup := v1.Group("/privacy")
+		{
+			privacyGroup.POST("/encrypt", handlers.Encrypt)
+			privacyGroup.POST("/decrypt", handlers.Decrypt)
+			privacyGroup.POST("/redact", handlers.Redact)
+			privacyGroup.POST("/detect", handlers.DetectPII)
+			privacyGroup.GET("/keys", handlers.GetKeys)
+			privacyGroup.POST("/keys", handlers.ManageKeys)
+			privacyGroup.POST("/verify-chain", handlers.VerifyChain)
+			privacyGroup.GET("/metrics", handlers.GetPrivacyMetrics)
+			privacyGroup.POST("/metrics/reset", handlers.ResetPrivacyMetrics)
+		}
 	}
 }
 
