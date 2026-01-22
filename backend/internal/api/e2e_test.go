@@ -3,6 +3,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -36,6 +37,18 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 	config.SetConfigService(configSvc)
 
 	hookMgr := hooks.NewHookManager()
+	// Register a test hook for E2E testing
+	hookMgr.Register(hooks.HookConfig{
+		Name:       "test-hook",
+		Type:       hooks.HookBeforeSend,
+		Enabled:    true,
+		Priority:   10,
+		Timeout:    time.Second * 5,
+		RetryCount: 0,
+		Metadata:   map[string]interface{}{"test": true},
+	}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		return map[string]interface{}{"processed": true, "payload": payload}, nil
+	})
 	hooks.SetHookManager(hookMgr)
 
 	preflightSvc := memory.NewMemoryPreflightService()
@@ -178,10 +191,73 @@ func TestE2E_PAPIWorkflow(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// 2. Check conflicts endpoint
+	// 2. Create a PAPI variable
+	createReq := map[string]interface{}{
+		"name":        "TEST_EXPERT",
+		"model":       "claude-3-opus",
+		"temperature": 0.7,
+		"api_channel": "anthropic",
+		"mcp_tools":   []string{"read", "write"},
+		"prompt":      "You are a test expert.",
+		"category":    []string{"test", "debug"},
+	}
+	body, _ := json.Marshal(createReq)
+	resp, err = client.Post(ts.URL+"/api/v1/config/papi", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+	resp.Body.Close()
+
+	// 3. Get the created variable
+	resp, err = client.Get(ts.URL + "/api/v1/config/papi/TEST_EXPERT")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 4. Update the variable
+	updateReq := map[string]interface{}{
+		"name":        "TEST_EXPERT",
+		"model":       "claude-3-sonnet",
+		"temperature": 0.5,
+		"api_channel": "anthropic",
+		"mcp_tools":   []string{"read"},
+		"prompt":      "You are an updated test expert.",
+		"category":    []string{"test"},
+	}
+	body, _ = json.Marshal(updateReq)
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/config/papi/TEST_EXPERT", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 5. Resolve by category
+	resolveReq := map[string]interface{}{
+		"category": "test",
+	}
+	body, _ = json.Marshal(resolveReq)
+	resp, err = client.Post(ts.URL+"/api/v1/config/papi/resolve", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 6. Check conflicts endpoint
 	resp, err = client.Get(ts.URL + "/api/v1/config/papi/conflicts")
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 7. Delete the variable
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/v1/config/papi/TEST_EXPERT", nil)
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 8. Verify deletion
+	resp, err = client.Get(ts.URL + "/api/v1/config/papi/TEST_EXPERT")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
 
@@ -192,14 +268,97 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 
 	client := ts.Client()
 
-	// 1. List hooks
+	// 1. List hooks (should include our test-hook)
 	resp, err := client.Get(ts.URL + "/api/v1/hooks")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var listResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&listResp)
+	resp.Body.Close()
+	hooksList := listResp["hooks"].([]interface{})
+	assert.GreaterOrEqual(t, len(hooksList), 1)
+
+	// 2. Get specific hook
+	resp, err = client.Get(ts.URL + "/api/v1/hooks/test-hook")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var hookResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&hookResp)
+	resp.Body.Close()
+	assert.Equal(t, "test-hook", hookResp["name"])
+	assert.Equal(t, true, hookResp["enabled"])
+
+	// 3. Disable hook
+	resp, err = client.Post(ts.URL+"/api/v1/hooks/test-hook/disable", "application/json", nil)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// 2. Get hook events
+	// 4. Verify hook is disabled
+	resp, err = client.Get(ts.URL + "/api/v1/hooks/test-hook")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	json.NewDecoder(resp.Body).Decode(&hookResp)
+	resp.Body.Close()
+	assert.Equal(t, false, hookResp["enabled"])
+
+	// 5. Enable hook
+	resp, err = client.Post(ts.URL+"/api/v1/hooks/test-hook/enable", "application/json", nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 6. Trigger hook
+	triggerReq := map[string]interface{}{
+		"payload": map[string]interface{}{
+			"message": "test message",
+			"data":    123,
+		},
+	}
+	body, _ := json.Marshal(triggerReq)
+	resp, err = client.Post(ts.URL+"/api/v1/hooks/test-hook/trigger", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var triggerResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&triggerResp)
+	resp.Body.Close()
+	assert.NotNil(t, triggerResp["result"])
+
+	// 7. Get hook events
 	resp, err = client.Get(ts.URL + "/api/v1/hooks/events")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 8. Get events filtered by hook name
+	resp, err = client.Get(ts.URL + "/api/v1/hooks/events?hook_name=test-hook")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 9. Update hook config
+	updateReq := map[string]interface{}{
+		"name":        "test-hook",
+		"type":        "hook_before_send",
+		"enabled":     true,
+		"priority":    5,
+		"timeout":     10000000000, // 10 seconds in nanoseconds
+		"retry_count": 2,
+	}
+	body, _ = json.Marshal(updateReq)
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/hooks/test-hook/config", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 10. Clear hook events
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/v1/hooks/events", nil)
+	resp, err = client.Do(req)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
@@ -242,14 +401,56 @@ func TestE2E_SummarizeWorkflow(t *testing.T) {
 	summarizeReq := map[string]interface{}{
 		"messages": []map[string]interface{}{
 			{"role": "user", "content": "How do I implement authentication?"},
-			{"role": "assistant", "content": "You can use JWT tokens for authentication..."},
+			{"role": "assistant", "content": "You can use JWT tokens for authentication. First, install the jwt library..."},
+			{"role": "user", "content": "What about refresh tokens?"},
+			{"role": "assistant", "content": "Refresh tokens are used to obtain new access tokens without re-authentication..."},
 		},
 	}
 	body, _ := json.Marshal(summarizeReq)
 	resp, err := client.Post(ts.URL+"/api/v1/summarize/conversation", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var summaryResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&summaryResp)
 	resp.Body.Close()
+	assert.NotEmpty(t, summaryResp["summary_text"])
+
+	// 2. Compress context (80/20 strategy)
+	compressReq := map[string]interface{}{
+		"context":             "This is a long context that needs to be compressed. It contains important information about the project architecture, design decisions, and implementation details. The system uses a microservices architecture with multiple components communicating via REST APIs and message queues.",
+		"target_tokens":       50,
+		"compression_ratio":   0.6,
+		"preserve_recent_pct": 0.2,
+	}
+	body, _ = json.Marshal(compressReq)
+	resp, err = client.Post(ts.URL+"/api/v1/summarize/context", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var compressResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&compressResp)
+	resp.Body.Close()
+	assert.NotNil(t, compressResp)
+
+	// 3. Extract decision skeleton
+	skeletonReq := map[string]interface{}{
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": "Should we use PostgreSQL or MongoDB?"},
+			{"role": "assistant", "content": "For this use case, I recommend PostgreSQL because of its strong ACID compliance and relational data model."},
+			{"role": "user", "content": "What about caching?"},
+			{"role": "assistant", "content": "We should use Redis for caching. It provides fast in-memory storage and supports various data structures."},
+		},
+	}
+	body, _ = json.Marshal(skeletonReq)
+	resp, err = client.Post(ts.URL+"/api/v1/summarize/skeleton", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var skeletonResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&skeletonResp)
+	resp.Body.Close()
+	assert.NotNil(t, skeletonResp)
 }
 
 // TestE2E_AuditWorkflow tests the audit workflow
@@ -295,26 +496,139 @@ func TestE2E_PrivacyWorkflow(t *testing.T) {
 
 	// 1. Detect PII
 	detectReq := map[string]interface{}{
-		"text": "Contact me at test@example.com or call 123-456-7890",
+		"text": "Contact me at test@example.com or call 123-456-7890. My SSN is 123-45-6789.",
 	}
 	body, _ := json.Marshal(detectReq)
 	resp, err := client.Post(ts.URL+"/api/v1/privacy/detect", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var detectResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&detectResp)
 	resp.Body.Close()
+	assert.GreaterOrEqual(t, int(detectResp["count"].(float64)), 1)
 
 	// 2. Redact PII
 	redactReq := map[string]interface{}{
-		"text": "Contact me at test@example.com or call 123-456-7890",
+		"text":            "Contact me at test@example.com or call 123-456-7890",
+		"redaction_mask":  "[REDACTED]",
+		"preserve_length": false,
 	}
 	body, _ = json.Marshal(redactReq)
 	resp, err = client.Post(ts.URL+"/api/v1/privacy/redact", "application/json", bytes.NewBuffer(body))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var redactResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&redactResp)
+	resp.Body.Close()
+	assert.NotNil(t, redactResp)
+
+	// 3. Encrypt data (standard method)
+	encryptReq := map[string]interface{}{
+		"plaintext": "This is sensitive data that needs encryption",
+		"method":    "standard",
+	}
+	body, _ = json.Marshal(encryptReq)
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/encrypt", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var encryptResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&encryptResp)
+	resp.Body.Close()
+	assert.Equal(t, "standard", encryptResp["method"])
+	encryptedData := encryptResp["encrypted_data"].(map[string]interface{})
+	assert.NotEmpty(t, encryptedData["ciphertext"])
+
+	// 4. Decrypt data (standard method)
+	decryptReq := map[string]interface{}{
+		"method":         "standard",
+		"encrypted_data": encryptedData,
+	}
+	body, _ = json.Marshal(decryptReq)
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/decrypt", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var decryptResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&decryptResp)
+	resp.Body.Close()
+	assert.Equal(t, "This is sensitive data that needs encryption", decryptResp["plaintext"])
+	assert.Equal(t, true, decryptResp["verified"])
+
+	// 5. Encrypt data (chain method)
+	chainEncryptReq := map[string]interface{}{
+		"plaintext": "Chain encrypted sensitive data",
+		"method":    "chain",
+	}
+	body, _ = json.Marshal(chainEncryptReq)
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/encrypt", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var chainEncryptResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&chainEncryptResp)
+	resp.Body.Close()
+	assert.Equal(t, "chain", chainEncryptResp["method"])
+	chainEncryptedData := chainEncryptResp["chain_encrypted"].(map[string]interface{})
+	assert.NotEmpty(t, chainEncryptedData["ciphertext"])
+
+	// 6. Decrypt data (chain method)
+	chainDecryptReq := map[string]interface{}{
+		"method":          "chain",
+		"chain_encrypted": chainEncryptedData,
+	}
+	body, _ = json.Marshal(chainDecryptReq)
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/decrypt", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var chainDecryptResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&chainDecryptResp)
+	resp.Body.Close()
+	assert.Equal(t, "Chain encrypted sensitive data", chainDecryptResp["plaintext"])
+
+	// 7. Get encryption keys info
+	resp, err = client.Get(ts.URL + "/api/v1/privacy/keys")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// 3. Get privacy metrics
+	// 8. Generate new key
+	keyReq := map[string]interface{}{
+		"action": "generate",
+	}
+	body, _ = json.Marshal(keyReq)
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/keys", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 9. Rotate key
+	rotateReq := map[string]interface{}{
+		"action": "rotate",
+	}
+	body, _ = json.Marshal(rotateReq)
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/keys", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 10. Verify chain integrity
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/verify-chain", "application/json", nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 11. Get privacy metrics
 	resp, err = client.Get(ts.URL + "/api/v1/privacy/metrics")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// 12. Reset metrics
+	resp, err = client.Post(ts.URL+"/api/v1/privacy/metrics/reset", "application/json", nil)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
