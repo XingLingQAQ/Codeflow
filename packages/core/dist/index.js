@@ -16,4 +16,5 @@ export * from './cache/index.js';
 export * from './isolation/index.js';
 export * from './privacy/index.js';
 export * from './audit/index.js';
+export * from './cowork/index.js';
 //# sourceMappingURL=index.js.map
