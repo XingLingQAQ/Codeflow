@@ -202,6 +202,36 @@ describe('GitConflictDetector', () => {
     });
   });
 
+  describe('checkGitAvailable', () => {
+    it('should return true when git is available', async () => {
+      const available = await detector.checkGitAvailable();
+      expect(available).toBe(true);
+    });
+
+    it('should cache the result', async () => {
+      const first = await detector.checkGitAvailable();
+      const second = await detector.checkGitAvailable();
+      expect(first).toBe(second);
+    });
+
+    it('should return false for invalid git path', async () => {
+      const badDetector = new GitConflictDetector({ gitPath: 'nonexistent-git-command' });
+      const available = await badDetector.checkGitAvailable();
+      expect(available).toBe(false);
+    });
+  });
+
+  describe('ensureGitAvailable', () => {
+    it('should not throw when git is available', async () => {
+      await expect(detector.ensureGitAvailable()).resolves.not.toThrow();
+    });
+
+    it('should throw when git is not available', async () => {
+      const badDetector = new GitConflictDetector({ gitPath: 'nonexistent-git-command' });
+      await expect(badDetector.ensureGitAvailable()).rejects.toThrow('Git is not available');
+    });
+  });
+
   describe('isGitRepository', () => {
     it('should return true for current directory (assuming it is a git repo)', async () => {
       const isRepo = await detector.isGitRepository();

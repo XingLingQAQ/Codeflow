@@ -38,12 +38,43 @@ export interface GitConflictResult {
  */
 export class GitConflictDetector {
   private config: GitConflictDetectorConfig;
+  private gitAvailable: boolean | null = null;
 
   constructor(config: GitConflictDetectorConfig = {}) {
     this.config = {
       gitPath: 'git',
       ...config,
     };
+  }
+
+  /**
+   * 检测 Git 是否可用
+   */
+  async checkGitAvailable(): Promise<boolean> {
+    if (this.gitAvailable !== null) {
+      return this.gitAvailable;
+    }
+
+    try {
+      await this.runGitCommand(['--version']);
+      this.gitAvailable = true;
+      return true;
+    } catch {
+      this.gitAvailable = false;
+      return false;
+    }
+  }
+
+  /**
+   * 确保 Git 可用，否则抛出错误
+   */
+  async ensureGitAvailable(): Promise<void> {
+    const available = await this.checkGitAvailable();
+    if (!available) {
+      throw new Error(
+        'Git is not available. Please install Git and ensure it is in your PATH.'
+      );
+    }
   }
 
   /**
