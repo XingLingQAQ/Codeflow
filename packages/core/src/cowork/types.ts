@@ -201,6 +201,16 @@ export interface DebateOptions {
   convergenceThreshold?: number;
   generator: string;
   critic: string;
+  /** Strategy for resolving conflicts */
+  conflictResolution?: 'generator-wins' | 'critic-wins' | 'merge' | 'vote';
+  /** Minimum agreement score to consider converged (0-1) */
+  minAgreementScore?: number;
+  /** AbortSignal for interruption support */
+  signal?: AbortSignal;
+  /** Callback after each round */
+  onRound?: (round: DebateRound) => Promise<void> | void;
+  /** Custom convergence checker */
+  checkConvergence?: (round: DebateRound, allRounds: DebateRound[]) => boolean;
 }
 
 /**

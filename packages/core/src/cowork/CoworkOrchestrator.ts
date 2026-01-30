@@ -392,12 +392,22 @@ export class CoworkOrchestrator extends EventEmitter {
     options: DebateOptions
   ): Promise<DebateResult> {
     const startTime = Date.now();
-    const { maxRounds = 3, convergenceThreshold = 0.8, generator, critic } = options;
+    const {
+      maxRounds = 3,
+      convergenceThreshold = 0.8,
+      generator,
+      critic,
+      signal,
+      onRound,
+      checkConvergence,
+      minAgreementScore = 0.8,
+    } = options;
 
     const rounds: DebateRound[] = [];
     let converged = false;
     let finalOutput: string | undefined;
     let finalDiffs: Diff[] | undefined;
+    let interrupted = false;
 
     // 获取执行器
     const generatorExecutor = this.executors.get(generator);
@@ -417,7 +427,13 @@ export class CoworkOrchestrator extends EventEmitter {
 
     let currentInstruction = task.input.instruction;
 
-    for (let round = 1; round <= maxRounds && !converged; round++) {
+    for (let round = 1; round <= maxRounds && !converged && !interrupted; round++) {
+      // 检查中断信号
+      if (signal?.aborted) {
+        interrupted = true;
+        break;
+      }
+
       // Generator 生成
       const generatorTask: CoworkTask = {
         ...task,
@@ -432,6 +448,12 @@ export class CoworkOrchestrator extends EventEmitter {
       const genResult = await this.execute(generatorTask);
       const genOutput = genResult.output?.result || '';
       const genDiffs = genResult.output?.diffs || [];
+
+      // 检查中断信号
+      if (signal?.aborted) {
+        interrupted = true;
+        break;
+      }
 
       // Critic 评审
       const criticTask: CoworkTask = {
@@ -463,26 +485,40 @@ export class CoworkOrchestrator extends EventEmitter {
         },
       };
 
-      // 检查收敛
-      const criticalIssues = issues.filter(
-        (i) => i.severity === 'critical' || i.severity === 'high'
-      );
+      // 检查收敛（使用自定义检查器或默认逻辑）
+      if (checkConvergence) {
+        converged = checkConvergence(debateRound, rounds);
+      } else {
+        // 默认收敛逻辑：无严重问题
+        const criticalIssues = issues.filter(
+          (i) => i.severity === 'critical' || i.severity === 'high'
+        );
 
-      if (criticalIssues.length === 0) {
-        converged = true;
+        // 计算一致性分数
+        const totalIssues = issues.length;
+        const agreementScore = totalIssues === 0 ? 1 : 1 - criticalIssues.length / totalIssues;
+
+        if (criticalIssues.length === 0 || agreementScore >= minAgreementScore) {
+          converged = true;
+        }
+      }
+
+      if (converged) {
         finalOutput = genOutput;
         finalDiffs = genDiffs;
         debateRound.refined = { output: genOutput, diffs: genDiffs };
       } else {
         // 根据反馈调整指令
-        currentInstruction = this.refineInstruction(
-          task.input.instruction,
-          issues
-        );
+        currentInstruction = this.refineInstruction(task.input.instruction, issues);
       }
 
       rounds.push(debateRound);
       this.emitEvent({ type: 'debate:round', round: debateRound });
+
+      // 执行回调
+      if (onRound) {
+        await onRound(debateRound);
+      }
     }
 
     return {
@@ -495,6 +531,7 @@ export class CoworkOrchestrator extends EventEmitter {
       converged,
       finalOutput,
       finalDiffs,
+      interrupted,
     };
   }
 

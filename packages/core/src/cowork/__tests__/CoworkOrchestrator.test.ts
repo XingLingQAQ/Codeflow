@@ -570,6 +570,115 @@ describe('CoworkOrchestrator', () => {
 
       expect(result.failureCount).toBe(1);
     });
+
+    it('should support interruption via AbortSignal', async () => {
+      const controller = new AbortController();
+
+      const task: CoworkTask = {
+        id: 'debate-int',
+        type: 'code-edit',
+        executor: 'generator',
+        input: {
+          files: ['src/test.ts'],
+          instruction: 'Implement feature',
+        },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      // 立即中断
+      controller.abort();
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 5,
+        signal: controller.signal,
+      });
+
+      expect(result.interrupted).toBe(true);
+      expect(result.rounds.length).toBe(0);
+    });
+
+    it('should support custom convergence checker', async () => {
+      const task: CoworkTask = {
+        id: 'debate-conv',
+        type: 'code-edit',
+        executor: 'generator',
+        input: {
+          files: ['src/test.ts'],
+          instruction: 'Implement feature',
+        },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 5,
+        checkConvergence: (round, allRounds) => {
+          // 自定义：第一轮就收敛
+          return round.round === 1;
+        },
+      });
+
+      expect(result.converged).toBe(true);
+      expect(result.rounds.length).toBe(1);
+    });
+
+    it('should call onRound callback', async () => {
+      const roundCalls: number[] = [];
+
+      const task: CoworkTask = {
+        id: 'debate-cb',
+        type: 'code-edit',
+        executor: 'generator',
+        input: {
+          files: ['src/test.ts'],
+          instruction: 'Implement feature',
+        },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 2,
+        onRound: async (round) => {
+          roundCalls.push(round.round);
+        },
+      });
+
+      expect(roundCalls.length).toBeGreaterThan(0);
+    });
+
+    it('should emit debate:round events', async () => {
+      const events: OrchestratorEvent[] = [];
+      orchestrator.on('event', (e) => events.push(e));
+
+      const task: CoworkTask = {
+        id: 'debate-evt',
+        type: 'code-edit',
+        executor: 'generator',
+        input: {
+          files: ['src/test.ts'],
+          instruction: 'Implement feature',
+        },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 2,
+      });
+
+      const debateEvents = events.filter((e) => e.type === 'debate:round');
+      expect(debateEvents.length).toBeGreaterThan(0);
+    });
   });
 
   describe('Blackboard', () => {
