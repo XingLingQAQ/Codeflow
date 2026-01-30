@@ -24,6 +24,7 @@ import {
   Diff,
 } from './types.js';
 import { CLIProcessManager } from './process/CLIProcessManager.js';
+import { GitConflictDetector } from './GitConflictDetector.js';
 
 /**
  * 执行器注册信息
@@ -52,10 +53,12 @@ export class CoworkOrchestrator extends EventEmitter {
   private processManager: CLIProcessManager;
   private blackboard: Map<string, BlackboardEntry> = new Map();
   private runningTasks: Map<string, CoworkTask> = new Map();
+  private gitConflictDetector: GitConflictDetector;
 
-  constructor(processManager?: CLIProcessManager) {
+  constructor(processManager?: CLIProcessManager, cwd?: string) {
     super();
     this.processManager = processManager || new CLIProcessManager();
+    this.gitConflictDetector = new GitConflictDetector({ cwd });
   }
 
   /**
@@ -267,6 +270,23 @@ export class CoworkOrchestrator extends EventEmitter {
             });
           }
         }
+      }
+    }
+
+    // 执行后检测 diff 冲突
+    const allDiffs: Diff[] = [];
+    for (const result of results) {
+      if (result.status === 'completed' && result.output?.diffs) {
+        allDiffs.push(...result.output.diffs);
+      }
+    }
+
+    // 检测 diff 之间的冲突
+    const diffConflicts = this.gitConflictDetector.detectMultipleDiffConflicts(allDiffs);
+    for (const conflict of diffConflicts) {
+      if (!conflicts.some((c) => c.file === conflict.file)) {
+        conflicts.push(conflict);
+        this.emitEvent({ type: 'conflict:detected', conflict });
       }
     }
 
@@ -502,6 +522,13 @@ export class CoworkOrchestrator extends EventEmitter {
    */
   getProcessManager(): CLIProcessManager {
     return this.processManager;
+  }
+
+  /**
+   * 获取 Git 冲突检测器
+   */
+  getGitConflictDetector(): GitConflictDetector {
+    return this.gitConflictDetector;
   }
 
   /**
