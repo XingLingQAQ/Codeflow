@@ -308,12 +308,28 @@ export class CoworkOrchestrator extends EventEmitter {
     options: SequentialOptions = {}
   ): Promise<BatchExecutionResult> {
     const startTime = Date.now();
-    const { stopOnError = true, passContext = true } = options;
+    const { stopOnError = true, passContext = true, signal, onBeforeTask, onAfterTask } = options;
 
     const results: ExecutionResult[] = [];
+    let interrupted = false;
 
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i];
+
+      // 检查中断信号
+      if (signal?.aborted) {
+        interrupted = true;
+        break;
+      }
+
+      // 执行前回调
+      if (onBeforeTask) {
+        const shouldContinue = await onBeforeTask(task, i);
+        if (!shouldContinue) {
+          interrupted = true;
+          break;
+        }
+      }
 
       // 传递上下文
       if (passContext && i > 0) {
@@ -342,6 +358,17 @@ export class CoworkOrchestrator extends EventEmitter {
       const result = await this.execute(task);
       results.push(result);
 
+      // 执行后回调
+      if (onAfterTask) {
+        await onAfterTask(task, result, i);
+      }
+
+      // 再次检查中断信号
+      if (signal?.aborted) {
+        interrupted = true;
+        break;
+      }
+
       if (stopOnError && result.status === 'failed') {
         break;
       }
@@ -353,6 +380,7 @@ export class CoworkOrchestrator extends EventEmitter {
       totalDuration: Date.now() - startTime,
       successCount: results.filter((r) => r.status === 'completed').length,
       failureCount: results.filter((r) => r.status === 'failed').length,
+      interrupted,
     };
   }
 

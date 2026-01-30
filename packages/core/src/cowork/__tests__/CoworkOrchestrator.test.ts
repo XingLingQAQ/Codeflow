@@ -405,6 +405,112 @@ describe('CoworkOrchestrator', () => {
       const entries = orchestrator.getAllBlackboardEntries();
       expect(entries.length).toBeGreaterThan(0);
     });
+
+    it('should support interruption via AbortSignal', async () => {
+      const controller = new AbortController();
+
+      const tasks: CoworkTask[] = [
+        {
+          id: 'int-1',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['a.ts'], instruction: 'Step 1' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+        {
+          id: 'int-2',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['b.ts'], instruction: 'Step 2' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+        {
+          id: 'int-3',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['c.ts'], instruction: 'Step 3' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+      ];
+
+      // 在第一个任务后中断
+      const result = await orchestrator.executeSequence(tasks, {
+        signal: controller.signal,
+        onAfterTask: async (_task, _result, index) => {
+          if (index === 0) {
+            controller.abort();
+          }
+        },
+      });
+
+      expect(result.interrupted).toBe(true);
+      expect(result.results.length).toBe(1);
+    });
+
+    it('should support onBeforeTask callback', async () => {
+      const beforeCalls: number[] = [];
+
+      const tasks: CoworkTask[] = [
+        {
+          id: 'cb-1',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['a.ts'], instruction: 'Step 1' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+        {
+          id: 'cb-2',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['b.ts'], instruction: 'Step 2' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+      ];
+
+      await orchestrator.executeSequence(tasks, {
+        onBeforeTask: async (_task, index) => {
+          beforeCalls.push(index);
+          return true;
+        },
+      });
+
+      expect(beforeCalls).toEqual([0, 1]);
+    });
+
+    it('should stop when onBeforeTask returns false', async () => {
+      const tasks: CoworkTask[] = [
+        {
+          id: 'stop-1',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['a.ts'], instruction: 'Step 1' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+        {
+          id: 'stop-2',
+          type: 'code-edit',
+          executor: 'test',
+          input: { files: ['b.ts'], instruction: 'Step 2' },
+          status: 'pending',
+          createdAt: Date.now(),
+        },
+      ];
+
+      const result = await orchestrator.executeSequence(tasks, {
+        onBeforeTask: async (_task, index) => {
+          return index === 0; // 只执行第一个
+        },
+      });
+
+      expect(result.interrupted).toBe(true);
+      expect(result.results.length).toBe(1);
+    });
   });
 
   describe('executeDebate', () => {

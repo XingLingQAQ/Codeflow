@@ -185,6 +185,12 @@ export interface ParallelOptions {
 export interface SequentialOptions {
   stopOnError?: boolean;
   passContext?: boolean;
+  /** AbortSignal for interruption support */
+  signal?: AbortSignal;
+  /** Callback before each task execution */
+  onBeforeTask?: (task: CoworkTask, index: number) => Promise<boolean> | boolean;
+  /** Callback after each task execution */
+  onAfterTask?: (task: CoworkTask, result: ExecutionResult, index: number) => Promise<void> | void;
 }
 
 /**
@@ -218,6 +224,8 @@ export interface BatchExecutionResult {
   successCount: number;
   failureCount: number;
   conflicts?: ConflictInfo[];
+  /** Whether the execution was interrupted */
+  interrupted?: boolean;
 }
 
 /**
