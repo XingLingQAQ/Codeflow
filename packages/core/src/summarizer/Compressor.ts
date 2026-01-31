@@ -78,69 +78,134 @@ export class Compressor implements ICompressor {
     const decisions: string[] = [];
     const relations: Array<{ from: string; to: string; type: string }> = [];
 
-    // 简单的实体和决策提取
+    // 实体提取模式
+    const entityPatterns = [
+      // 大写开头的词（类名、专有名词）
+      /\b[A-Z][a-zA-Z]{2,}\b/g,
+      // 驼峰命名（变量名、函数名）
+      /\b[a-z]+(?:[A-Z][a-z]+)+\b/g,
+      // 下划线命名
+      /\b[a-z]+(?:_[a-z]+)+\b/g,
+      // 文件路径
+      /(?:[\w-]+\/)+[\w-]+\.\w+/g,
+      // 技术术语（带连字符）
+      /\b[A-Za-z]+-[A-Za-z]+(?:-[A-Za-z]+)*\b/g,
+    ];
+
+    // 决策关键词（扩展）
+    const decisionKeywords = [
+      // 英文
+      'decide', 'decided', 'decision',
+      'choose', 'chose', 'chosen', 'choice',
+      'select', 'selected', 'selection',
+      'implement', 'implemented', 'implementation',
+      'use', 'using', 'used',
+      'adopt', 'adopted', 'adoption',
+      'prefer', 'preferred',
+      'recommend', 'recommended',
+      'should', 'must', 'will',
+      'going to', 'plan to',
+      // 中文
+      '决定', '选择', '采用', '实现', '使用',
+      '推荐', '建议', '应该', '必须', '计划',
+    ];
+
+    // 关系关键词
+    const relationPatterns = [
+      { pattern: /(\w+)\s+(?:extends|inherits from|is a)\s+(\w+)/gi, type: 'extends' },
+      { pattern: /(\w+)\s+(?:implements|realizes)\s+(\w+)/gi, type: 'implements' },
+      { pattern: /(\w+)\s+(?:uses|depends on|requires)\s+(\w+)/gi, type: 'uses' },
+      { pattern: /(\w+)\s+(?:contains|has|includes)\s+(\w+)/gi, type: 'contains' },
+      { pattern: /(\w+)\s+(?:calls|invokes)\s+(\w+)/gi, type: 'calls' },
+      { pattern: /(\w+)\s+(?:returns|produces)\s+(\w+)/gi, type: 'returns' },
+    ];
+
+    // 排除的常见词
+    const excludeWords = new Set([
+      'The', 'This', 'That', 'These', 'Those', 'What', 'When', 'Where', 'Which', 'Who',
+      'How', 'Why', 'Can', 'Could', 'Would', 'Should', 'Will', 'May', 'Might', 'Must',
+      'Have', 'Has', 'Had', 'Been', 'Being', 'Are', 'Were', 'Was', 'Is', 'Do', 'Does',
+      'Did', 'Done', 'Get', 'Got', 'Set', 'Let', 'Put', 'Make', 'Made', 'Take', 'Took',
+      'Give', 'Gave', 'Come', 'Came', 'Go', 'Went', 'See', 'Saw', 'Know', 'Knew',
+      'Think', 'Thought', 'Say', 'Said', 'Tell', 'Told', 'Ask', 'Asked', 'Use', 'Used',
+      'Find', 'Found', 'Want', 'Need', 'Try', 'Tried', 'Keep', 'Kept', 'Start', 'Stop',
+      'True', 'False', 'Null', 'Undefined', 'None', 'Yes', 'No', 'Not', 'And', 'Or',
+      'But', 'For', 'With', 'From', 'Into', 'About', 'After', 'Before', 'Between',
+    ]);
+
     for (const msg of messages) {
       const content = msg.content;
 
-      // 提取实体（简化：提取大写开头的词）
-      const entityMatches = content.match(/\b[A-Z][a-zA-Z]+\b/g);
-      if (entityMatches) {
-        for (const entity of entityMatches) {
-          if (!entities.includes(entity)) {
-            entities.push(entity);
+      // 提取实体
+      for (const pattern of entityPatterns) {
+        const matches = content.match(pattern);
+        if (matches) {
+          for (const entity of matches) {
+            if (
+              entity.length >= 3 &&
+              !excludeWords.has(entity) &&
+              !entities.includes(entity)
+            ) {
+              entities.push(entity);
+            }
           }
         }
       }
 
-      // 提取决策（简化：提取包含决策关键词的句子）
-      const decisionKeywords = [
-        'decide',
-        'choose',
-        'select',
-        'implement',
-        'use',
-        'adopt',
-        '决定',
-        '选择',
-        '采用',
-        '实现',
-      ];
-      const sentences = content.split(/[.。!！?？]/);
+      // 提取决策
+      const sentences = content.split(/[.。!！?？\n]/);
       for (const sentence of sentences) {
-        const lowerSentence = sentence.toLowerCase();
-        if (decisionKeywords.some((kw) => lowerSentence.includes(kw))) {
-          const trimmed = sentence.trim();
-          if (trimmed && !decisions.includes(trimmed)) {
-            decisions.push(trimmed);
+        const trimmed = sentence.trim();
+        if (trimmed.length < 10) continue;
+
+        const lowerSentence = trimmed.toLowerCase();
+        const hasDecisionKeyword = decisionKeywords.some((kw) => lowerSentence.includes(kw));
+
+        if (hasDecisionKeyword && !decisions.includes(trimmed)) {
+          // 提取决策的核心部分（限制长度）
+          const decision = trimmed.length > 200 ? trimmed.slice(0, 200) + '...' : trimmed;
+          decisions.push(decision);
+        }
+      }
+
+      // 提取关系
+      for (const { pattern, type } of relationPatterns) {
+        let match;
+        const regex = new RegExp(pattern.source, pattern.flags);
+        while ((match = regex.exec(content)) !== null) {
+          const from = match[1];
+          const to = match[2];
+          if (
+            from !== to &&
+            !relations.some((r) => r.from === from && r.to === to && r.type === type)
+          ) {
+            relations.push({ from, to, type });
           }
         }
       }
     }
 
-    // 提取关系（简化：基于实体共现）
-    for (let i = 0; i < entities.length - 1; i++) {
-      for (let j = i + 1; j < entities.length; j++) {
-        const entity1 = entities[i];
-        const entity2 = entities[j];
-
-        // 检查是否在同一消息中出现
-        for (const msg of messages) {
-          if (msg.content.includes(entity1) && msg.content.includes(entity2)) {
-            relations.push({
-              from: entity1,
-              to: entity2,
-              type: 'related_to',
-            });
-            break;
+    // 基于实体共现补充关系
+    const entitySet = new Set(entities.slice(0, 30));
+    for (const msg of messages) {
+      const foundEntities = entities.filter((e) => msg.content.includes(e));
+      if (foundEntities.length >= 2) {
+        for (let i = 0; i < foundEntities.length - 1; i++) {
+          for (let j = i + 1; j < foundEntities.length; j++) {
+            const from = foundEntities[i];
+            const to = foundEntities[j];
+            if (!relations.some((r) => r.from === from && r.to === to)) {
+              relations.push({ from, to, type: 'related_to' });
+            }
           }
         }
       }
     }
 
     return {
-      entities: entities.slice(0, 20),
-      decisions: decisions.slice(0, 10),
-      relations: relations.slice(0, 15),
+      entities: entities.slice(0, 30),
+      decisions: decisions.slice(0, 15),
+      relations: relations.slice(0, 25),
     };
   }
 
@@ -191,7 +256,7 @@ export class Compressor implements ICompressor {
       );
 
       if (targetHistoricalTokens > 0) {
-        // 按重要性排序（简化：优先保留较长的消息和 assistant 消息）
+        // 按重要性排序历史消息
         const scored = historicalMessages.map((msg, idx) => ({
           msg,
           idx,
@@ -227,37 +292,63 @@ export class Compressor implements ICompressor {
 
   private calculateImportance(msg: Message, index: number, totalMessages: number): number {
     let score = 0;
+    const content = msg.content;
+    const lowerContent = content.toLowerCase();
 
-    // 长度因素（较长的消息可能更重要）
-    score += Math.min(msg.content.length / 100, 10);
+    // 1. 长度因素（较长的消息可能更重要，但有上限）
+    const lengthScore = Math.min(content.length / 100, 10);
+    score += lengthScore;
 
-    // 角色因素（assistant 消息通常包含更多信息）
+    // 2. 角色因素
     if (msg.role === 'assistant') {
-      score += 5;
+      score += 5; // assistant 消息通常包含更多信息
+    } else if (msg.role === 'system') {
+      score += 10; // 系统消息最重要
     }
 
-    // 位置因素（较新的消息更重要）
-    score += (index / totalMessages) * 3;
+    // 3. 位置因素（较新的消息更重要）
+    const positionScore = (index / totalMessages) * 5;
+    score += positionScore;
 
-    // 关键词因素
-    const importantKeywords = [
-      'important',
-      'critical',
-      'must',
-      'should',
-      'error',
-      'bug',
-      'fix',
-      '重要',
-      '关键',
-      '必须',
-      '错误',
-      '修复',
-    ];
-    for (const kw of importantKeywords) {
-      if (msg.content.toLowerCase().includes(kw)) {
-        score += 2;
+    // 4. 关键词因素（扩展）
+    const keywordScores: Record<string, number> = {
+      // 高优先级关键词
+      'critical': 5, 'important': 4, 'must': 4, 'required': 4,
+      'error': 4, 'bug': 4, 'fix': 3, 'issue': 3,
+      'security': 5, 'vulnerability': 5,
+      'breaking': 5, 'deprecated': 4,
+      // 中优先级关键词
+      'should': 2, 'recommend': 2, 'suggest': 2,
+      'warning': 3, 'caution': 3,
+      'implement': 2, 'feature': 2, 'enhancement': 2,
+      // 中文关键词
+      '重要': 4, '关键': 4, '必须': 4, '错误': 4, '修复': 3,
+      '安全': 5, '漏洞': 5, '问题': 3, '建议': 2,
+    };
+
+    for (const [keyword, keywordScore] of Object.entries(keywordScores)) {
+      if (lowerContent.includes(keyword)) {
+        score += keywordScore;
       }
+    }
+
+    // 5. 代码块因素（包含代码的消息可能更重要）
+    const codeBlockCount = (content.match(/```/g) || []).length / 2;
+    score += Math.min(codeBlockCount * 2, 6);
+
+    // 6. 结构化内容因素（列表、标题等）
+    const hasStructure =
+      content.includes('- ') ||
+      content.includes('* ') ||
+      content.includes('1. ') ||
+      content.match(/^#+\s/m);
+    if (hasStructure) {
+      score += 2;
+    }
+
+    // 7. 问答因素（问题和回答通常成对重要）
+    if (content.includes('?') || content.includes('？')) {
+      score += 1;
     }
 
     return score;
@@ -267,15 +358,61 @@ export class Compressor implements ICompressor {
     const userMessages = messages.filter((m) => m.role === 'user');
     const assistantMessages = messages.filter((m) => m.role === 'assistant');
 
+    // 提取主题（改进：提取更有意义的内容）
     const topics: string[] = [];
+    const keyPhrases: string[] = [];
 
-    // 提取主题（简化：取每条消息的前 50 个字符）
     for (const msg of userMessages.slice(-5)) {
-      const topic = msg.content.slice(0, 50).replace(/\n/g, ' ');
-      topics.push(topic);
+      // 提取第一句话作为主题
+      const firstSentence = msg.content.split(/[.。!！?？\n]/)[0]?.trim();
+      if (firstSentence && firstSentence.length >= 5 && firstSentence.length <= 100) {
+        topics.push(firstSentence);
+      } else if (msg.content.length > 0) {
+        // 如果第一句太长或太短，取前 80 个字符
+        const topic = msg.content.slice(0, 80).replace(/\n/g, ' ').trim();
+        if (topic) topics.push(topic + (msg.content.length > 80 ? '...' : ''));
+      }
     }
 
-    return `Previous conversation covered ${messages.length} messages. User topics: ${topics.join('; ')}. Assistant provided ${assistantMessages.length} responses.`;
+    // 从 assistant 消息中提取关键短语
+    for (const msg of assistantMessages.slice(-3)) {
+      // 提取包含关键动作的短语
+      const actionPatterns = [
+        /(?:I |I'll |I've |We |We'll |We've )([^.。!！?？]{10,60})/gi,
+        /(?:created|implemented|fixed|added|updated|modified|removed)\s+([^.。!！?？]{5,50})/gi,
+      ];
+
+      for (const pattern of actionPatterns) {
+        const matches = msg.content.match(pattern);
+        if (matches) {
+          for (const match of matches.slice(0, 2)) {
+            const phrase = match.trim();
+            if (phrase.length >= 10 && !keyPhrases.includes(phrase)) {
+              keyPhrases.push(phrase);
+            }
+          }
+        }
+      }
+    }
+
+    // 构建摘要
+    const parts: string[] = [];
+
+    parts.push(`Conversation summary (${messages.length} messages):`);
+
+    if (topics.length > 0) {
+      parts.push(`Topics discussed: ${topics.slice(0, 3).join('; ')}`);
+    }
+
+    if (keyPhrases.length > 0) {
+      parts.push(`Key actions: ${keyPhrases.slice(0, 3).join('; ')}`);
+    }
+
+    parts.push(
+      `Statistics: ${userMessages.length} user messages, ${assistantMessages.length} assistant responses.`
+    );
+
+    return parts.join(' ');
   }
 
   private buildSummaryPrompt(messages: Message[], config?: SummaryAgentConfig): string {

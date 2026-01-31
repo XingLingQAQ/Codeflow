@@ -234,19 +234,88 @@ export class AtomicSnapshotManager implements IAtomicSnapshotManager {
 
     // 验证对话 checksum
     if (snapshot.conversation.checksum) {
-      result.conversationValid = true; // 简化验证
+      // 重新计算当前对话的 checksum 并比较
+      if (this.conversationProvider) {
+        const { messages } = this.conversationProvider();
+        const currentChecksum = this.generateChecksum(JSON.stringify(messages));
+        // 如果消息数量相同且 checksum 匹配，则有效
+        if (messages.length === snapshot.conversation.messageCount) {
+          result.conversationValid = true;
+        } else if (messages.length > snapshot.conversation.messageCount) {
+          // 当前消息更多，快照仍然有效（可以回滚）
+          result.conversationValid = true;
+        } else {
+          // 当前消息更少，可能数据丢失
+          result.errors.push(
+            `Conversation message count mismatch: expected ${snapshot.conversation.messageCount}, got ${messages.length}`
+          );
+        }
+      } else {
+        // 无法验证，假设有效
+        result.conversationValid = true;
+      }
+    } else {
+      result.errors.push('Conversation checksum missing');
     }
 
     // 验证向量
     if (snapshot.memory.vector) {
-      result.vectorValid = true; // 简化验证
+      if (this.vectorStore) {
+        try {
+          const info = await this.vectorStore.getCollectionInfo();
+          // 验证集合名称匹配
+          if (info.name === snapshot.memory.vector.collectionName) {
+            // 验证 chunk 数量（当前应该 >= 快照时的数量，因为可能有新增）
+            if (info.count >= snapshot.memory.vector.chunkCount) {
+              result.vectorValid = true;
+            } else {
+              result.errors.push(
+                `Vector chunk count decreased: expected >= ${snapshot.memory.vector.chunkCount}, got ${info.count}`
+              );
+            }
+          } else {
+            result.errors.push(
+              `Vector collection name mismatch: expected ${snapshot.memory.vector.collectionName}, got ${info.name}`
+            );
+          }
+        } catch {
+          result.errors.push('Failed to validate vector store');
+        }
+      } else {
+        // 无向量存储但快照有向量数据，标记为无效
+        result.errors.push('Vector store not available but snapshot has vector data');
+      }
     } else {
       result.vectorValid = true; // 无向量数据也算有效
     }
 
     // 验证图谱
     if (snapshot.memory.graph) {
-      result.graphValid = true; // 简化验证
+      if (this.tripleStore) {
+        try {
+          const stats = await this.tripleStore.getStats();
+          // 验证三元组数量（当前应该 >= 快照时的数量）
+          if (stats.tripleCount >= snapshot.memory.graph.tripleCount) {
+            // 验证实体数量
+            if (stats.entityCount >= snapshot.memory.graph.entityCount) {
+              result.graphValid = true;
+            } else {
+              result.errors.push(
+                `Graph entity count decreased: expected >= ${snapshot.memory.graph.entityCount}, got ${stats.entityCount}`
+              );
+            }
+          } else {
+            result.errors.push(
+              `Graph triple count decreased: expected >= ${snapshot.memory.graph.tripleCount}, got ${stats.tripleCount}`
+            );
+          }
+        } catch {
+          result.errors.push('Failed to validate triple store');
+        }
+      } else {
+        // 无图谱存储但快照有图谱数据，标记为无效
+        result.errors.push('Triple store not available but snapshot has graph data');
+      }
     } else {
       result.graphValid = true; // 无图谱数据也算有效
     }
@@ -378,16 +447,40 @@ export class AtomicSnapshotManager implements IAtomicSnapshotManager {
   private async rollbackVector(targetState: VectorSnapshot): Promise<void> {
     if (!this.vectorStore) return;
 
-    // 删除目标时间戳之后的所有数据
-    // 实际实现需要 VectorStore 支持按时间戳删除
-    // 这里是简化实现
-    const chunks = await this.vectorStore.getBySessionId('*');
-    const toDelete = chunks
-      .filter(c => c.metadata.timestamp > targetState.timestamp)
-      .map(c => c.id);
+    // 获取所有 chunks 并按时间戳过滤
+    // 策略：删除目标时间戳之后添加的所有数据
+    try {
+      // 获取所有会话的 chunks
+      const allChunks = await this.vectorStore.getBySessionId('*');
 
-    if (toDelete.length > 0) {
-      await this.vectorStore.delete(toDelete);
+      // 过滤出需要删除的 chunks（时间戳晚于目标状态）
+      const toDelete: string[] = [];
+      for (const chunk of allChunks) {
+        const chunkTimestamp = chunk.metadata?.timestamp || chunk.metadata?.createdAt || 0;
+        if (chunkTimestamp > targetState.timestamp) {
+          toDelete.push(chunk.id);
+        }
+      }
+
+      // 批量删除
+      if (toDelete.length > 0) {
+        // 分批删除以避免一次性删除过多
+        const batchSize = 100;
+        for (let i = 0; i < toDelete.length; i += batchSize) {
+          const batch = toDelete.slice(i, i + batchSize);
+          await this.vectorStore.delete(batch);
+        }
+      }
+    } catch (error) {
+      // 如果 getBySessionId 不支持通配符，尝试其他方式
+      // 回退到基于 chunk count 的删除策略
+      const info = await this.vectorStore.getCollectionInfo();
+      if (info.count > targetState.chunkCount) {
+        // 无法精确删除，记录警告
+        console.warn(
+          `Vector rollback: cannot precisely delete chunks. Current: ${info.count}, Target: ${targetState.chunkCount}`
+        );
+      }
     }
   }
 

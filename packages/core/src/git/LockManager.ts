@@ -379,9 +379,49 @@ export class LockManager implements ILockManager {
   }
 
   private selectVictims(cycle: string[]): string[] {
-    // 选择优先级最低的 owner 作为 victim
-    // 简化实现：选择环中的第一个
-    return cycle.length > 0 ? [cycle[0]] : [];
+    if (cycle.length === 0) return [];
+
+    // 选择 victim 的策略：
+    // 1. 优先选择持有锁数量最少的 owner（影响最小）
+    // 2. 如果相同，选择等待时间最短的（最近加入的）
+    // 3. 如果还相同，选择优先级最低的
+
+    const ownerScores = cycle.map((owner) => {
+      let score = 0;
+
+      // 计算持有的锁数量
+      let heldLocks = 0;
+      for (const lockInfo of this.locks.values()) {
+        if (lockInfo.owner === owner) {
+          heldLocks++;
+        }
+      }
+      score += heldLocks * 100; // 持有锁越多，分数越高（越不应该被选为 victim）
+
+      // 计算等待时间
+      const pendingForOwner = Array.from(this.pendingRequests.values())
+        .flat()
+        .filter((r) => r.owner === owner);
+      if (pendingForOwner.length > 0) {
+        const oldestRequest = pendingForOwner.reduce((oldest, r) =>
+          r.timestamp < oldest.timestamp ? r : oldest
+        );
+        const waitTime = Date.now() - oldestRequest.timestamp;
+        score += waitTime / 10; // 等待时间越长，分数越高（越不应该被选为 victim）
+      }
+
+      // 考虑优先级
+      const ownerPriority = pendingForOwner[0]?.priority ?? LOCK_PRIORITIES.NORMAL;
+      score += ownerPriority * 50; // 优先级越高，分数越高
+
+      return { owner, score };
+    });
+
+    // 选择分数最低的作为 victim
+    ownerScores.sort((a, b) => a.score - b.score);
+
+    // 返回分数最低的 owner 作为 victim
+    return [ownerScores[0].owner];
   }
 
   private findLockId(resourceId: string): string | undefined {

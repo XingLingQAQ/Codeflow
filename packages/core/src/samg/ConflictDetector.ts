@@ -239,24 +239,24 @@ export class ConflictDetector implements IConflictDetector {
 
   private checkTemporal(newTriple: Triple, existing: Triple): Conflict | null {
     // 检查时间相关谓词的时序一致性
-    const temporalPredicates = ['startedAt', 'endedAt', 'occurredAt', 'before', 'after'];
+    const temporalPredicates = ['startedAt', 'endedAt', 'occurredAt', 'before', 'after', 'during', 'createdAt', 'updatedAt', 'deletedAt'];
 
     if (
       temporalPredicates.includes(newTriple.predicate) &&
       temporalPredicates.includes(existing.predicate) &&
       this.isSameNode(newTriple.subject, existing.subject)
     ) {
-      // 简化检查：如果 startedAt > endedAt，则冲突
+      // 检查 startedAt vs endedAt 冲突
       if (
         newTriple.predicate === 'startedAt' &&
         existing.predicate === 'endedAt' &&
         isLiteralValue(newTriple.object) &&
         isLiteralValue(existing.object)
       ) {
-        const startTime = Number(newTriple.object['@value']);
-        const endTime = Number(existing.object['@value']);
+        const startTime = this.parseTemporalValue(newTriple.object['@value']);
+        const endTime = this.parseTemporalValue(existing.object['@value']);
 
-        if (startTime > endTime) {
+        if (startTime !== null && endTime !== null && startTime > endTime) {
           return this.createConflict(
             'temporal',
             'high',
@@ -266,8 +266,114 @@ export class ConflictDetector implements IConflictDetector {
           );
         }
       }
+
+      // 检查 endedAt vs startedAt 冲突（反向）
+      if (
+        newTriple.predicate === 'endedAt' &&
+        existing.predicate === 'startedAt' &&
+        isLiteralValue(newTriple.object) &&
+        isLiteralValue(existing.object)
+      ) {
+        const endTime = this.parseTemporalValue(newTriple.object['@value']);
+        const startTime = this.parseTemporalValue(existing.object['@value']);
+
+        if (startTime !== null && endTime !== null && endTime < startTime) {
+          return this.createConflict(
+            'temporal',
+            'high',
+            existing,
+            newTriple,
+            `Temporal inconsistency: end time (${endTime}) < start time (${startTime})`
+          );
+        }
+      }
+
+      // 检查 before/after 关系一致性
+      if (
+        newTriple.predicate === 'before' &&
+        existing.predicate === 'after' &&
+        !isLiteralValue(newTriple.object) &&
+        !isLiteralValue(existing.object)
+      ) {
+        // A before B 和 A after B 是矛盾的
+        if (
+          this.isSameNode(newTriple.object as TripleNode, existing.object as TripleNode)
+        ) {
+          return this.createConflict(
+            'temporal',
+            'critical',
+            existing,
+            newTriple,
+            `Temporal contradiction: subject is both before and after the same entity`
+          );
+        }
+      }
+
+      // 检查 createdAt vs deletedAt 冲突
+      if (
+        newTriple.predicate === 'createdAt' &&
+        existing.predicate === 'deletedAt' &&
+        isLiteralValue(newTriple.object) &&
+        isLiteralValue(existing.object)
+      ) {
+        const createdTime = this.parseTemporalValue(newTriple.object['@value']);
+        const deletedTime = this.parseTemporalValue(existing.object['@value']);
+
+        if (createdTime !== null && deletedTime !== null && createdTime > deletedTime) {
+          return this.createConflict(
+            'temporal',
+            'critical',
+            existing,
+            newTriple,
+            `Temporal inconsistency: created time (${createdTime}) > deleted time (${deletedTime})`
+          );
+        }
+      }
+
+      // 检查 updatedAt vs createdAt 冲突
+      if (
+        newTriple.predicate === 'updatedAt' &&
+        existing.predicate === 'createdAt' &&
+        isLiteralValue(newTriple.object) &&
+        isLiteralValue(existing.object)
+      ) {
+        const updatedTime = this.parseTemporalValue(newTriple.object['@value']);
+        const createdTime = this.parseTemporalValue(existing.object['@value']);
+
+        if (updatedTime !== null && createdTime !== null && updatedTime < createdTime) {
+          return this.createConflict(
+            'temporal',
+            'medium',
+            existing,
+            newTriple,
+            `Temporal inconsistency: updated time (${updatedTime}) < created time (${createdTime})`
+          );
+        }
+      }
     }
 
+    return null;
+  }
+
+  /**
+   * 解析时间值，支持多种格式
+   */
+  private parseTemporalValue(value: unknown): number | null {
+    if (typeof value === 'number') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      // 尝试解析 ISO 日期字符串
+      const date = Date.parse(value);
+      if (!isNaN(date)) {
+        return date;
+      }
+      // 尝试解析纯数字字符串
+      const num = Number(value);
+      if (!isNaN(num)) {
+        return num;
+      }
+    }
     return null;
   }
 

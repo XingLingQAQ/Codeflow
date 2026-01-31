@@ -229,18 +229,18 @@ export class Commander implements ICommander {
         messages = messages.filter((m) => config.filterRoles!.includes(m.role));
       }
 
-      // 限制 token 数量（简化估算：1 token ≈ 4 字符）
+      // 限制 token 数量
       if (config?.maxContextTokens) {
-        const maxChars = config.maxContextTokens * 4;
-        let totalChars = 0;
+        const maxTokens = config.maxContextTokens;
+        let totalTokens = 0;
         const filteredMessages: Message[] = [];
 
         // 从最新消息开始保留
         for (let i = messages.length - 1; i >= 0; i--) {
-          const msgChars = messages[i].content.length;
-          if (totalChars + msgChars <= maxChars) {
+          const msgTokens = this.estimateMessageTokens(messages[i]);
+          if (totalTokens + msgTokens <= maxTokens) {
             filteredMessages.unshift(messages[i]);
-            totalChars += msgChars;
+            totalTokens += msgTokens;
           } else {
             break;
           }
@@ -426,5 +426,64 @@ export class Commander implements ICommander {
     }
 
     return prompt;
+  }
+
+  /**
+   * 估算消息的 Token 数量
+   * 使用改进的启发式算法
+   */
+  private estimateMessageTokens(message: Message): number {
+    const content = message.content;
+    if (!content) return 0;
+
+    let tokens = 0;
+
+    // 1. 检测代码块
+    const codeBlockRegex = /```[\s\S]*?```/g;
+    const codeBlocks = content.match(codeBlockRegex) || [];
+    let nonCodeContent = content;
+
+    for (const block of codeBlocks) {
+      tokens += Math.ceil(block.length / 3.5);
+      nonCodeContent = nonCodeContent.replace(block, '');
+    }
+
+    // 2. 检测 CJK 字符
+    const cjkRegex = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g;
+    const cjkChars = nonCodeContent.match(cjkRegex) || [];
+    tokens += cjkChars.length * 1.5;
+
+    const nonCjkContent = nonCodeContent.replace(cjkRegex, '');
+
+    // 3. 计算英文和其他内容
+    const words = nonCjkContent.split(/\s+/).filter(w => w.length > 0);
+
+    for (const word of words) {
+      if (/^\d+$/.test(word)) {
+        tokens += Math.ceil(word.length / 3);
+      } else if (/^[a-zA-Z]+$/.test(word)) {
+        if (word.length <= 4) {
+          tokens += 1;
+        } else if (word.length <= 8) {
+          tokens += 1.5;
+        } else {
+          tokens += Math.ceil(word.length / 4);
+        }
+      } else {
+        tokens += Math.ceil(word.length / 3);
+      }
+    }
+
+    // 4. 标点和换行
+    const punctuation = nonCjkContent.match(/[.,!?;:'"()\[\]{}]/g) || [];
+    tokens += punctuation.length * 0.3;
+
+    const newlines = content.match(/\n/g) || [];
+    tokens += newlines.length * 0.5;
+
+    // 5. 角色标记开销
+    tokens += 4; // 每条消息的角色标记
+
+    return Math.ceil(tokens);
   }
 }

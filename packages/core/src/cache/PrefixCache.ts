@@ -16,6 +16,7 @@ export class PrefixCache<T = unknown> implements IPrefixCache<T> {
   private config: PrefixCacheConfig;
   private cache: Map<string, CacheEntry<T>> = new Map();
   private prefixIndex: Map<string, Set<string>> = new Map();
+  private originalPrefixes: Map<string, string> = new Map(); // hash -> original prefix
   private stats: CacheStats = {
     hits: 0,
     misses: 0,
@@ -155,14 +156,16 @@ export class PrefixCache<T = unknown> implements IPrefixCache<T> {
   // ==================== Private Methods ====================
 
   private hashPrefix(prefix: string): string {
-    // 简单哈希实现（生产环境应使用更强的哈希）
-    let hash = 0;
+    // 使用 FNV-1a 哈希算法（快速且分布均匀）
+    let hash = 2166136261; // FNV offset basis
     for (let i = 0; i < prefix.length; i++) {
-      const char = prefix.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+      hash ^= prefix.charCodeAt(i);
+      hash = Math.imul(hash, 16777619); // FNV prime
     }
-    return `prefix_${hash.toString(36)}_${prefix.length}`;
+
+    // 转换为正数并添加长度信息以减少碰撞
+    const positiveHash = hash >>> 0;
+    return `prefix_${positiveHash.toString(36)}_${prefix.length}`;
   }
 
   private indexPrefix(prefix: string, hash: string): void {
@@ -180,17 +183,42 @@ export class PrefixCache<T = unknown> implements IPrefixCache<T> {
       }
       this.prefixIndex.get(segmentHash)!.add(hash);
     }
+
+    // 存储原始前缀用于索引重建
+    this.originalPrefixes.set(hash, prefix);
   }
 
   private removeFromIndex(prefix: string, hash: string): void {
     for (const [, hashes] of this.prefixIndex) {
       hashes.delete(hash);
     }
+    this.originalPrefixes.delete(hash);
   }
 
   private rebuildIndex(): void {
     this.prefixIndex.clear();
-    // 重建索引需要原始前缀，这里简化处理
+
+    // 使用存储的原始前缀重建索引
+    for (const [hash, prefix] of this.originalPrefixes) {
+      if (this.cache.has(hash)) {
+        const segments = [
+          prefix.slice(0, 100),
+          prefix.slice(0, 500),
+          prefix.slice(0, 1000),
+        ].filter(s => s.length > 0);
+
+        for (const segment of segments) {
+          const segmentHash = this.hashPrefix(segment);
+          if (!this.prefixIndex.has(segmentHash)) {
+            this.prefixIndex.set(segmentHash, new Set());
+          }
+          this.prefixIndex.get(segmentHash)!.add(hash);
+        }
+      } else {
+        // 清理不存在的缓存条目
+        this.originalPrefixes.delete(hash);
+      }
+    }
   }
 
   private findLongestPrefixMatch(prefix: string): PrefixMatchResult<T> | null {
