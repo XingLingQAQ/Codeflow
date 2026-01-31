@@ -47,13 +47,13 @@ export class AuditManager implements IAuditManager {
     const timestamp = Date.now();
     const previousHash = this.lastHash;
 
-    // 构建完整条目
+    // 构建完整条目（hash 将在下一步计算）
     const fullEntry: AuditLogEntry = {
       ...entry,
       id,
       timestamp,
       previousHash,
-      hash: '', // 临时占位
+      hash: '', // 占位，下一步计算
     };
 
     // 计算哈希
