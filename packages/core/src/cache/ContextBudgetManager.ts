@@ -45,10 +45,14 @@ export class ContextBudgetManager implements IContextBudgetManager {
   release(category: BudgetAllocation['category'], tokens: number): void {
     const allocation = this.budget.allocations.find(a => a.category === category);
     if (allocation) {
-      const released = Math.min(allocation.tokens, tokens);
-      allocation.tokens -= released;
-      this.budget.usedTokens -= released;
-      this.budget.remainingTokens += released;
+      // 只能释放已使用的 tokens，不能超过 usedTokens
+      const maxReleasable = Math.min(allocation.tokens, this.budget.usedTokens);
+      const released = Math.min(maxReleasable, tokens);
+      if (released > 0) {
+        allocation.tokens -= released;
+        this.budget.usedTokens -= released;
+        this.budget.remainingTokens += released;
+      }
     }
   }
 
