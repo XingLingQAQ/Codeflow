@@ -246,4 +246,47 @@ describe('GitConflictDetector', () => {
       expect(branch.length).toBeGreaterThan(0);
     });
   });
+
+  describe('getStatus', () => {
+    it('should return file status array', async () => {
+      const status = await detector.getStatus();
+      expect(Array.isArray(status)).toBe(true);
+    });
+
+    it('should parse modified files', async () => {
+      const status = await detector.getStatus();
+      // 验证返回的是有效的状态数组
+      for (const file of status) {
+        expect(file.file).toBeDefined();
+        expect(['modified', 'added', 'deleted', 'untracked', 'conflicted']).toContain(file.status);
+        expect(typeof file.staged).toBe('boolean');
+      }
+    });
+  });
+
+  describe('detectConflicts', () => {
+    it('should return conflict result', async () => {
+      const result = await detector.detectConflicts();
+
+      expect(result).toBeDefined();
+      expect(typeof result.hasConflicts).toBe('boolean');
+      expect(Array.isArray(result.conflicts)).toBe(true);
+      expect(Array.isArray(result.modifiedFiles)).toBe(true);
+      expect(Array.isArray(result.stagedFiles)).toBe(true);
+    });
+  });
+
+  describe('getUncommittedChanges', () => {
+    it('should return array of changed files', async () => {
+      const changes = await detector.getUncommittedChanges();
+      expect(Array.isArray(changes)).toBe(true);
+    });
+  });
+
+  describe('getStagedChanges', () => {
+    it('should return array of staged files', async () => {
+      const staged = await detector.getStagedChanges();
+      expect(Array.isArray(staged)).toBe(true);
+    });
+  });
 });
