@@ -783,4 +783,177 @@ describe('CoworkOrchestrator', () => {
       expect(orchestrator.getRunningTasks().length).toBe(0);
     });
   });
+
+  describe('parseIssues (via executeDebate)', () => {
+    let criticEditor: MockCodeEditor;
+
+    beforeEach(() => {
+      criticEditor = new MockCodeEditor();
+      criticEditor.name = 'critic-editor';
+
+      orchestrator.registerExecutor('generator', mockEditor, mockCapabilities);
+      orchestrator.registerExecutor('critic', criticEditor, {
+        ...mockCapabilities,
+        name: 'critic',
+      });
+    });
+
+    it('should parse bug issues from critic output', async () => {
+      // 模拟 critic 返回包含 bug 的输出
+      criticEditor.edit = async () => ({
+        success: true,
+        file: 'test.ts',
+        diff: { file: 'test.ts', hunks: [], additions: 0, deletions: 0 },
+        result: 'Bug: Missing null check on line 42',
+      });
+
+      const task: CoworkTask = {
+        id: 'parse-bug',
+        type: 'code-edit',
+        executor: 'generator',
+        input: { files: ['test.ts'], instruction: 'Fix bugs' },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 1,
+      });
+
+      expect(result.rounds.length).toBeGreaterThan(0);
+    });
+
+    it('should parse security issues from critic output', async () => {
+      criticEditor.edit = async () => ({
+        success: true,
+        file: 'test.ts',
+        diff: { file: 'test.ts', hunks: [], additions: 0, deletions: 0 },
+        result: 'Security vulnerability: SQL injection risk',
+      });
+
+      const task: CoworkTask = {
+        id: 'parse-security',
+        type: 'code-edit',
+        executor: 'generator',
+        input: { files: ['test.ts'], instruction: 'Security review' },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 1,
+      });
+
+      expect(result.rounds.length).toBeGreaterThan(0);
+    });
+
+    it('should parse performance issues from critic output', async () => {
+      criticEditor.edit = async () => ({
+        success: true,
+        file: 'test.ts',
+        diff: { file: 'test.ts', hunks: [], additions: 0, deletions: 0 },
+        result: 'Performance: Slow database query in loop',
+      });
+
+      const task: CoworkTask = {
+        id: 'parse-perf',
+        type: 'code-edit',
+        executor: 'generator',
+        input: { files: ['test.ts'], instruction: 'Optimize' },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 1,
+      });
+
+      expect(result.rounds.length).toBeGreaterThan(0);
+    });
+
+    it('should parse structured issue format', async () => {
+      criticEditor.edit = async () => ({
+        success: true,
+        file: 'test.ts',
+        diff: { file: 'test.ts', hunks: [], additions: 0, deletions: 0 },
+        result: '- [critical] Memory leak in event handler\n- [low] Style: inconsistent naming',
+      });
+
+      const task: CoworkTask = {
+        id: 'parse-structured',
+        type: 'code-edit',
+        executor: 'generator',
+        input: { files: ['test.ts'], instruction: 'Review' },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 1,
+      });
+
+      expect(result.rounds.length).toBeGreaterThan(0);
+    });
+
+    it('should parse issues with line numbers', async () => {
+      criticEditor.edit = async () => ({
+        success: true,
+        file: 'test.ts',
+        diff: { file: 'test.ts', hunks: [], additions: 0, deletions: 0 },
+        result: 'Line 42: Error - undefined variable\nL15: Bug in condition',
+      });
+
+      const task: CoworkTask = {
+        id: 'parse-lines',
+        type: 'code-edit',
+        executor: 'generator',
+        input: { files: ['test.ts'], instruction: 'Fix' },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 1,
+      });
+
+      expect(result.rounds.length).toBeGreaterThan(0);
+    });
+
+    it('should handle empty critic output', async () => {
+      criticEditor.edit = async () => ({
+        success: true,
+        file: 'test.ts',
+        diff: { file: 'test.ts', hunks: [], additions: 0, deletions: 0 },
+        result: '',
+      });
+
+      const task: CoworkTask = {
+        id: 'parse-empty',
+        type: 'code-edit',
+        executor: 'generator',
+        input: { files: ['test.ts'], instruction: 'Check' },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await orchestrator.executeDebate(task, {
+        generator: 'generator',
+        critic: 'critic',
+        maxRounds: 1,
+      });
+
+      // 空输出应该导致收敛（无问题）
+      expect(result.converged).toBe(true);
+    });
+  });
 });

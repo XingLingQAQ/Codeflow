@@ -637,41 +637,162 @@ export class CoworkOrchestrator extends EventEmitter {
   }
 
   private parseIssues(criticOutput: string): DebateIssue[] {
-    // 简单解析 - 实际实现可以更复杂
     const issues: DebateIssue[] = [];
     const lines = criticOutput.split('\n');
 
-    for (const line of lines) {
-      const lowerLine = line.toLowerCase();
+    // 正则模式匹配常见的问题格式
+    const issuePatterns = [
+      // 匹配 "- [severity] description" 或 "* [severity] description" 格式
+      /^[\-\*]\s*\[?(critical|high|medium|low)\]?\s*[:\-]?\s*(.+)/i,
+      // 匹配 "Issue: description" 或 "Bug: description" 格式
+      /^(bug|error|issue|security|vulnerability|performance|style|warning)\s*[:\-]\s*(.+)/i,
+      // 匹配 "Line X: description" 格式
+      /^line\s*(\d+)\s*[:\-]\s*(.+)/i,
+    ];
 
-      if (lowerLine.includes('bug') || lowerLine.includes('error')) {
-        issues.push({
-          type: 'bug',
-          severity: lowerLine.includes('critical') ? 'critical' : 'medium',
-          description: line.trim(),
-        });
-      } else if (lowerLine.includes('security') || lowerLine.includes('vulnerability')) {
-        issues.push({
-          type: 'security',
-          severity: 'high',
-          description: line.trim(),
-        });
-      } else if (lowerLine.includes('performance') || lowerLine.includes('slow')) {
-        issues.push({
-          type: 'performance',
-          severity: 'medium',
-          description: line.trim(),
-        });
-      } else if (lowerLine.includes('style') || lowerLine.includes('format')) {
-        issues.push({
-          type: 'style',
-          severity: 'low',
-          description: line.trim(),
-        });
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine || trimmedLine.length < 5) continue;
+
+      const lowerLine = trimmedLine.toLowerCase();
+      let issue: DebateIssue | null = null;
+
+      // 尝试匹配结构化格式
+      for (const pattern of issuePatterns) {
+        const match = trimmedLine.match(pattern);
+        if (match) {
+          const [, typeOrSeverity, description] = match;
+          const lower = typeOrSeverity.toLowerCase();
+
+          // 判断是严重性还是类型
+          if (['critical', 'high', 'medium', 'low'].includes(lower)) {
+            issue = {
+              type: this.inferIssueType(description),
+              severity: lower as DebateIssue['severity'],
+              description: description.trim(),
+            };
+          } else {
+            issue = {
+              type: this.mapToIssueType(lower),
+              severity: this.inferSeverity(lower, description),
+              description: description.trim(),
+            };
+          }
+          break;
+        }
+      }
+
+      // 如果没有匹配结构化格式，使用关键词检测
+      if (!issue) {
+        if (lowerLine.includes('critical') || lowerLine.includes('severe')) {
+          issue = {
+            type: this.inferIssueType(trimmedLine),
+            severity: 'critical',
+            description: trimmedLine,
+          };
+        } else if (lowerLine.includes('bug') || lowerLine.includes('error') || lowerLine.includes('crash')) {
+          issue = {
+            type: 'bug',
+            severity: lowerLine.includes('critical') ? 'critical' : 'medium',
+            description: trimmedLine,
+          };
+        } else if (lowerLine.includes('security') || lowerLine.includes('vulnerability') || lowerLine.includes('injection') || lowerLine.includes('xss')) {
+          issue = {
+            type: 'security',
+            severity: 'high',
+            description: trimmedLine,
+          };
+        } else if (lowerLine.includes('performance') || lowerLine.includes('slow') || lowerLine.includes('memory leak') || lowerLine.includes('inefficient')) {
+          issue = {
+            type: 'performance',
+            severity: 'medium',
+            description: trimmedLine,
+          };
+        } else if (lowerLine.includes('style') || lowerLine.includes('format') || lowerLine.includes('naming') || lowerLine.includes('convention')) {
+          issue = {
+            type: 'style',
+            severity: 'low',
+            description: trimmedLine,
+          };
+        } else if (lowerLine.includes('logic') || lowerLine.includes('incorrect') || lowerLine.includes('wrong')) {
+          issue = {
+            type: 'logic',
+            severity: 'medium',
+            description: trimmedLine,
+          };
+        }
+      }
+
+      if (issue) {
+        // 尝试提取位置信息
+        const locationMatch = trimmedLine.match(/(?:line|L)?\s*(\d+)(?:\s*[:\-,]\s*(?:col(?:umn)?|C)?\s*(\d+))?/i);
+        if (locationMatch) {
+          issue.location = {
+            file: '',
+            line: parseInt(locationMatch[1], 10),
+          };
+        }
+
+        // 提取建议（如果有）
+        const suggestionMatch = trimmedLine.match(/(?:suggest(?:ion)?|fix|solution|recommend)\s*[:\-]\s*(.+)/i);
+        if (suggestionMatch) {
+          issue.suggestion = suggestionMatch[1].trim();
+        }
+
+        issues.push(issue);
       }
     }
 
     return issues;
+  }
+
+  /**
+   * 根据描述推断问题类型
+   */
+  private inferIssueType(description: string): DebateIssue['type'] {
+    const lower = description.toLowerCase();
+    if (lower.includes('security') || lower.includes('vulnerability')) return 'security';
+    if (lower.includes('performance') || lower.includes('slow')) return 'performance';
+    if (lower.includes('style') || lower.includes('format')) return 'style';
+    if (lower.includes('logic') || lower.includes('incorrect')) return 'logic';
+    return 'bug';
+  }
+
+  /**
+   * 将关键词映射到问题类型
+   */
+  private mapToIssueType(keyword: string): DebateIssue['type'] {
+    const mapping: Record<string, DebateIssue['type']> = {
+      bug: 'bug',
+      error: 'bug',
+      issue: 'bug',
+      security: 'security',
+      vulnerability: 'security',
+      performance: 'performance',
+      style: 'style',
+      warning: 'bug',
+    };
+    return mapping[keyword] || 'bug';
+  }
+
+  /**
+   * 根据类型和描述推断严重性
+   */
+  private inferSeverity(type: string, description: string): DebateIssue['severity'] {
+    const lower = description.toLowerCase();
+
+    // 安全问题默认高严重性
+    if (type === 'security' || type === 'vulnerability') return 'high';
+
+    // 检查描述中的严重性关键词
+    if (lower.includes('critical') || lower.includes('severe') || lower.includes('crash')) return 'critical';
+    if (lower.includes('high') || lower.includes('important') || lower.includes('major')) return 'high';
+    if (lower.includes('low') || lower.includes('minor') || lower.includes('trivial')) return 'low';
+
+    // 样式问题默认低严重性
+    if (type === 'style') return 'low';
+
+    return 'medium';
   }
 
   private refineInstruction(original: string, issues: DebateIssue[]): string {
