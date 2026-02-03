@@ -82,9 +82,9 @@ P007,并行模式 - 多 Agent 并行执行器,"实现多 Agent 在不同 Worktre
 4. ResultCollector - 结果收集器","1. 支持同时启动多个 Agent
 2. 每个 Agent 在独立 worktree 中工作
 3. 支持不同 Agent 使用不同模型
-4. 实时收集执行进度",P0,cowork,未开始,未开始,未开始,未提交,"1. Agent 之间完全隔离
+4. 实时收集执行进度",P0,cowork,已完成,已完成,已完成,已提交,"1. Agent 之间完全隔离
 2. 支持取消单个 Agent","1. 与现有 Cowork 并行模式兼容
-2. 资源使用可控",AUTOSERVER,"packages/core/src/cowork/CoworkOrchestrator.ts:1",
+2. 资源使用可控",AUTOSERVER,"packages/core/src/cowork/parallel/ParallelExecutor.ts:1;packages/core/src/cowork/parallel/WorkerPool.ts:1;packages/core/src/cowork/parallel/ResultCollector.ts:1","picked_reason:依赖P006已完成;done_at:2026-02-03;evidence:28 tests passed"
 P008,并行模式 - 方案评估器,"实现并行方案的评估和比较功能。
 
 功能点：

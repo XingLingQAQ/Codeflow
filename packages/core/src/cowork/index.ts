@@ -6,3 +6,4 @@ export * from './editors/index.js';
 export * from './factory.js';
 export * from './GitConflictDetector.js';
 export * from './EditorConfigManager.js';
+export * from './parallel/index.js';
