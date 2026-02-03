@@ -5,3 +5,4 @@ export * from './AtomicSnapshotManager.js';
 export * from './LockTypes.js';
 export * from './LockManager.js';
 export * from './TransactionManager.js';
+export * from './WorktreeManager.js';
