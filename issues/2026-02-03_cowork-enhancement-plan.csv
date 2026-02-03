@@ -290,9 +290,9 @@ P024,模型配置 - Agent 模型映射,"实现各 Agent 的模型映射配置，
 6. Dispatch Agent 模型配置","1. 支持为每个 Agent 指定模型
 2. 支持为不同任务类型指定不同模型
 3. 用户可覆盖默认配置
-4. 配置变更实时生效",P0,config,未开始,未开始,未开始,未提交,"1. 与 Commander 模式兼容
+4. 配置变更实时生效",P0,config,已完成,已完成,已完成,已提交,"1. 与 Commander 模式兼容
 2. 支持角色级配置","1. 不影响现有 Agent 调用
-2. 配置可导出/导入",AUTOSERVER,"packages/core/src/commander/types.ts:1",
+2. 配置可导出/导入",AUTOSERVER,"packages/core/src/commander/types.ts:1;packages/core/src/config/AgentModelMapping.ts:1","picked_reason:依赖P022已完成;done_at:2026-02-03;evidence:53 tests passed"
 P025,GUI - 模型选择器组件,"实现通用的模型选择器 UI 组件。
 
 功能点：
