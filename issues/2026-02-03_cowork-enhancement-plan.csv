@@ -46,9 +46,9 @@ P004,Plan 模式 - 执行循环,"实现 Aha-Loop 的 5 阶段执行循环：Rese
 5. QAPhase - 质量检查","1. 每个阶段可独立执行
 2. 阶段之间状态持久化
 3. 支持跳过不需要的阶段
-4. AI 自主决定是否需要并行探索",P1,cowork,未开始,未开始,未开始,未提交,"1. 实现阶段使用低成本模型
+4. AI 自主决定是否需要并行探索",P1,cowork,已完成,已完成,已完成,已提交,"1. 实现阶段使用低成本模型
 2. 审查阶段使用高端模型","1. 与现有 Cowork 执行逻辑兼容
-2. 状态可跨会话恢复",AUTOSERVER,"packages/core/src/cowork/CoworkOrchestrator.ts:1",
+2. 状态可跨会话恢复",AUTOSERVER,"packages/core/src/cowork/plan/ExecutionLoop.ts:1","picked_reason:依赖P003已完成;done_at:2026-02-03;evidence:28 tests passed"
 P005,Plan 模式 - God Committee 监督,"实现 Aha-Loop 的 God Committee 独立监督机制。
 
 功能点：
