@@ -1,0 +1,387 @@
+id,title,description,acceptance_criteria,priority,area,dev_state,review_initial_state,review_regression_state,git_state,review_initial_requirements,review_regression_requirements,test_mcp,refs,notes
+P001,Cowork Plan 模式 - 核心框架,"实现 Cowork 的 Plan 模式核心框架，整合 OpenSpec 约束驱动和 Aha-Loop 愿景构建能力。
+
+功能点：
+1. PlanModeOrchestrator - Plan 模式编排器
+2. VisionBuilder - 交互式愿景构建（来自 Aha-Loop）
+3. ConstraintExtractor - 约束集提取（来自 OpenSpec）
+4. PlanArtifactManager - 工件管理（proposal/specs/design/tasks）","1. 可通过 startPlanMode() 启动 Plan 模式
+2. VisionBuilder 支持交互式问答提取需求
+3. ConstraintExtractor 能从需求生成约束集
+4. 工件按 OpenSpec 结构存储到 .codeflow/changes/",P0,cowork,未开始,未开始,未开始,未提交,"1. 接口设计符合现有 Cowork 架构
+2. 与 Commander 模式兼容
+3. 类型定义完整","1. 不影响现有 Cowork 并行/顺序/辩论模式
+2. 配置系统兼容",AUTOSERVER,"packages/core/src/cowork/CoworkOrchestrator.ts:1;packages/core/src/cowork/types.ts:1",
+P002,Plan 模式 - 工件生成器,"实现 OpenSpec 风格的工件生成器，支持生成 proposal.md、specs/、design.md、tasks.md。
+
+功能点：
+1. ProposalGenerator - 生成 proposal.md（为什么做、改什么）
+2. SpecGenerator - 生成 specs/ 目录（需求和场景）
+3. DesignGenerator - 生成 design.md（技术方案）
+4. TaskGenerator - 生成 tasks.md（实施清单）","1. 每个生成器独立可用
+2. 支持 fast-forward 一次性生成所有工件
+3. 工件格式符合 OpenSpec 规范
+4. 支持增量更新（流动非僵化）",P0,cowork,未开始,未开始,未开始,未提交,"1. 生成器使用低成本模型（Haiku）
+2. 输出格式标准化","1. 生成的工件可被后续阶段正确解析
+2. 支持中文和英文",AUTOSERVER,"packages/core/src/cowork/types.ts:1",
+P003,Plan 模式 - 架构设计阶段,"实现 Aha-Loop 的 Architect 阶段，支持技术选型和架构设计。
+
+功能点：
+1. TechResearcher - 技术研究（调用 Research Agent）
+2. ArchitectureDesigner - 架构设计
+3. RoadmapGenerator - 里程碑规划
+4. PRDGenerator - PRD 队列生成","1. 支持技术选型研究
+2. 生成 architecture.md
+3. 生成 roadmap.json（里程碑+PRD 队列）
+4. 研究结果可追溯",P1,cowork,未开始,未开始,未开始,未提交,"1. 研究阶段使用 Sonnet 模型
+2. 架构设计使用 Opus 模型","1. 与 VisionBuilder 输出兼容
+2. roadmap.json 格式可被执行阶段解析",AUTOSERVER,"packages/core/src/cowork/types.ts:1",
+P004,Plan 模式 - 执行循环,"实现 Aha-Loop 的 5 阶段执行循环：Research → Explore → Review → Implement → QA。
+
+功能点：
+1. ResearchPhase - 技术研究
+2. ExplorePhase - 并行探索（可选）
+3. ReviewPhase - 计划评审
+4. ImplementPhase - 代码实现
+5. QAPhase - 质量检查","1. 每个阶段可独立执行
+2. 阶段之间状态持久化
+3. 支持跳过不需要的阶段
+4. AI 自主决定是否需要并行探索",P1,cowork,未开始,未开始,未开始,未提交,"1. 实现阶段使用低成本模型
+2. 审查阶段使用高端模型","1. 与现有 Cowork 执行逻辑兼容
+2. 状态可跨会话恢复",AUTOSERVER,"packages/core/src/cowork/CoworkOrchestrator.ts:1",
+P005,Plan 模式 - God Committee 监督,"实现 Aha-Loop 的 God Committee 独立监督机制。
+
+功能点：
+1. GodCommittee - 监督委员会
+2. OversightReport - 监督报告
+3. DecisionAudit - 决策审计
+4. RiskAssessment - 风险评估","1. 监督所有关键决策
+2. 生成监督报告
+3. 支持投票机制
+4. 所有决策可追溯",P2,cowork,未开始,未开始,未开始,未提交,"1. 使用独立 Agent 避免自我审查偏见
+2. 监督不阻塞主流程","1. 与审计系统集成
+2. 报告格式标准化",AUTOSERVER,"packages/core/src/audit/AuditManager.ts:1",
+P006,并行模式 - Worktree 管理器,"实现基于 Git Worktree 的真正隔离并行开发。
+
+功能点：
+1. WorktreeManager - Worktree 生命周期管理
+2. createWorktree() - 创建隔离工作目录
+3. removeWorktree() - 清理工作目录
+4. listWorktrees() - 列出所有工作目录","1. 支持创建/删除/列出 worktree
+2. 每个 worktree 有独立分支
+3. 支持并发创建多个 worktree
+4. 清理时不影响主分支",P0,cowork,未开始,未开始,未开始,未提交,"1. 使用 git worktree 命令
+2. 路径规范化处理","1. 不影响现有 Git 集成
+2. 异常时正确清理",AUTOSERVER,"packages/core/src/git/AtomicSnapshotManager.ts:1",
+P007,并行模式 - 多 Agent 并行执行器,"实现多 Agent 在不同 Worktree 中并行执行任务。
+
+功能点：
+1. ParallelExecutor - 并行执行器
+2. AgentWorker - Agent 工作单元
+3. WorkerPool - 工作池管理
+4. ResultCollector - 结果收集器","1. 支持同时启动多个 Agent
+2. 每个 Agent 在独立 worktree 中工作
+3. 支持不同 Agent 使用不同模型
+4. 实时收集执行进度",P0,cowork,未开始,未开始,未开始,未提交,"1. Agent 之间完全隔离
+2. 支持取消单个 Agent","1. 与现有 Cowork 并行模式兼容
+2. 资源使用可控",AUTOSERVER,"packages/core/src/cowork/CoworkOrchestrator.ts:1",
+P008,并行模式 - 方案评估器,"实现并行方案的评估和比较功能。
+
+功能点：
+1. SolutionEvaluator - 方案评估器
+2. CodeQualityMetrics - 代码质量指标
+3. PerformanceMetrics - 性能指标
+4. MaintainabilityMetrics - 可维护性指标
+5. ComparisonReport - 对比报告","1. 支持多维度评估（质量/性能/可维护性）
+2. 生成对比报告
+3. 支持自动推荐最优方案
+4. 评估结果可视化",P1,cowork,未开始,未开始,未开始,未提交,"1. 评估使用 Opus 模型
+2. 指标可配置","1. 评估结果可被 GUI 展示
+2. 支持自定义评估维度",AUTOSERVER,"packages/core/src/cowork/types.ts:1",
+P009,并行模式 - 用户选择与合并,"实现用户选择最优方案并合并的功能。
+
+功能点：
+1. SolutionSelector - 方案选择器
+2. MergeStrategy - 合并策略
+3. ConflictResolver - 冲突解决
+4. MergeExecutor - 合并执行器","1. 展示所有方案供用户选择
+2. 支持预览每个方案的代码
+3. 选择后自动合并到主分支
+4. 合并冲突时提供解决方案",P1,cowork,未开始,未开始,未开始,未提交,"1. 合并前备份当前状态
+2. 支持回滚合并","1. 与原子快照系统集成
+2. 合并后清理 worktree",AUTOSERVER,"packages/core/src/git/AtomicSnapshotManager.ts:1",
+P010,Spec 注入系统 - 分层规范库,"实现 Trellis 风格的分层规范库。
+
+功能点：
+1. SpecLibrary - 规范库管理
+2. 分层目录结构（frontend/backend/guides）
+3. SpecLoader - 规范加载器
+4. SpecValidator - 规范验证器","1. 支持 .codeflow/spec/ 目录结构
+2. 按领域分层存储规范
+3. 支持 Markdown 格式规范
+4. 规范格式验证",P1,spec,未开始,未开始,未开始,未提交,"1. 目录结构符合 Trellis 规范
+2. 支持热加载","1. 与现有配置系统兼容
+2. 支持团队共享",AUTOSERVER,"packages/core/src/config/ConfigManager.ts:1",
+P011,Spec 注入系统 - Auto-Injection,"实现规范自动注入机制。
+
+功能点：
+1. SpecInjector - 规范注入器
+2. ContextAnalyzer - 上下文分析（判断任务类型）
+3. RelevantSpecSelector - 相关规范选择
+4. InjectionHook - 注入钩子","1. 启动时自动注入相关规范
+2. 根据任务类型选择规范
+3. 支持 Hook 触发注入
+4. 注入内容可追溯",P1,spec,未开始,未开始,未开始,未提交,"1. 注入不超过 Token 预算
+2. 支持优先级排序","1. 与 Hook 系统集成
+2. 不影响现有对话流程",AUTOSERVER,"packages/core/src/hooks/types.ts:1",
+P012,Spec 注入系统 - Session Journal,"实现会话日志持久化和上下文恢复。
+
+功能点：
+1. SessionJournal - 会话日志管理
+2. JournalWriter - 日志写入
+3. JournalIndex - 日志索引
+4. ContextRestorer - 上下文恢复","1. 会话结束时自动生成摘要
+2. 摘要存储到 workspace/{user}/journal-*.md
+3. 维护 index.md 索引
+4. 新会话自动加载最近日志",P2,spec,未开始,未开始,未开始,未提交,"1. 摘要使用低成本模型生成
+2. 日志格式标准化","1. 与向量记忆系统互补
+2. 支持多用户隔离",AUTOSERVER,"packages/core/src/memory/types.ts:1",
+P013,Dispatch Agent - 轻量路由,"实现 Trellis 风格的 Dispatch Agent，纯路由不读规范。
+
+功能点：
+1. DispatchAgent - 调度 Agent
+2. TaskClassifier - 任务分类器
+3. ModelSelector - 模型选择器
+4. SpecSelector - 规范选择器","1. 使用最低成本模型（Haiku）
+2. 快速分类任务类型
+3. 选择合适的执行 Agent 和模型
+4. 选择需要注入的规范",P1,commander,未开始,未开始,未开始,未提交,"1. 分类延迟 < 1s
+2. 不读取规范内容","1. 与 Commander 模式集成
+2. 路由规则可配置",AUTOSERVER,"packages/core/src/commander/Commander.ts:1",
+P014,Quality Loop - 质量控制循环,"实现 Trellis 的 ralph-loop 质量控制循环。
+
+功能点：
+1. QualityLoop - 质量循环控制器
+2. CheckAgent - 检查 Agent
+3. FixAgent - 修复 Agent
+4. IterationManager - 迭代管理","1. Check → Fix → Check 循环
+2. 最多 3 轮迭代
+3. 超过迭代次数需人工介入
+4. 每轮结果可追溯",P1,cowork,未开始,未开始,未开始,未提交,"1. Check 使用 Opus 模型
+2. Fix 使用低成本模型","1. 与 DebateView 互补
+2. 可配置迭代次数",AUTOSERVER,"packages/core/src/cowork/CoworkOrchestrator.ts:1",
+P015,CLI 命令 - Plan 模式命令,"实现 Plan 模式相关的 CLI 命令。
+
+功能点：
+1. /codeflow:plan-new - 创建新计划
+2. /codeflow:plan-vision - 构建愿景
+3. /codeflow:plan-constraints - 生成约束集
+4. /codeflow:plan-ff - Fast-forward 生成所有工件
+5. /codeflow:plan-execute - 执行计划","1. 命令可在 Claude Code 中使用
+2. 支持参数传递
+3. 命令帮助文档完整
+4. 错误提示友好",P1,cli,未开始,未开始,未开始,未提交,"1. 命令格式符合 Claude Code 规范
+2. 支持 Tab 补全","1. 与现有 Skill 系统兼容
+2. 命令可组合使用",AUTOSERVER,"packages/core/src/commander/types.ts:1",
+P016,CLI 命令 - 并行模式命令,"实现并行模式相关的 CLI 命令。
+
+功能点：
+1. /codeflow:parallel-start - 启动并行任务
+2. /codeflow:parallel-status - 查看并行状态
+3. /codeflow:parallel-compare - 对比方案
+4. /codeflow:parallel-select - 选择方案
+5. /codeflow:parallel-merge - 合并方案","1. 命令可在 Claude Code 中使用
+2. 支持实时状态查看
+3. 对比结果可视化
+4. 合并操作可回滚",P1,cli,未开始,未开始,未开始,未提交,"1. 命令格式符合 Claude Code 规范
+2. 状态输出格式化","1. 与 Worktree 管理器集成
+2. 支持取消操作",AUTOSERVER,"packages/core/src/commander/types.ts:1",
+P017,GUI - Plan 模式面板,"实现 Plan 模式的 GUI 组件。
+
+功能点：
+1. PlanModePanel - Plan 模式主面板
+2. VisionEditor - 愿景编辑器
+3. ConstraintList - 约束列表
+4. ArtifactViewer - 工件查看器
+5. PhaseProgress - 阶段进度","1. 可视化展示 Plan 模式各阶段
+2. 支持编辑愿景和约束
+3. 实时显示工件生成进度
+4. 支持工件预览和编辑",P2,gui,未开始,未开始,未开始,未提交,"1. 与现有 PlanBoard 风格一致
+2. 响应式设计","1. 与 Plan 模式核心集成
+2. 支持深色模式",AUTOFRONTEND,"packages/gui/src/components/PlanBoard/PlanBoard.tsx:1",
+P018,GUI - 并行模式面板,"实现并行模式的 GUI 组件。
+
+功能点：
+1. ParallelPanel - 并行模式主面板
+2. WorkerStatusList - Worker 状态列表
+3. SolutionCompare - 方案对比视图
+4. DiffViewer - 代码差异查看器
+5. MergePreview - 合并预览","1. 实时显示各 Agent 执行状态
+2. 并排对比多个方案
+3. 代码差异高亮显示
+4. 合并前预览效果",P2,gui,未开始,未开始,未开始,未提交,"1. 与现有 AgentBoard 风格一致
+2. 支持拖拽排序","1. 与并行执行器集成
+2. 支持大文件差异",AUTOFRONTEND,"packages/gui/src/components/AgentBoard/AgentBoard.tsx:1",
+P019,成本优化 - 模型路由规则,"实现基于任务类型的模型路由规则，优化成本。
+
+功能点：
+1. CostOptimizer - 成本优化器
+2. TaskTypeRouter - 任务类型路由
+3. ModelCostConfig - 模型成本配置
+4. UsageTracker - 使用量追踪","1. 决策类任务使用 Opus
+2. 代码生成使用 Haiku/Flash
+3. 研究类使用 Sonnet
+4. 成本节省 80%+",P1,commander,未开始,未开始,未开始,未提交,"1. 路由规则可配置
+2. 支持自定义模型","1. 与现有适配器兼容
+2. 不影响输出质量",AUTOSERVER,"packages/core/src/adapters/types.ts:1",
+P020,集成测试 - Plan 模式完整流程,"Plan 模式端到端集成测试。
+
+测试场景：
+1. 愿景构建 → 约束提取 → 工件生成 → 执行
+2. 中断恢复测试
+3. 多用户并发测试","1. 完整流程可执行
+2. 中断后可恢复
+3. 多用户隔离正确",P1,test,未开始,未开始,未开始,未提交,"1. 覆盖主要路径
+2. 包含边界情况","1. 不依赖外部 API（Mock）
+2. 可重复执行",AUTOSERVER,"packages/core/src/cowork/__tests__/CoworkOrchestrator.test.ts:1",
+P021,集成测试 - 并行模式完整流程,"并行模式端到端集成测试。
+
+测试场景：
+1. 创建 Worktree → 并行执行 → 评估 → 选择 → 合并
+2. 冲突解决测试
+3. 清理测试","1. 完整流程可执行
+2. 冲突正确解决
+3. 清理无残留",P1,test,未开始,未开始,未开始,未提交,"1. 覆盖主要路径
+2. 包含异常情况","1. 不依赖外部 API（Mock）
+2. 可重复执行",AUTOSERVER,"packages/core/src/cowork/__tests__/CoworkOrchestrator.test.ts:1",
+P022,模型配置 - 可用模型注册表,"实现可用模型注册表，支持动态添加/移除模型。
+
+功能点：
+1. ModelRegistry - 模型注册表
+2. ModelDefinition - 模型定义（名称/提供商/成本/能力）
+3. registerModel() - 注册新模型
+4. getAvailableModels() - 获取可用模型列表
+5. ModelCapabilities - 模型能力标签","1. 支持注册 Claude/Gemini/OpenAI/本地模型
+2. 每个模型有能力标签（coding/reasoning/frontend/backend）
+3. 支持自定义模型
+4. 模型列表可动态更新",P0,config,已完成,已完成,已完成,已提交,"1. 与现有适配器系统兼容
+2. 支持热加载","1. 不影响现有模型调用
+2. 配置持久化",AUTOSERVER,"packages/core/src/adapters/types.ts:1;packages/core/src/config/ConfigManager.ts:1;packages/core/src/config/ModelRegistry.ts:1","picked_reason:模型注册表是模型配置系统的基础;done_at:2026-02-03;evidence:57 tests passed"
+P023,模型配置 - 阶段模型映射,"实现各阶段的模型映射配置，用户可自定义每个阶段使用的模型。
+
+功能点：
+1. PhaseModelMapping - 阶段模型映射
+2. 默认映射配置
+3. 用户自定义映射
+4. 映射验证（检查模型是否支持该阶段）","1. 支持为每个阶段指定模型
+2. 提供合理的默认配置
+3. 用户可覆盖默认配置
+4. 配置变更实时生效",P0,config,未开始,未开始,未开始,未提交,"1. 配置格式清晰易懂
+2. 支持 JSON/YAML 格式","1. 与 Plan 模式各阶段兼容
+2. 与并行模式兼容",AUTOSERVER,"packages/core/src/config/types.ts:1",
+P024,模型配置 - Agent 模型映射,"实现各 Agent 的模型映射配置，用户可自定义每个 Agent 使用的模型。
+
+功能点：
+1. AgentModelMapping - Agent 模型映射
+2. Main Agent 模型配置
+3. Coder Agent 模型配置
+4. Research Agent 模型配置
+5. Check Agent 模型配置
+6. Dispatch Agent 模型配置","1. 支持为每个 Agent 指定模型
+2. 支持为不同任务类型指定不同模型
+3. 用户可覆盖默认配置
+4. 配置变更实时生效",P0,config,未开始,未开始,未开始,未提交,"1. 与 Commander 模式兼容
+2. 支持角色级配置","1. 不影响现有 Agent 调用
+2. 配置可导出/导入",AUTOSERVER,"packages/core/src/commander/types.ts:1",
+P025,GUI - 模型选择器组件,"实现通用的模型选择器 UI 组件。
+
+功能点：
+1. ModelSelector - 模型选择下拉框
+2. ModelCard - 模型卡片（显示名称/提供商/成本/能力）
+3. ModelFilter - 模型筛选（按能力/提供商筛选）
+4. ModelSearch - 模型搜索","1. 下拉框显示所有可用模型
+2. 显示模型关键信息（成本/能力）
+3. 支持按能力筛选
+4. 支持搜索模型",P0,gui,未开始,未开始,未开始,未提交,"1. 与现有 HotSwap 组件风格一致
+2. 响应式设计","1. 可嵌入其他组件
+2. 支持深色模式",AUTOFRONTEND,"packages/gui/src/components/HotSwap/HotSwapDropdown.tsx:1",
+P026,GUI - 阶段模型配置面板,"实现 Plan 模式各阶段的模型配置 UI。
+
+功能点：
+1. PhaseModelConfig - 阶段模型配置面板
+2. 愿景构建阶段模型选择
+3. 约束提取阶段模型选择
+4. 架构设计阶段模型选择
+5. 代码实现阶段模型选择
+6. 质量检查阶段模型选择
+7. 一键恢复默认配置","1. 可视化展示各阶段当前模型
+2. 点击可切换模型
+3. 显示预估成本
+4. 支持保存为预设",P1,gui,未开始,未开始,未开始,未提交,"1. 与 Plan 模式面板集成
+2. 配置变更实时预览","1. 配置持久化
+2. 支持导入/导出",AUTOFRONTEND,"packages/gui/src/components/PlanBoard/PlanBoard.tsx:1",
+P027,GUI - Agent 模型配置面板,"实现各 Agent 的模型配置 UI。
+
+功能点：
+1. AgentModelConfig - Agent 模型配置面板
+2. Main Agent 模型选择
+3. Coder Agent 模型选择（可按任务类型细分）
+4. Research Agent 模型选择
+5. Check Agent 模型选择
+6. 成本预估显示","1. 可视化展示各 Agent 当前模型
+2. Coder Agent 支持按任务类型配置（frontend/backend/algorithm）
+3. 显示预估成本对比
+4. 支持保存为预设",P1,gui,未开始,未开始,未开始,未提交,"1. 与 AgentBoard 集成
+2. 配置变更实时预览","1. 配置持久化
+2. 支持团队共享预设",AUTOFRONTEND,"packages/gui/src/components/AgentBoard/AgentBoard.tsx:1",
+P028,GUI - 并行模式模型配置,"实现并行模式中各 Worker 的模型配置 UI。
+
+功能点：
+1. ParallelModelConfig - 并行模型配置
+2. Worker 模型选择（每个 Worker 可用不同模型）
+3. 模型组合预设（如：Claude+Gemini+Codex）
+4. 成本对比显示","1. 启动并行任务前可配置各 Worker 模型
+2. 支持快速选择预设组合
+3. 显示各模型预估成本
+4. 支持保存自定义组合",P1,gui,未开始,未开始,未开始,未提交,"1. 与并行模式面板集成
+2. 支持拖拽调整","1. 配置持久化
+2. 预设可共享",AUTOFRONTEND,"packages/gui/src/components/AgentBoard/AgentBoard.tsx:1",
+P029,GUI - 全局模型设置页面,"实现全局模型设置页面，集中管理所有模型配置。
+
+功能点：
+1. ModelSettingsPage - 模型设置页面
+2. 可用模型管理（添加/移除/编辑）
+3. API Key 管理
+4. 默认模型配置
+5. 成本限制设置
+6. 使用统计展示","1. 集中管理所有模型
+2. 安全存储 API Key
+3. 设置成本上限告警
+4. 查看历史使用统计",P1,gui,未开始,未开始,未开始,未提交,"1. 独立页面或 Modal
+2. 敏感信息加密存储","1. 与隐私系统集成
+2. 支持导出配置（不含 Key）",AUTOFRONTEND,"packages/gui/src/components/index.ts:1",
+P030,成本追踪 - 实时成本显示,"实现实时成本追踪和显示。
+
+功能点：
+1. CostTracker - 成本追踪器
+2. 实时 Token 计数
+3. 实时成本计算
+4. 成本告警（接近/超过预算）
+5. 会话成本汇总","1. 实时显示当前会话成本
+2. 按模型分类显示成本
+3. 接近预算时告警
+4. 会话结束显示成本汇总",P1,core,未开始,未开始,未开始,未提交,"1. 与各适配器集成
+2. 成本计算准确","1. 不影响响应速度
+2. 支持多币种显示",AUTOSERVER,"packages/core/src/adapters/types.ts:1",
+P031,GUI - 成本显示组件,"实现成本显示 UI 组件。
+
+功能点：
+1. CostIndicator - 成本指示器（显示在状态栏）
+2. CostBreakdown - 成本明细（按模型/阶段分类）
+3. CostChart - 成本图表（趋势/分布）
+4. BudgetAlert - 预算告警弹窗","1. 状态栏实时显示当前成本
+2. 点击展开详细明细
+3. 图表展示成本分布
+4. 超预算时弹窗告警",P1,gui,未开始,未开始,未开始,未提交,"1. 与 MemoryIndicator 风格一致
+2. 不遮挡主要内容","1. 数据实时更新
+2. 支持隐藏/显示",AUTOFRONTEND,"packages/gui/src/components/MemoryIndicator/MemoryIndicator.tsx:1",
