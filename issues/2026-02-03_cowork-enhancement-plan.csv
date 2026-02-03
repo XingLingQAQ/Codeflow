@@ -131,9 +131,9 @@ P011,Spec 注入系统 - Auto-Injection,"实现规范自动注入机制。
 4. InjectionHook - 注入钩子","1. 启动时自动注入相关规范
 2. 根据任务类型选择规范
 3. 支持 Hook 触发注入
-4. 注入内容可追溯",P1,spec,未开始,未开始,未开始,未提交,"1. 注入不超过 Token 预算
+4. 注入内容可追溯",P1,spec,已完成,已完成,已完成,已提交,"1. 注入不超过 Token 预算
 2. 支持优先级排序","1. 与 Hook 系统集成
-2. 不影响现有对话流程",AUTOSERVER,"packages/core/src/hooks/types.ts:1",
+2. 不影响现有对话流程",AUTOSERVER,"packages/core/src/spec/SpecInjector.ts:1","picked_reason:依赖P010已完成;done_at:2026-02-03;evidence:33 tests passed"
 P012,Spec 注入系统 - Session Journal,"实现会话日志持久化和上下文恢复。
 
 功能点：

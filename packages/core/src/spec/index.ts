@@ -4,3 +4,4 @@
  */
 
 export * from './SpecLibrary.js';
+export * from './SpecInjector.js';
