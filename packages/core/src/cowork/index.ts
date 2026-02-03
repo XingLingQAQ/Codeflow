@@ -8,3 +8,4 @@ export * from './GitConflictDetector.js';
 export * from './EditorConfigManager.js';
 export * from './parallel/index.js';
 export * from './plan/index.js';
+export * from './QualityLoop.js';
