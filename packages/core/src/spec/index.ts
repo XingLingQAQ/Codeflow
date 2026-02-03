@@ -5,3 +5,4 @@
 
 export * from './SpecLibrary.js';
 export * from './SpecInjector.js';
+export * from './SessionJournal.js';
