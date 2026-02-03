@@ -5,3 +5,4 @@
 export * from './ParallelExecutor.js';
 export * from './ResultCollector.js';
 export * from './WorkerPool.js';
+export * from './SolutionEvaluator.js';
