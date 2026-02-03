@@ -10,3 +10,4 @@ export * from './NestedConversation';
 export * from './AgentBoard';
 export * from './DebateView';
 export * from './PlanBoard';
+export * from './ModelSelector';

@@ -302,9 +302,9 @@ P025,GUI - 模型选择器组件,"实现通用的模型选择器 UI 组件。
 4. ModelSearch - 模型搜索","1. 下拉框显示所有可用模型
 2. 显示模型关键信息（成本/能力）
 3. 支持按能力筛选
-4. 支持搜索模型",P0,gui,未开始,未开始,未开始,未提交,"1. 与现有 HotSwap 组件风格一致
+4. 支持搜索模型",P0,gui,已完成,已完成,已完成,已提交,"1. 与现有 HotSwap 组件风格一致
 2. 响应式设计","1. 可嵌入其他组件
-2. 支持深色模式",AUTOFRONTEND,"packages/gui/src/components/HotSwap/HotSwapDropdown.tsx:1",
+2. 支持深色模式",AUTOFRONTEND,"packages/gui/src/components/HotSwap/HotSwapDropdown.tsx:1;packages/gui/src/components/ModelSelector/ModelSelector.tsx:1","picked_reason:P0优先级且依赖P022-P024已完成;done_at:2026-02-03;evidence:15 tests passed"
 P026,GUI - 阶段模型配置面板,"实现 Plan 模式各阶段的模型配置 UI。
 
 功能点：
