@@ -180,9 +180,9 @@ P015,CLI 命令 - Plan 模式命令,"实现 Plan 模式相关的 CLI 命令。
 5. /codeflow:plan-execute - 执行计划","1. 命令可在 Claude Code 中使用
 2. 支持参数传递
 3. 命令帮助文档完整
-4. 错误提示友好",P1,cli,未开始,未开始,未开始,未提交,"1. 命令格式符合 Claude Code 规范
+4. 错误提示友好",P1,cli,已完成,已完成,已完成,已提交,"1. 命令格式符合 Claude Code 规范
 2. 支持 Tab 补全","1. 与现有 Skill 系统兼容
-2. 命令可组合使用",AUTOSERVER,"packages/core/src/commander/types.ts:1",
+2. 命令可组合使用",AUTOSERVER,"packages/core/src/commander/PlanCommands.ts:1;packages/core/src/commander/index.ts:4","picked_reason:P1优先级CLI命令;done_at:2026-02-03;evidence:37 tests passed"
 P016,CLI 命令 - 并行模式命令,"实现并行模式相关的 CLI 命令。
 
 功能点：
@@ -193,9 +193,9 @@ P016,CLI 命令 - 并行模式命令,"实现并行模式相关的 CLI 命令。
 5. /codeflow:parallel-merge - 合并方案","1. 命令可在 Claude Code 中使用
 2. 支持实时状态查看
 3. 对比结果可视化
-4. 合并操作可回滚",P1,cli,未开始,未开始,未开始,未提交,"1. 命令格式符合 Claude Code 规范
+4. 合并操作可回滚",P1,cli,已完成,已完成,已完成,已提交,"1. 命令格式符合 Claude Code 规范
 2. 状态输出格式化","1. 与 Worktree 管理器集成
-2. 支持取消操作",AUTOSERVER,"packages/core/src/commander/types.ts:1",
+2. 支持取消操作",AUTOSERVER,"packages/core/src/commander/ParallelCommands.ts:1;packages/core/src/commander/index.ts:5","picked_reason:P1优先级CLI命令;done_at:2026-02-03;evidence:46 tests passed"
 P017,GUI - Plan 模式面板,"实现 Plan 模式的 GUI 组件。
 
 功能点：
