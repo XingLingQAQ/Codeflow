@@ -370,9 +370,9 @@ P030,成本追踪 - 实时成本显示,"实现实时成本追踪和显示。
 5. 会话成本汇总","1. 实时显示当前会话成本
 2. 按模型分类显示成本
 3. 接近预算时告警
-4. 会话结束显示成本汇总",P1,core,未开始,未开始,未开始,未提交,"1. 与各适配器集成
+4. 会话结束显示成本汇总",P1,core,已完成,已完成,已完成,已提交,"1. 与各适配器集成
 2. 成本计算准确","1. 不影响响应速度
-2. 支持多币种显示",AUTOSERVER,"packages/core/src/adapters/types.ts:1",
+2. 支持多币种显示",AUTOSERVER,"packages/core/src/adapters/CostTracker.ts:1;packages/core/src/adapters/index.ts:6","picked_reason:成本追踪是成本优化系统的核心组件;done_at:2026-02-03;evidence:40 tests passed"
 P031,GUI - 成本显示组件,"实现成本显示 UI 组件。
 
 功能点：
