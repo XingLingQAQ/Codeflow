@@ -9,3 +9,4 @@ export * from './ConstraintExtractor.js';
 export * from './PlanArtifactManager.js';
 export * from './PlanModeOrchestrator.js';
 export * from './ArtifactGenerators.js';
+export * from './ArchitectPhase.js';
