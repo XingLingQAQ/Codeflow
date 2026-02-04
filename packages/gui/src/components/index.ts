@@ -1,7 +1,7 @@
+// Core Components - explicit exports to avoid conflicts
 export * from './Chat';
 export * from './Graph';
 export * from './Timeline';
-export * from './HotSwap';
 export * from './MemoryIndicator';
 export * from './MemoryDashboard';
 export * from './ContextBuilder';
@@ -10,4 +10,84 @@ export * from './NestedConversation';
 export * from './AgentBoard';
 export * from './DebateView';
 export * from './PlanBoard';
-export * from './ModelSelector';
+
+// HotSwap - explicit to avoid ModelOption conflict
+export {
+  HotSwapDropdown,
+  type HotSwapDropdownProps,
+} from './HotSwap';
+
+// ModelSelector - explicit to avoid conflicts
+export {
+  ModelSelector,
+  ModelCard,
+  ModelFilter,
+  ModelSearch,
+  type ModelSelectorProps,
+} from './ModelSelector';
+
+// New Components (P017-P031) - explicit exports to avoid conflicts
+export {
+  colors,
+  spacing,
+  borderRadius,
+  fontSize,
+  fontWeight,
+  shadows,
+  transitions,
+  componentStyles,
+} from './shared/tokens';
+
+export {
+  CustomSelect,
+  type SelectOption,
+  type CustomSelectProps,
+} from './shared/CustomSelect';
+
+export { Button, type ButtonProps } from './shared/Button';
+export { Card, CardHeader, CardContent, CardFooter, type CardProps } from './shared/Card';
+export { Badge, StatusBadge, type BadgeProps } from './shared/Badge';
+export { Input, type InputProps } from './shared/Input';
+export { Toggle, type ToggleProps } from './shared/Toggle';
+export { Tooltip, type TooltipProps } from './shared/Tooltip';
+export { Modal, type ModalProps } from './shared/Modal';
+export { Tabs, TabPanel, type TabsProps, type TabItem } from './shared/Tabs';
+
+export {
+  CostIndicator,
+  CostBreakdown as CostBreakdownComponent,
+  CostChart,
+  BudgetAlert,
+  type CostData,
+  type CostBreakdown,
+  type CostIndicatorProps,
+} from './CostIndicator';
+
+export {
+  PlanModePanel,
+  type PlanModePanelProps,
+  type PlanPhase,
+  type PlanArtifact,
+  type VisionData,
+  type ConstraintItem,
+} from './PlanModePanel';
+
+export {
+  ParallelPanel,
+  type ParallelPanelProps,
+  type ParallelTask,
+  type ParallelWorker,
+  type WorkerSolution,
+} from './ParallelPanel';
+
+export {
+  PhaseModelConfigPanel,
+  AgentModelConfigPanel,
+  ParallelModelConfigPanel,
+  ModelSettingsPage,
+  type ModelInfo as ConfigModelInfo,
+  type PhaseModelConfig,
+  type AgentModelConfig,
+  type ParallelWorkerConfig,
+  type ModelPreset as ConfigModelPreset,
+} from './ModelConfig';
