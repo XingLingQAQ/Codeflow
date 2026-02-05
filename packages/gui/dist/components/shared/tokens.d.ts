@@ -122,6 +122,48 @@ export declare const transitions: {
     normal: string;
     slow: string;
 };
+export declare const keyframes: {
+    float: string;
+    pulseSlow: string;
+    ping: string;
+    slideDown: string;
+    slideUp: string;
+    fadeIn: string;
+    progress: string;
+};
+export declare const animations: {
+    float: string;
+    pulseSlow: string;
+    ping: string;
+    slideDown: string;
+    slideUp: string;
+    fadeIn: string;
+    progress: string;
+};
+export declare const zIndex: {
+    dropdown: number;
+    sticky: number;
+    fixed: number;
+    modalBackdrop: number;
+    modal: number;
+    popover: number;
+    tooltip: number;
+    toast: number;
+};
+export declare const breakpoints: {
+    sm: number;
+    md: number;
+    lg: number;
+    xl: number;
+    '2xl': number;
+};
+export declare const mediaQueries: {
+    sm: string;
+    md: string;
+    lg: string;
+    xl: string;
+    '2xl': string;
+};
 export declare const componentStyles: {
     card: {
         backgroundColor: string;

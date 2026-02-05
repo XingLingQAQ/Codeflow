@@ -126,6 +126,88 @@ export const transitions = {
     normal: 'all 0.2s ease',
     slow: 'all 0.3s ease',
 };
+// Animation keyframes
+export const keyframes = {
+    float: `
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-10px); }
+    }
+  `,
+    pulseSlow: `
+    @keyframes pulse-slow {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  `,
+    ping: `
+    @keyframes ping {
+      75%, 100% { transform: scale(2); opacity: 0; }
+    }
+  `,
+    slideDown: `
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  `,
+    slideUp: `
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  `,
+    fadeIn: `
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  `,
+    progress: `
+    @keyframes progress {
+      0% { width: 0%; }
+      50% { width: 60%; }
+      100% { width: 100%; }
+    }
+  `,
+};
+// Animation utilities
+export const animations = {
+    float: 'float 3s ease-in-out infinite',
+    pulseSlow: 'pulse-slow 2s ease-in-out infinite',
+    ping: 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite',
+    slideDown: 'slideDown 0.15s ease',
+    slideUp: 'slideUp 0.15s ease',
+    fadeIn: 'fadeIn 0.3s ease',
+    progress: 'progress 2s ease-in-out infinite',
+};
+// Z-index scale
+export const zIndex = {
+    dropdown: 1000,
+    sticky: 1020,
+    fixed: 1030,
+    modalBackdrop: 1040,
+    modal: 1050,
+    popover: 1060,
+    tooltip: 1070,
+    toast: 1080,
+};
+// Responsive breakpoints
+export const breakpoints = {
+    sm: 640,
+    md: 768,
+    lg: 1024,
+    xl: 1280,
+    '2xl': 1536,
+};
+// Media query helpers
+export const mediaQueries = {
+    sm: `@media (min-width: ${breakpoints.sm}px)`,
+    md: `@media (min-width: ${breakpoints.md}px)`,
+    lg: `@media (min-width: ${breakpoints.lg}px)`,
+    xl: `@media (min-width: ${breakpoints.xl}px)`,
+    '2xl': `@media (min-width: ${breakpoints['2xl']}px)`,
+};
 // 组件样式预设
 export const componentStyles = {
     card: {
