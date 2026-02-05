@@ -91,3 +91,15 @@ export {
   type ParallelWorkerConfig,
   type ModelPreset as ConfigModelPreset,
 } from './ModelConfig';
+
+// Layout Components (FE-020)
+export {
+  Sidebar,
+  MobileNav,
+  AppLayout,
+  ViewMode,
+  type NavItem,
+  type SidebarProps,
+  type MobileNavProps,
+  type AppLayoutProps,
+} from './Layout';
