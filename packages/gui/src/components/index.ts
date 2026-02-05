@@ -131,3 +131,16 @@ export {
   type CircularProgressProps,
   type ProgressStatus,
 } from './shared/ProgressBar';
+
+// Views (FE-040)
+export {
+  HomeView,
+  type HomeViewProps,
+} from './views/HomeView';
+
+export {
+  SessionsView,
+  type SessionsViewProps,
+  type Session,
+  type Message,
+} from './views/SessionsView';
