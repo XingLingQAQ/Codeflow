@@ -5,6 +5,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
  */
 import { useState, useMemo, useCallback } from 'react';
 import { TASK_STATUS_CONFIG, TASK_PRIORITY_CONFIG, MODEL_CONFIG, formatTaskTime, calculateTaskProgress, } from './types';
+import { CustomSelect } from '../shared/CustomSelect';
 /**
  * 任务卡片
  */
@@ -147,14 +148,10 @@ export const TaskDetailPanel = ({ task, allTasks, modelPresets, onModelChange, o
                                             borderRadius: 4,
                                             backgroundColor: `${statusConfig.color}20`,
                                             color: statusConfig.color,
-                                        }, children: [statusConfig.icon, " ", statusConfig.label] })] }), _jsx("div", { style: { fontSize: 16, fontWeight: 600, color: '#333' }, children: task.title })] }), _jsxs("div", { style: { marginBottom: 20 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 500, color: '#666', marginBottom: 6 }, children: "Description" }), _jsx("div", { style: { fontSize: 13, color: '#333', lineHeight: 1.5 }, children: task.description || 'No description' })] }), _jsxs("div", { style: { marginBottom: 20 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 500, color: '#666', marginBottom: 6 }, children: "Model" }), _jsx("select", { value: task.model, onChange: (e) => onModelChange?.(task.id, e.target.value), style: {
-                                    width: '100%',
-                                    padding: '8px 12px',
-                                    fontSize: 13,
-                                    border: '1px solid #e0e0e0',
-                                    borderRadius: 6,
-                                    backgroundColor: '#fff',
-                                }, children: Object.entries(MODEL_CONFIG).map(([key, config]) => (_jsxs("option", { value: key, children: [config.icon, " ", config.label] }, key))) }), modelPresets.length > 0 && (_jsxs("div", { style: { marginTop: 8 }, children: [_jsx("div", { style: { fontSize: 11, color: '#666', marginBottom: 4 }, children: "Quick Presets:" }), _jsx("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 4 }, children: modelPresets.map((preset) => (_jsx("button", { onClick: () => onModelChange?.(task.id, preset.model), style: {
+                                        }, children: [statusConfig.icon, " ", statusConfig.label] })] }), _jsx("div", { style: { fontSize: 16, fontWeight: 600, color: '#333' }, children: task.title })] }), _jsxs("div", { style: { marginBottom: 20 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 500, color: '#666', marginBottom: 6 }, children: "Description" }), _jsx("div", { style: { fontSize: 13, color: '#333', lineHeight: 1.5 }, children: task.description || 'No description' })] }), _jsxs("div", { style: { marginBottom: 20 }, children: [_jsx("div", { style: { fontSize: 12, fontWeight: 500, color: '#666', marginBottom: 6 }, children: "Model" }), _jsx(CustomSelect, { options: Object.entries(MODEL_CONFIG).map(([key, config]) => ({
+                                    value: key,
+                                    label: `${config.icon} ${config.label}`,
+                                })), value: task.model, onChange: (value) => onModelChange?.(task.id, value), placeholder: "Select model" }), modelPresets.length > 0 && (_jsxs("div", { style: { marginTop: 8 }, children: [_jsx("div", { style: { fontSize: 11, color: '#666', marginBottom: 4 }, children: "Quick Presets:" }), _jsx("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 4 }, children: modelPresets.map((preset) => (_jsx("button", { onClick: () => onModelChange?.(task.id, preset.model), style: {
                                                 padding: '4px 8px',
                                                 fontSize: 10,
                                                 border: '1px solid #e0e0e0',
@@ -190,19 +187,13 @@ export const BatchActions = ({ selectedCount, onBatchModelChange, onBatchStatusC
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-        }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 12 }, children: [_jsxs("span", { style: { fontSize: 13, fontWeight: 500, color: '#1976D2' }, children: [selectedCount, " selected"] }), _jsxs("select", { onChange: (e) => onBatchModelChange?.(e.target.value), defaultValue: "", style: {
-                            padding: '6px 10px',
-                            fontSize: 12,
-                            border: '1px solid #bbdefb',
-                            borderRadius: 4,
-                            backgroundColor: '#fff',
-                        }, children: [_jsx("option", { value: "", disabled: true, children: "Change Model..." }), Object.entries(MODEL_CONFIG).map(([key, config]) => (_jsx("option", { value: key, children: config.label }, key)))] }), _jsxs("select", { onChange: (e) => onBatchStatusChange?.(e.target.value), defaultValue: "", style: {
-                            padding: '6px 10px',
-                            fontSize: 12,
-                            border: '1px solid #bbdefb',
-                            borderRadius: 4,
-                            backgroundColor: '#fff',
-                        }, children: [_jsx("option", { value: "", disabled: true, children: "Change Status..." }), Object.entries(TASK_STATUS_CONFIG).map(([key, config]) => (_jsx("option", { value: key, children: config.label }, key)))] })] }), _jsx("button", { onClick: onClearSelection, style: {
+        }, children: [_jsxs("div", { style: { display: 'flex', alignItems: 'center', gap: 12 }, children: [_jsxs("span", { style: { fontSize: 13, fontWeight: 500, color: '#1976D2' }, children: [selectedCount, " selected"] }), _jsx(CustomSelect, { options: Object.entries(MODEL_CONFIG).map(([key, config]) => ({
+                            value: key,
+                            label: config.label,
+                        })), value: "", onChange: (value) => onBatchModelChange?.(value), placeholder: "Change Model...", style: { minWidth: 140 } }), _jsx(CustomSelect, { options: Object.entries(TASK_STATUS_CONFIG).map(([key, config]) => ({
+                            value: key,
+                            label: config.label,
+                        })), value: "", onChange: (value) => onBatchStatusChange?.(value), placeholder: "Change Status...", style: { minWidth: 140 } })] }), _jsx("button", { onClick: onClearSelection, style: {
                     padding: '6px 12px',
                     fontSize: 12,
                     border: 'none',

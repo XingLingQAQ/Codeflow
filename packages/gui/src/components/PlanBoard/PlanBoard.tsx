@@ -21,6 +21,7 @@ import {
   formatTaskTime,
   calculateTaskProgress,
 } from './types';
+import { CustomSelect, SelectOption } from '../shared/CustomSelect';
 
 /**
  * 任务卡片
@@ -347,24 +348,15 @@ export const TaskDetailPanel: React.FC<TaskDetailPanelProps> = ({
           <div style={{ fontSize: 12, fontWeight: 500, color: '#666', marginBottom: 6 }}>
             Model
           </div>
-          <select
+          <CustomSelect
+            options={Object.entries(MODEL_CONFIG).map(([key, config]) => ({
+              value: key,
+              label: `${config.icon} ${config.label}`,
+            }))}
             value={task.model}
-            onChange={(e) => onModelChange?.(task.id, e.target.value as ModelType)}
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              fontSize: 13,
-              border: '1px solid #e0e0e0',
-              borderRadius: 6,
-              backgroundColor: '#fff',
-            }}
-          >
-            {Object.entries(MODEL_CONFIG).map(([key, config]) => (
-              <option key={key} value={key}>
-                {config.icon} {config.label}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => onModelChange?.(task.id, value as ModelType)}
+            placeholder="Select model"
+          />
 
           {/* 模型预设 */}
           {modelPresets.length > 0 && (
@@ -503,48 +495,28 @@ export const BatchActions: React.FC<BatchActionsProps> = ({
         </span>
 
         {/* 批量切换模型 */}
-        <select
-          onChange={(e) => onBatchModelChange?.(e.target.value as ModelType)}
-          defaultValue=""
-          style={{
-            padding: '6px 10px',
-            fontSize: 12,
-            border: '1px solid #bbdefb',
-            borderRadius: 4,
-            backgroundColor: '#fff',
-          }}
-        >
-          <option value="" disabled>
-            Change Model...
-          </option>
-          {Object.entries(MODEL_CONFIG).map(([key, config]) => (
-            <option key={key} value={key}>
-              {config.label}
-            </option>
-          ))}
-        </select>
+        <CustomSelect
+          options={Object.entries(MODEL_CONFIG).map(([key, config]) => ({
+            value: key,
+            label: config.label,
+          }))}
+          value=""
+          onChange={(value) => onBatchModelChange?.(value as ModelType)}
+          placeholder="Change Model..."
+          style={{ minWidth: 140 }}
+        />
 
         {/* 批量切换状态 */}
-        <select
-          onChange={(e) => onBatchStatusChange?.(e.target.value as TaskStatus)}
-          defaultValue=""
-          style={{
-            padding: '6px 10px',
-            fontSize: 12,
-            border: '1px solid #bbdefb',
-            borderRadius: 4,
-            backgroundColor: '#fff',
-          }}
-        >
-          <option value="" disabled>
-            Change Status...
-          </option>
-          {Object.entries(TASK_STATUS_CONFIG).map(([key, config]) => (
-            <option key={key} value={key}>
-              {config.label}
-            </option>
-          ))}
-        </select>
+        <CustomSelect
+          options={Object.entries(TASK_STATUS_CONFIG).map(([key, config]) => ({
+            value: key,
+            label: config.label,
+          }))}
+          value=""
+          onChange={(value) => onBatchStatusChange?.(value as TaskStatus)}
+          placeholder="Change Status..."
+          style={{ minWidth: 140 }}
+        />
       </div>
 
       <button
