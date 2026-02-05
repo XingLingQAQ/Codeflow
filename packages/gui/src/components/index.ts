@@ -151,3 +151,15 @@ export {
   type Project,
   type ProjectStatus,
 } from './views/ProjectsView';
+
+export {
+  MemoryView,
+  type MemoryViewProps,
+  type MemoryNode,
+} from './views/MemoryView';
+
+export {
+  AgentsView,
+  type AgentsViewProps,
+  type AgentPreset,
+} from './views/AgentsView';
