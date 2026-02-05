@@ -144,3 +144,10 @@ export {
   type Session,
   type Message,
 } from './views/SessionsView';
+
+export {
+  ProjectsView,
+  type ProjectsViewProps,
+  type Project,
+  type ProjectStatus,
+} from './views/ProjectsView';

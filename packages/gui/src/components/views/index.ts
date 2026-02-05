@@ -9,3 +9,9 @@ export {
   type Session,
   type Message,
 } from './SessionsView';
+export {
+  ProjectsView,
+  type ProjectsViewProps,
+  type Project,
+  type ProjectStatus,
+} from './ProjectsView';
