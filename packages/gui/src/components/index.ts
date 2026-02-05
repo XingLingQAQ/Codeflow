@@ -103,3 +103,31 @@ export {
   type MobileNavProps,
   type AppLayoutProps,
 } from './Layout';
+
+// Common Components (FE-030)
+export {
+  Avatar,
+  AvatarStack,
+  type AvatarProps,
+  type AvatarStackProps,
+  type AvatarSize,
+} from './shared/Avatar';
+
+export {
+  ToastContainer,
+  ToastItem,
+  ToastProvider,
+  useToast,
+  type Toast,
+  type ToastType,
+  type ToastProps,
+  type ToastContainerProps,
+} from './shared/Toast';
+
+export {
+  ProgressBar,
+  CircularProgress,
+  type ProgressBarProps,
+  type CircularProgressProps,
+  type ProgressStatus,
+} from './shared/ProgressBar';
