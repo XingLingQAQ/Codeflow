@@ -25,3 +25,18 @@ export {
   type AgentsViewProps,
   type AgentPreset,
 } from './AgentsView';
+export {
+  PlanView,
+  type PlanViewProps,
+  type PlanStep,
+  type PlanPhaseType,
+  type PlanPhaseStatus,
+  type RuntimeStatus,
+} from './PlanView';
+export {
+  SettingsView,
+  type SettingsViewProps,
+  type UserProfile,
+  type ConnectionStatus,
+  type InterfacePreferences,
+} from './SettingsView';

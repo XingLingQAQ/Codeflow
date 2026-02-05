@@ -34,4 +34,6 @@ export { SessionsView, type SessionsViewProps, type Session, type Message, } fro
 export { ProjectsView, type ProjectsViewProps, type Project, type ProjectStatus, } from './views/ProjectsView';
 export { MemoryView, type MemoryViewProps, type MemoryNode, } from './views/MemoryView';
 export { AgentsView, type AgentsViewProps, type AgentPreset, } from './views/AgentsView';
+export { PlanView, type PlanViewProps, type PlanStep, type PlanPhaseType, type PlanPhaseStatus, type RuntimeStatus, } from './views/PlanView';
+export { SettingsView, type SettingsViewProps, type UserProfile, type ConnectionStatus, type InterfacePreferences, } from './views/SettingsView';
 //# sourceMappingURL=index.d.ts.map

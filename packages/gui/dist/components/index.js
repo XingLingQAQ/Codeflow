@@ -41,4 +41,6 @@ export { SessionsView, } from './views/SessionsView';
 export { ProjectsView, } from './views/ProjectsView';
 export { MemoryView, } from './views/MemoryView';
 export { AgentsView, } from './views/AgentsView';
+export { PlanView, } from './views/PlanView';
+export { SettingsView, } from './views/SettingsView';
 //# sourceMappingURL=index.js.map
