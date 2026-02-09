@@ -39,6 +39,52 @@ export interface ChunkMetadata {
 }
 
 /**
+ * 原子记忆来源
+ */
+export type AtomicMemorySource = 'user' | 'assistant' | 'system';
+
+/**
+ * 原子记忆结构（细粒度记忆单元）
+ */
+export interface AtomicMemory {
+  id: string;
+  timestamp: number;
+  content: string;
+  tags: string[];
+  sessionId: string;
+  folderId?: string;
+  source: AtomicMemorySource;
+  importance: number;
+  embedding?: number[];
+}
+
+/**
+ * 原子记忆检索选项
+ */
+export interface AtomicMemorySearchOptions {
+  limit?: number;
+  offset?: number;
+  sessionId?: string;
+  folderId?: string;
+  tags?: string[];
+  startAt?: number;
+  endAt?: number;
+}
+
+/**
+ * 原子记忆存储接口
+ */
+export interface IAtomicMemoryStore {
+  add(memory: AtomicMemory): Promise<void>;
+  search(query: string, options?: AtomicMemorySearchOptions): Promise<AtomicMemory[]>;
+  searchByTimeRange(start: number, end: number): Promise<AtomicMemory[]>;
+  searchByTags(tags: string[]): Promise<AtomicMemory[]>;
+  update(id: string, updates: Partial<AtomicMemory>): Promise<void>;
+  delete(id: string): Promise<void>;
+  getBySession(sessionId: string): Promise<AtomicMemory[]>;
+}
+
+/**
  * 向量搜索结果
  */
 export interface VectorSearchResult {
