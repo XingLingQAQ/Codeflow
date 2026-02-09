@@ -5,3 +5,4 @@ export * from './InMemoryVectorStore.js';
 export * from './StreamWriter.js';
 export * from './SQLiteVectorStore.js';
 export * from './AtomicMemoryService.js';
+export * from './MemoryExtractor.js';
