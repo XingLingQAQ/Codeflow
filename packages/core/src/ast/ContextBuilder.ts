@@ -148,8 +148,8 @@ export class SimpleASTParser implements IASTParser {
     const lines = code.split('\n');
 
     const patterns: Record<string, RegExp> = {
-      javascript: /^(async\s+)?function\s+(\w+)|^(const|let|var)\s+(\w+)\s*=\s*(async\s+)?\(/,
-      typescript: /^(async\s+)?function\s+(\w+)|^(const|let|var)\s+(\w+)\s*=\s*(async\s+)?\(/,
+      javascript: /^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(/,
+      typescript: /^(?:export\s+)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(/,
       python: /^(async\s+)?def\s+(\w+)\s*\(/,
       rust: /^(pub\s+)?(async\s+)?fn\s+(\w+)/,
       go: /^func\s+(\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(/,
