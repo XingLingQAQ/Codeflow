@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { ICliAdapter } from '../adapters/types.js';
 import { SimpleASTParser } from '../ast/ContextBuilder.js';
 
 export interface PublicMethodInfo {
@@ -23,6 +24,13 @@ export interface IntentProjectionResult {
   classDefinitions: ClassDefinitionInfo[];
 }
 
+export interface IntentProjectionPromptInput {
+  language: string;
+  publicMethods: PublicMethodInfo[];
+  imports: string[];
+  classDefinitions: ClassDefinitionInfo[];
+}
+
 const SUPPORTED_LANGUAGES = ['typescript', 'javascript', 'go', 'python'] as const;
 type SupportedProjectionLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
@@ -38,11 +46,22 @@ const LANGUAGE_BY_EXTENSION: Record<string, SupportedProjectionLanguage> = {
   '.py': 'python',
 };
 
+const DEFAULT_INTENT_PROMPT = `你是代码意图投影助手。请根据输入的代码结构生成高密度意图文档。
+
+要求：
+1) 剥离实现细节，仅保留核心业务逻辑；
+2) 描述数据流转方向；
+3) 标注副作用（数据库/API/文件等）；
+4) 输出 Markdown；
+5) 输出内容需简洁且可被 AI 快速消费。`;
+
 export class IntentProjector {
   private readonly astParser: SimpleASTParser;
+  private readonly llmAdapter?: Pick<ICliAdapter, 'send'>;
 
-  constructor(astParser: SimpleASTParser = new SimpleASTParser()) {
+  constructor(astParser: SimpleASTParser = new SimpleASTParser(), llmAdapter?: Pick<ICliAdapter, 'send'>) {
     this.astParser = astParser;
+    this.llmAdapter = llmAdapter;
   }
 
   async project(sourceFile: string): Promise<IntentProjectionResult> {
@@ -63,6 +82,34 @@ export class IntentProjector {
       imports: this.extractImports(parseResult.rootNode.children),
       classDefinitions: this.extractClassDefinitions(parseResult.rootNode.children, language),
     };
+  }
+
+  async projectToIntentMarkdown(sourceFile: string): Promise<string> {
+    const structured = await this.project(sourceFile);
+    return this.projectFromStructured(structured);
+  }
+
+  async projectFromStructured(input: IntentProjectionPromptInput): Promise<string> {
+    if (!this.llmAdapter) {
+      throw new Error('IntentProjector 未配置 llmAdapter，无法执行 LLM 意图转换');
+    }
+
+    const prompt = this.buildIntentPrompt(input);
+    const response = await this.llmAdapter.send(prompt, {
+      temperature: 0.3,
+      maxTokens: 2000,
+    });
+
+    const markdown = (response.content || '').trim();
+    if (!markdown) {
+      throw new Error('LLM 未返回有效的意图文档内容');
+    }
+
+    return markdown;
+  }
+
+  private buildIntentPrompt(input: IntentProjectionPromptInput): string {
+    return `${DEFAULT_INTENT_PROMPT}\n\n代码结构(JSON)：\n${JSON.stringify(input, null, 2)}\n\n请直接输出 Markdown。`;
   }
 
   private detectLanguage(sourceFile: string): SupportedProjectionLanguage {

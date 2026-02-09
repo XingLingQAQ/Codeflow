@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -146,5 +146,49 @@ function run(task) {
     expect(result.language).toBe('javascript');
     expect(result.publicMethods.some((item) => item.name === 'run')).toBe(true);
     expect(result.imports.some((item) => item.includes("import x from 'x'"))).toBe(true);
+  });
+
+  it('projectFromStructured 应通过 LLM 生成 Markdown', async () => {
+    const send = vi.fn().mockResolvedValue({
+      content: '# Intent\n\n- 核心流程：读取用户画像并生成提示',
+      model: 'mock-model',
+    });
+
+    const projector = new IntentProjector(undefined, { send });
+    const markdown = await projector.projectFromStructured({
+      language: 'typescript',
+      imports: ['import { x } from "y"'],
+      publicMethods: [
+        {
+          name: 'run',
+          params: ['input'],
+          returnType: 'Promise<void>',
+          docstring: '',
+        },
+      ],
+      classDefinitions: [
+        {
+          name: 'Runner',
+          extends: 'BaseRunner',
+          implements: ['Disposable'],
+        },
+      ],
+    });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(markdown).toContain('# Intent');
+  });
+
+  it('未配置 llmAdapter 时 projectFromStructured 应报错', async () => {
+    const projector = new IntentProjector();
+
+    await expect(
+      projector.projectFromStructured({
+        language: 'typescript',
+        imports: [],
+        publicMethods: [],
+        classDefinitions: [],
+      })
+    ).rejects.toThrow('未配置 llmAdapter');
   });
 });
