@@ -7,6 +7,7 @@ import (
 
 	"github.com/codeflow/backend/internal/api/handlers"
 	"github.com/codeflow/backend/internal/api/middleware"
+	"github.com/codeflow/backend/internal/web"
 )
 
 // Config holds API server configuration.
@@ -91,6 +92,13 @@ func (s *Server) setupRoutes() {
 			memory.DELETE("/items/:id", handlers.DeleteMemoryItem)
 			memory.POST("/items/:id/archive", handlers.ArchiveMemoryItem)
 			memory.POST("/items/:id/restore", handlers.RestoreMemoryItem)
+
+			// Atomic Memory routes
+			memory.POST("/atomic", handlers.CreateAtomicMemory)
+			memory.GET("/atomic/search", handlers.SearchAtomicMemory)
+			memory.GET("/atomic/session/:id", handlers.GetAtomicMemoriesBySession)
+			memory.PUT("/atomic/:id", handlers.UpdateAtomicMemory)
+			memory.DELETE("/atomic/:id", handlers.DeleteAtomicMemory)
 
 			// Memory Preflight routes
 			memory.POST("/preflight", handlers.MemoryPreflight)
@@ -300,6 +308,9 @@ func (s *Server) setupRoutes() {
 			samgGroup.GET("/stats", handlers.GetSAMGStats)
 		}
 	}
+
+	// Static file serving for embedded frontend (must be after API routes)
+	web.SetupStaticRoutes(s.router)
 }
 
 // Run starts the API server.
