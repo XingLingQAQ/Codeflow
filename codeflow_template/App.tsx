@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Terminal, Home, MessageSquare, Database, Users, 
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Terminal, Home, MessageSquare, Database, Users,
   Settings, Search, Bell, Mic, Paperclip, ArrowUp,
   ChevronRight, Plus, Monitor, Shield, LayoutGrid,
   Code, Zap, FileText, Check, MoreHorizontal,
@@ -10,8 +10,16 @@ import {
   Github, Globe, Moon, Sun, Laptop, ToggleLeft, ToggleRight,
   LogOut, CreditCard, Key, Smartphone
 } from 'lucide-react';
-import { ViewMode, NavItem, MemoryNode, AgentPreset } from './types';
+import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse } from './types';
 import { LogModal } from './components/LogModal';
+import { useApi, useMutation } from './hooks/useApi';
+import { EmptyState } from './components/EmptyState';
+import { LoadingSkeleton } from './components/LoadingSkeleton';
+import { ErrorState } from './components/ErrorState';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ConnectionStatus } from './components/ConnectionStatus';
+import { listProjects, createProject } from './services/projects';
+import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
 interface ToastMsg {
@@ -152,14 +160,7 @@ const HomeView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => v
 
         <div className="max-w-4xl w-full px-6 flex flex-col items-center relative z-20">
         <div className="mb-8 md:mb-10 relative group cursor-pointer animate-float">
-            <div className="absolute inset-0 bg-blue-100 rounded-full animate-ping opacity-20 duration-[3000ms]"></div>
-            <div className="relative bg-white/80 backdrop-blur-sm px-4 py-1.5 rounded-full shadow-lg shadow-blue-500/5 border border-blue-100 flex items-center gap-2.5">
-            <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-xs font-semibold text-slate-600 tracking-wide">SYSTEM ONLINE</span>
-            </div>
+            <ConnectionStatus />
         </div>
 
         <h1 className="text-3xl md:text-5xl font-bold text-slate-900 mb-8 md:mb-12 text-center tracking-tight leading-tight">
@@ -234,18 +235,43 @@ const HomeView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => v
 };
 
 const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => void, showToast: (msg: string) => void }) => {
-    // Mock Project Data
-    const projects = [
-        { id: 1, title: 'Supabase Migration', desc: 'Migrating Auth and DB layer from Firebase to Supabase.', status: 'active', lastActive: '2m ago', tags: ['Backend', 'Postgres'], progress: 65 },
-        { id: 2, title: 'Commerce Refactor', desc: 'Modernizing checkout flow with Stripe & optimized cart.', status: 'planning', lastActive: '1h ago', tags: ['Frontend', 'Stripe'], progress: 10 },
-        { id: 3, title: 'Internal Dashboard', desc: 'Admin panel for analytics and user management.', status: 'paused', lastActive: '2d ago', tags: ['React', 'Tremor'], progress: 45 },
-        { id: 4, title: 'Mobile App MVP', desc: 'React Native prototype for client demo.', status: 'completed', lastActive: '1w ago', tags: ['Mobile', 'RN'], progress: 100 },
-        { id: 5, title: 'API Gateway', desc: 'Centralized API gateway with rate limiting.', status: 'active', lastActive: '3h ago', tags: ['DevOps', 'Go'], progress: 30 },
-        { id: 6, title: 'Design System', desc: 'Unified UI component library.', status: 'planning', lastActive: '4d ago', tags: ['UI/UX', 'Figma'], progress: 5 },
-    ];
+    const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [newTitle, setNewTitle] = useState('');
+    const [newDesc, setNewDesc] = useState('');
 
-    const handleProjectClick = (title: string) => {
-        showToast(`Opening ${title}...`);
+    // Debounce search
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    const { data, loading, error, refetch } = useApi<ProjectListResponse>(
+        (signal) => listProjects({ search: debouncedSearch || undefined }, signal),
+        [debouncedSearch],
+    );
+
+    const createMutation = useMutation<ProjectCreateInput, Project>(
+        (input, signal) => createProject(input, signal),
+    );
+
+    const handleCreate = async () => {
+        if (!newTitle.trim()) return;
+        try {
+            await createMutation.execute({ title: newTitle.trim(), description: newDesc.trim() || undefined });
+            setNewTitle('');
+            setNewDesc('');
+            setShowCreateForm(false);
+            showToast('Project created');
+            refetch();
+        } catch {
+            showToast('Failed to create project');
+        }
+    };
+
+    const handleProjectClick = (project: Project) => {
+        showToast(`Opening ${project.title}...`);
         setTimeout(() => onNavigate(ViewMode.PLAN), 600);
     };
 
@@ -258,6 +284,17 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
         }
     };
 
+    const formatTime = (ts: number) => {
+        if (!ts) return 'Unknown';
+        const diff = Math.floor((Date.now() / 1000) - ts);
+        if (diff < 60) return 'Just now';
+        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+        return `${Math.floor(diff / 86400)}d ago`;
+    };
+
+    const projects = data?.projects ?? [];
+
     return (
         <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
             {/* Header */}
@@ -269,79 +306,136 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
                 <div className="flex items-center gap-3">
                     <div className="hidden md:flex relative group">
                         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                        <input 
-                            type="text" 
-                            placeholder="Search projects..." 
+                        <input
+                            type="text"
+                            placeholder="Search projects..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             className="pl-9 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-blue-200 focus:ring-2 focus:ring-blue-500/10 rounded-xl text-sm w-64 transition-all"
                         />
                     </div>
-                    <button className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/10 transition-transform active:scale-95">
+                    <button
+                        onClick={() => setShowCreateForm(true)}
+                        className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/10 transition-transform active:scale-95"
+                    >
                         <Plus size={18} />
                         <span className="hidden sm:inline">New Project</span>
                     </button>
                 </div>
             </div>
 
-            {/* Content Grid */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-10">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                    {projects.map((project) => (
-                        <div 
-                            key={project.id}
-                            onClick={() => handleProjectClick(project.title)}
-                            className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden"
-                        >
-                            <div className="flex justify-between items-start mb-4">
-                                <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(project.status)}`}>
-                                    {project.status}
-                                </div>
-                                <button className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
-                                    <MoreVertical size={16} />
-                                </button>
-                            </div>
-                            
-                            <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{project.title}</h3>
-                            <p className="text-sm text-slate-500 mb-6 line-clamp-2 h-10">{project.desc}</p>
-                            
-                            {/* Progress Bar */}
-                            <div className="mb-6">
-                                <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1.5">
-                                    <span>Progress</span>
-                                    <span>{project.progress}%</span>
-                                </div>
-                                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                    <div 
-                                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-1000" 
-                                        style={{ width: `${project.progress}%` }}
-                                    ></div>
-                                </div>
-                            </div>
-
-                            <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                                <div className="flex gap-2">
-                                    {project.tags.map(tag => (
-                                        <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{tag}</span>
-                                    ))}
-                                </div>
-                                <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
-                                    <Clock size={12} />
-                                    {project.lastActive}
-                                </div>
-                            </div>
+            {/* Create Form Modal */}
+            {showCreateForm && (
+                <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCreateForm(false)}>
+                    <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <h2 className="text-lg font-bold text-slate-800 mb-4">New Project</h2>
+                        <input
+                            type="text"
+                            placeholder="Project title *"
+                            value={newTitle}
+                            onChange={e => setNewTitle(e.target.value)}
+                            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm mb-3 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none"
+                            autoFocus
+                        />
+                        <textarea
+                            placeholder="Description (optional)"
+                            value={newDesc}
+                            onChange={e => setNewDesc(e.target.value)}
+                            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm mb-4 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none resize-none h-20"
+                        />
+                        <div className="flex justify-end gap-2">
+                            <button onClick={() => setShowCreateForm(false)} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg">Cancel</button>
+                            <button
+                                onClick={handleCreate}
+                                disabled={!newTitle.trim() || createMutation.loading}
+                                className="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
+                            >
+                                {createMutation.loading ? 'Creating...' : 'Create'}
+                            </button>
                         </div>
-                    ))}
-                    
-                    {/* Add New Placeholer */}
-                    <button className="border-2 border-dashed border-slate-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 hover:border-blue-300 hover:bg-blue-50/50 transition-all group min-h-[260px]">
-                        <div className="size-14 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 group-hover:scale-110 group-hover:border-blue-200 group-hover:text-blue-500 transition-all">
-                            <Plus size={24} />
-                        </div>
-                        <div className="text-center">
-                            <h3 className="font-bold text-slate-700 group-hover:text-blue-600 transition-colors">Create New Project</h3>
-                            <p className="text-sm text-slate-400 mt-1">Start from scratch or import repo</p>
-                        </div>
-                    </button>
+                    </div>
                 </div>
+            )}
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 md:p-10">
+                {loading ? (
+                    <LoadingSkeleton variant="card" count={6} />
+                ) : error ? (
+                    <ErrorState message={error.message} onRetry={refetch} />
+                ) : projects.length === 0 ? (
+                    <EmptyState
+                        icon={<Folder size={48} />}
+                        title="No projects yet"
+                        description="Create your first project to get started"
+                        action={{ label: 'New Project', onClick: () => setShowCreateForm(true) }}
+                    />
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
+                        {projects.map((project) => (
+                            <div
+                                key={project.id}
+                                onClick={() => handleProjectClick(project)}
+                                className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden"
+                            >
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(project.status)}`}>
+                                        {project.status}
+                                    </div>
+                                    <button className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
+                                        <MoreVertical size={16} />
+                                    </button>
+                                </div>
+
+                                <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{project.title}</h3>
+                                <p className="text-sm text-slate-500 mb-6 line-clamp-2 h-10">{project.description || 'No description provided'}</p>
+
+                                {/* Progress Bar */}
+                                <div className="mb-6">
+                                    <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1.5">
+                                        <span>{project.progress === 0 ? 'Not started' : project.progress === 100 ? 'Completed' : 'Progress'}</span>
+                                        <span>{project.progress}%</span>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full transition-all duration-1000 ${project.progress === 0 ? 'bg-slate-200' : project.progress === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-indigo-500'}`}
+                                            style={{ width: `${Math.max(project.progress, project.progress === 0 ? 0 : 2)}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                                    <div className="flex gap-2">
+                                        {(project.tags ?? []).map(tag => (
+                                            <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{tag}</span>
+                                        ))}
+                                        {(!project.tags || project.tags.length === 0) && (
+                                            <span className="text-[10px] text-slate-300">No tags</span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+                                        <Clock size={12} />
+                                        {formatTime(project.last_active)}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+
+                        {/* Add New Placeholder */}
+                        <button
+                            onClick={() => setShowCreateForm(true)}
+                            className="border-2 border-dashed border-slate-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 hover:border-blue-300 hover:bg-blue-50/50 transition-all group min-h-[260px]"
+                        >
+                            <div className="size-14 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 group-hover:scale-110 group-hover:border-blue-200 group-hover:text-blue-500 transition-all">
+                                <Plus size={24} />
+                            </div>
+                            <div className="text-center">
+                                <h3 className="font-bold text-slate-700 group-hover:text-blue-600 transition-colors">Create New Project</h3>
+                                <p className="text-sm text-slate-400 mt-1">Start from scratch or import repo</p>
+                            </div>
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
