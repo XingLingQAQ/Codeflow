@@ -7,3 +7,6 @@ export * from './SQLiteVectorStore.js';
 export * from './AtomicMemoryService.js';
 export * from './MemoryExtractor.js';
 export * from './UserProfileService.js';
+export * from './FolderMemoryService.js';
+export * from './PassiveRAG.js';
+export * from './MemorySearchTool.js';
