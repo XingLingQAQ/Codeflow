@@ -10,7 +10,7 @@ import {
   Github, Globe, Moon, Sun, Laptop, ToggleLeft, ToggleRight,
   LogOut, CreditCard, Key, Smartphone
 } from 'lucide-react';
-import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse, Plan, PlanTask } from './types';
+import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, SAMGEntity, SAMGTriple, MemoryItem, GlobalConfig } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -20,6 +20,11 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { listProjects, createProject } from './services/projects';
 import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
+import { listAgents } from './services/agents';
+import { getConversationTrace, stopConversation, retryConversation } from './services/conversations';
+import { getVisibleNodes, getTriples } from './services/samg';
+import { getMemoryItems } from './services/memory';
+import { getGlobalConfig, updateGlobalConfig } from './services/config';
 import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
@@ -613,154 +618,114 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
 
 const SessionsView = () => {
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
-  const handleSelectSession = (id: string) => {
-      setSelectedSession(id);
-      setMobileView('chat');
+  const { data: agents, loading, error, refetch } = useApi<Agent[]>(
+    (signal) => listAgents(signal), [],
+  );
+
+  const { data: trace } = useApi<CallTrace>(
+    (signal) => selectedAgentId ? getConversationTrace(selectedAgentId, signal) : Promise.resolve(null as unknown as CallTrace),
+    [selectedAgentId],
+    { enabled: !!selectedAgentId },
+  );
+
+  const handleSelectAgent = (id: string) => {
+    setSelectedAgentId(id);
+    setMobileView('chat');
   };
 
+  const selectedAgent = agents?.find(a => a.id === selectedAgentId);
+  const agentList = agents ?? [];
+
   const SidebarContent = () => (
-      <>
-        <div className="p-5 border-b border-slate-100 bg-slate-50/50 shrink-0">
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Projects</h3>
+    <>
+      <div className="p-5 border-b border-slate-100 bg-slate-50/50 shrink-0">
+        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Sessions</h3>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {loading ? <LoadingSkeleton variant="list" count={4} /> :
+         error ? <ErrorState message={error.message} onRetry={refetch} /> :
+         agentList.length === 0 ? <div className="text-center py-8 text-sm text-slate-400">No active sessions</div> :
+         agentList.map(agent => (
+          <div
+            key={agent.id}
+            onClick={() => handleSelectAgent(agent.id)}
+            className={`p-3 border rounded-xl cursor-pointer transition-all ${selectedAgentId === agent.id ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-slate-200 hover:border-blue-200'}`}
+          >
+            <div className="flex justify-between items-center mb-1">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${agent.status === 'running' ? 'text-blue-600 bg-blue-50' : 'text-slate-500 bg-slate-100'}`}>{agent.role}</span>
+              <span className="text-[10px] text-slate-400">{agent.status}</span>
             </div>
-            <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-sm cursor-pointer hover:border-blue-300 transition-all group">
-                <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-3">
-                        <div className="size-8 rounded-lg bg-slate-800 text-white flex items-center justify-center text-xs font-bold">SM</div>
-                        <span className="font-bold text-sm text-slate-800">Supabase Migration</span>
-                    </div>
-                    <div className="size-2 rounded-full bg-emerald-500 animate-pulse"></div>
-                </div>
-                <div className="text-[11px] text-slate-500 pl-11">3 active sessions • main branch</div>
+            <h4 className="text-sm font-bold text-slate-800 mb-1">{agent.name}</h4>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-500">{agent.model} • {agent.task_count} tasks</span>
             </div>
-        </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            <div 
-                onClick={() => handleSelectSession('new')}
-                className={`p-3 border rounded-xl cursor-pointer transition-all ${selectedSession === 'new' || selectedSession === null ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-slate-200 hover:border-blue-200'}`}
-            >
-                <div className="flex justify-between items-center mb-1">
-                    <span className="text-[10px] font-bold text-blue-600 bg-white px-1.5 py-0.5 rounded shadow-sm">REF-8821</span>
-                    <span className="text-[10px] text-slate-400">Just now</span>
-                </div>
-                <h4 className="text-sm font-bold text-slate-800 mb-1">Refactor Auth</h4>
-                <div className="flex items-center gap-2">
-                        <div className="size-4 rounded-full bg-indigo-100 flex items-center justify-center">
-                        <Zap size={10} className="text-indigo-600" />
-                        </div>
-                        <span className="text-[11px] text-slate-500">Generating service wrapper...</span>
-                </div>
-            </div>
-            {['Database Schema', 'API Endpoints', 'Stripe Webhooks'].map((item, i) => (
-                <div key={i} onClick={() => handleSelectSession(`prj-${i}`)} className="p-3 bg-white border border-slate-200 hover:border-blue-200 hover:shadow-sm rounded-xl cursor-pointer transition-all">
-                    <div className="flex justify-between items-center mb-1">
-                        <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">PRJ-{200+i}</span>
-                        <span className="text-[10px] text-slate-400">2h ago</span>
-                    </div>
-                    <h4 className="text-sm font-bold text-slate-700 mb-1">{item}</h4>
-                    <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-slate-400">Waiting for review</span>
-                    </div>
-                </div>
-            ))}
-        </div>
-      </>
+          </div>
+        ))}
+      </div>
+    </>
   );
 
   return (
     <div className="flex flex-1 h-full overflow-hidden relative pb-16 md:pb-0">
-        {/* Desktop Sidebar */}
-        <aside className="hidden md:flex w-80 bg-white border-r border-slate-200 flex-col shrink-0 z-10">
-            <SidebarContent />
-        </aside>
-
-        {/* Mobile List View */}
-        <div className={`md:hidden flex flex-col w-full h-full absolute inset-0 bg-white z-20 transition-transform duration-300 ${mobileView === 'list' ? 'translate-x-0' : '-translate-x-full'}`}>
-             <SidebarContent />
-        </div>
-
-        {/* Chat Area (Desktop & Mobile) */}
-        <div className={`flex-1 flex flex-col bg-white relative w-full h-full transition-transform duration-300 md:translate-x-0 ${mobileView === 'chat' ? 'translate-x-0 absolute inset-0 z-30' : 'translate-x-full md:translate-x-0'}`}>
-            <header className="h-16 border-b border-slate-100 flex items-center justify-between px-4 md:px-6 bg-white/80 backdrop-blur z-20 shrink-0">
-                <div className="flex items-center gap-3">
-                    <button onClick={() => setMobileView('list')} className="md:hidden p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-full">
-                        <ChevronLeft size={20} />
-                    </button>
-                    <div>
-                        <h2 className="font-bold text-slate-800 flex items-center gap-2 text-sm md:text-base">
-                            Refactor Auth
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px] font-bold hidden sm:inline-flex">#8821</span>
-                        </h2>
-                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
-                            <Code size={12} /> feature/supabase-migration
-                        </span>
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                     <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-full">
-                        <div className="size-2 rounded-full bg-green-500"></div>
-                        <span className="text-xs font-medium text-slate-600 hidden sm:inline">Claude 3.5 Sonnet</span>
-                        <span className="text-xs font-medium text-slate-600 sm:hidden">Claude</span>
-                     </div>
-                </div>
-            </header>
-            <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 md:space-y-8 bg-slate-50/30 pb-24 md:pb-8">
-                {/* User Message */}
-                <div className="flex justify-end">
-                    <div className="bg-blue-600 text-white rounded-2xl rounded-br-sm px-4 py-3 md:px-5 md:py-3.5 max-w-[90%] md:max-w-2xl shadow-md shadow-blue-500/10">
-                        <p className="text-sm leading-relaxed">I want to migrate our current JWT implementation to use the Supabase SDK. Can you analyze the current auth controller?</p>
-                    </div>
-                </div>
-
-                {/* AI Response */}
-                <div className="flex justify-start">
-                    <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-1 py-1 max-w-[95%] md:max-w-2xl shadow-sm">
-                        <div className="bg-slate-50/50 rounded-xl p-3 border-b border-slate-100 mb-2">
-                            <div className="flex items-center gap-2 text-slate-500 mb-2">
-                                 <Activity size={14} className="animate-pulse text-indigo-500" />
-                                 <span className="text-xs font-medium">Scanning project files...</span>
-                            </div>
-                            <div className="space-y-1 pl-6">
-                                <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                                    <Check size={12} className="text-emerald-500" /> Read src/controllers/auth.ts
-                                </div>
-                                <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                                    <Check size={12} className="text-emerald-500" /> Read src/middleware/jwt.ts
-                                </div>
-                            </div>
-                        </div>
-                        <div className="px-4 py-3 md:px-5">
-                             <p className="text-sm text-slate-700 leading-relaxed mb-3">
-                                 I've analyzed your current implementation. You are using a custom JWT signing mechanism. Here is a plan to migrate to Supabase:
-                             </p>
-                             <ol className="list-decimal list-inside text-sm text-slate-600 space-y-1 mb-4">
-                                 <li>Install <code className="bg-slate-100 px-1 rounded text-xs">@supabase/supabase-js</code></li>
-                                 <li>Initialize the Supabase client in a new service file.</li>
-                                 <li>Replace login endpoint with <code className="bg-slate-100 px-1 rounded text-xs">signInWithPassword</code>.</li>
-                             </ol>
-                             <p className="text-sm text-slate-700">Shall I start by installing the SDK?</p>
-                        </div>
-                    </div>
-                </div>
-            </main>
-            <div className="p-4 md:p-6 bg-white border-t border-slate-100 absolute bottom-0 md:static w-full">
-                 <div className="relative bg-slate-50 border border-slate-200 rounded-2xl p-2 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-                    <textarea className="w-full bg-transparent border-none text-sm resize-none focus:ring-0 px-3 py-2 h-12" placeholder="Reply to CodeFlow..."></textarea>
-                    <div className="flex justify-between items-center px-2 pb-1">
-                        <div className="flex gap-2 text-slate-400">
-                            <Paperclip size={18} className="hover:text-blue-500 cursor-pointer" />
-                            <Terminal size={18} className="hover:text-blue-500 cursor-pointer" />
-                        </div>
-                        <button className="bg-blue-600 text-white rounded-full p-2 hover:bg-blue-700 transition-colors">
-                            <ArrowUp size={16} />
-                        </button>
-                    </div>
-                 </div>
+      <aside className="hidden md:flex w-80 bg-white border-r border-slate-200 flex-col shrink-0 z-10">
+        <SidebarContent />
+      </aside>
+      <div className={`md:hidden flex flex-col w-full h-full absolute inset-0 bg-white z-20 transition-transform duration-300 ${mobileView === 'list' ? 'translate-x-0' : '-translate-x-full'}`}>
+        <SidebarContent />
+      </div>
+      <div className={`flex-1 flex flex-col bg-white relative w-full h-full transition-transform duration-300 md:translate-x-0 ${mobileView === 'chat' ? 'translate-x-0 absolute inset-0 z-30' : 'translate-x-full md:translate-x-0'}`}>
+        <header className="h-16 border-b border-slate-100 flex items-center justify-between px-4 md:px-6 bg-white/80 backdrop-blur z-20 shrink-0">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setMobileView('list')} className="md:hidden p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-full">
+              <ChevronLeft size={20} />
+            </button>
+            <div>
+              <h2 className="font-bold text-slate-800 text-sm md:text-base">{selectedAgent?.name || 'Select a session'}</h2>
+              {selectedAgent && <span className="text-[11px] text-slate-400">{selectedAgent.model} • {selectedAgent.status}</span>}
             </div>
+          </div>
+          {selectedAgent && (
+            <div className="flex items-center gap-2">
+              <button onClick={() => selectedAgent && stopConversation(selectedAgent.session_id || selectedAgent.id)} className="px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded-lg">Stop</button>
+              <button onClick={() => selectedAgent && retryConversation(selectedAgent.session_id || selectedAgent.id)} className="px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 rounded-lg">Retry</button>
+            </div>
+          )}
+        </header>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 bg-slate-50/30 pb-24 md:pb-8">
+          {!selectedAgent ? (
+            <EmptyState icon={<MessageSquare size={48} />} title="No session selected" description="Select a session from the sidebar to view conversation" />
+          ) : !trace ? (
+            <div className="text-center py-8 text-sm text-slate-400">No conversation trace available</div>
+          ) : (
+            <div className="space-y-4">
+              {trace.children?.map((child, i) => (
+                <div key={child.id || i} className={`flex ${child.agent_role === 'orchestrator' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`rounded-2xl px-4 py-3 max-w-[90%] md:max-w-2xl shadow-sm ${child.agent_role === 'orchestrator' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 rounded-tl-sm'}`}>
+                    <p className="text-xs font-bold mb-1 opacity-70">{child.agent_role} • {child.tool_name}</p>
+                    <p className="text-sm leading-relaxed">{child.output || 'Processing...'}</p>
+                  </div>
+                </div>
+              )) ?? <div className="text-center py-4 text-sm text-slate-400">Empty trace</div>}
+            </div>
+          )}
+        </main>
+        <div className="p-4 md:p-6 bg-white border-t border-slate-100 absolute bottom-0 md:static w-full">
+          <div className="relative bg-slate-50 border border-slate-200 rounded-2xl p-2 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
+            <textarea className="w-full bg-transparent border-none text-sm resize-none focus:ring-0 px-3 py-2 h-12" placeholder="Reply to CodeFlow..."></textarea>
+            <div className="flex justify-between items-center px-2 pb-1">
+              <div className="flex gap-2 text-slate-400">
+                <Paperclip size={18} className="hover:text-blue-500 cursor-pointer" />
+                <Terminal size={18} className="hover:text-blue-500 cursor-pointer" />
+              </div>
+              <button className="bg-blue-600 text-white rounded-full p-2 hover:bg-blue-700 transition-colors">
+                <ArrowUp size={16} />
+              </button>
+            </div>
+          </div>
         </div>
+      </div>
     </div>
   );
 };
