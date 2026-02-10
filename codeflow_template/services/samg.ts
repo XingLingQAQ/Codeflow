@@ -4,36 +4,41 @@ import type { SAMGTriple, SAMGEntity } from '../types';
 
 const BASE = API_ENDPOINTS.samg;
 
-export function getTriples(signal?: AbortSignal) {
-  return get<SAMGTriple[]>(`${BASE}/triples`, undefined, signal);
+export async function getTriples(signal?: AbortSignal) {
+  const res = await get<{ triples: SAMGTriple[]; count: number }>(`${BASE}/triples`, undefined, signal);
+  return res.triples ?? [];
 }
 
 export function getTriple(id: string, signal?: AbortSignal) {
   return get<SAMGTriple>(`${BASE}/triples/${id}`, undefined, signal);
 }
 
-export function getRelations(id: string, signal?: AbortSignal) {
-  return get<SAMGTriple[]>(`${BASE}/triples/${id}/relations`, undefined, signal);
+export async function getRelations(id: string, signal?: AbortSignal) {
+  const res = await get<{ node_id: string; relations: SAMGTriple[]; count: number }>(`${BASE}/triples/${id}/relations`, undefined, signal);
+  return res.relations ?? [];
 }
 
 export function addTriples(triples: Partial<SAMGTriple>[], signal?: AbortSignal) {
-  return post<SAMGTriple[]>(`${BASE}/triples`, { triples }, signal);
+  return post<{ message: string; count: number }>(`${BASE}/triples`, { triples }, signal);
 }
 
 export function deleteTriples(ids: string[], signal?: AbortSignal) {
-  return del<{ deleted: number }>(`${BASE}/triples`, signal);
+  return del<{ message: string; count: number }>(`${BASE}/triples`, signal);
 }
 
-export function getVisibleNodes(signal?: AbortSignal) {
-  return get<SAMGEntity[]>(`${BASE}/nodes/visible`, undefined, signal);
+export async function getVisibleNodes(signal?: AbortSignal) {
+  const res = await get<{ nodes: SAMGEntity[]; count: number }>(`${BASE}/nodes/visible`, undefined, signal);
+  return res.nodes ?? [];
 }
 
-export function getHiddenNodes(signal?: AbortSignal) {
-  return get<SAMGEntity[]>(`${BASE}/nodes/hidden`, undefined, signal);
+export async function getHiddenNodes(signal?: AbortSignal) {
+  const res = await get<{ nodes: SAMGEntity[]; count: number }>(`${BASE}/nodes/hidden`, undefined, signal);
+  return res.nodes ?? [];
 }
 
-export function getTopNodes(signal?: AbortSignal) {
-  return get<SAMGEntity[]>(`${BASE}/nodes/top`, undefined, signal);
+export async function getTopNodes(signal?: AbortSignal) {
+  const res = await get<{ nodes: SAMGEntity[]; count: number }>(`${BASE}/nodes/top`, undefined, signal);
+  return res.nodes ?? [];
 }
 
 export function getSAMGStats(signal?: AbortSignal) {

@@ -64,6 +64,7 @@ type SAMGService struct {
 var (
 	globalSAMGService *SAMGService
 	globalSAMGMu      sync.RWMutex
+	samgOnce          sync.Once
 )
 
 // SAMGServiceConfig 服务配置
@@ -110,6 +111,13 @@ func SetSAMGService(svc *SAMGService) {
 
 // GetSAMGService 获取全局SAMG服务
 func GetSAMGService() *SAMGService {
+	samgOnce.Do(func() {
+		globalSAMGMu.Lock()
+		defer globalSAMGMu.Unlock()
+		if globalSAMGService == nil {
+			globalSAMGService = NewSAMGService(nil)
+		}
+	})
 	globalSAMGMu.RLock()
 	defer globalSAMGMu.RUnlock()
 	return globalSAMGService

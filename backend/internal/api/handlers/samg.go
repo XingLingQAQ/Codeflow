@@ -60,13 +60,11 @@ type ActivationConfigRequest struct {
 func GetTriples(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	ctx := c.Request.Context()
-
-	// 构建查询
 	query := samg.TripleQuery{}
 
 	if subject := c.Query("subject"); subject != "" {
@@ -96,42 +94,38 @@ func GetTriples(c *gin.Context) {
 
 	triples, err := svc.QueryTriples(ctx, query)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"triples": triples,
-		"count":   len(triples),
-	})
+	respondOK(c, gin.H{"triples": triples, "count": len(triples)})
 }
+
+// PLACEHOLDER_SAMG_REST
 
 // AddTriples 添加三元组
 // POST /api/v1/samg/triples
 func AddTriples(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var req AddTriplesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	ctx := c.Request.Context()
 	err := svc.AddTriples(ctx, req.Triples)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "triples added",
-		"count":   len(req.Triples),
-	})
+	respondCreated(c, gin.H{"message": "triples added", "count": len(req.Triples)})
 }
 
 // GetTriple 获取单个三元组
@@ -139,7 +133,7 @@ func AddTriples(c *gin.Context) {
 func GetTriple(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
@@ -148,24 +142,25 @@ func GetTriple(c *gin.Context) {
 
 	triple, err := svc.GetTriple(ctx, tripleID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-
 	if triple == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "triple not found"})
+		respondError(c, http.StatusNotFound, "triple not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, triple)
+	respondOK(c, triple)
 }
+
+// PLACEHOLDER_SAMG_REST2
 
 // DeleteTriples 删除三元组
 // DELETE /api/v1/samg/triples
 func DeleteTriples(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
@@ -173,21 +168,18 @@ func DeleteTriples(c *gin.Context) {
 		IDs []string `json:"ids" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	ctx := c.Request.Context()
 	err := svc.DeleteTriples(ctx, req.IDs)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "triples deleted",
-		"count":   len(req.IDs),
-	})
+	respondOK(c, gin.H{"message": "triples deleted", "count": len(req.IDs)})
 }
 
 // GetRelations 获取节点关联关系
@@ -195,7 +187,7 @@ func DeleteTriples(c *gin.Context) {
 func GetRelations(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
@@ -204,29 +196,27 @@ func GetRelations(c *gin.Context) {
 
 	relations, err := svc.GetRelations(ctx, nodeID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"node_id":   nodeID,
-		"relations": relations,
-		"count":     len(relations),
-	})
+	respondOK(c, gin.H{"node_id": nodeID, "relations": relations, "count": len(relations)})
 }
+
+// PLACEHOLDER_SAMG_REST3
 
 // ExtractTriples 从文本提取三元组
 // POST /api/v1/samg/extract
 func ExtractTriples(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var req ExtractRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -240,14 +230,11 @@ func ExtractTriples(c *gin.Context) {
 
 	triples, err := svc.ExtractFromMessage(ctx, req.Content, source)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"triples": triples,
-		"count":   len(triples),
-	})
+	respondOK(c, gin.H{"triples": triples, "count": len(triples)})
 }
 
 // Activate 扩展激活
@@ -255,54 +242,51 @@ func ExtractTriples(c *gin.Context) {
 func Activate(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var req ActivateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	ctx := c.Request.Context()
 	result, err := svc.Activate(ctx, req.SourceIDs)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	respondOK(c, result)
 }
+
+// PLACEHOLDER_SAMG_REST4
 
 // FindPaths 查找路径
 // POST /api/v1/samg/paths
 func FindPaths(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var req FindPathsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	ctx := c.Request.Context()
 	paths, err := svc.FindPaths(ctx, req.SourceID, req.TargetID, req.MaxHops)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"source_id": req.SourceID,
-		"target_id": req.TargetID,
-		"paths":     paths,
-		"count":     len(paths),
-	})
+	respondOK(c, gin.H{"source_id": req.SourceID, "target_id": req.TargetID, "paths": paths, "count": len(paths)})
 }
 
 // GetDecayConfig 获取衰减配置
@@ -310,12 +294,11 @@ func FindPaths(c *gin.Context) {
 func GetDecayConfig(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
-	config := svc.GetDecayConfig()
-	c.JSON(http.StatusOK, config)
+	respondOK(c, svc.GetDecayConfig())
 }
 
 // UpdateDecayConfig 更新衰减配置
@@ -323,13 +306,13 @@ func GetDecayConfig(c *gin.Context) {
 func UpdateDecayConfig(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var req DecayConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -344,33 +327,28 @@ func UpdateDecayConfig(c *gin.Context) {
 	}
 
 	svc.UpdateDecayConfig(config)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "decay config updated",
-		"config":  config,
-	})
+	respondOK(c, gin.H{"message": "decay config updated", "config": config})
 }
+
+// PLACEHOLDER_SAMG_REST5
 
 // ApplyDecay 应用衰减
 // POST /api/v1/samg/decay/apply
 func ApplyDecay(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	ctx := c.Request.Context()
 	decayed, hidden, err := svc.ApplyDecay(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"decayed_nodes": decayed,
-		"hidden_nodes":  hidden,
-	})
+	respondOK(c, gin.H{"decayed_nodes": decayed, "hidden_nodes": hidden})
 }
 
 // GetVisibleNodes 获取可见节点
@@ -378,17 +356,13 @@ func ApplyDecay(c *gin.Context) {
 func GetVisibleNodes(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	ctx := c.Request.Context()
 	nodes := svc.GetVisibleNodes(ctx)
-
-	c.JSON(http.StatusOK, gin.H{
-		"nodes": nodes,
-		"count": len(nodes),
-	})
+	respondOK(c, gin.H{"nodes": nodes, "count": len(nodes)})
 }
 
 // GetHiddenNodes 获取隐藏节点
@@ -396,25 +370,23 @@ func GetVisibleNodes(c *gin.Context) {
 func GetHiddenNodes(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	ctx := c.Request.Context()
 	nodes := svc.GetHiddenNodes(ctx)
-
-	c.JSON(http.StatusOK, gin.H{
-		"nodes": nodes,
-		"count": len(nodes),
-	})
+	respondOK(c, gin.H{"nodes": nodes, "count": len(nodes)})
 }
+
+// PLACEHOLDER_SAMG_REST6
 
 // GetTopNodes 获取Top N节点
 // GET /api/v1/samg/nodes/top
 func GetTopNodes(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
@@ -427,11 +399,7 @@ func GetTopNodes(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	nodes := svc.GetTopNodes(ctx, n)
-
-	c.JSON(http.StatusOK, gin.H{
-		"nodes": nodes,
-		"count": len(nodes),
-	})
+	respondOK(c, gin.H{"nodes": nodes, "count": len(nodes)})
 }
 
 // RecordAccess 记录节点访问
@@ -439,7 +407,7 @@ func GetTopNodes(c *gin.Context) {
 func RecordAccess(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
@@ -448,14 +416,11 @@ func RecordAccess(c *gin.Context) {
 
 	err := svc.RecordAccess(ctx, nodeID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "access recorded",
-		"node_id": nodeID,
-	})
+	respondOK(c, gin.H{"message": "access recorded", "node_id": nodeID})
 }
 
 // GetActivationConfig 获取激活配置
@@ -463,26 +428,27 @@ func RecordAccess(c *gin.Context) {
 func GetActivationConfig(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
-	config := svc.GetActivationConfig()
-	c.JSON(http.StatusOK, config)
+	respondOK(c, svc.GetActivationConfig())
 }
+
+// PLACEHOLDER_SAMG_REST7
 
 // UpdateActivationConfig 更新激活配置
 // PUT /api/v1/samg/activation
 func UpdateActivationConfig(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var req ActivationConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -496,11 +462,7 @@ func UpdateActivationConfig(c *gin.Context) {
 	}
 
 	svc.UpdateActivationConfig(config)
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "activation config updated",
-		"config":  config,
-	})
+	respondOK(c, gin.H{"message": "activation config updated", "config": config})
 }
 
 // ExportGraph 导出图谱
@@ -508,18 +470,18 @@ func UpdateActivationConfig(c *gin.Context) {
 func ExportGraph(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	ctx := c.Request.Context()
 	graph, err := svc.ExportGraph(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, graph)
+	respondOK(c, graph)
 }
 
 // ImportGraph 导入图谱
@@ -527,27 +489,24 @@ func ExportGraph(c *gin.Context) {
 func ImportGraph(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	var graph samg.JsonLdGraph
 	if err := c.ShouldBindJSON(&graph); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	ctx := c.Request.Context()
 	err := svc.ImportGraph(ctx, &graph)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "graph imported",
-		"triple_count": len(graph.Graph),
-	})
+	respondOK(c, gin.H{"message": "graph imported", "triple_count": len(graph.Graph)})
 }
 
 // GetSAMGStats 获取SAMG统计信息
@@ -555,16 +514,16 @@ func ImportGraph(c *gin.Context) {
 func GetSAMGStats(c *gin.Context) {
 	svc := samg.GetSAMGService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SAMG service not available"})
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
 		return
 	}
 
 	ctx := c.Request.Context()
 	stats, err := svc.GetStats(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, stats)
+	respondOK(c, stats)
 }
