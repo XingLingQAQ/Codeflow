@@ -10,7 +10,7 @@ import {
   Github, Globe, Moon, Sun, Laptop, ToggleLeft, ToggleRight,
   LogOut, CreditCard, Key, Smartphone
 } from 'lucide-react';
-import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse } from './types';
+import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse, Plan, PlanTask } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -19,6 +19,7 @@ import { ErrorState } from './components/ErrorState';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { listProjects, createProject } from './services/projects';
+import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
 import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
@@ -930,6 +931,59 @@ const AgentsView = ({ showToast, onNavigate }: { showToast: (msg: string) => voi
 
 const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToast: (m: string) => void }) => {
     const [mobileTab, setMobileTab] = useState<'editor' | 'status'>('editor');
+    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+
+    // Fetch plans
+    const { data: plans, loading: plansLoading, error: plansError, refetch: refetchPlans } = useApi<Plan[]>(
+        (signal) => listPlans(signal),
+        [],
+    );
+
+    // Fetch tasks for selected plan
+    const { data: tasks, loading: tasksLoading, refetch: refetchTasks } = useApi<PlanTask[]>(
+        (signal) => selectedPlanId ? getPlanTasks(selectedPlanId, signal) : Promise.resolve([]),
+        [selectedPlanId],
+        { enabled: !!selectedPlanId },
+    );
+
+    const selectedPlan = plans?.find(p => p.id === selectedPlanId) ?? plans?.[0] ?? null;
+
+    // Auto-select first plan
+    useEffect(() => {
+        if (plans && plans.length > 0 && !selectedPlanId) {
+            setSelectedPlanId(plans[0].id);
+        }
+    }, [plans, selectedPlanId]);
+
+    const handleCreatePlan = async () => {
+        try {
+            const plan = await createPlan({ title: 'New Plan', description: '' });
+            showToast('Plan created');
+            refetchPlans();
+            setSelectedPlanId(plan.id);
+        } catch { showToast('Failed to create plan'); }
+    };
+
+    const handleTaskStatusToggle = async (task: PlanTask) => {
+        if (!selectedPlanId) return;
+        const nextStatus = task.status === 'completed' ? 'pending' : task.status === 'pending' ? 'in_progress' : 'completed';
+        try {
+            await updatePlanTask(selectedPlanId, task.id, { status: nextStatus } as Partial<PlanTask>);
+            refetchTasks();
+        } catch { showToast('Failed to update task'); }
+    };
+
+    const getTaskStatusStyle = (status: string) => {
+        switch (status) {
+            case 'completed': return { bg: 'bg-green-50', border: 'border-green-100', badge: 'text-green-600 bg-green-50', icon: <Check size={16} className="text-green-500" />, label: 'DONE' };
+            case 'in_progress': return { bg: 'bg-blue-50/50', border: 'border-blue-100', badge: 'text-blue-600 bg-blue-100 animate-pulse', icon: <Code size={16} className="text-blue-600" />, label: 'RUNNING' };
+            case 'failed': return { bg: 'bg-red-50', border: 'border-red-100', badge: 'text-red-600 bg-red-50', icon: <X size={16} className="text-red-500" />, label: 'FAILED' };
+            default: return { bg: 'bg-white', border: 'border-slate-200', badge: 'text-slate-400 bg-slate-50', icon: <Clock size={16} className="text-slate-400" />, label: 'PENDING' };
+        }
+    };
+
+    const taskList = tasks ?? [];
+    const completedCount = taskList.filter(t => t.status === 'completed').length;
 
     return (
         <div className="flex-1 flex flex-col h-full bg-slate-50 relative z-0 overflow-hidden pb-16 md:pb-0">
@@ -939,8 +993,17 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                          <LayoutGrid size={18} />
                     </div>
                     <h1 className="font-bold text-slate-800 text-lg hidden sm:block">CodeFlow Plan</h1>
+                    {plans && plans.length > 1 && (
+                        <select
+                            value={selectedPlanId ?? ''}
+                            onChange={e => setSelectedPlanId(e.target.value)}
+                            className="ml-2 text-sm border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                        >
+                            {plans.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                        </select>
+                    )}
                 </div>
-                
+
                 {/* Stepper */}
                 <div className="flex items-center">
                    <div className="flex flex-col items-center group cursor-pointer">
@@ -995,15 +1058,31 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
             <div className="flex-1 flex overflow-hidden relative">
                 {/* Main Content (Editor) */}
                 <div className={`flex-1 overflow-y-auto p-4 md:p-10 flex flex-col items-center transition-opacity duration-300 ${mobileTab === 'status' ? 'opacity-0 absolute pointer-events-none' : 'opacity-100'} md:opacity-100 md:static md:pointer-events-auto`}>
+                    {plansLoading ? (
+                        <LoadingSkeleton variant="text" count={3} />
+                    ) : plansError ? (
+                        <ErrorState message={plansError.message} onRetry={refetchPlans} />
+                    ) : !selectedPlan ? (
+                        <EmptyState
+                            icon={<LayoutGrid size={48} />}
+                            title="No plans yet"
+                            description="Create a plan to get started"
+                            action={{ label: 'New Plan', onClick: handleCreatePlan }}
+                        />
+                    ) : (
                     <div className="w-full max-w-3xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                          <div className="flex items-start justify-between flex-wrap gap-2">
                             <div>
-                                <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight mb-2">Project Vision: Commerce Refactor</h2>
-                                <p className="text-sm md:text-base text-slate-500">Defining scope, objectives, and constraints for the migration agent.</p>
+                                <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight mb-2">{selectedPlan.title}</h2>
+                                <p className="text-sm md:text-base text-slate-500">{selectedPlan.description || 'No description provided'}</p>
                             </div>
-                            <span className="px-3 py-1 bg-green-50 text-green-700 border border-green-200 rounded-full text-xs font-bold flex items-center gap-2">
-                                <span className="size-2 bg-green-500 rounded-full animate-pulse"></span>
-                                Agents Active
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 ${
+                                selectedPlan.status === 'active' ? 'bg-green-50 text-green-700 border border-green-200' :
+                                selectedPlan.status === 'completed' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
+                                'bg-slate-50 text-slate-600 border border-slate-200'
+                            }`}>
+                                {selectedPlan.status === 'active' && <span className="size-2 bg-green-500 rounded-full animate-pulse"></span>}
+                                {selectedPlan.status}
                             </span>
                          </div>
 
@@ -1014,23 +1093,13 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                                 <div className="w-px h-4 bg-slate-200 my-auto mx-1"></div>
                                 <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Grid size={16} /></button>
                              </div>
-                             <textarea 
+                             <textarea
                                 className="flex-1 w-full p-6 md:p-8 resize-none border-none focus:ring-0 text-slate-700 leading-relaxed font-mono text-xs md:text-sm"
-                                defaultValue={`# Goal Statement
-Migrate legacy checkout from custom PHP to Node.js Stripe integration.
-
-## Core Requirements
-- Support Apple Pay & Google Pay
-- Preserve existing customer data structure
-- Reduce checkout latency by 40%
-
-## Technical Scope
-1. Analyze current CheckoutController.php
-2. Design new API schema in types/checkout.ts
-3. Implement Stripe webhook handlers`}
+                                defaultValue={selectedPlan.description || '# Plan\nDescribe your plan here...'}
                              />
                          </div>
                     </div>
+                    )}
                 </div>
 
                 {/* Status Sidebar (Desktop: Sidebar, Mobile: Full View) */}
@@ -1038,87 +1107,75 @@ Migrate legacy checkout from custom PHP to Node.js Stripe integration.
                     <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white/50">
                         <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm">
                             <Monitor size={16} className="text-blue-500" />
-                            AI Runtime Status
+                            Tasks ({completedCount}/{taskList.length})
                         </h3>
-                        <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full border border-green-100">Active</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            taskList.length > 0 && completedCount === taskList.length
+                                ? 'text-green-600 bg-green-50 border-green-100'
+                                : taskList.some(t => t.status === 'in_progress')
+                                    ? 'text-blue-600 bg-blue-50 border-blue-100'
+                                    : 'text-slate-400 bg-slate-50 border-slate-100'
+                        }`}>{taskList.length > 0 && completedCount === taskList.length ? 'Complete' : taskList.some(t => t.status === 'in_progress') ? 'Active' : 'Idle'}</span>
                     </div>
-                    
+
                     <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                         {/* Director Task */}
-                         <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
-                            <div className="flex justify-between items-center mb-2">
-                                <div className="flex items-center gap-2">
-                                    <Check size={16} className="text-green-500" />
-                                    <span className="text-sm font-bold text-slate-800">Director</span>
-                                </div>
-                                <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">DONE</span>
-                            </div>
-                            <p className="text-xs text-slate-500 pl-6 border-l-2 border-green-100 ml-1.5">Task decomposition complete. Assigned migration to Coder.</p>
-                         </div>
-
-                         {/* Coder Task (Active) */}
-                         <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 shadow-sm relative overflow-hidden group cursor-pointer hover:shadow-md transition-all" onClick={onOpenModal}>
-                             <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>
-                             <div className="flex justify-between items-center mb-2">
-                                <div className="flex items-center gap-2">
-                                    <div className="relative flex items-center justify-center size-4">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                                        <Code size={16} className="text-blue-600 relative z-10" />
-                                    </div>
-                                    <span className="text-sm font-bold text-slate-800">Coder</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded animate-pulse">RUNNING</span>
-                                    <MoreHorizontal size={14} className="text-blue-400" />
-                                </div>
-                             </div>
-                             <div className="pl-6 ml-1.5">
-                                 <p className="text-xs font-medium text-slate-700 mb-2">Drafting API definitions...</p>
-                                 <div className="w-full h-1.5 bg-blue-100 rounded-full overflow-hidden">
-                                     <div className="h-full bg-blue-500 w-[60%] animate-[progress_2s_ease-in-out_infinite]"></div>
-                                 </div>
-                                 <p className="text-[10px] text-slate-400 font-mono mt-2">Create: types/checkout.ts</p>
-                             </div>
-                         </div>
+                         {tasksLoading ? (
+                             <LoadingSkeleton variant="list" count={3} />
+                         ) : taskList.length === 0 ? (
+                             <div className="text-center py-8 text-sm text-slate-400">No tasks yet</div>
+                         ) : (
+                             taskList.map(task => {
+                                 const style = getTaskStatusStyle(task.status);
+                                 return (
+                                     <div
+                                         key={task.id}
+                                         onClick={() => handleTaskStatusToggle(task)}
+                                         className={`p-4 ${style.bg} rounded-xl border ${style.border} shadow-sm cursor-pointer hover:shadow-md transition-all`}
+                                     >
+                                         <div className="flex justify-between items-center mb-2">
+                                             <div className="flex items-center gap-2">
+                                                 {style.icon}
+                                                 <span className="text-sm font-bold text-slate-800">{task.title}</span>
+                                             </div>
+                                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${style.badge}`}>{style.label}</span>
+                                         </div>
+                                         {task.description && (
+                                             <p className="text-xs text-slate-500 pl-6 border-l-2 border-slate-100 ml-1.5 line-clamp-2">{task.description}</p>
+                                         )}
+                                         {task.assignee && (
+                                             <p className="text-[10px] text-slate-400 font-mono mt-2 pl-6 ml-1.5">{task.assignee}</p>
+                                         )}
+                                     </div>
+                                 );
+                             })
+                         )}
                     </div>
 
-                    {/* Artifacts */}
+                    {/* Progress Summary */}
                     <div className="h-1/3 bg-slate-50 border-t border-slate-200 flex flex-col">
                         <div className="p-4 border-b border-slate-200 flex justify-between items-center">
                             <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
-                                <FileText size={16} className="text-blue-500" /> Generated Artifacts
+                                <FileText size={16} className="text-blue-500" /> Progress
                             </h3>
-                            <span className="text-[9px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">FILTER: *.MD</span>
+                            <span className="text-[9px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
+                                {taskList.length > 0 ? `${Math.round((completedCount / taskList.length) * 100)}%` : '0%'}
+                            </span>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between group cursor-pointer hover:border-blue-300 transition-colors">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-                                        <FileText size={16} />
+                            {taskList.length > 0 && (
+                                <div className="space-y-2">
+                                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500"
+                                            style={{ width: `${taskList.length > 0 ? (completedCount / taskList.length) * 100 : 0}%` }}
+                                        />
                                     </div>
-                                    <div>
-                                        <h4 className="text-xs font-bold text-slate-800">technical_spec.md</h4>
-                                        <p className="text-[10px] text-slate-400">Technical Specification</p>
-                                    </div>
+                                    <p className="text-xs text-slate-400">{completedCount} of {taskList.length} tasks completed</p>
                                 </div>
-                                <Check size={14} className="text-green-500" />
-                            </div>
-                            <div className="bg-white p-3 rounded-xl border border-blue-200 shadow-sm flex items-center justify-between relative overflow-hidden">
-                                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 animate-[loading_1.5s_ease-in-out_infinite]"></div>
-                                <div className="flex items-center gap-3">
-                                    <div className="size-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                                        <Edit3 size={16} className="animate-pulse" />
-                                    </div>
-                                    <div>
-                                        <h4 className="text-xs font-bold text-slate-800">api_docs.md</h4>
-                                        <p className="text-[10px] text-slate-400">API Documentation</p>
-                                    </div>
-                                </div>
-                                <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">GEN</span>
-                            </div>
+                            )}
                         </div>
                     </div>
-                    
+
                     <div className="p-4 bg-white border-t border-slate-200">
                          <button onClick={() => { onOpenModal(); showToast("Execution started") }} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95">
                             <Zap size={18} /> Execute Plan
