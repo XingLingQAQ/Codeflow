@@ -448,13 +448,36 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
 };
 
 const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
-  const [model, setModel] = useState('Claude 3.5 Sonnet');
-  const [temp, setTemp] = useState(0.7);
   const [darkMode, setDarkMode] = useState(false);
+  const [configError, setConfigError] = useState(false);
 
-  const handleSave = () => {
+  const { data: config, loading, error, refetch } = useApi<GlobalConfig>(
+    (signal) => getGlobalConfig(signal), [],
+  );
+
+  const [model, setModel] = useState('');
+  const [temp, setTemp] = useState(0.7);
+
+  // Sync from API data
+  useEffect(() => {
+    if (config) {
+      setModel(config.default_model || '');
+      // temperature not in GlobalConfig, keep local default
+    } else if (error) {
+      setConfigError(true);
+    }
+  }, [config, error]);
+
+  const handleSave = async () => {
+    try {
+      await updateGlobalConfig({ default_model: model });
       showToast("Settings saved successfully");
+    } catch {
+      showToast("Failed to save settings");
+    }
   };
+
+  const modelOptions = config?.api_pool?.map(ch => ch.name) ?? ['Claude 3.5 Sonnet', 'GPT-4o', 'Gemini 1.5 Pro'];
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
@@ -522,11 +545,16 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
                 </div>
 
                 <div className="space-y-6">
+                    {configError && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+                            Could not load config from server. Using defaults.
+                        </div>
+                    )}
                     <div className="space-y-3">
                          <label className="text-xs font-bold text-slate-700 uppercase">Default Model</label>
                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            {['Claude 3.5 Sonnet', 'GPT-4o', 'Gemini 1.5 Pro'].map(m => (
-                                <button 
+                            {modelOptions.map(m => (
+                                <button
                                     key={m}
                                     onClick={() => setModel(m)}
                                     className={`px-4 py-3 rounded-xl border text-sm font-bold text-left transition-all ${model === m ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm ring-1 ring-indigo-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-100'}`}
@@ -731,106 +759,109 @@ const SessionsView = () => {
 };
 
 const MemoryView = () => {
-    // Mock Nodes
-    const nodes: MemoryNode[] = [
-        { id: '1', x: 50, y: 50, label: 'AuthService.ts', type: 'service', color: 'bg-blue-100 border-blue-300 text-blue-600', icon: 'hub' },
-        { id: '2', x: 30, y: 30, label: 'UserDB', type: 'db', color: 'bg-emerald-100 border-emerald-300 text-emerald-600', icon: 'database' },
-        { id: '3', x: 70, y: 35, label: 'JWT Strategy', type: 'auth', color: 'bg-violet-100 border-violet-300 text-violet-600', icon: 'shield' },
-        { id: '4', x: 65, y: 70, label: '/config', type: 'config', color: 'bg-amber-100 border-amber-300 text-amber-600', icon: 'folder' },
-    ];
+    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-    const [selectedNode, setSelectedNode] = useState<string>('1');
+    const { data: entities, loading, error, refetch } = useApi<SAMGEntity[]>(
+        (signal) => getVisibleNodes(signal), [],
+    );
 
-    const getNodeDetails = (id: string) => {
-        const node = nodes.find(n => n.id === id);
-        if (!node) return null;
-        
-        // Mock dynamic content based on selection
-        return {
-            name: node.label,
-            type: node.type.toUpperCase(),
-            desc: id === '1' ? '@core/services' : (id === '2' ? 'PostgreSQL Table' : 'Security Config'),
-            relations: id === '1' ? [
-                { name: 'User Schema', match: '98%', desc: 'Defines user table structure', icon: <Database size={16} />, color: 'emerald' },
-                { name: 'JWT Strategy', match: '85%', desc: 'Passport.js configuration', icon: <Shield size={16} />, color: 'violet' }
-            ] : [
-                { name: 'AuthService', match: '98%', desc: 'Primary Consumer', icon: <Monitor size={16} />, color: 'blue' }
-            ]
-        };
+    const { data: triples } = useApi<SAMGTriple[]>(
+        (signal) => getTriples(signal), [],
+    );
+
+    const { data: memoryItems } = useApi<MemoryItem[]>(
+        (signal) => getMemoryItems(signal), [],
+    );
+
+    const nodeList = entities ?? [];
+    const tripleList = triples ?? [];
+    const selectedEntity = nodeList.find(e => e['@id'] === selectedNodeId);
+
+    // Simple layout: distribute nodes in a circle
+    const getNodePosition = (index: number, total: number) => {
+        const angle = (2 * Math.PI * index) / Math.max(total, 1);
+        const radius = 30;
+        return { x: 50 + radius * Math.cos(angle), y: 50 + radius * Math.sin(angle) };
     };
 
-    const details = getNodeDetails(selectedNode);
+    const typeColors: Record<string, string> = {
+        service: 'bg-blue-100 border-blue-300 text-blue-600',
+        entity: 'bg-emerald-100 border-emerald-300 text-emerald-600',
+        concept: 'bg-violet-100 border-violet-300 text-violet-600',
+        default: 'bg-slate-100 border-slate-300 text-slate-600',
+    };
 
     return (
         <div className="flex-1 flex flex-col md:flex-row h-full relative overflow-hidden bg-slate-50 pb-16 md:pb-0">
-             {/* Graph Area */}
              <div className="flex-1 relative h-[60vh] md:h-auto border-b md:border-b-0 md:border-r border-slate-200">
                  <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '40px 40px', opacity: 0.5 }}></div>
-                 
-                 {/* Simulated Edges */}
-                 <svg className="absolute inset-0 pointer-events-none w-full h-full">
-                     <line x1="50%" y1="50%" x2="30%" y2="30%" stroke="#cbd5e1" strokeWidth="2" />
-                     <line x1="50%" y1="50%" x2="70%" y2="35%" stroke="#cbd5e1" strokeWidth="2" />
-                     <line x1="50%" y1="50%" x2="65%" y2="70%" stroke="#cbd5e1" strokeWidth="2" />
-                 </svg>
 
-                 {/* Nodes */}
-                 {nodes.map(node => (
-                     <div 
-                        key={node.id}
-                        onClick={() => setSelectedNode(node.id)}
-                        className={`absolute flex flex-col items-center gap-2 cursor-pointer group hover:z-50 transition-all duration-300`}
-                        style={{ left: `${node.x}%`, top: `${node.y}%`, transform: 'translate(-50%, -50%)' }}
-                     >
-                         <div className={`size-12 md:size-16 rounded-full border-4 border-white shadow-lg flex items-center justify-center ${node.color} ${selectedNode === node.id ? 'ring-4 ring-blue-500/20 scale-110' : ''} group-hover:scale-110 transition-all`}>
+                 {loading ? <LoadingSkeleton variant="text" count={2} /> :
+                  error ? <ErrorState message={error.message} onRetry={refetch} /> :
+                  nodeList.length === 0 ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <EmptyState icon={<Database size={48} />} title="No nodes yet" description="Semantic graph is empty" />
+                    </div>
+                  ) : (
+                  <>
+                    <svg className="absolute inset-0 pointer-events-none w-full h-full">
+                      {tripleList.slice(0, 50).map((t, i) => {
+                        const si = nodeList.findIndex(n => n['@id'] === t.subject['@id']);
+                        const oi = nodeList.findIndex(n => n['@id'] === t.object.node?.['@id']);
+                        if (si < 0 || oi < 0) return null;
+                        const sp = getNodePosition(si, nodeList.length);
+                        const op = getNodePosition(oi, nodeList.length);
+                        return <line key={i} x1={`${sp.x}%`} y1={`${sp.y}%`} x2={`${op.x}%`} y2={`${op.y}%`} stroke="#cbd5e1" strokeWidth="2" />;
+                      })}
+                    </svg>
+                    {nodeList.map((node, i) => {
+                      const pos = getNodePosition(i, nodeList.length);
+                      const color = typeColors[node['@type']?.[0] ?? 'default'] ?? typeColors.default;
+                      return (
+                        <div
+                          key={node['@id']}
+                          onClick={() => setSelectedNodeId(node['@id'])}
+                          className="absolute flex flex-col items-center gap-2 cursor-pointer group hover:z-50 transition-all duration-300"
+                          style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                        >
+                          <div className={`size-12 md:size-16 rounded-full border-4 border-white shadow-lg flex items-center justify-center ${color} ${selectedNodeId === node['@id'] ? 'ring-4 ring-blue-500/20 scale-110' : ''} group-hover:scale-110 transition-all`}>
                             <div className="size-3 rounded-full bg-current opacity-50"></div>
-                         </div>
-                         <div className={`px-2 py-1 md:px-3 bg-white/90 backdrop-blur border border-slate-200 rounded-full text-[10px] md:text-xs font-bold text-slate-700 shadow-sm ${selectedNode === node.id ? 'text-blue-600 border-blue-200' : ''}`}>
-                             {node.label}
-                         </div>
-                     </div>
-                 ))}
+                          </div>
+                          <div className={`px-2 py-1 md:px-3 bg-white/90 backdrop-blur border border-slate-200 rounded-full text-[10px] md:text-xs font-bold text-slate-700 shadow-sm ${selectedNodeId === node['@id'] ? 'text-blue-600 border-blue-200' : ''}`}>
+                            {node.label}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </>
+                  )}
              </div>
 
-             {/* Details Panel */}
-             <div className="h-[40vh] md:h-full w-full md:w-80 bg-white z-10 flex flex-col shadow-xl animate-in slide-in-from-bottom md:slide-in-from-right duration-300">
-                 {details && (
+             <div className="h-[40vh] md:h-full w-full md:w-80 bg-white z-10 flex flex-col shadow-xl">
+                 {selectedEntity ? (
                     <>
                         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-                            <div className="flex items-start gap-3 mb-2">
-                                <div className="size-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
-                                    <Monitor size={20} />
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-slate-800">{details.name}</h3>
-                                    <span className="text-xs text-slate-500 font-mono">{details.desc}</span>
-                                </div>
-                            </div>
-                            <div className="flex gap-2 mt-2">
-                                <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100">TYPESCRIPT</span>
-                                <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded border border-slate-200">24KB</span>
-                            </div>
+                            <h3 className="font-bold text-slate-800">{selectedEntity.label}</h3>
+                            <span className="text-xs text-slate-500">{selectedEntity['@type']?.join(', ') || 'Unknown type'}</span>
+                            {selectedEntity.description && <p className="text-xs text-slate-400 mt-1">{selectedEntity.description}</p>}
                         </div>
                         <div className="p-5 flex-1 overflow-y-auto">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Semantic Relations</h4>
+                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Relations</h4>
                             <div className="space-y-3">
-                                {details.relations.map((rel, i) => (
-                                    <div key={i} className="flex items-center gap-3 p-2 bg-white border border-slate-100 rounded-xl hover:border-blue-200 transition-colors cursor-pointer shadow-sm">
-                                        <div className={`size-8 rounded-lg bg-${rel.color}-50 text-${rel.color}-600 flex items-center justify-center`}>
-                                            {rel.icon}
-                                        </div>
+                                {tripleList.filter(t => t.subject['@id'] === selectedNodeId || t.object.node?.['@id'] === selectedNodeId).slice(0, 10).map((t, i) => (
+                                    <div key={i} className="flex items-center gap-3 p-2 bg-white border border-slate-100 rounded-xl shadow-sm">
+                                        <div className="size-8 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center"><Database size={16} /></div>
                                         <div className="flex-1">
-                                            <div className="flex justify-between">
-                                                <span className="text-sm font-semibold text-slate-700">{rel.name}</span>
-                                                {rel.match && <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1 rounded font-bold">{rel.match}</span>}
-                                            </div>
-                                            <p className="text-[10px] text-slate-400 truncate">{rel.desc}</p>
+                                            <span className="text-sm font-semibold text-slate-700">{t.predicate}</span>
+                                            <p className="text-[10px] text-slate-400">{t.subject['@id'] === selectedNodeId ? t.object.node?.label ?? 'literal' : t.subject.label ?? t.subject['@id']}</p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </div>
                     </>
+                 ) : (
+                    <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Select a node to view details</div>
                  )}
              </div>
         </div>
@@ -838,57 +869,65 @@ const MemoryView = () => {
 };
 
 const AgentsView = ({ showToast, onNavigate }: { showToast: (msg: string) => void, onNavigate: (m: ViewMode) => void }) => {
-    const presets: AgentPreset[] = [
-        { title: "Full-Stack Team", description: "Orchestrator lead with frontend/backend specialists.", count: 3, tags: ["Arch", "Dev"], avatars: ["bg-blue-200", "bg-indigo-200", "bg-purple-200"], color: "blue" },
-        { title: "Security Audit", description: "Vulnerability scanner and senior security analyst.", count: 2, tags: ["Sec", "QA"], avatars: ["bg-emerald-200", "bg-teal-200"], color: "emerald" },
-        { title: "Research Squad", description: "Synthesizes data into technical whitepapers.", count: 4, tags: ["Research", "Strategy"], avatars: ["bg-amber-200", "bg-orange-200", "bg-yellow-200", "bg-red-200"], color: "amber" },
-        { title: "QA Lab", description: "Automates unit, integration, and E2E testing.", count: 3, tags: ["Test", "Auto"], avatars: ["bg-pink-200", "bg-rose-200", "bg-red-200"], color: "pink" },
-    ];
+    const { data: agents, loading, error, refetch } = useApi<Agent[]>(
+        (signal) => listAgents(signal), [],
+    );
 
-    const handleUsePreset = (title: string) => {
-        showToast(`Activated ${title} Swarm`);
-        setTimeout(() => onNavigate(ViewMode.PLAN), 500);
-    }
+    const agentList = agents ?? [];
+
+    const getRoleColor = (role: string) => {
+        const hash = role.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        const colors = ['blue', 'emerald', 'amber', 'pink', 'violet', 'indigo'];
+        return colors[hash % colors.length];
+    };
+
+    const getStatusBadge = (status: string) => {
+        switch (status) {
+            case 'running': return 'text-blue-600 bg-blue-50 border-blue-100';
+            case 'idle': return 'text-slate-500 bg-slate-50 border-slate-100';
+            case 'error': return 'text-red-600 bg-red-50 border-red-100';
+            default: return 'text-slate-400 bg-slate-50 border-slate-100';
+        }
+    };
 
     return (
         <div className="flex-1 p-6 md:p-12 overflow-y-auto bg-slate-50 relative pb-24 md:pb-12">
             <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '30px 30px' }}></div>
             <div className="max-w-6xl mx-auto relative z-10">
                 <div className="text-center mb-10 md:mb-16">
-                    <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">Agent Swarm Presets</h1>
-                    <p className="text-sm md:text-base text-slate-500 max-w-2xl mx-auto">Select a pre-configured architecture to jumpstart your workflow. Optimized hierarchies for specialized development teams.</p>
+                    <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">Agents</h1>
+                    <p className="text-sm md:text-base text-slate-500 max-w-2xl mx-auto">Active AI agents in your workspace</p>
                 </div>
+                {loading ? <LoadingSkeleton variant="card" count={4} /> :
+                 error ? <ErrorState message={error.message} onRetry={refetch} /> :
+                 agentList.length === 0 ? (
+                    <EmptyState icon={<Users size={48} />} title="No agents" description="No agents are currently active" />
+                 ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-                    {presets.map((preset, i) => (
-                        <div key={i} className="bg-white/70 backdrop-blur-md border border-white p-6 md:p-8 rounded-[32px] shadow-xl shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 group relative overflow-hidden">
-                            <div className="flex justify-between items-start mb-6">
-                                <div className="flex -space-x-3">
-                                    {preset.avatars.map((bg, idx) => (
-                                        <div key={idx} className={`size-10 rounded-full border-2 border-white shadow-sm ${bg}`}></div>
-                                    ))}
+                    {agentList.map(agent => {
+                        const color = getRoleColor(agent.role);
+                        return (
+                            <div key={agent.id} className="bg-white/70 backdrop-blur-md border border-white p-6 md:p-8 rounded-[32px] shadow-xl shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 group relative overflow-hidden">
+                                <div className="flex justify-between items-start mb-6">
+                                    <div className={`size-10 rounded-full bg-${color}-200 flex items-center justify-center text-${color}-700 font-bold text-sm`}>
+                                        {agent.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <span className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full border ${getStatusBadge(agent.status)}`}>
+                                        {agent.status}
+                                    </span>
                                 </div>
-                                <span className={`px-3 py-1 bg-${preset.color}-50 text-${preset.color}-600 text-[10px] font-bold uppercase tracking-widest rounded-full`}>
-                                    {preset.count} Agents
-                                </span>
+                                <h3 className="text-xl font-bold text-slate-800 mb-2">{agent.name}</h3>
+                                <p className="text-sm text-slate-500 mb-4">{agent.model} • {agent.role}</p>
+                                <div className="flex gap-4 text-xs text-slate-400">
+                                    <span>{agent.task_count} tasks</span>
+                                    <span>{agent.tokens_used.toLocaleString()} tokens</span>
+                                    {agent.error_count > 0 && <span className="text-red-400">{agent.error_count} errors</span>}
+                                </div>
                             </div>
-                            <h3 className="text-xl font-bold text-slate-800 mb-2">{preset.title}</h3>
-                            <p className="text-sm text-slate-500 mb-8 h-10">{preset.description}</p>
-                            <div className="flex gap-2">
-                                {preset.tags.map(tag => (
-                                    <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 text-[10px] font-bold rounded-md">{tag}</span>
-                                ))}
-                            </div>
-                            <div className="absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                <button 
-                                    onClick={() => handleUsePreset(preset.title)}
-                                    className="px-8 py-3 bg-indigo-600 text-white rounded-full font-bold shadow-xl shadow-indigo-200 hover:scale-105 transition-transform"
-                                >
-                                    Use Preset
-                                </button>
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
+                 )}
             </div>
         </div>
     );
