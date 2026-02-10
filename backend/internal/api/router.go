@@ -2,6 +2,9 @@
 package api
 
 import (
+	"fmt"
+	"net"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
@@ -219,6 +222,19 @@ func (s *Server) setupRoutes() {
 			plans.DELETE("/:id/tasks/:tid", handlers.DeletePlanTask)
 		}
 
+		// Project routes
+		projects := v1.Group("/projects")
+		{
+			projects.GET("", handlers.GetProjects)
+			projects.POST("", handlers.CreateProject)
+			projects.GET("/:id", handlers.GetProject)
+			projects.PUT("/:id", handlers.UpdateProject)
+			projects.DELETE("/:id", handlers.DeleteProject)
+			projects.GET("/:id/plans", handlers.GetProjectPlans)
+			projects.POST("/:id/plans", handlers.AddPlanToProject)
+			projects.DELETE("/:id/plans/:planId", handlers.RemovePlanFromProject)
+		}
+
 		// Summarize routes
 		summarizeGroup := v1.Group("/summarize")
 		{
@@ -314,8 +330,27 @@ func (s *Server) setupRoutes() {
 }
 
 // Run starts the API server.
+// If port is "0", it binds to a random available port and prints the actual port to stdout.
 func (s *Server) Run() error {
-	return s.router.Run(":" + s.config.Port)
+	addr := ":" + s.config.Port
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		// If the configured port is occupied, try port 0 (random)
+		if s.config.Port != "0" {
+			listener, err = net.Listen("tcp", ":0")
+			if err != nil {
+				return fmt.Errorf("failed to bind to any port: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		}
+	}
+
+	// Extract actual port and emit for Tauri sidecar protocol
+	actualPort := listener.Addr().(*net.TCPAddr).Port
+	fmt.Printf("CODEFLOW_PORT:%d\n", actualPort)
+
+	return s.router.RunListener(listener)
 }
 
 // Router returns the underlying gin router for testing.
