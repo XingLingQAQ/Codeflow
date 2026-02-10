@@ -17,3 +17,4 @@ export * from './isolation/index.js';
 export * from './privacy/index.js';
 export * from './audit/index.js';
 export * from './cowork/index.js';
+export * from './shadow/index.js';

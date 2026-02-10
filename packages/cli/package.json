@@ -1,0 +1,24 @@
+{
+  "name": "@codeflow/cli",
+  "version": "0.1.0",
+  "description": "CodeFlow CLI 工具",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "codeflow": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "codeflow",
+    "cli"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@codeflow/core": "workspace:*",
+    "commander": "^13.1.0"
+  }
+}
