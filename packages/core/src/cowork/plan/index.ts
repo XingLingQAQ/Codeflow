@@ -12,3 +12,4 @@ export * from './ArtifactGenerators.js';
 export * from './ArchitectPhase.js';
 export * from './ExecutionLoop.js';
 export * from './GodCommittee.js';
+export * from './MemoryShadowIntegration.js';

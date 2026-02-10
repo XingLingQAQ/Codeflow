@@ -80,12 +80,61 @@ export interface IHookManager {
 
   // 记忆检索 Hooks
   hook_on_user_input_submitted(input: string): Promise<MemoryMatch[]>;
+
+  // 任务级 Hooks（Plan 模式集成）
+  hook_before_task_execute(context: TaskExecutionContext): Promise<void>;
+  hook_after_task_execute(result: TaskExecutionResult): Promise<void>;
+  hook_on_task_failure(context: TaskFailureContext): Promise<void>;
+  hook_on_task_complete(result: TaskExecutionResult): Promise<void>;
 }
 
 /**
  * Hook 处理函数类型
  */
 export type HookHandler<T = unknown, R = void> = (data: T) => Promise<R> | R;
+
+/**
+ * 任务执行上下文（用于 task-level hooks）
+ */
+export interface TaskExecutionContext {
+  taskId: string;
+  planId: string;
+  title: string;
+  description: string;
+  files?: string[];
+  sessionId: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * 任务执行结果（用于 hook_after_task_execute / hook_on_task_complete）
+ */
+export interface TaskExecutionResult {
+  taskId: string;
+  planId: string;
+  title: string;
+  status: 'completed' | 'failed';
+  filesModified?: string[];
+  output?: string;
+  error?: string;
+  durationMs?: number;
+  sessionId: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * 任务失败上下文（用于 hook_on_task_failure）
+ */
+export interface TaskFailureContext {
+  taskId: string;
+  planId: string;
+  title: string;
+  error: string;
+  phase?: string;
+  filesModified?: string[];
+  sessionId: string;
+  metadata?: Record<string, unknown>;
+}
 
 /**
  * Hook 事件类型枚举
@@ -99,4 +148,8 @@ export enum HookEvent {
   AFTER_EXEC = 'after_exec',
   RESTORE_STATE = 'restore_state',
   USER_INPUT_SUBMITTED = 'user_input_submitted',
+  BEFORE_TASK_EXECUTE = 'before_task_execute',
+  AFTER_TASK_EXECUTE = 'after_task_execute',
+  ON_TASK_FAILURE = 'on_task_failure',
+  ON_TASK_COMPLETE = 'on_task_complete',
 }
