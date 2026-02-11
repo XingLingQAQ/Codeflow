@@ -3,6 +3,8 @@ package samg
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -17,7 +19,11 @@ type ISAMGService interface {
 
 	// 增量提取
 	ExtractFromMessage(ctx context.Context, message string, source TripleSource) ([]Triple, error)
+	ExtractWithPointers(ctx context.Context, message string, source TripleSource, rawArchiveID string) ([]Triple, error)
 	TriggerIncrementalExtraction(ctx context.Context, sessionID string, messageIndex int, content string) error
+
+	// 查询
+	QueryMemory(ctx context.Context, req QueryMemoryRequest) (*QueryMemoryResponse, error)
 
 	// 扩展激活
 	Activate(ctx context.Context, sourceIDs []string) (*ActivationResult, error)
@@ -34,6 +40,10 @@ type ISAMGService interface {
 	ExportGraph(ctx context.Context) (*JsonLdGraph, error)
 	ImportGraph(ctx context.Context, graph *JsonLdGraph) error
 	GetStats(ctx context.Context) (*SAMGStats, error)
+
+	// 指针操作
+	GetNodePointers(ctx context.Context, nodeID string) ([]Pointer, error)
+	AddNodePointer(ctx context.Context, nodeID string, ptr Pointer) error
 
 	// 配置
 	GetActivationConfig() ActivationConfig
@@ -353,4 +363,198 @@ func (s *SAMGService) StartAutoDecay(ctx context.Context, interval time.Duration
 			}
 		}
 	}()
+}
+
+// ExtractWithPointers 提取三元组并绑定 Raw Archive 指针。
+func (s *SAMGService) ExtractWithPointers(ctx context.Context, message string, source TripleSource, rawArchiveID string) ([]Triple, error) {
+	triples, err := s.extractor.Extract(ctx, message, source)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(triples) == 0 {
+		return triples, nil
+	}
+
+	// 添加到存储
+	if err := s.store.Add(ctx, triples); err != nil {
+		return triples, err
+	}
+
+	// 为每个三元组的 Subject/Object 节点挂载指针
+	summary := message
+	if len(summary) > 100 {
+		summary = summary[:100]
+	}
+
+	for _, triple := range triples {
+		ptr := Pointer{
+			SourceID:   rawArchiveID,
+			SourceType: string(source.ExtractionMethod),
+			Summary:    summary,
+			Timestamp:  time.Now().UnixMilli(),
+			Relevance:  triple.Confidence,
+		}
+
+		s.store.AppendPointer(ctx, triple.Subject.ID, ptr)
+		if triple.Object.Node != nil {
+			s.store.AppendPointer(ctx, triple.Object.Node.ID, ptr)
+		}
+
+		// 记录访问以更新 BLA
+		s.decay.RecordAccess(ctx, triple.Subject.ID)
+		if triple.Object.Node != nil {
+			s.decay.RecordAccess(ctx, triple.Object.Node.ID)
+		}
+	}
+
+	// 触发回调
+	s.mu.RLock()
+	callback := s.onExtractComplete
+	s.mu.RUnlock()
+	if callback != nil {
+		callback(ctx, triples)
+	}
+
+	return triples, nil
+}
+
+// QueryMemory 通过 SAMG 神经索引查询相关记忆。
+func (s *SAMGService) QueryMemory(ctx context.Context, req QueryMemoryRequest) (*QueryMemoryResponse, error) {
+	if req.MaxResults <= 0 {
+		req.MaxResults = 10
+	}
+
+	// Step 1: 找到种子节点
+	seedIDs := s.findSeedNodes(ctx, req.Topic)
+	if len(seedIDs) == 0 {
+		return &QueryMemoryResponse{
+			ActivatedNodes: []QueryMemoryNode{},
+			ContextBlock:   "",
+		}, nil
+	}
+
+	// Step 2: 扩散激活
+	result, err := s.activation.Activate(ctx, seedIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 3: BLA 过滤 + 构建 QueryMemoryNode
+	var nodes []QueryMemoryNode
+	for _, na := range result.ActivatedNodes {
+		if req.MinBLA > 0 {
+			decayNode, exists := s.decay.GetNodeActivation(na.ID)
+			if exists && decayNode.Activation < req.MinBLA {
+				continue
+			}
+		}
+
+		node := QueryMemoryNode{
+			ID:         na.ID,
+			Label:      na.Label,
+			Activation: na.Activation,
+			Hop:        na.Hop,
+		}
+
+		// 获取 label
+		entity, _ := s.store.GetEntity(ctx, na.ID)
+		if entity != nil {
+			node.Label = entity.Label
+		}
+
+		// Step 4: 指针解析
+		if req.ResolvePointers && entity != nil {
+			for _, ptr := range entity.Pointers {
+				rp := ResolvedPointer{Pointer: ptr}
+				// 注意：实际的 ResolvedContent 需要调用 Raw Archive，
+				// 这里只返回指针信息，由上层 MemoryAgent 负责解析
+				node.Pointers = append(node.Pointers, rp)
+			}
+		}
+
+		nodes = append(nodes, node)
+		if len(nodes) >= req.MaxResults {
+			break
+		}
+	}
+
+	// Step 5: 构造上下文块
+	contextBlock := s.buildContextBlock(nodes)
+
+	return &QueryMemoryResponse{
+		ActivatedNodes: nodes,
+		ContextBlock:   contextBlock,
+	}, nil
+}
+
+// GetNodePointers 获取节点的所有指针。
+func (s *SAMGService) GetNodePointers(ctx context.Context, nodeID string) ([]Pointer, error) {
+	return s.store.GetPointers(ctx, nodeID)
+}
+
+// AddNodePointer 手动添加指针到节点。
+func (s *SAMGService) AddNodePointer(ctx context.Context, nodeID string, ptr Pointer) error {
+	return s.store.AppendPointer(ctx, nodeID, ptr)
+}
+
+// findSeedNodes 从 topic 找到种子节点 ID。
+func (s *SAMGService) findSeedNodes(ctx context.Context, topic string) []string {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return nil
+	}
+
+	entities, _ := s.store.GetEntities(ctx)
+	var seeds []string
+
+	topicLower := strings.ToLower(topic)
+	words := strings.Fields(topicLower)
+
+	for _, entity := range entities {
+		labelLower := strings.ToLower(entity.Label)
+		// 精确匹配
+		if labelLower == topicLower {
+			seeds = append(seeds, entity.ID)
+			continue
+		}
+		// 关键词匹配
+		for _, word := range words {
+			if strings.Contains(labelLower, word) {
+				seeds = append(seeds, entity.ID)
+				break
+			}
+		}
+		// 别名匹配
+		for _, alias := range entity.Aliases {
+			if strings.Contains(strings.ToLower(alias), topicLower) {
+				seeds = append(seeds, entity.ID)
+				break
+			}
+		}
+	}
+
+	return seeds
+}
+
+// buildContextBlock 从激活节点构建上下文文本块。
+func (s *SAMGService) buildContextBlock(nodes []QueryMemoryNode) string {
+	if len(nodes) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## 相关记忆\n\n")
+
+	for _, node := range nodes {
+		sb.WriteString(fmt.Sprintf("### %s (关联度: %.2f)\n", node.Label, node.Activation))
+		if len(node.Pointers) > 0 {
+			for _, ptr := range node.Pointers {
+				sb.WriteString(fmt.Sprintf("- [%s] %s\n", ptr.SourceType, ptr.Summary))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }

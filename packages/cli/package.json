@@ -20,5 +20,8 @@
   "dependencies": {
     "@codeflow/core": "workspace:*",
     "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3"
   }
 }

@@ -61,8 +61,14 @@ export declare class ClaudeAdapter implements ICliAdapter {
      */
     private handleError;
     /**
-     * 估算 Token 数量（简单实现）
+     * 估算 Token 数量
+     * 使用改进的启发式算法，考虑不同语言和内容类型
      */
     private estimateTokens;
+    /**
+     * 估算单个内容的 Token 数量
+     * 基于 Claude tokenizer 的特性进行估算
+     */
+    private estimateContentTokens;
 }
 //# sourceMappingURL=ClaudeAdapter.d.ts.map

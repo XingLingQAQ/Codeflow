@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE } from '../api';
+import { getApiBase } from '../api';
 
 export interface ConnectionStatusProps {
   /** Polling interval in ms (default: 15000) */
@@ -15,7 +15,7 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ interval = 1
 
     const check = async () => {
       try {
-        const res = await fetch(`${API_BASE}/health`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+        const res = await fetch(`${getApiBase()}/health`, { method: 'GET', signal: AbortSignal.timeout(5000) });
         if (mounted) setOnline(res.ok);
       } catch {
         if (mounted) setOnline(false);

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { IHookManager, RequestPayload, AIResponse, StreamChunk, Context, DecisionSkeleton, Message, ExecResult, SnapshotID, MemoryMatch, HookEvent, HookHandler } from './types.js';
+import { IHookManager, RequestPayload, AIResponse, StreamChunk, Context, DecisionSkeleton, Message, ExecResult, SnapshotID, MemoryMatch, HookEvent, HookHandler, TaskExecutionContext, TaskExecutionResult, TaskFailureContext } from './types.js';
 /**
  * Hook Bus 事件系统实现
  * 基于 EventEmitter 的事件订阅/发布机制
@@ -52,6 +52,22 @@ export declare class HookManager extends EventEmitter implements IHookManager {
      * 记忆检索 Hook: 用户输入提交时触发
      */
     hook_on_user_input_submitted(input: string): Promise<MemoryMatch[]>;
+    /**
+     * 任务级 Hook: 任务执行前（加载意图文档、相关记忆）
+     */
+    hook_before_task_execute(context: TaskExecutionContext): Promise<void>;
+    /**
+     * 任务级 Hook: 任务执行后（存储原子记忆）
+     */
+    hook_after_task_execute(result: TaskExecutionResult): Promise<void>;
+    /**
+     * 任务级 Hook: 任务失败时（检索历史修复方案）
+     */
+    hook_on_task_failure(context: TaskFailureContext): Promise<void>;
+    /**
+     * 任务级 Hook: 任务完成后（更新用户画像、同步意图文档）
+     */
+    hook_on_task_complete(result: TaskExecutionResult): Promise<void>;
     /**
      * 清理所有处理器
      */

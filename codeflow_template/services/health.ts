@@ -1,6 +1,5 @@
-import { get } from '../api';
-import { API_BASE } from '../api';
+import { get, getApiBase } from '../api';
 
 export function healthCheck(signal?: AbortSignal) {
-  return get<{ status: string }>(`${API_BASE}/health`, undefined, signal);
+  return get<{ status: string }>(`${getApiBase()}/health`, undefined, signal);
 }

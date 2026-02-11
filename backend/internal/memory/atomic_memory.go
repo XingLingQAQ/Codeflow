@@ -19,18 +19,33 @@ const (
 	AtomicMemorySourceSystem    AtomicMemorySource = "system"
 )
 
+// MemoryTier 记忆层级（替代 STM/LTM 二分法）。
+type MemoryTier string
+
+const (
+	MemoryTierHot  MemoryTier = "hot"  // 高频活跃（≈ STM Active）
+	MemoryTierWarm MemoryTier = "warm" // 中频（≈ LTM Active）
+	MemoryTierCold MemoryTier = "cold" // 低频归档（≈ Archived）
+)
+
+// HeatHalfLifeDays Heat 半衰期（天）。
+const HeatHalfLifeDays = 7
+
 // AtomicMemory 原子记忆数据结构
 // 设计目标：细粒度、可检索、可向量化。
 type AtomicMemory struct {
-	ID        string             `json:"id"`
-	Timestamp int64              `json:"timestamp"`
-	Content   string             `json:"content"`
-	Tags      []string           `json:"tags"`
-	SessionID string             `json:"session_id"`
-	FolderID  *string            `json:"folder_id,omitempty"`
-	Source    AtomicMemorySource `json:"source"`
-	Importance float64           `json:"importance"`
-	Embedding []float64          `json:"embedding,omitempty"`
+	ID         string             `json:"id"`
+	Timestamp  int64              `json:"timestamp"`
+	Content    string             `json:"content"`
+	Tags       []string           `json:"tags"`
+	SessionID  string             `json:"session_id"`
+	FolderID   *string            `json:"folder_id,omitempty"`
+	Source     AtomicMemorySource `json:"source"`
+	Importance float64            `json:"importance"`
+	Embedding  []float64          `json:"embedding,omitempty"`
+	Tier       MemoryTier         `json:"tier"`
+	Heat       float64            `json:"heat"`
+	Surprise   float64            `json:"surprise"`
 }
 
 // AtomicMemorySearchOptions 原子记忆检索选项。
@@ -58,6 +73,9 @@ CREATE TABLE IF NOT EXISTS atomic_memories (
   importance REAL NOT NULL CHECK (importance >= 0 AND importance <= 1),
   embedding_json TEXT,
   vector_dim INTEGER NOT NULL DEFAULT 0,
+  tier TEXT NOT NULL DEFAULT 'hot' CHECK (tier IN ('hot', 'warm', 'cold')),
+  heat REAL NOT NULL DEFAULT 1.0,
+  surprise REAL NOT NULL DEFAULT 0.5,
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
   updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
@@ -70,6 +88,12 @@ CREATE INDEX IF NOT EXISTS idx_atomic_memories_source_time
 
 CREATE INDEX IF NOT EXISTS idx_atomic_memories_folder_time
   ON atomic_memories(folder_id, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_atomic_memories_tier
+  ON atomic_memories(tier);
+
+CREATE INDEX IF NOT EXISTS idx_atomic_memories_heat
+  ON atomic_memories(heat DESC);
 `
 
 // EnsureAtomicMemorySchema 初始化/迁移原子记忆表结构。
@@ -80,6 +104,16 @@ func EnsureAtomicMemorySchema(ctx context.Context, db *sql.DB) error {
 
 	if _, err := db.ExecContext(ctx, CreateAtomicMemoriesTableSQL); err != nil {
 		return fmt.Errorf("create atomic memory schema: %w", err)
+	}
+
+	// 迁移：为旧表添加 tier/heat/surprise 列（如果不存在）
+	migrations := []string{
+		`ALTER TABLE atomic_memories ADD COLUMN tier TEXT NOT NULL DEFAULT 'hot' CHECK (tier IN ('hot', 'warm', 'cold'))`,
+		`ALTER TABLE atomic_memories ADD COLUMN heat REAL NOT NULL DEFAULT 1.0`,
+		`ALTER TABLE atomic_memories ADD COLUMN surprise REAL NOT NULL DEFAULT 0.5`,
+	}
+	for _, m := range migrations {
+		db.ExecContext(ctx, m) // 忽略 "duplicate column" 错误
 	}
 
 	return nil

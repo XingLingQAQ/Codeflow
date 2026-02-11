@@ -14,5 +14,9 @@ export var HookEvent;
     HookEvent["AFTER_EXEC"] = "after_exec";
     HookEvent["RESTORE_STATE"] = "restore_state";
     HookEvent["USER_INPUT_SUBMITTED"] = "user_input_submitted";
+    HookEvent["BEFORE_TASK_EXECUTE"] = "before_task_execute";
+    HookEvent["AFTER_TASK_EXECUTE"] = "after_task_execute";
+    HookEvent["ON_TASK_FAILURE"] = "on_task_failure";
+    HookEvent["ON_TASK_COMPLETE"] = "on_task_complete";
 })(HookEvent || (HookEvent = {}));
 //# sourceMappingURL=types.js.map

@@ -4,16 +4,18 @@
  */
 import { EventEmitter } from 'events';
 import { CLIProcessManager } from './process/CLIProcessManager.js';
+import { GitConflictDetector } from './GitConflictDetector.js';
 /**
  * Cowork Orchestrator
  */
 export class CoworkOrchestrator extends EventEmitter {
-    constructor(processManager) {
+    constructor(processManager, cwd) {
         super();
         this.executors = new Map();
         this.blackboard = new Map();
         this.runningTasks = new Map();
         this.processManager = processManager || new CLIProcessManager();
+        this.gitConflictDetector = new GitConflictDetector({ cwd });
     }
     /**
      * 注册执行器
@@ -187,6 +189,21 @@ export class CoworkOrchestrator extends EventEmitter {
                 }
             }
         }
+        // 执行后检测 diff 冲突
+        const allDiffs = [];
+        for (const result of results) {
+            if (result.status === 'completed' && result.output?.diffs) {
+                allDiffs.push(...result.output.diffs);
+            }
+        }
+        // 检测 diff 之间的冲突
+        const diffConflicts = this.gitConflictDetector.detectMultipleDiffConflicts(allDiffs);
+        for (const conflict of diffConflicts) {
+            if (!conflicts.some((c) => c.file === conflict.file)) {
+                conflicts.push(conflict);
+                this.emitEvent({ type: 'conflict:detected', conflict });
+            }
+        }
         return {
             mode: 'parallel',
             results,
@@ -201,10 +218,24 @@ export class CoworkOrchestrator extends EventEmitter {
      */
     async executeSequence(tasks, options = {}) {
         const startTime = Date.now();
-        const { stopOnError = true, passContext = true } = options;
+        const { stopOnError = true, passContext = true, signal, onBeforeTask, onAfterTask } = options;
         const results = [];
+        let interrupted = false;
         for (let i = 0; i < tasks.length; i++) {
             const task = tasks[i];
+            // 检查中断信号
+            if (signal?.aborted) {
+                interrupted = true;
+                break;
+            }
+            // 执行前回调
+            if (onBeforeTask) {
+                const shouldContinue = await onBeforeTask(task, i);
+                if (!shouldContinue) {
+                    interrupted = true;
+                    break;
+                }
+            }
             // 传递上下文
             if (passContext && i > 0) {
                 const prevResult = results[i - 1];
@@ -224,6 +255,15 @@ export class CoworkOrchestrator extends EventEmitter {
             });
             const result = await this.execute(task);
             results.push(result);
+            // 执行后回调
+            if (onAfterTask) {
+                await onAfterTask(task, result, i);
+            }
+            // 再次检查中断信号
+            if (signal?.aborted) {
+                interrupted = true;
+                break;
+            }
             if (stopOnError && result.status === 'failed') {
                 break;
             }
@@ -234,6 +274,7 @@ export class CoworkOrchestrator extends EventEmitter {
             totalDuration: Date.now() - startTime,
             successCount: results.filter((r) => r.status === 'completed').length,
             failureCount: results.filter((r) => r.status === 'failed').length,
+            interrupted,
         };
     }
     /**
@@ -241,11 +282,12 @@ export class CoworkOrchestrator extends EventEmitter {
      */
     async executeDebate(task, options) {
         const startTime = Date.now();
-        const { maxRounds = 3, convergenceThreshold = 0.8, generator, critic } = options;
+        const { maxRounds = 3, convergenceThreshold = 0.8, generator, critic, signal, onRound, checkConvergence, minAgreementScore = 0.8, } = options;
         const rounds = [];
         let converged = false;
         let finalOutput;
         let finalDiffs;
+        let interrupted = false;
         // 获取执行器
         const generatorExecutor = this.executors.get(generator);
         const criticExecutor = this.executors.get(critic);
@@ -261,7 +303,12 @@ export class CoworkOrchestrator extends EventEmitter {
             };
         }
         let currentInstruction = task.input.instruction;
-        for (let round = 1; round <= maxRounds && !converged; round++) {
+        for (let round = 1; round <= maxRounds && !converged && !interrupted; round++) {
+            // 检查中断信号
+            if (signal?.aborted) {
+                interrupted = true;
+                break;
+            }
             // Generator 生成
             const generatorTask = {
                 ...task,
@@ -275,6 +322,11 @@ export class CoworkOrchestrator extends EventEmitter {
             const genResult = await this.execute(generatorTask);
             const genOutput = genResult.output?.result || '';
             const genDiffs = genResult.output?.diffs || [];
+            // 检查中断信号
+            if (signal?.aborted) {
+                interrupted = true;
+                break;
+            }
             // Critic 评审
             const criticTask = {
                 ...task,
@@ -302,10 +354,21 @@ export class CoworkOrchestrator extends EventEmitter {
                     issues,
                 },
             };
-            // 检查收敛
-            const criticalIssues = issues.filter((i) => i.severity === 'critical' || i.severity === 'high');
-            if (criticalIssues.length === 0) {
-                converged = true;
+            // 检查收敛（使用自定义检查器或默认逻辑）
+            if (checkConvergence) {
+                converged = checkConvergence(debateRound, rounds);
+            }
+            else {
+                // 默认收敛逻辑：无严重问题
+                const criticalIssues = issues.filter((i) => i.severity === 'critical' || i.severity === 'high');
+                // 计算一致性分数
+                const totalIssues = issues.length;
+                const agreementScore = totalIssues === 0 ? 1 : 1 - criticalIssues.length / totalIssues;
+                if (criticalIssues.length === 0 || agreementScore >= minAgreementScore) {
+                    converged = true;
+                }
+            }
+            if (converged) {
                 finalOutput = genOutput;
                 finalDiffs = genDiffs;
                 debateRound.refined = { output: genOutput, diffs: genDiffs };
@@ -316,6 +379,10 @@ export class CoworkOrchestrator extends EventEmitter {
             }
             rounds.push(debateRound);
             this.emitEvent({ type: 'debate:round', round: debateRound });
+            // 执行回调
+            if (onRound) {
+                await onRound(debateRound);
+            }
         }
         return {
             mode: 'debate',
@@ -327,6 +394,7 @@ export class CoworkOrchestrator extends EventEmitter {
             converged,
             finalOutput,
             finalDiffs,
+            interrupted,
         };
     }
     /**
@@ -375,6 +443,12 @@ export class CoworkOrchestrator extends EventEmitter {
         return this.processManager;
     }
     /**
+     * 获取 Git 冲突检测器
+     */
+    getGitConflictDetector() {
+        return this.gitConflictDetector;
+    }
+    /**
      * 清理资源
      */
     async cleanup() {
@@ -404,41 +478,161 @@ export class CoworkOrchestrator extends EventEmitter {
         return parts.join('\n\n');
     }
     parseIssues(criticOutput) {
-        // 简单解析 - 实际实现可以更复杂
         const issues = [];
         const lines = criticOutput.split('\n');
+        // 正则模式匹配常见的问题格式
+        const issuePatterns = [
+            // 匹配 "- [severity] description" 或 "* [severity] description" 格式
+            /^[\-\*]\s*\[?(critical|high|medium|low)\]?\s*[:\-]?\s*(.+)/i,
+            // 匹配 "Issue: description" 或 "Bug: description" 格式
+            /^(bug|error|issue|security|vulnerability|performance|style|warning)\s*[:\-]\s*(.+)/i,
+            // 匹配 "Line X: description" 格式
+            /^line\s*(\d+)\s*[:\-]\s*(.+)/i,
+        ];
         for (const line of lines) {
-            const lowerLine = line.toLowerCase();
-            if (lowerLine.includes('bug') || lowerLine.includes('error')) {
-                issues.push({
-                    type: 'bug',
-                    severity: lowerLine.includes('critical') ? 'critical' : 'medium',
-                    description: line.trim(),
-                });
+            const trimmedLine = line.trim();
+            if (!trimmedLine || trimmedLine.length < 5)
+                continue;
+            const lowerLine = trimmedLine.toLowerCase();
+            let issue = null;
+            // 尝试匹配结构化格式
+            for (const pattern of issuePatterns) {
+                const match = trimmedLine.match(pattern);
+                if (match) {
+                    const [, typeOrSeverity, description] = match;
+                    const lower = typeOrSeverity.toLowerCase();
+                    // 判断是严重性还是类型
+                    if (['critical', 'high', 'medium', 'low'].includes(lower)) {
+                        issue = {
+                            type: this.inferIssueType(description),
+                            severity: lower,
+                            description: description.trim(),
+                        };
+                    }
+                    else {
+                        issue = {
+                            type: this.mapToIssueType(lower),
+                            severity: this.inferSeverity(lower, description),
+                            description: description.trim(),
+                        };
+                    }
+                    break;
+                }
             }
-            else if (lowerLine.includes('security') || lowerLine.includes('vulnerability')) {
-                issues.push({
-                    type: 'security',
-                    severity: 'high',
-                    description: line.trim(),
-                });
+            // 如果没有匹配结构化格式，使用关键词检测
+            if (!issue) {
+                if (lowerLine.includes('critical') || lowerLine.includes('severe')) {
+                    issue = {
+                        type: this.inferIssueType(trimmedLine),
+                        severity: 'critical',
+                        description: trimmedLine,
+                    };
+                }
+                else if (lowerLine.includes('bug') || lowerLine.includes('error') || lowerLine.includes('crash')) {
+                    issue = {
+                        type: 'bug',
+                        severity: lowerLine.includes('critical') ? 'critical' : 'medium',
+                        description: trimmedLine,
+                    };
+                }
+                else if (lowerLine.includes('security') || lowerLine.includes('vulnerability') || lowerLine.includes('injection') || lowerLine.includes('xss')) {
+                    issue = {
+                        type: 'security',
+                        severity: 'high',
+                        description: trimmedLine,
+                    };
+                }
+                else if (lowerLine.includes('performance') || lowerLine.includes('slow') || lowerLine.includes('memory leak') || lowerLine.includes('inefficient')) {
+                    issue = {
+                        type: 'performance',
+                        severity: 'medium',
+                        description: trimmedLine,
+                    };
+                }
+                else if (lowerLine.includes('style') || lowerLine.includes('format') || lowerLine.includes('naming') || lowerLine.includes('convention')) {
+                    issue = {
+                        type: 'style',
+                        severity: 'low',
+                        description: trimmedLine,
+                    };
+                }
+                else if (lowerLine.includes('logic') || lowerLine.includes('incorrect') || lowerLine.includes('wrong')) {
+                    issue = {
+                        type: 'logic',
+                        severity: 'medium',
+                        description: trimmedLine,
+                    };
+                }
             }
-            else if (lowerLine.includes('performance') || lowerLine.includes('slow')) {
-                issues.push({
-                    type: 'performance',
-                    severity: 'medium',
-                    description: line.trim(),
-                });
-            }
-            else if (lowerLine.includes('style') || lowerLine.includes('format')) {
-                issues.push({
-                    type: 'style',
-                    severity: 'low',
-                    description: line.trim(),
-                });
+            if (issue) {
+                // 尝试提取位置信息
+                const locationMatch = trimmedLine.match(/(?:line|L)?\s*(\d+)(?:\s*[:\-,]\s*(?:col(?:umn)?|C)?\s*(\d+))?/i);
+                if (locationMatch) {
+                    issue.location = {
+                        file: '',
+                        line: parseInt(locationMatch[1], 10),
+                    };
+                }
+                // 提取建议（如果有）
+                const suggestionMatch = trimmedLine.match(/(?:suggest(?:ion)?|fix|solution|recommend)\s*[:\-]\s*(.+)/i);
+                if (suggestionMatch) {
+                    issue.suggestion = suggestionMatch[1].trim();
+                }
+                issues.push(issue);
             }
         }
         return issues;
+    }
+    /**
+     * 根据描述推断问题类型
+     */
+    inferIssueType(description) {
+        const lower = description.toLowerCase();
+        if (lower.includes('security') || lower.includes('vulnerability'))
+            return 'security';
+        if (lower.includes('performance') || lower.includes('slow'))
+            return 'performance';
+        if (lower.includes('style') || lower.includes('format'))
+            return 'style';
+        if (lower.includes('logic') || lower.includes('incorrect'))
+            return 'logic';
+        return 'bug';
+    }
+    /**
+     * 将关键词映射到问题类型
+     */
+    mapToIssueType(keyword) {
+        const mapping = {
+            bug: 'bug',
+            error: 'bug',
+            issue: 'bug',
+            security: 'security',
+            vulnerability: 'security',
+            performance: 'performance',
+            style: 'style',
+            warning: 'bug',
+        };
+        return mapping[keyword] || 'bug';
+    }
+    /**
+     * 根据类型和描述推断严重性
+     */
+    inferSeverity(type, description) {
+        const lower = description.toLowerCase();
+        // 安全问题默认高严重性
+        if (type === 'security' || type === 'vulnerability')
+            return 'high';
+        // 检查描述中的严重性关键词
+        if (lower.includes('critical') || lower.includes('severe') || lower.includes('crash'))
+            return 'critical';
+        if (lower.includes('high') || lower.includes('important') || lower.includes('major'))
+            return 'high';
+        if (lower.includes('low') || lower.includes('minor') || lower.includes('trivial'))
+            return 'low';
+        // 样式问题默认低严重性
+        if (type === 'style')
+            return 'low';
+        return 'medium';
     }
     refineInstruction(original, issues) {
         const issueDescriptions = issues

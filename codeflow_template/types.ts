@@ -164,6 +164,37 @@ export interface MemoryItem {
   archived_at?: number;
 }
 
+// --- Atomic Memory (Unified STM/LTM) ---
+
+export type MemoryTier = 'hot' | 'warm' | 'cold';
+
+export interface AtomicMemory {
+  id: string;
+  timestamp: number;
+  content: string;
+  tags: string[];
+  session_id: string;
+  folder_id?: string;
+  source: 'user' | 'assistant' | 'system';
+  importance: number;
+  tier: MemoryTier;
+  heat: number;
+  surprise: number;
+}
+
+// --- Raw Archive ---
+
+export type RawEntryType = 'conversation' | 'code_diff' | 'document';
+
+export interface RawEntry {
+  id: string;
+  type: RawEntryType;
+  content: string;
+  metadata?: Record<string, unknown>;
+  timestamp: number;
+  session_id: string;
+}
+
 // --- SAMG (Semantic Graph) ---
 
 export interface MemoryNode {
@@ -200,8 +231,38 @@ export interface SAMGEntity {
   description?: string;
   properties?: Record<string, unknown>;
   aliases?: string[];
+  pointers?: SAMGPointer[];
   created_at: number;
   updated_at: number;
+}
+
+// --- SAMG Pointer System ---
+
+export interface SAMGPointer {
+  source_id: string;
+  source_type: string;
+  summary: string;
+  line_range?: string;
+  file_path?: string;
+  timestamp: number;
+  relevance: number;
+}
+
+export interface ResolvedPointer extends SAMGPointer {
+  resolved_content?: string;
+}
+
+export interface QueryMemoryNode {
+  id: string;
+  label: string;
+  activation: number;
+  hop: number;
+  pointers?: ResolvedPointer[];
+}
+
+export interface QueryMemoryResponse {
+  activated_nodes: QueryMemoryNode[];
+  context_block: string;
 }
 
 // --- Config ---

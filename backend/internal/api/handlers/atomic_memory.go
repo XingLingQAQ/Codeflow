@@ -27,6 +27,10 @@ type atomicMemoryService interface {
 	GetByID(ctx context.Context, id string) (*memory.AtomicMemory, error)
 	Update(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
 	Delete(ctx context.Context, id string) error
+	ApplyHeatDecay(ctx context.Context) (int, error)
+	RecomputeTiers(ctx context.Context) (int, error)
+	BoostHeat(ctx context.Context, id string, boost float64) error
+	SearchByTier(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error)
 }
 
 var (
@@ -204,7 +208,7 @@ func SearchAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	respondOK(c, items)
+	respondOK(c, gin.H{"memories": items, "count": len(items)})
 }
 
 // GetAtomicMemoriesBySession handles GET /api/v1/memory/atomic/session/:id.
@@ -247,7 +251,7 @@ func GetAtomicMemoriesBySession(c *gin.Context) {
 		return
 	}
 
-	respondOK(c, items)
+	respondOK(c, gin.H{"memories": items, "count": len(items)})
 }
 
 // UpdateAtomicMemory handles PUT /api/v1/memory/atomic/:id.
@@ -457,4 +461,95 @@ func splitAndTrim(input string) []string {
 		return nil
 	}
 	return result
+}
+
+// ApplyAtomicHeatDecay handles POST /api/v1/memory/atomic/decay
+func ApplyAtomicHeatDecay(c *gin.Context) {
+	svc, err := getAtomicMemoryService()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Service init failed: "+err.Error())
+		return
+	}
+
+	affected, err := svc.ApplyHeatDecay(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Apply decay failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"affected": affected})
+}
+
+// RecomputeAtomicTiers handles POST /api/v1/memory/atomic/recompute-tiers
+func RecomputeAtomicTiers(c *gin.Context) {
+	svc, err := getAtomicMemoryService()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Service init failed: "+err.Error())
+		return
+	}
+
+	affected, err := svc.RecomputeTiers(c.Request.Context())
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Recompute tiers failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"affected": affected})
+}
+
+// BoostAtomicHeat handles POST /api/v1/memory/atomic/:id/boost
+func BoostAtomicHeat(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		respondError(c, http.StatusBadRequest, "Missing memory ID")
+		return
+	}
+
+	var req struct {
+		Boost float64 `json:"boost"`
+	}
+	c.ShouldBindJSON(&req)
+
+	svc, err := getAtomicMemoryService()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Service init failed: "+err.Error())
+		return
+	}
+
+	if err := svc.BoostHeat(c.Request.Context(), id, req.Boost); err != nil {
+		respondError(c, http.StatusInternalServerError, "Boost failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"message": "heat boosted"})
+}
+
+// GetAtomicMemoriesByTier handles GET /api/v1/memory/atomic/tier/:tier
+func GetAtomicMemoriesByTier(c *gin.Context) {
+	tier := memory.MemoryTier(c.Param("tier"))
+	if tier != memory.MemoryTierHot && tier != memory.MemoryTierWarm && tier != memory.MemoryTierCold {
+		respondError(c, http.StatusBadRequest, "Invalid tier: must be hot, warm, or cold")
+		return
+	}
+
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+
+	svc, err := getAtomicMemoryService()
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Service init failed: "+err.Error())
+		return
+	}
+
+	memories, err := svc.SearchByTier(c.Request.Context(), tier, limit)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Search by tier failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"memories": memories, "count": len(memories), "tier": tier})
 }

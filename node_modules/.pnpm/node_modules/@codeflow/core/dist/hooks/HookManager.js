@@ -119,6 +119,30 @@ export class HookManager extends EventEmitter {
         return results || [];
     }
     /**
+     * 任务级 Hook: 任务执行前（加载意图文档、相关记忆）
+     */
+    async hook_before_task_execute(context) {
+        await this.executeHandlers(HookEvent.BEFORE_TASK_EXECUTE, context);
+    }
+    /**
+     * 任务级 Hook: 任务执行后（存储原子记忆）
+     */
+    async hook_after_task_execute(result) {
+        await this.executeHandlers(HookEvent.AFTER_TASK_EXECUTE, result);
+    }
+    /**
+     * 任务级 Hook: 任务失败时（检索历史修复方案）
+     */
+    async hook_on_task_failure(context) {
+        await this.executeHandlers(HookEvent.ON_TASK_FAILURE, context);
+    }
+    /**
+     * 任务级 Hook: 任务完成后（更新用户画像、同步意图文档）
+     */
+    async hook_on_task_complete(result) {
+        await this.executeHandlers(HookEvent.ON_TASK_COMPLETE, result);
+    }
+    /**
      * 清理所有处理器
      */
     clear() {

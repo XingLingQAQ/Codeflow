@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -351,6 +352,31 @@ func ApplyDecay(c *gin.Context) {
 	respondOK(c, gin.H{"decayed_nodes": decayed, "hidden_nodes": hidden})
 }
 
+// enrichNodeActivations maps NodeActivation list to SAMGEntity-compatible format
+// by looking up the full Entity from the store for each activation.
+func enrichNodeActivations(svc *samg.SAMGService, ctx context.Context, activations []samg.NodeActivation) []gin.H {
+	store := svc.GetStore()
+	result := make([]gin.H, 0, len(activations))
+	for _, na := range activations {
+		node := gin.H{
+			"@id":        na.NodeID,
+			"@type":      []string{na.Type},
+			"label":      na.Label,
+			"created_at": na.CreatedTime,
+			"updated_at": na.LastAccessTime,
+		}
+		// Try to enrich with full entity data (pointers, description, aliases)
+		if entity, err := store.GetEntity(ctx, na.NodeID); err == nil && entity != nil {
+			node["description"] = entity.Description
+			node["properties"] = entity.Properties
+			node["aliases"] = entity.Aliases
+			node["pointers"] = entity.Pointers
+		}
+		result = append(result, node)
+	}
+	return result
+}
+
 // GetVisibleNodes 获取可见节点
 // GET /api/v1/samg/nodes/visible
 func GetVisibleNodes(c *gin.Context) {
@@ -361,7 +387,8 @@ func GetVisibleNodes(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	nodes := svc.GetVisibleNodes(ctx)
+	activations := svc.GetVisibleNodes(ctx)
+	nodes := enrichNodeActivations(svc, ctx, activations)
 	respondOK(c, gin.H{"nodes": nodes, "count": len(nodes)})
 }
 
@@ -375,7 +402,8 @@ func GetHiddenNodes(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	nodes := svc.GetHiddenNodes(ctx)
+	activations := svc.GetHiddenNodes(ctx)
+	nodes := enrichNodeActivations(svc, ctx, activations)
 	respondOK(c, gin.H{"nodes": nodes, "count": len(nodes)})
 }
 
@@ -398,7 +426,8 @@ func GetTopNodes(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	nodes := svc.GetTopNodes(ctx, n)
+	activations := svc.GetTopNodes(ctx, n)
+	nodes := enrichNodeActivations(svc, ctx, activations)
 	respondOK(c, gin.H{"nodes": nodes, "count": len(nodes)})
 }
 
@@ -526,4 +555,141 @@ func GetSAMGStats(c *gin.Context) {
 	}
 
 	respondOK(c, stats)
+}
+
+// QueryMemory 通过 SAMG 神经索引查询相关记忆
+// POST /api/v1/samg/query-memory
+func QueryMemory(c *gin.Context) {
+	svc := samg.GetSAMGService()
+	if svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
+		return
+	}
+
+	var req samg.QueryMemoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		return
+	}
+
+	ctx := c.Request.Context()
+	result, err := svc.QueryMemory(ctx, req)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Query memory failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, result)
+}
+
+// GetNodePointers 获取节点的所有指针
+// GET /api/v1/samg/nodes/:id/pointers
+func GetNodePointers(c *gin.Context) {
+	svc := samg.GetSAMGService()
+	if svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
+		return
+	}
+
+	nodeID := c.Param("id")
+	if nodeID == "" {
+		respondError(c, http.StatusBadRequest, "Missing node ID")
+		return
+	}
+
+	ctx := c.Request.Context()
+	pointers, err := svc.GetNodePointers(ctx, nodeID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Get pointers failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"node_id": nodeID, "pointers": pointers, "count": len(pointers)})
+}
+
+// AddNodePointerRequest 添加指针请求
+type AddNodePointerRequest struct {
+	SourceID   string  `json:"source_id" binding:"required"`
+	SourceType string  `json:"source_type" binding:"required"`
+	Summary    string  `json:"summary"`
+	LineRange  string  `json:"line_range,omitempty"`
+	FilePath   string  `json:"file_path,omitempty"`
+	Relevance  float64 `json:"relevance"`
+}
+
+// AddNodePointer 手动添加指针到节点
+// POST /api/v1/samg/nodes/:id/pointers
+func AddNodePointer(c *gin.Context) {
+	svc := samg.GetSAMGService()
+	if svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
+		return
+	}
+
+	nodeID := c.Param("id")
+	if nodeID == "" {
+		respondError(c, http.StatusBadRequest, "Missing node ID")
+		return
+	}
+
+	var req AddNodePointerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		return
+	}
+
+	ptr := samg.Pointer{
+		SourceID:   req.SourceID,
+		SourceType: req.SourceType,
+		Summary:    req.Summary,
+		LineRange:  req.LineRange,
+		FilePath:   req.FilePath,
+		Relevance:  req.Relevance,
+	}
+
+	ctx := c.Request.Context()
+	if err := svc.AddNodePointer(ctx, nodeID, ptr); err != nil {
+		respondError(c, http.StatusInternalServerError, "Add pointer failed: "+err.Error())
+		return
+	}
+
+	respondCreated(c, gin.H{"message": "Pointer added"})
+}
+
+// ExtractWithPointers 提取三元组并绑定 Raw Archive 指针
+// POST /api/v1/samg/extract-with-pointers
+func ExtractWithPointers(c *gin.Context) {
+	svc := samg.GetSAMGService()
+	if svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "SAMG service not available")
+		return
+	}
+
+	var req struct {
+		Content       string `json:"content" binding:"required"`
+		SessionID     string `json:"session_id"`
+		MessageIndex  int    `json:"message_index"`
+		AgentRole     string `json:"agent_role"`
+		RawArchiveID  string `json:"raw_archive_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		return
+	}
+
+	source := samg.TripleSource{
+		SessionID:        req.SessionID,
+		MessageIndex:     req.MessageIndex,
+		AgentRole:        req.AgentRole,
+		ExtractionMethod: samg.ExtractionRule,
+	}
+
+	ctx := c.Request.Context()
+	triples, err := svc.ExtractWithPointers(ctx, req.Content, source, req.RawArchiveID)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "Extract failed: "+err.Error())
+		return
+	}
+
+	respondOK(c, gin.H{"triples": triples, "count": len(triples)})
 }

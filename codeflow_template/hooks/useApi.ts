@@ -67,6 +67,7 @@ export function useApi<T>(
   }, [doFetch]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };

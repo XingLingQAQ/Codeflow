@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -26,6 +27,9 @@ type AtomicMemoryUpdate struct {
 	Source        *AtomicMemorySource
 	Importance    *float64
 	Embedding     *[]float64
+	Tier          *MemoryTier
+	Heat          *float64
+	Surprise      *float64
 }
 
 // AtomicMemoryService 原子记忆服务。
@@ -74,6 +78,15 @@ func (s *AtomicMemoryService) Add(ctx context.Context, mem *AtomicMemory) error 
 	if mem.Timestamp <= 0 {
 		mem.Timestamp = time.Now().Unix()
 	}
+	if mem.Tier == "" {
+		mem.Tier = MemoryTierHot
+	}
+	if mem.Heat <= 0 {
+		mem.Heat = 1.0
+	}
+	if mem.Surprise <= 0 {
+		mem.Surprise = 0.5
+	}
 	if len(mem.Embedding) == 0 {
 		embedding, err := s.embeddingProvider.Embed(ctx, mem.Content)
 		if err != nil {
@@ -103,8 +116,8 @@ func (s *AtomicMemoryService) Add(ctx context.Context, mem *AtomicMemory) error 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO atomic_memories (
 			id, timestamp, content, tags_json, session_id, folder_id,
-			source, importance, embedding_json, vector_dim, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+			source, importance, embedding_json, vector_dim, tier, heat, surprise, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
 	`,
 		mem.ID,
 		mem.Timestamp,
@@ -116,6 +129,9 @@ func (s *AtomicMemoryService) Add(ctx context.Context, mem *AtomicMemory) error 
 		mem.Importance,
 		embeddingJSON,
 		len(mem.Embedding),
+		string(mem.Tier),
+		mem.Heat,
+		mem.Surprise,
 	)
 	if err != nil {
 		return fmt.Errorf("insert atomic memory: %w", err)
@@ -216,7 +232,7 @@ func (s *AtomicMemoryService) SearchByTimeRange(ctx context.Context, start, end 
 
 	ctx = ensureContext(ctx)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json
+		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json, tier, heat, surprise
 		FROM atomic_memories
 		WHERE timestamp >= ? AND timestamp <= ?
 		ORDER BY timestamp DESC
@@ -255,7 +271,7 @@ func (s *AtomicMemoryService) SearchByTags(ctx context.Context, tags []string) (
 	}
 
 	query := `
-		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json
+		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json, tier, heat, surprise
 		FROM atomic_memories
 		WHERE ` + strings.Join(clauses, " OR ") + `
 		ORDER BY timestamp DESC
@@ -289,7 +305,7 @@ func (s *AtomicMemoryService) GetBySession(ctx context.Context, sessionID string
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json
+		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json, tier, heat, surprise
 		FROM atomic_memories
 		WHERE session_id = ?
 		ORDER BY timestamp DESC
@@ -316,7 +332,7 @@ func (s *AtomicMemoryService) GetByID(ctx context.Context, id string) (*AtomicMe
 	}
 
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json
+		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json, tier, heat, surprise
 		FROM atomic_memories
 		WHERE id = ?
 	`, id)
@@ -380,6 +396,9 @@ func (s *AtomicMemoryService) Update(ctx context.Context, id string, updates *At
 			importance = ?,
 			embedding_json = ?,
 			vector_dim = ?,
+			tier = ?,
+			heat = ?,
+			surprise = ?,
 			updated_at = strftime('%s', 'now')
 		WHERE id = ?
 	`,
@@ -392,6 +411,9 @@ func (s *AtomicMemoryService) Update(ctx context.Context, id string, updates *At
 		current.Importance,
 		embeddingJSON,
 		len(current.Embedding),
+		string(current.Tier),
+		current.Heat,
+		current.Surprise,
 		current.ID,
 	)
 	if err != nil {
@@ -442,6 +464,156 @@ func (s *AtomicMemoryService) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// ApplyHeatDecay 对所有原子记忆执行 Heat 衰减。
+// Heat(t) = Heat(t-1) × 0.5^(Δt / HalfLife)
+func (s *AtomicMemoryService) ApplyHeatDecay(ctx context.Context) (int, error) {
+	if err := s.validateDependencies(); err != nil {
+		return 0, err
+	}
+	ctx = ensureContext(ctx)
+
+	halfLifeSeconds := float64(HeatHalfLifeDays * 24 * 3600)
+	now := time.Now().Unix()
+
+	// 读取所有 heat > 0.001 的记忆
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, heat, updated_at FROM atomic_memories WHERE heat > 0.001
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("query for decay: %w", err)
+	}
+	defer rows.Close()
+
+	type decayItem struct {
+		id      string
+		newHeat float64
+	}
+	var items []decayItem
+
+	for rows.Next() {
+		var id string
+		var heat float64
+		var updatedAt int64
+		if err := rows.Scan(&id, &heat, &updatedAt); err != nil {
+			return 0, err
+		}
+		dt := float64(now - updatedAt)
+		if dt <= 0 {
+			continue
+		}
+		newHeat := heat * math.Pow(0.5, dt/halfLifeSeconds)
+		if newHeat < 0.001 {
+			newHeat = 0
+		}
+		items = append(items, decayItem{id: id, newHeat: newHeat})
+	}
+
+	if len(items) == 0 {
+		return 0, nil
+	}
+
+	// 批量更新
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `UPDATE atomic_memories SET heat = ?, updated_at = ? WHERE id = ?`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	for _, item := range items {
+		stmt.ExecContext(ctx, item.newHeat, now, item.id)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return len(items), nil
+}
+
+// RecomputeTiers 根据 Heat 值重新分配层级。
+// hot: heat >= 0.5, warm: 0.1 <= heat < 0.5, cold: heat < 0.1
+func (s *AtomicMemoryService) RecomputeTiers(ctx context.Context) (int, error) {
+	if err := s.validateDependencies(); err != nil {
+		return 0, err
+	}
+	ctx = ensureContext(ctx)
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE atomic_memories
+		SET tier = CASE
+			WHEN heat >= 0.5 THEN 'hot'
+			WHEN heat >= 0.1 THEN 'warm'
+			ELSE 'cold'
+		END
+		WHERE tier != CASE
+			WHEN heat >= 0.5 THEN 'hot'
+			WHEN heat >= 0.1 THEN 'warm'
+			ELSE 'cold'
+		END
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("recompute tiers: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	return int(affected), nil
+}
+
+// BoostHeat 提升指定记忆的 Heat（被访问时调用）。
+func (s *AtomicMemoryService) BoostHeat(ctx context.Context, id string, boost float64) error {
+	if err := s.validateDependencies(); err != nil {
+		return err
+	}
+	if boost <= 0 {
+		boost = 0.2
+	}
+	ctx = ensureContext(ctx)
+
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE atomic_memories
+		SET heat = MIN(1.0, heat + ?),
+			tier = CASE
+				WHEN MIN(1.0, heat + ?) >= 0.5 THEN 'hot'
+				WHEN MIN(1.0, heat + ?) >= 0.1 THEN 'warm'
+				ELSE 'cold'
+			END,
+			updated_at = strftime('%s', 'now')
+		WHERE id = ?
+	`, boost, boost, boost, id)
+	return err
+}
+
+// SearchByTier 按层级检索。
+func (s *AtomicMemoryService) SearchByTier(ctx context.Context, tier MemoryTier, limit int) ([]AtomicMemory, error) {
+	if err := s.validateDependencies(); err != nil {
+		return nil, err
+	}
+	ctx = ensureContext(ctx)
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json, tier, heat, surprise
+		FROM atomic_memories
+		WHERE tier = ?
+		ORDER BY heat DESC
+		LIMIT ?
+	`, string(tier), limit)
+	if err != nil {
+		return nil, fmt.Errorf("query by tier: %w", err)
+	}
+	defer rows.Close()
+
+	return scanAtomicMemories(rows)
+}
+
 func (s *AtomicMemoryService) validateDependencies() error {
 	if s == nil {
 		return errors.New("atomic memory service is nil")
@@ -484,7 +656,7 @@ func (s *AtomicMemoryService) getByIDs(ctx context.Context, orderedIDs []string)
 	}
 
 	query := `
-		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json
+		SELECT id, timestamp, content, tags_json, session_id, folder_id, source, importance, embedding_json, tier, heat, surprise
 		FROM atomic_memories
 		WHERE id IN (` + strings.Join(placeholders, ",") + `)
 	`
@@ -533,6 +705,15 @@ func applyAtomicUpdates(current *AtomicMemory, updates *AtomicMemoryUpdate) {
 	}
 	if updates.Embedding != nil {
 		current.Embedding = *updates.Embedding
+	}
+	if updates.Tier != nil {
+		current.Tier = *updates.Tier
+	}
+	if updates.Heat != nil {
+		current.Heat = *updates.Heat
+	}
+	if updates.Surprise != nil {
+		current.Surprise = *updates.Surprise
 	}
 }
 
@@ -605,6 +786,7 @@ func scanAtomicMemoryRow(scanner interface {
 		folderID      sql.NullString
 		source        string
 		embeddingJSON sql.NullString
+		tier          string
 	)
 
 	err := scanner.Scan(
@@ -617,12 +799,19 @@ func scanAtomicMemoryRow(scanner interface {
 		&source,
 		&item.Importance,
 		&embeddingJSON,
+		&tier,
+		&item.Heat,
+		&item.Surprise,
 	)
 	if err != nil {
 		return AtomicMemory{}, err
 	}
 
 	item.Source = AtomicMemorySource(source)
+	item.Tier = MemoryTier(tier)
+	if item.Tier == "" {
+		item.Tier = MemoryTierHot
+	}
 	if folderID.Valid {
 		v := folderID.String
 		item.FolderID = &v

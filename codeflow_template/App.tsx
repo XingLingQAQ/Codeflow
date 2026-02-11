@@ -8,9 +8,10 @@ import {
   Menu, X, ChevronLeft, Layers, User, Briefcase,
   Folder, Calendar, Clock, MoreVertical, GitBranch,
   Github, Globe, Moon, Sun, Laptop, ToggleLeft, ToggleRight,
-  LogOut, CreditCard, Key, Smartphone
+  LogOut, CreditCard, Key, Smartphone,
+  Flame, Snowflake, Archive, ExternalLink, RefreshCw
 } from 'lucide-react';
-import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, SAMGEntity, SAMGTriple, MemoryItem, GlobalConfig } from './types';
+import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, SAMGEntity, SAMGTriple, MemoryItem, GlobalConfig, AtomicMemory, MemoryTier, RawEntry, SAMGPointer, QueryMemoryResponse } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -22,8 +23,10 @@ import { listProjects, createProject } from './services/projects';
 import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
 import { listAgents } from './services/agents';
 import { getConversationTrace, stopConversation, retryConversation } from './services/conversations';
-import { getVisibleNodes, getTriples } from './services/samg';
+import { getVisibleNodes, getTriples, getNodePointers, queryMemory } from './services/samg';
 import { getMemoryItems } from './services/memory';
+import { getAtomicMemoriesByTier, boostHeat, applyHeatDecay, recomputeTiers } from './services/atomic_memory';
+import { listRawArchive, getRawArchiveStats } from './services/raw_archive';
 import { getGlobalConfig, updateGlobalConfig } from './services/config';
 import type { ProjectCreateInput } from './services/projects';
 
@@ -758,114 +761,320 @@ const SessionsView = () => {
   );
 };
 
+type MemoryTab = 'atomic' | 'samg' | 'archive';
+
+const tierConfig: Record<MemoryTier, { icon: React.ReactNode; color: string; bg: string; label: string }> = {
+  hot:  { icon: <Flame size={14} />,    color: 'text-red-500',  bg: 'bg-red-50 border-red-200',    label: '🔴 Hot' },
+  warm: { icon: <Zap size={14} />,      color: 'text-amber-500', bg: 'bg-amber-50 border-amber-200', label: '🟡 Warm' },
+  cold: { icon: <Snowflake size={14} />, color: 'text-blue-400', bg: 'bg-blue-50 border-blue-200',   label: '🔵 Cold' },
+};
+
 const MemoryView = () => {
-    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [tab, setTab] = useState<MemoryTab>('atomic');
+  const [tierFilter, setTierFilter] = useState<MemoryTier | 'all'>('all');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [nodePointers, setNodePointers] = useState<SAMGPointer[]>([]);
+  const [archivePage, setArchivePage] = useState(0);
 
-    const { data: entities, loading, error, refetch } = useApi<SAMGEntity[]>(
-        (signal) => getVisibleNodes(signal), [],
-    );
+  // --- Atomic Memory ---
+  const { data: hotMemories, loading: hotLoading, refetch: refetchHot } = useApi<AtomicMemory[]>(
+    (signal) => getAtomicMemoriesByTier('hot', 50, signal), [],
+  );
+  const { data: warmMemories, refetch: refetchWarm } = useApi<AtomicMemory[]>(
+    (signal) => getAtomicMemoriesByTier('warm', 50, signal), [],
+  );
+  const { data: coldMemories, refetch: refetchCold } = useApi<AtomicMemory[]>(
+    (signal) => getAtomicMemoriesByTier('cold', 50, signal), [],
+  );
 
-    const { data: triples } = useApi<SAMGTriple[]>(
-        (signal) => getTriples(signal), [],
-    );
+  const allAtomicMemories = [
+    ...(hotMemories ?? []),
+    ...(warmMemories ?? []),
+    ...(coldMemories ?? []),
+  ];
+  const filteredMemories = tierFilter === 'all'
+    ? allAtomicMemories
+    : allAtomicMemories.filter(m => m.tier === tierFilter);
 
-    const { data: memoryItems } = useApi<MemoryItem[]>(
-        (signal) => getMemoryItems(signal), [],
-    );
+  const refetchAllAtomic = () => { refetchHot(); refetchWarm(); refetchCold(); };
 
-    const nodeList = entities ?? [];
-    const tripleList = triples ?? [];
-    const selectedEntity = nodeList.find(e => e['@id'] === selectedNodeId);
+  // --- SAMG ---
+  const { data: entities, loading: samgLoading, error: samgError, refetch: refetchSamg } = useApi<SAMGEntity[]>(
+    (signal) => getVisibleNodes(signal), [],
+  );
+  const { data: triples } = useApi<SAMGTriple[]>(
+    (signal) => getTriples(signal), [],
+  );
+  const nodeList = entities ?? [];
+  const tripleList = triples ?? [];
+  const selectedEntity = nodeList.find(e => e['@id'] === selectedNodeId);
 
-    // Simple layout: distribute nodes in a circle
-    const getNodePosition = (index: number, total: number) => {
-        const angle = (2 * Math.PI * index) / Math.max(total, 1);
-        const radius = 30;
-        return { x: 50 + radius * Math.cos(angle), y: 50 + radius * Math.sin(angle) };
-    };
+  useEffect(() => {
+    if (!selectedNodeId) { setNodePointers([]); return; }
+    getNodePointers(selectedNodeId).then(setNodePointers).catch(() => setNodePointers([]));
+  }, [selectedNodeId]);
 
-    const typeColors: Record<string, string> = {
-        service: 'bg-blue-100 border-blue-300 text-blue-600',
-        entity: 'bg-emerald-100 border-emerald-300 text-emerald-600',
-        concept: 'bg-violet-100 border-violet-300 text-violet-600',
-        default: 'bg-slate-100 border-slate-300 text-slate-600',
-    };
+  const getNodePosition = (index: number, total: number) => {
+    const angle = (2 * Math.PI * index) / Math.max(total, 1);
+    const radius = 30;
+    return { x: 50 + radius * Math.cos(angle), y: 50 + radius * Math.sin(angle) };
+  };
 
-    return (
-        <div className="flex-1 flex flex-col md:flex-row h-full relative overflow-hidden bg-slate-50 pb-16 md:pb-0">
-             <div className="flex-1 relative h-[60vh] md:h-auto border-b md:border-b-0 md:border-r border-slate-200">
-                 <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '40px 40px', opacity: 0.5 }}></div>
+  const typeColors: Record<string, string> = {
+    service: 'bg-blue-100 border-blue-300 text-blue-600',
+    entity: 'bg-emerald-100 border-emerald-300 text-emerald-600',
+    concept: 'bg-violet-100 border-violet-300 text-violet-600',
+    default: 'bg-slate-100 border-slate-300 text-slate-600',
+  };
 
-                 {loading ? <LoadingSkeleton variant="text" count={2} /> :
-                  error ? <ErrorState message={error.message} onRetry={refetch} /> :
-                  nodeList.length === 0 ? (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <EmptyState icon={<Database size={48} />} title="No nodes yet" description="Semantic graph is empty" />
-                    </div>
-                  ) : (
-                  <>
-                    <svg className="absolute inset-0 pointer-events-none w-full h-full">
-                      {tripleList.slice(0, 50).map((t, i) => {
-                        const si = nodeList.findIndex(n => n['@id'] === t.subject['@id']);
-                        const oi = nodeList.findIndex(n => n['@id'] === t.object.node?.['@id']);
-                        if (si < 0 || oi < 0) return null;
-                        const sp = getNodePosition(si, nodeList.length);
-                        const op = getNodePosition(oi, nodeList.length);
-                        return <line key={i} x1={`${sp.x}%`} y1={`${sp.y}%`} x2={`${op.x}%`} y2={`${op.y}%`} stroke="#cbd5e1" strokeWidth="2" />;
-                      })}
-                    </svg>
-                    {nodeList.map((node, i) => {
-                      const pos = getNodePosition(i, nodeList.length);
-                      const color = typeColors[node['@type']?.[0] ?? 'default'] ?? typeColors.default;
-                      return (
-                        <div
-                          key={node['@id']}
-                          onClick={() => setSelectedNodeId(node['@id'])}
-                          className="absolute flex flex-col items-center gap-2 cursor-pointer group hover:z-50 transition-all duration-300"
-                          style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
-                        >
-                          <div className={`size-12 md:size-16 rounded-full border-4 border-white shadow-lg flex items-center justify-center ${color} ${selectedNodeId === node['@id'] ? 'ring-4 ring-blue-500/20 scale-110' : ''} group-hover:scale-110 transition-all`}>
-                            <div className="size-3 rounded-full bg-current opacity-50"></div>
-                          </div>
-                          <div className={`px-2 py-1 md:px-3 bg-white/90 backdrop-blur border border-slate-200 rounded-full text-[10px] md:text-xs font-bold text-slate-700 shadow-sm ${selectedNodeId === node['@id'] ? 'text-blue-600 border-blue-200' : ''}`}>
-                            {node.label}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                  )}
-             </div>
+  // --- Raw Archive ---
+  const { data: archiveData, loading: archiveLoading, refetch: refetchArchive } = useApi<{ entries: RawEntry[]; count: number; total: number }>(
+    (signal) => listRawArchive({ limit: 30, offset: archivePage * 30 }, signal), [archivePage],
+  );
+  const { data: archiveStats } = useApi<{ total_entries: number }>(
+    (signal) => getRawArchiveStats(signal), [],
+  );
 
-             <div className="h-[40vh] md:h-full w-full md:w-80 bg-white z-10 flex flex-col shadow-xl">
-                 {selectedEntity ? (
-                    <>
-                        <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-                            <h3 className="font-bold text-slate-800">{selectedEntity.label}</h3>
-                            <span className="text-xs text-slate-500">{selectedEntity['@type']?.join(', ') || 'Unknown type'}</span>
-                            {selectedEntity.description && <p className="text-xs text-slate-400 mt-1">{selectedEntity.description}</p>}
-                        </div>
-                        <div className="p-5 flex-1 overflow-y-auto">
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Relations</h4>
-                            <div className="space-y-3">
-                                {tripleList.filter(t => t.subject['@id'] === selectedNodeId || t.object.node?.['@id'] === selectedNodeId).slice(0, 10).map((t, i) => (
-                                    <div key={i} className="flex items-center gap-3 p-2 bg-white border border-slate-100 rounded-xl shadow-sm">
-                                        <div className="size-8 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center"><Database size={16} /></div>
-                                        <div className="flex-1">
-                                            <span className="text-sm font-semibold text-slate-700">{t.predicate}</span>
-                                            <p className="text-[10px] text-slate-400">{t.subject['@id'] === selectedNodeId ? t.object.node?.label ?? 'literal' : t.subject.label ?? t.subject['@id']}</p>
-                                        </div>
-                                    </div>
-                                ))}
+  const archiveEntries = archiveData?.entries ?? [];
+  const archiveTotal = archiveData?.total ?? archiveStats?.total_entries ?? 0;
+
+  const tabs: { id: MemoryTab; label: string; icon: React.ReactNode }[] = [
+    { id: 'atomic', label: 'Atomic Memory', icon: <Layers size={16} /> },
+    { id: 'samg', label: 'SAMG Graph', icon: <Activity size={16} /> },
+    { id: 'archive', label: 'Raw Archive', icon: <Archive size={16} /> },
+  ];
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-slate-50 pb-16 md:pb-0 overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-4 pt-3 pb-2 border-b border-slate-200 bg-white shrink-0">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              tab === t.id ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100'
+            }`}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-hidden">
+        {/* === Atomic Memory Tab === */}
+        {tab === 'atomic' && (
+          <div className="h-full flex flex-col">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-white shrink-0">
+              <span className="text-xs text-slate-400 mr-2">Filter:</span>
+              {(['all', 'hot', 'warm', 'cold'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setTierFilter(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    tierFilter === f ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  {f === 'all' ? 'All' : tierConfig[f].label}
+                </button>
+              ))}
+              <div className="flex-1" />
+              <button onClick={refetchAllAtomic} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400" title="Refresh">
+                <RefreshCw size={14} />
+              </button>
+              <span className="text-xs text-slate-400">{filteredMemories.length} items</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {hotLoading ? <LoadingSkeleton variant="text" count={4} /> :
+               filteredMemories.length === 0 ? (
+                <EmptyState icon={<Layers size={48} />} title="No memories" description="Atomic memory is empty" />
+              ) : (
+                <div className="space-y-2">
+                  {filteredMemories.map(mem => {
+                    const tc = tierConfig[mem.tier] ?? tierConfig.hot;
+                    return (
+                      <div key={mem.id} className={`p-3 rounded-xl border ${tc.bg} transition-all hover:shadow-sm`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 ${tc.color}`}>{tc.icon}</div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-slate-700 leading-relaxed">{mem.content.length > 200 ? mem.content.slice(0, 200) + '...' : mem.content}</p>
+                            <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400">
+                              <span className={`font-bold uppercase ${tc.color}`}>{mem.tier}</span>
+                              <span>Heat: {mem.heat.toFixed(2)}</span>
+                              <span>Surprise: {mem.surprise.toFixed(2)}</span>
+                              <span>{mem.source}</span>
+                              {mem.tags?.length > 0 && <span>{mem.tags.join(', ')}</span>}
+                              <span>{new Date(mem.timestamp * 1000).toLocaleString()}</span>
                             </div>
+                          </div>
                         </div>
-                    </>
-                 ) : (
-                    <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Select a node to view details</div>
-                 )}
-             </div>
-        </div>
-    );
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* === SAMG Graph Tab === */}
+        {tab === 'samg' && (
+          <div className="h-full flex flex-col md:flex-row overflow-hidden">
+            <div className="flex-1 relative h-[60vh] md:h-auto border-b md:border-b-0 md:border-r border-slate-200">
+              <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '40px 40px', opacity: 0.5 }} />
+              {samgLoading ? <LoadingSkeleton variant="text" count={2} /> :
+               samgError ? <ErrorState message={samgError.message} onRetry={refetchSamg} /> :
+               nodeList.length === 0 ? (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <EmptyState icon={<Activity size={48} />} title="No nodes yet" description="Semantic graph is empty" />
+                </div>
+              ) : (
+                <>
+                  <svg className="absolute inset-0 pointer-events-none w-full h-full">
+                    {tripleList.slice(0, 50).map((t, i) => {
+                      const si = nodeList.findIndex(n => n['@id'] === t.subject['@id']);
+                      const oi = nodeList.findIndex(n => n['@id'] === t.object.node?.['@id']);
+                      if (si < 0 || oi < 0) return null;
+                      const sp = getNodePosition(si, nodeList.length);
+                      const op = getNodePosition(oi, nodeList.length);
+                      return <line key={i} x1={`${sp.x}%`} y1={`${sp.y}%`} x2={`${op.x}%`} y2={`${op.y}%`} stroke="#cbd5e1" strokeWidth="2" />;
+                    })}
+                  </svg>
+                  {nodeList.map((node, i) => {
+                    const pos = getNodePosition(i, nodeList.length);
+                    const color = typeColors[node['@type']?.[0] ?? 'default'] ?? typeColors.default;
+                    return (
+                      <div
+                        key={node['@id']}
+                        onClick={() => setSelectedNodeId(node['@id'])}
+                        className="absolute flex flex-col items-center gap-2 cursor-pointer group hover:z-50 transition-all duration-300"
+                        style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
+                      >
+                        <div className={`size-12 md:size-16 rounded-full border-4 border-white shadow-lg flex items-center justify-center ${color} ${selectedNodeId === node['@id'] ? 'ring-4 ring-blue-500/20 scale-110' : ''} group-hover:scale-110 transition-all`}>
+                          <div className="size-3 rounded-full bg-current opacity-50" />
+                        </div>
+                        <div className={`px-2 py-1 md:px-3 bg-white/90 backdrop-blur border border-slate-200 rounded-full text-[10px] md:text-xs font-bold text-slate-700 shadow-sm ${selectedNodeId === node['@id'] ? 'text-blue-600 border-blue-200' : ''}`}>
+                          {node.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+            {/* SAMG Detail Panel */}
+            <div className="h-[40vh] md:h-full w-full md:w-80 bg-white z-10 flex flex-col shadow-xl overflow-hidden">
+              {selectedEntity ? (
+                <>
+                  <div className="p-5 border-b border-slate-100 bg-slate-50/50 shrink-0">
+                    <h3 className="font-bold text-slate-800">{selectedEntity.label}</h3>
+                    <span className="text-xs text-slate-500">{selectedEntity['@type']?.join(', ') || 'Unknown type'}</span>
+                    {selectedEntity.description && <p className="text-xs text-slate-400 mt-1">{selectedEntity.description}</p>}
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-5">
+                    {/* Pointers section */}
+                    {nodePointers.length > 0 && (
+                      <>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Pointers ({nodePointers.length})</h4>
+                        <div className="space-y-2 mb-5">
+                          {nodePointers.map((ptr, i) => (
+                            <div key={i} className="p-2 bg-violet-50 border border-violet-200 rounded-lg">
+                              <div className="flex items-center gap-2">
+                                <ExternalLink size={12} className="text-violet-400 shrink-0" />
+                                <span className="text-xs font-medium text-violet-700 truncate">{ptr.summary || ptr.source_id}</span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1 text-[10px] text-violet-400">
+                                <span>{ptr.source_type}</span>
+                                <span>relevance: {ptr.relevance.toFixed(2)}</span>
+                                {ptr.file_path && <span>{ptr.file_path}{ptr.line_range ? `:${ptr.line_range}` : ''}</span>}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    {/* Relations section */}
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Relations</h4>
+                    <div className="space-y-2">
+                      {tripleList.filter(t => t.subject['@id'] === selectedNodeId || t.object.node?.['@id'] === selectedNodeId).slice(0, 10).map((t, i) => (
+                        <div key={i} className="flex items-center gap-3 p-2 bg-white border border-slate-100 rounded-xl shadow-sm">
+                          <div className="size-8 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center"><Database size={16} /></div>
+                          <div className="flex-1">
+                            <span className="text-sm font-semibold text-slate-700">{t.predicate}</span>
+                            <p className="text-[10px] text-slate-400">{t.subject['@id'] === selectedNodeId ? t.object.node?.label ?? 'literal' : t.subject.label ?? t.subject['@id']}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Select a node to view details</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* === Raw Archive Tab === */}
+        {tab === 'archive' && (
+          <div className="h-full flex flex-col">
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 bg-white shrink-0">
+              <Archive size={16} className="text-slate-400" />
+              <span className="text-sm font-medium text-slate-600">Total: {archiveTotal} entries</span>
+              <div className="flex-1" />
+              <button onClick={refetchArchive} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400" title="Refresh">
+                <RefreshCw size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {archiveLoading ? <LoadingSkeleton variant="text" count={5} /> :
+               archiveEntries.length === 0 ? (
+                <EmptyState icon={<Archive size={48} />} title="No entries" description="Raw archive is empty" />
+              ) : (
+                <div className="space-y-2">
+                  {archiveEntries.map(entry => (
+                    <div key={entry.id} className="p-3 bg-white border border-slate-200 rounded-xl hover:shadow-sm transition-all">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                          entry.type === 'conversation' ? 'bg-blue-100 text-blue-600' :
+                          entry.type === 'code_diff' ? 'bg-emerald-100 text-emerald-600' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>{entry.type}</span>
+                        <span className="text-[10px] text-slate-400">{new Date(entry.timestamp * 1000).toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-300 truncate">{entry.id}</span>
+                      </div>
+                      <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{entry.content.length > 300 ? entry.content.slice(0, 300) + '...' : entry.content}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Pagination */}
+            {archiveTotal > 30 && (
+              <div className="flex items-center justify-center gap-3 px-4 py-3 border-t border-slate-200 bg-white shrink-0">
+                <button
+                  onClick={() => setArchivePage(p => Math.max(0, p - 1))}
+                  disabled={archivePage === 0}
+                  className="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span className="text-xs text-slate-400">Page {archivePage + 1} / {Math.ceil(archiveTotal / 30)}</span>
+                <button
+                  onClick={() => setArchivePage(p => p + 1)}
+                  disabled={(archivePage + 1) * 30 >= archiveTotal}
+                  className="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const AgentsView = ({ showToast, onNavigate }: { showToast: (msg: string) => void, onNavigate: (m: ViewMode) => void }) => {

@@ -1,33 +1,80 @@
-// --- API Configuration ---
-export const API_BASE = 'http://localhost:8080';
-export const WS_BASE = 'ws://localhost:8080';
+// --- API Configuration (dynamic port for Tauri sidecar) ---
 
+const DEFAULT_PORT = 8080;
+
+/** Mutable base URLs — updated by initApiBase() when running inside Tauri. */
+let _apiBase = `http://localhost:${DEFAULT_PORT}`;
+let _wsBase = `ws://localhost:${DEFAULT_PORT}`;
+let _initialized = false;
+
+export function getApiBase(): string { return _apiBase; }
+export function getWsBase(): string { return _wsBase; }
+
+/**
+ * Detect Tauri environment and resolve the sidecar port.
+ * Call once at app startup (before first render).
+ * In browser dev mode this is a no-op and keeps the default port.
+ */
+export async function initApiBase(): Promise<void> {
+  if (_initialized) return;
+  _initialized = true;
+
+  // Quick check: not in Tauri → skip immediately
+  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+    console.log('[CodeFlow] Browser mode, using default port', DEFAULT_PORT);
+    return;
+  }
+
+  // In Tauri — resolve sidecar port
+  console.log('[CodeFlow] Tauri detected, resolving sidecar port...');
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+
+    // Poll for sidecar port (may not be ready immediately)
+    for (let i = 0; i < 20; i++) {
+      const port = await invoke<number | null>('get_backend_port');
+      if (port) {
+        _apiBase = `http://localhost:${port}`;
+        _wsBase = `ws://localhost:${port}`;
+        console.log(`[CodeFlow] Sidecar port resolved: ${port}, apiBase=${_apiBase}`);
+        return;
+      }
+      console.log(`[CodeFlow] Port not ready, retry ${i + 1}/20...`);
+      await new Promise(r => setTimeout(r, 500));
+    }
+    console.error('[CodeFlow] Could not resolve sidecar port after 10s, using default', DEFAULT_PORT);
+  } catch (e) {
+    console.error('[CodeFlow] Failed to resolve sidecar port:', e);
+  }
+}
+
+/** Computed endpoint helpers — always use current _apiBase/_wsBase. */
 export const API_ENDPOINTS = {
-  health: `${API_BASE}/health`,
-  projects: `${API_BASE}/api/v1/projects`,
-  memory: `${API_BASE}/api/v1/memory`,
-  search: `${API_BASE}/api/v1/search`,
-  context: `${API_BASE}/api/v1/context`,
-  agents: `${API_BASE}/api/v1/agents`,
-  conversations: `${API_BASE}/api/v1/conversations`,
-  blackboard: `${API_BASE}/api/v1/blackboard`,
-  debates: `${API_BASE}/api/v1/debates`,
-  plans: `${API_BASE}/api/v1/plans`,
-  config: `${API_BASE}/api/v1/config`,
-  summarize: `${API_BASE}/api/v1/summarize`,
-  audit: `${API_BASE}/api/v1/audit`,
-  privacy: `${API_BASE}/api/v1/privacy`,
-  isolation: `${API_BASE}/api/v1/isolation`,
-  samg: `${API_BASE}/api/v1/samg`,
-  hooks: `${API_BASE}/api/v1/hooks`,
-  votes: `${API_BASE}/api/v1/votes`,
-} as const;
+  get health() { return `${_apiBase}/health`; },
+  get projects() { return `${_apiBase}/api/v1/projects`; },
+  get memory() { return `${_apiBase}/api/v1/memory`; },
+  get search() { return `${_apiBase}/api/v1/search`; },
+  get context() { return `${_apiBase}/api/v1/context`; },
+  get agents() { return `${_apiBase}/api/v1/agents`; },
+  get conversations() { return `${_apiBase}/api/v1/conversations`; },
+  get blackboard() { return `${_apiBase}/api/v1/blackboard`; },
+  get debates() { return `${_apiBase}/api/v1/debates`; },
+  get plans() { return `${_apiBase}/api/v1/plans`; },
+  get config() { return `${_apiBase}/api/v1/config`; },
+  get summarize() { return `${_apiBase}/api/v1/summarize`; },
+  get audit() { return `${_apiBase}/api/v1/audit`; },
+  get privacy() { return `${_apiBase}/api/v1/privacy`; },
+  get isolation() { return `${_apiBase}/api/v1/isolation`; },
+  get samg() { return `${_apiBase}/api/v1/samg`; },
+  get hooks() { return `${_apiBase}/api/v1/hooks`; },
+  get votes() { return `${_apiBase}/api/v1/votes`; },
+};
 
 export const WS_ENDPOINTS = {
-  events: `${WS_BASE}/ws`,
-  debate: (id: string) => `${WS_BASE}/api/v1/debates/${id}/stream`,
-  conversation: (sessionId: string) => `${WS_BASE}/api/v1/conversations/${sessionId}/stream`,
-} as const;
+  get events() { return `${_wsBase}/ws`; },
+  debate: (id: string) => `${_wsBase}/api/v1/debates/${id}/stream`,
+  conversation: (sessionId: string) => `${_wsBase}/api/v1/conversations/${sessionId}/stream`,
+};
 
 // --- Error Types ---
 
@@ -64,6 +111,7 @@ async function request<T>(
   options: RequestInit = {},
   signal?: AbortSignal,
 ): Promise<T> {
+  console.log(`[CodeFlow API] ${options.method || 'GET'} ${url}`);
   const mergedOptions: RequestInit = {
     ...options,
     headers: {

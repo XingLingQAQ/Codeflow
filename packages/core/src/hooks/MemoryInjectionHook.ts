@@ -3,11 +3,16 @@
  *
  * 注册到 HookEvent.BEFORE_SEND，在发送请求前自动检索相关记忆
  * 并注入为 system 消息。
+ *
+ * 支持两种模式：
+ * - local: 使用前端 PassiveRAG 本地检索（默认）
+ * - agent: 使用后端 MemoryAgent /agent/context API
  */
 
 import { HookManager } from './HookManager.js';
 import { HookEvent, RequestPayload } from './types.js';
 import { PassiveRAGService } from '../memory/PassiveRAG.js';
+import { MemoryAgentClient } from '../memory/MemoryAgentClient.js';
 
 /**
  * MemoryInjectionHook 配置
@@ -21,27 +26,33 @@ export interface MemoryInjectionConfig {
   position: 'prepend' | 'append';
   /** 最大注入字符数 */
   maxInjectionLength: number;
+  /** 检索模式: local (PassiveRAG) 或 agent (MemoryAgent API) */
+  mode: 'local' | 'agent';
 }
 
 const DEFAULT_CONFIG: MemoryInjectionConfig = {
   enabled: true,
   position: 'prepend',
   maxInjectionLength: 2000,
+  mode: 'local',
 };
 
 export class MemoryInjectionHook {
   private readonly hookManager: HookManager;
   private readonly ragService: PassiveRAGService;
+  private readonly agentClient?: MemoryAgentClient;
   private config: MemoryInjectionConfig;
   private boundHandler: (payload: RequestPayload) => Promise<RequestPayload>;
 
   constructor(
     hookManager: HookManager,
     ragService: PassiveRAGService,
-    config: Partial<MemoryInjectionConfig> = {}
+    config: Partial<MemoryInjectionConfig> = {},
+    agentClient?: MemoryAgentClient
   ) {
     this.hookManager = hookManager;
     this.ragService = ragService;
+    this.agentClient = agentClient;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.boundHandler = this.onBeforeSend.bind(this);
   }
@@ -95,16 +106,32 @@ export class MemoryInjectionHook {
         return payload;
       }
 
-      const memories = await this.ragService.retrieve(
-        lastUserMessage,
-        this.config.sessionId
-      );
+      let contextText: string;
 
-      if (memories.length === 0) {
+      if (this.config.mode === 'agent' && this.agentClient) {
+        // 后端 MemoryAgent 模式
+        const result = await this.agentClient.assembleContext({
+          session_id: this.config.sessionId || '',
+          query: lastUserMessage,
+          max_tokens: Math.floor(this.config.maxInjectionLength / 4),
+        });
+        contextText = result.context_block;
+      } else {
+        // 本地 PassiveRAG 模式（默认）
+        const memories = await this.ragService.retrieve(
+          lastUserMessage,
+          this.config.sessionId
+        );
+        if (memories.length === 0) {
+          return payload;
+        }
+        contextText = this.ragService.formatForInjection(memories);
+      }
+
+      if (!contextText) {
         return payload;
       }
 
-      let contextText = this.ragService.formatForInjection(memories);
       if (contextText.length > this.config.maxInjectionLength) {
         contextText = contextText.slice(0, this.config.maxInjectionLength) + '\n...（已截断）';
       }

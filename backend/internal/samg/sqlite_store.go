@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -876,6 +877,140 @@ func (s *SQLiteTripleStore) Deduplicate(ctx context.Context) (int, error) {
 	}
 
 	return len(toDelete), nil
+}
+
+// AppendPointer 向实体追加指针（SQLite 实现）。
+// 指针存储在 Entity.Properties["pointers"] 中，序列化为 JSON。
+func (s *SQLiteTripleStore) AppendPointer(ctx context.Context, entityID string, ptr Pointer) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entity, err := s.getEntityLocked(ctx, entityID)
+	if err != nil || entity == nil {
+		return nil // 实体不存在，静默跳过
+	}
+
+	// 从 Properties 中读取现有指针
+	pointers := extractPointersFromProperties(entity.Properties)
+	pointers = append(pointers, ptr)
+
+	// 超过上限时淘汰
+	if len(pointers) > MaxPointersPerEntity {
+		sort.Slice(pointers, func(i, j int) bool {
+			scoreI := pointers[i].Relevance * float64(pointers[i].Timestamp)
+			scoreJ := pointers[j].Relevance * float64(pointers[j].Timestamp)
+			return scoreI > scoreJ
+		})
+		pointers = pointers[:MaxPointersPerEntity]
+	}
+
+	// 写回 Properties
+	if entity.Properties == nil {
+		entity.Properties = make(map[string]interface{})
+	}
+	entity.Properties["pointers"] = pointers
+	entity.Pointers = pointers
+	entity.UpdatedAt = time.Now().UnixMilli()
+
+	return s.upsertEntityLocked(ctx, *entity)
+}
+
+// GetPointers 获取实体的所有指针。
+func (s *SQLiteTripleStore) GetPointers(ctx context.Context, entityID string) ([]Pointer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entity, err := s.getEntityLocked(ctx, entityID)
+	if err != nil || entity == nil {
+		return nil, nil
+	}
+
+	return extractPointersFromProperties(entity.Properties), nil
+}
+
+// getEntityLocked 在已持有锁的情况下获取实体（内部方法）。
+func (s *SQLiteTripleStore) getEntityLocked(ctx context.Context, id string) (*Entity, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, type, label, description, properties, aliases, created_at, updated_at
+		FROM entities WHERE id = ?
+	`, id)
+
+	var entity Entity
+	var typeJSON, propsJSON, aliasesJSON sql.NullString
+	var description sql.NullString
+
+	err := row.Scan(&entity.ID, &typeJSON, &entity.Label, &description, &propsJSON, &aliasesJSON, &entity.CreatedAt, &entity.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if description.Valid {
+		entity.Description = description.String
+	}
+	if typeJSON.Valid {
+		json.Unmarshal([]byte(typeJSON.String), &entity.Type)
+	}
+	if propsJSON.Valid {
+		json.Unmarshal([]byte(propsJSON.String), &entity.Properties)
+	}
+	if aliasesJSON.Valid {
+		json.Unmarshal([]byte(aliasesJSON.String), &entity.Aliases)
+	}
+
+	entity.Pointers = extractPointersFromProperties(entity.Properties)
+	return &entity, nil
+}
+
+// upsertEntityLocked 在已持有锁的情况下更新实体（内部方法）。
+func (s *SQLiteTripleStore) upsertEntityLocked(ctx context.Context, entity Entity) error {
+	typeJSON, _ := json.Marshal(entity.Type)
+	propsJSON, _ := json.Marshal(entity.Properties)
+	aliasesJSON, _ := json.Marshal(entity.Aliases)
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO entities (id, type, label, description, properties, aliases, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			type = excluded.type,
+			label = excluded.label,
+			description = excluded.description,
+			properties = excluded.properties,
+			aliases = excluded.aliases,
+			updated_at = excluded.updated_at
+	`, entity.ID, string(typeJSON), entity.Label, entity.Description, string(propsJSON), string(aliasesJSON), entity.CreatedAt, entity.UpdatedAt)
+	return err
+}
+
+// extractPointersFromProperties 从 Entity.Properties 中提取指针列表。
+func extractPointersFromProperties(props map[string]interface{}) []Pointer {
+	if props == nil {
+		return nil
+	}
+	raw, ok := props["pointers"]
+	if !ok {
+		return nil
+	}
+
+	// 可能是 []Pointer 或 []interface{}（从 JSON 反序列化）
+	switch v := raw.(type) {
+	case []Pointer:
+		return v
+	case []interface{}:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil
+		}
+		var ptrs []Pointer
+		if err := json.Unmarshal(b, &ptrs); err != nil {
+			return nil
+		}
+		return ptrs
+	default:
+		return nil
+	}
 }
 
 // Ensure SQLiteTripleStore implements ITripleStore

@@ -24,7 +24,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Port:            "8080",
-		AllowedOrigins:  []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowedOrigins:  []string{"http://localhost:3000", "http://localhost:5173", "tauri://localhost", "https://tauri.localhost"},
 		EnableDebugMode: false,
 	}
 }
@@ -51,7 +51,9 @@ func NewServer(config *Config) *Server {
 	router.Use(gin.Recovery())
 	router.Use(middleware.Logger())
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     config.AllowedOrigins,
+		AllowOriginFunc: func(origin string) bool {
+			return true // Desktop app — all local origins allowed
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -102,11 +104,27 @@ func (s *Server) setupRoutes() {
 			memory.GET("/atomic/session/:id", handlers.GetAtomicMemoriesBySession)
 			memory.PUT("/atomic/:id", handlers.UpdateAtomicMemory)
 			memory.DELETE("/atomic/:id", handlers.DeleteAtomicMemory)
+			memory.POST("/atomic/decay", handlers.ApplyAtomicHeatDecay)
+			memory.POST("/atomic/recompute-tiers", handlers.RecomputeAtomicTiers)
+			memory.POST("/atomic/:id/boost", handlers.BoostAtomicHeat)
+			memory.GET("/atomic/tier/:tier", handlers.GetAtomicMemoriesByTier)
 
 			// Memory Preflight routes
 			memory.POST("/preflight", handlers.MemoryPreflight)
 			memory.GET("/suggestions", handlers.GetMemorySuggestions)
 			memory.POST("/inject", handlers.InjectMemory)
+
+			// Raw Archive routes
+			memory.POST("/archive", handlers.StoreRawArchive)
+			memory.GET("/archive", handlers.ListRawArchive)
+			memory.GET("/archive/search", handlers.SearchRawArchive)
+			memory.GET("/archive/stats", handlers.GetRawArchiveStats)
+			memory.GET("/archive/:id", handlers.GetRawArchiveEntry)
+
+			// MemoryAgent unified dispatch
+			memory.POST("/agent/ingest", handlers.MemoryAgentIngest)
+			memory.POST("/agent/retrieve", handlers.MemoryAgentRetrieve)
+			memory.POST("/agent/context", handlers.MemoryAgentContext)
 		}
 
 		// Search routes
@@ -300,6 +318,10 @@ func (s *Server) setupRoutes() {
 
 			// Extraction
 			samgGroup.POST("/extract", handlers.ExtractTriples)
+			samgGroup.POST("/extract-with-pointers", handlers.ExtractWithPointers)
+
+			// Query Memory (Neural Index)
+			samgGroup.POST("/query-memory", handlers.QueryMemory)
 
 			// Activation
 			samgGroup.POST("/activate", handlers.Activate)
@@ -317,6 +339,8 @@ func (s *Server) setupRoutes() {
 			samgGroup.GET("/nodes/hidden", handlers.GetHiddenNodes)
 			samgGroup.GET("/nodes/top", handlers.GetTopNodes)
 			samgGroup.POST("/nodes/:id/access", handlers.RecordAccess)
+			samgGroup.GET("/nodes/:id/pointers", handlers.GetNodePointers)
+			samgGroup.POST("/nodes/:id/pointers", handlers.AddNodePointer)
 
 			// Graph
 			samgGroup.GET("/graph/export", handlers.ExportGraph)

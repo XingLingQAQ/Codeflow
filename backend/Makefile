@@ -1,4 +1,4 @@
-.PHONY: all build test lint clean help
+.PHONY: all build test lint clean help build-all build-frontend
 
 # Variables
 BINARY_NAME=codeflow-server
@@ -7,6 +7,8 @@ MAIN_PATH=./cmd/codeflow-server
 GO=go
 GOFLAGS=-v
 LDFLAGS=-ldflags "-s -w"
+FRONTEND_DIR=../codeflow_template
+WEB_DIST_DIR=./internal/web/dist
 
 # Default target
 all: lint test build
@@ -79,6 +81,8 @@ help:
 	@echo "Targets:"
 	@echo "  all            - Run lint, test, and build (default)"
 	@echo "  build          - Build the application"
+	@echo "  build-all      - Build frontend + backend (single exe)"
+	@echo "  build-frontend - Build frontend only"
 	@echo "  test           - Run tests"
 	@echo "  test-coverage  - Run tests with coverage report"
 	@echo "  lint           - Run golangci-lint"
@@ -89,3 +93,18 @@ help:
 	@echo "  run            - Build and run the application"
 	@echo "  dev            - Run in development mode"
 	@echo "  help           - Show this help message"
+
+# Build frontend
+build-frontend:
+	@echo "Building frontend..."
+	@cd $(FRONTEND_DIR) && npm install && npm run build
+	@echo "Frontend build complete: $(WEB_DIST_DIR)"
+
+# Build all (frontend + backend)
+build-all: build-frontend
+	@echo "Building $(BINARY_NAME) with embedded frontend..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME).exe $(MAIN_PATH)
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME).exe"
+	@echo "Run with: $(BUILD_DIR)/$(BINARY_NAME).exe"
+	@echo "Access at: http://localhost:8080"

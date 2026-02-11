@@ -1,6 +1,6 @@
 import { get, post, del } from '../api';
 import { API_ENDPOINTS } from '../api';
-import type { SAMGTriple, SAMGEntity } from '../types';
+import type { SAMGTriple, SAMGEntity, SAMGPointer, QueryMemoryResponse } from '../types';
 
 const BASE = API_ENDPOINTS.samg;
 
@@ -43,4 +43,37 @@ export async function getTopNodes(signal?: AbortSignal) {
 
 export function getSAMGStats(signal?: AbortSignal) {
   return get<{ triple_count: number; entity_count: number; predicate_count: number }>(`${BASE}/stats`, undefined, signal);
+}
+
+// --- Pointer System ---
+
+export function queryMemory(
+  req: { topic: string; type?: string; max_results?: number; resolve_pointers?: boolean; min_bla?: number },
+  signal?: AbortSignal,
+) {
+  return post<QueryMemoryResponse>(`${BASE}/query-memory`, req, signal);
+}
+
+export async function getNodePointers(nodeId: string, signal?: AbortSignal) {
+  const res = await get<{ node_id: string; pointers: SAMGPointer[]; count: number }>(
+    `${BASE}/nodes/${encodeURIComponent(nodeId)}/pointers`,
+    undefined,
+    signal,
+  );
+  return res.pointers ?? [];
+}
+
+export function addNodePointer(
+  nodeId: string,
+  pointer: { source_id: string; source_type: string; summary?: string; relevance?: number },
+  signal?: AbortSignal,
+) {
+  return post<{ message: string }>(`${BASE}/nodes/${encodeURIComponent(nodeId)}/pointers`, pointer, signal);
+}
+
+export function extractWithPointers(
+  req: { content: string; session_id?: string; raw_archive_id: string },
+  signal?: AbortSignal,
+) {
+  return post<{ triples: SAMGTriple[]; count: number }>(`${BASE}/extract-with-pointers`, req, signal);
 }

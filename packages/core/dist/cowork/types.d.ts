@@ -167,6 +167,12 @@ export interface ParallelOptions {
 export interface SequentialOptions {
     stopOnError?: boolean;
     passContext?: boolean;
+    /** AbortSignal for interruption support */
+    signal?: AbortSignal;
+    /** Callback before each task execution */
+    onBeforeTask?: (task: CoworkTask, index: number) => Promise<boolean> | boolean;
+    /** Callback after each task execution */
+    onAfterTask?: (task: CoworkTask, result: ExecutionResult, index: number) => Promise<void> | void;
 }
 /**
  * 辩论执行选项
@@ -176,6 +182,16 @@ export interface DebateOptions {
     convergenceThreshold?: number;
     generator: string;
     critic: string;
+    /** Strategy for resolving conflicts */
+    conflictResolution?: 'generator-wins' | 'critic-wins' | 'merge' | 'vote';
+    /** Minimum agreement score to consider converged (0-1) */
+    minAgreementScore?: number;
+    /** AbortSignal for interruption support */
+    signal?: AbortSignal;
+    /** Callback after each round */
+    onRound?: (round: DebateRound) => Promise<void> | void;
+    /** Custom convergence checker */
+    checkConvergence?: (round: DebateRound, allRounds: DebateRound[]) => boolean;
 }
 /**
  * 执行结果
@@ -197,6 +213,8 @@ export interface BatchExecutionResult {
     successCount: number;
     failureCount: number;
     conflicts?: ConflictInfo[];
+    /** Whether the execution was interrupted */
+    interrupted?: boolean;
 }
 /**
  * 冲突信息

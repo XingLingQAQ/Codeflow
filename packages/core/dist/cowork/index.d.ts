@@ -3,4 +3,10 @@ export * from './process/index.js';
 export * from './CoworkOrchestrator.js';
 export * from './adapters/index.js';
 export * from './editors/index.js';
+export * from './factory.js';
+export * from './GitConflictDetector.js';
+export * from './EditorConfigManager.js';
+export * from './parallel/index.js';
+export * from './plan/index.js';
+export * from './QualityLoop.js';
 //# sourceMappingURL=index.d.ts.map

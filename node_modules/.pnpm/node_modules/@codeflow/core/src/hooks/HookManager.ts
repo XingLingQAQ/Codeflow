@@ -12,6 +12,9 @@ import {
   MemoryMatch,
   HookEvent,
   HookHandler,
+  TaskExecutionContext,
+  TaskExecutionResult,
+  TaskFailureContext,
 } from './types.js';
 
 /**
@@ -164,6 +167,46 @@ export class HookManager extends EventEmitter implements IHookManager {
       (acc, current) => [...(acc || []), ...current] // 合并所有处理器的结果
     );
     return results || [];
+  }
+
+  /**
+   * 任务级 Hook: 任务执行前（加载意图文档、相关记忆）
+   */
+  async hook_before_task_execute(context: TaskExecutionContext): Promise<void> {
+    await this.executeHandlers<TaskExecutionContext, void>(
+      HookEvent.BEFORE_TASK_EXECUTE,
+      context
+    );
+  }
+
+  /**
+   * 任务级 Hook: 任务执行后（存储原子记忆）
+   */
+  async hook_after_task_execute(result: TaskExecutionResult): Promise<void> {
+    await this.executeHandlers<TaskExecutionResult, void>(
+      HookEvent.AFTER_TASK_EXECUTE,
+      result
+    );
+  }
+
+  /**
+   * 任务级 Hook: 任务失败时（检索历史修复方案）
+   */
+  async hook_on_task_failure(context: TaskFailureContext): Promise<void> {
+    await this.executeHandlers<TaskFailureContext, void>(
+      HookEvent.ON_TASK_FAILURE,
+      context
+    );
+  }
+
+  /**
+   * 任务级 Hook: 任务完成后（更新用户画像、同步意图文档）
+   */
+  async hook_on_task_complete(result: TaskExecutionResult): Promise<void> {
+    await this.executeHandlers<TaskExecutionResult, void>(
+      HookEvent.ON_TASK_COMPLETE,
+      result
+    );
   }
 
   /**

@@ -5,6 +5,7 @@
 import { EventEmitter } from 'events';
 import { CoworkTask, ICodeEditor, ExecutorCapabilities, ParallelOptions, SequentialOptions, DebateOptions, ExecutionResult, BatchExecutionResult, DebateResult } from './types.js';
 import { CLIProcessManager } from './process/CLIProcessManager.js';
+import { GitConflictDetector } from './GitConflictDetector.js';
 /**
  * 执行器注册信息
  */
@@ -30,7 +31,8 @@ export declare class CoworkOrchestrator extends EventEmitter {
     private processManager;
     private blackboard;
     private runningTasks;
-    constructor(processManager?: CLIProcessManager);
+    private gitConflictDetector;
+    constructor(processManager?: CLIProcessManager, cwd?: string);
     /**
      * 注册执行器
      */
@@ -79,12 +81,28 @@ export declare class CoworkOrchestrator extends EventEmitter {
      */
     getProcessManager(): CLIProcessManager;
     /**
+     * 获取 Git 冲突检测器
+     */
+    getGitConflictDetector(): GitConflictDetector;
+    /**
      * 清理资源
      */
     cleanup(): Promise<void>;
     private emitEvent;
     private buildContextFromResult;
     private parseIssues;
+    /**
+     * 根据描述推断问题类型
+     */
+    private inferIssueType;
+    /**
+     * 将关键词映射到问题类型
+     */
+    private mapToIssueType;
+    /**
+     * 根据类型和描述推断严重性
+     */
+    private inferSeverity;
     private refineInstruction;
 }
 export {};

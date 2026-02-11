@@ -12,6 +12,7 @@ import { HookEvent, AIResponse, Message } from './types.js';
 import { MemoryExtractor } from '../memory/MemoryExtractor.js';
 import { UserProfileService } from '../memory/UserProfileService.js';
 import { ShadowScaffold } from '../shadow/ShadowScaffold.js';
+import { MemoryAgentClient } from '../memory/MemoryAgentClient.js';
 
 export interface MemoryShadowHooksConfig {
   /** 用户 ID */
@@ -26,6 +27,8 @@ export interface MemoryShadowHooksConfig {
   enableProfileUpdate: boolean;
   /** 画像更新的最小消息间隔（条数） */
   profileUpdateInterval: number;
+  /** 是否启用 MemoryAgent 双写 */
+  enableAgentIngest: boolean;
 }
 
 const DEFAULT_CONFIG: MemoryShadowHooksConfig = {
@@ -35,6 +38,7 @@ const DEFAULT_CONFIG: MemoryShadowHooksConfig = {
   enableMemoryExtraction: true,
   enableProfileUpdate: true,
   profileUpdateInterval: 10,
+  enableAgentIngest: true,
 };
 
 export class MemoryShadowHooks {
@@ -42,6 +46,7 @@ export class MemoryShadowHooks {
   private readonly memoryExtractor?: MemoryExtractor;
   private readonly profileService?: UserProfileService;
   private readonly shadowScaffold: ShadowScaffold;
+  private readonly agentClient?: MemoryAgentClient;
   private readonly config: MemoryShadowHooksConfig;
 
   private messageCount = 0;
@@ -52,13 +57,15 @@ export class MemoryShadowHooks {
     config: Partial<MemoryShadowHooksConfig> = {},
     memoryExtractor?: MemoryExtractor,
     profileService?: UserProfileService,
-    shadowScaffold?: ShadowScaffold
+    shadowScaffold?: ShadowScaffold,
+    agentClient?: MemoryAgentClient
   ) {
     this.hookManager = hookManager;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.memoryExtractor = memoryExtractor;
     this.profileService = profileService;
     this.shadowScaffold = shadowScaffold || new ShadowScaffold();
+    this.agentClient = agentClient;
   }
 
   /**
@@ -97,11 +104,29 @@ export class MemoryShadowHooks {
   }
 
   /**
-   * hook_post_response: 提取记忆
+   * hook_post_response: 提取记忆 + MemoryAgent 双写
    *
-   * 在 AI 响应后，异步提取对话中的记忆
+   * 在 AI 响应后，异步提取对话中的记忆，
+   * 同时通过 MemoryAgent 归档完整对话。
    */
   private async onPostResponse(response: AIResponse): Promise<void> {
+    // 1. MemoryAgent 双写（归档完整对话）
+    if (this.config.enableAgentIngest && this.agentClient && this.lastUserMessage) {
+      try {
+        const fullContent = `User: ${this.lastUserMessage}\nAssistant: ${response.content || ''}`;
+        this.agentClient.ingest({
+          content: fullContent,
+          type: 'conversation',
+          session_id: this.config.sessionId,
+          source: 'assistant',
+          tags: ['auto-ingest'],
+        }).catch(() => { /* 非阻塞 */ });
+      } catch {
+        // 归档失败不阻塞主流程
+      }
+    }
+
+    // 2. 原有的记忆提取逻辑
     if (!this.config.enableMemoryExtraction || !this.memoryExtractor) {
       return;
     }

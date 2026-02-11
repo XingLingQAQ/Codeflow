@@ -20,10 +20,10 @@ func main() {
 }
 
 func run() error {
-	// Get port from environment or use default
+	// Get port from environment or use dynamic port (0 = OS assigns)
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "0"
 	}
 
 	// Get allowed origins from environment or use defaults

@@ -76,9 +76,25 @@ type Entity struct {
 	Description string                 `json:"description,omitempty"`
 	Properties  map[string]interface{} `json:"properties,omitempty"`
 	Aliases     []string               `json:"aliases,omitempty"`
+	Pointers    []Pointer              `json:"pointers,omitempty"`
 	CreatedAt   int64                  `json:"created_at"`
 	UpdatedAt   int64                  `json:"updated_at"`
 }
+
+// Pointer 指向 Raw Archive 的指针。
+// 将 SAMG 概念节点绑定到原始数据证据。
+type Pointer struct {
+	SourceID   string  `json:"source_id"`
+	SourceType string  `json:"source_type"`
+	Summary    string  `json:"summary"`
+	LineRange  string  `json:"line_range,omitempty"`
+	FilePath   string  `json:"file_path,omitempty"`
+	Timestamp  int64   `json:"timestamp"`
+	Relevance  float64 `json:"relevance"`
+}
+
+// MaxPointersPerEntity 每个实体最大指针数。
+const MaxPointersPerEntity = 50
 
 // JsonLdContext JSON-LD上下文
 type JsonLdContext struct {
@@ -154,6 +170,10 @@ type ITripleStore interface {
 
 	// 去重
 	Deduplicate(ctx context.Context) (int, error)
+
+	// 指针操作
+	AppendPointer(ctx context.Context, entityID string, ptr Pointer) error
+	GetPointers(ctx context.Context, entityID string) ([]Pointer, error)
 }
 
 // ITripleExtractor 三元组提取器接口
@@ -317,4 +337,34 @@ func CreateNodeObject(node TripleNode) TripleObject {
 // CreateLiteralObject 从字面量创建对象
 func CreateLiteralObject(literal LiteralValue) TripleObject {
 	return TripleObject{Literal: &literal}
+}
+
+// QueryMemoryRequest Memory Agent 查询请求。
+type QueryMemoryRequest struct {
+	Topic           string  `json:"topic"`
+	Type            string  `json:"type,omitempty"`
+	MaxResults      int     `json:"max_results,omitempty"`
+	ResolvePointers bool    `json:"resolve_pointers"`
+	MinBLA          float64 `json:"min_bla,omitempty"`
+}
+
+// QueryMemoryNode 查询结果中的激活节点（含指针）。
+type QueryMemoryNode struct {
+	ID         string            `json:"id"`
+	Label      string            `json:"label"`
+	Activation float64           `json:"activation"`
+	Hop        int               `json:"hop"`
+	Pointers   []ResolvedPointer `json:"pointers,omitempty"`
+}
+
+// ResolvedPointer 已解析的指针（可能包含原始内容）。
+type ResolvedPointer struct {
+	Pointer
+	ResolvedContent string `json:"resolved_content,omitempty"`
+}
+
+// QueryMemoryResponse Memory Agent 查询响应。
+type QueryMemoryResponse struct {
+	ActivatedNodes []QueryMemoryNode `json:"activated_nodes"`
+	ContextBlock   string            `json:"context_block"`
 }

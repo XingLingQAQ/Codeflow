@@ -592,3 +592,54 @@ func toString(v interface{}) string {
 		return ""
 	}
 }
+
+// AppendPointer 向实体追加指针，超过上限时按 Relevance × Recency 淘汰。
+func (s *InMemoryTripleStore) AppendPointer(ctx context.Context, entityID string, ptr Pointer) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entity, ok := s.entities[entityID]
+	if !ok {
+		return nil // 实体不存在，静默跳过
+	}
+
+	entity.Pointers = append(entity.Pointers, ptr)
+
+	// 超过上限时淘汰
+	if len(entity.Pointers) > MaxPointersPerEntity {
+		sort.Slice(entity.Pointers, func(i, j int) bool {
+			scoreI := entity.Pointers[i].Relevance * float64(entity.Pointers[i].Timestamp)
+			scoreJ := entity.Pointers[j].Relevance * float64(entity.Pointers[j].Timestamp)
+			return scoreI > scoreJ
+		})
+		entity.Pointers = entity.Pointers[:MaxPointersPerEntity]
+	}
+
+	entity.UpdatedAt = time.Now().UnixMilli()
+	s.entities[entityID] = entity
+	return nil
+}
+
+// GetPointers 获取实体的所有指针。
+func (s *InMemoryTripleStore) GetPointers(ctx context.Context, entityID string) ([]Pointer, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entity, ok := s.entities[entityID]
+	if !ok {
+		return nil, nil
+	}
+	return entity.Pointers, nil
+}

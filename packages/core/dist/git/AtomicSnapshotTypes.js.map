@@ -1,0 +1,1 @@
+{"version":3,"file":"AtomicSnapshotTypes.js","sourceRoot":"","sources":["../../src/git/AtomicSnapshotTypes.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAoKH;;GAEG;AACH,MAAM,CAAC,MAAM,uBAAuB,GAAG;IACrC,YAAY,EAAE,GAAG;IACjB,sBAAsB,EAAE,MAAM,EAAE,YAAY;IAC5C,oBAAoB,EAAE,IAAI;IAC1B,sBAAsB,EAAE,IAAI;CAC7B,CAAC"}

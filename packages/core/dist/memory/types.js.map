@@ -1,0 +1,1 @@
+{"version":3,"file":"types.js","sourceRoot":"","sources":["../../src/memory/types.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAsJH;;GAEG;AACH,MAAM,CAAC,MAAM,qBAAqB,GAAsB;IACtD,cAAc,EAAE,iBAAiB;IACjC,SAAS,EAAE,GAAG;IACd,YAAY,EAAE,EAAE;IAChB,IAAI,EAAE,WAAW;IACjB,IAAI,EAAE,IAAI;CACX,CAAC;AAEF,MAAM,CAAC,MAAM,qBAAqB,GAAsB;IACtD,SAAS,EAAE,EAAE;IACb,aAAa,EAAE,IAAI;CACpB,CAAC"}

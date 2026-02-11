@@ -408,9 +408,78 @@ export class ClaudeAdapter implements ICliAdapter {
   }
 
   /**
-   * 估算 Token 数量（简单实现）
+   * 估算 Token 数量
+   * 使用改进的启发式算法，考虑不同语言和内容类型
    */
   private estimateTokens(messages: Message[]): number {
-    return messages.reduce((sum, msg) => sum + Math.ceil(msg.content.length / 4), 0);
+    return messages.reduce((sum, msg) => sum + this.estimateContentTokens(msg.content), 0);
+  }
+
+  /**
+   * 估算单个内容的 Token 数量
+   * 基于 Claude tokenizer 的特性进行估算
+   */
+  private estimateContentTokens(content: string): number {
+    if (!content) return 0;
+
+    let tokens = 0;
+
+    // 1. 检测代码块并单独计算
+    const codeBlockRegex = /```[\s\S]*?```/g;
+    const codeBlocks = content.match(codeBlockRegex) || [];
+    let nonCodeContent = content;
+
+    for (const block of codeBlocks) {
+      // 代码通常每 3-4 字符一个 token（因为有很多符号和短标识符）
+      tokens += Math.ceil(block.length / 3.5);
+      nonCodeContent = nonCodeContent.replace(block, '');
+    }
+
+    // 2. 检测中文/日文/韩文字符（CJK）
+    const cjkRegex = /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g;
+    const cjkChars = nonCodeContent.match(cjkRegex) || [];
+    // CJK 字符通常每个字符 1-2 个 token
+    tokens += cjkChars.length * 1.5;
+
+    // 移除 CJK 字符后计算剩余内容
+    const nonCjkContent = nonCodeContent.replace(cjkRegex, '');
+
+    // 3. 计算英文和其他内容
+    // 英文通常每 4 字符一个 token，但需要考虑：
+    // - 空格和标点符号
+    // - 常见单词可能被合并
+    // - 数字和特殊字符
+
+    // 按空格分词
+    const words = nonCjkContent.split(/\s+/).filter(w => w.length > 0);
+
+    for (const word of words) {
+      if (/^\d+$/.test(word)) {
+        // 纯数字：每 3-4 位一个 token
+        tokens += Math.ceil(word.length / 3);
+      } else if (/^[a-zA-Z]+$/.test(word)) {
+        // 纯英文单词
+        if (word.length <= 4) {
+          tokens += 1; // 短单词通常是一个 token
+        } else if (word.length <= 8) {
+          tokens += 1.5; // 中等长度单词
+        } else {
+          tokens += Math.ceil(word.length / 4); // 长单词
+        }
+      } else {
+        // 混合内容（包含符号等）
+        tokens += Math.ceil(word.length / 3);
+      }
+    }
+
+    // 4. 添加标点符号和空格的 token（通常被合并到相邻 token）
+    const punctuation = nonCjkContent.match(/[.,!?;:'"()\[\]{}]/g) || [];
+    tokens += punctuation.length * 0.3; // 标点通常被合并
+
+    // 5. 添加换行符的 token
+    const newlines = content.match(/\n/g) || [];
+    tokens += newlines.length * 0.5;
+
+    return Math.ceil(tokens);
   }
 }
