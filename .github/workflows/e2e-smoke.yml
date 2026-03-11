@@ -1,0 +1,57 @@
+name: E2E Smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Install Root Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Frontend Dependencies
+        working-directory: codeflow_template
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run E2E Suite
+        env:
+          CODEFLOW_BASE_URL: http://127.0.0.1:3000
+          CODEFLOW_AUTOSTART_DEV_SERVER: "true"
+          CODEFLOW_RUN_REAL_USER: "false"
+          CODEFLOW_HEADLESS: "true"
+          CODEFLOW_DEV_PM: "npm"
+          CODEFLOW_DEV_CWD: codeflow_template
+        run: pnpm run test:e2e:all
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: artifacts/
+          if-no-files-found: warn
