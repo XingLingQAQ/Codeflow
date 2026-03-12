@@ -12,10 +12,13 @@ import (
 
 	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/config"
+	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/isolation"
 	"github.com/codeflow/backend/internal/memory"
+	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/privacy"
+	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
@@ -25,16 +28,35 @@ import (
 
 // setupE2EServer creates a test server with all services initialized
 func setupE2EServer(t *testing.T) *httptest.Server {
+	t.Helper()
 	// Initialize all services
 	snapshotSvc := snapshot.NewInMemorySnapshotService()
 	snapshot.SetSnapshotService(snapshotSvc)
 
-	// Config service - use in-memory for testing
+	// Config service - use sqlite-backed services for testing
 	configSvc, err := config.NewSQLiteConfigService(":memory:")
 	if err != nil {
 		t.Fatalf("Failed to create config service: %v", err)
 	}
 	config.SetConfigService(configSvc)
+
+	plannerSvc, err := planner.NewSQLitePlanner(":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create planner service: %v", err)
+	}
+	planner.SetPlanner(plannerSvc)
+
+	projectSvc, err := project.NewSQLiteProjectService(":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create project service: %v", err)
+	}
+	project.SetProjectService(projectSvc)
+
+	contextSvc, err := ctxsvc.NewSQLiteContextService(":memory:")
+	if err != nil {
+		t.Fatalf("Failed to create context service: %v", err)
+	}
+	ctxsvc.SetContextService(contextSvc)
 
 	hookMgr := hooks.NewHookManager()
 	// Register a test hook for E2E testing
@@ -82,8 +104,19 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 		EnableDebugMode: true,
 	}
 	server := NewServer(cfg)
+	ts := httptest.NewServer(server.Router())
+	t.Cleanup(func() {
+		ctxsvc.SetContextService(nil)
+		project.SetProjectService(nil)
+		planner.SetPlanner(nil)
+		config.SetConfigService(nil)
+		_ = contextSvc.Close()
+		_ = projectSvc.Close()
+		_ = plannerSvc.Close()
+		_ = configSvc.Close()
+	})
 
-	return httptest.NewServer(server.Router())
+	return ts
 }
 
 // TestE2E_SnapshotWorkflow tests the complete snapshot workflow

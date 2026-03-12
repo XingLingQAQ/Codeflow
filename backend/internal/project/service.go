@@ -3,13 +3,19 @@ package project
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/codeflow/backend/internal/planner"
 )
@@ -195,8 +201,11 @@ func (s *InMemoryProjectService) ListProjects(ctx context.Context, req *ProjectL
 		filtered = append(filtered, p)
 	}
 
-	// 按最近活跃时间倒序
+	// 按最近活跃时间倒序，时间相同按 ID 倒序，保证稳定顺序
 	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].LastActive == filtered[j].LastActive {
+			return filtered[i].ID > filtered[j].ID
+		}
 		return filtered[i].LastActive > filtered[j].LastActive
 	})
 
@@ -412,15 +421,452 @@ func (s *InMemoryProjectService) RecalculateProgress(ctx context.Context, projec
 	return nil
 }
 
+type SQLiteProjectService struct {
+	*InMemoryProjectService
+	db      *sql.DB
+	dbMu    sync.RWMutex
+	writeMu sync.Mutex
+}
+
+const createProjectTablesSQL = `
+CREATE TABLE IF NOT EXISTS projects (
+	id TEXT PRIMARY KEY,
+	title TEXT NOT NULL,
+	description TEXT,
+	status TEXT NOT NULL,
+	progress INTEGER NOT NULL,
+	tags_json TEXT NOT NULL DEFAULT '[]',
+	git_branch TEXT,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL,
+	last_active INTEGER NOT NULL,
+	metadata_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS project_plans (
+	project_id TEXT NOT NULL,
+	plan_id TEXT NOT NULL,
+	position INTEGER NOT NULL,
+	PRIMARY KEY (project_id, plan_id),
+	FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_last_active ON projects(last_active DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_project_plans_project_position ON project_plans(project_id, position ASC, plan_id ASC);
+`
+
+type projectStateSnapshot struct {
+	projects map[string]*Project
+}
+
+func NewSQLiteProjectService(dbPath string) (*SQLiteProjectService, error) {
+	connStr, err := buildProjectSQLiteConnString(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("open project database: %w", err)
+	}
+
+	svc := &SQLiteProjectService{
+		InMemoryProjectService: NewInMemoryProjectService(),
+		db:                     db,
+	}
+
+	if err := svc.initialize(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return svc, nil
+}
+
+func buildProjectSQLiteConnString(dbPath string) (string, error) {
+	if dbPath == "" || dbPath == ":memory:" {
+		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	}
+
+	dir := filepath.Dir(dbPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create project db dir: %w", err)
+		}
+	}
+
+	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+}
+
+func (s *SQLiteProjectService) initialize() error {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	if _, err := s.db.Exec(createProjectTablesSQL); err != nil {
+		return fmt.Errorf("create project tables: %w", err)
+	}
+
+	return s.loadFromDBLocked()
+}
+
+func (s *SQLiteProjectService) loadFromDBLocked() error {
+	projects := make(map[string]*Project)
+
+	rows, err := s.db.Query(`
+		SELECT id, title, description, status, progress, tags_json, git_branch, created_at, updated_at, last_active, metadata_json
+		FROM projects
+	`)
+	if err != nil {
+		return fmt.Errorf("query projects: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		project, err := scanProject(rows)
+		if err != nil {
+			return err
+		}
+		projects[project.ID] = project
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate projects: %w", err)
+	}
+
+	planRows, err := s.db.Query(`
+		SELECT project_id, plan_id
+		FROM project_plans
+		ORDER BY project_id ASC, position ASC, plan_id ASC
+	`)
+	if err != nil {
+		return fmt.Errorf("query project plans: %w", err)
+	}
+	defer planRows.Close()
+
+	for planRows.Next() {
+		var projectID string
+		var planID string
+		if err := planRows.Scan(&projectID, &planID); err != nil {
+			return fmt.Errorf("scan project plan relation: %w", err)
+		}
+		if project, ok := projects[projectID]; ok {
+			project.PlanIDs = append(project.PlanIDs, planID)
+		}
+	}
+	if err := planRows.Err(); err != nil {
+		return fmt.Errorf("iterate project plan relations: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projects = projects
+	return nil
+}
+
+func (s *SQLiteProjectService) Close() error {
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
+}
+
+func (s *SQLiteProjectService) CreateProject(ctx context.Context, req *ProjectCreateRequest) (*Project, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	before := s.snapshotState()
+	project, err := s.InMemoryProjectService.CreateProject(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *SQLiteProjectService) UpdateProject(ctx context.Context, id string, req *ProjectUpdateRequest) (*Project, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	before := s.snapshotState()
+	project, err := s.InMemoryProjectService.UpdateProject(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *SQLiteProjectService) DeleteProject(ctx context.Context, id string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	before := s.snapshotState()
+	if err := s.InMemoryProjectService.DeleteProject(ctx, id); err != nil {
+		return err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteProjectService) AddPlanToProject(ctx context.Context, projectID, planID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	before := s.snapshotState()
+	if err := s.InMemoryProjectService.AddPlanToProject(ctx, projectID, planID); err != nil {
+		return err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteProjectService) RemovePlanFromProject(ctx context.Context, projectID, planID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	before := s.snapshotState()
+	if err := s.InMemoryProjectService.RemovePlanFromProject(ctx, projectID, planID); err != nil {
+		return err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteProjectService) RecalculateProgress(ctx context.Context, projectID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	before := s.snapshotState()
+	if err := s.InMemoryProjectService.RecalculateProgress(ctx, projectID); err != nil {
+		return err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteProjectService) persistCurrentState() error {
+	snapshot := s.snapshotState()
+	return s.saveSnapshot(snapshot)
+}
+
+func (s *SQLiteProjectService) saveSnapshot(snapshot projectStateSnapshot) error {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin project transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM project_plans`); err != nil {
+		return fmt.Errorf("clear project plans: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM projects`); err != nil {
+		return fmt.Errorf("clear projects: %w", err)
+	}
+
+	for _, project := range snapshot.projects {
+		tagsJSON, err := marshalProjectStrings(project.Tags)
+		if err != nil {
+			return fmt.Errorf("marshal project tags: %w", err)
+		}
+		metadataJSON, err := marshalProjectMetadata(project.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal project metadata: %w", err)
+		}
+
+		if _, err := tx.Exec(`
+			INSERT INTO projects (id, title, description, status, progress, tags_json, git_branch, created_at, updated_at, last_active, metadata_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, project.ID, project.Title, project.Description, string(project.Status), project.Progress, tagsJSON, nullProjectString(project.GitBranch), project.CreatedAt, project.UpdatedAt, project.LastActive, nullProjectString(metadataJSON)); err != nil {
+			return fmt.Errorf("insert project %s: %w", project.ID, err)
+		}
+
+		for idx, planID := range project.PlanIDs {
+			if _, err := tx.Exec(`
+				INSERT INTO project_plans (project_id, plan_id, position)
+				VALUES (?, ?, ?)
+			`, project.ID, planID, idx+1); err != nil {
+				return fmt.Errorf("insert project plan relation %s/%s: %w", project.ID, planID, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit project transaction: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteProjectService) snapshotState() projectStateSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot := projectStateSnapshot{projects: make(map[string]*Project, len(s.projects))}
+	for id, project := range s.projects {
+		snapshot.projects[id] = cloneProject(project)
+	}
+	return snapshot
+}
+
+func (s *SQLiteProjectService) restoreState(snapshot projectStateSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projects = snapshot.projects
+}
+
+func scanProject(scanner interface{ Scan(dest ...any) error }) (*Project, error) {
+	var project Project
+	var description sql.NullString
+	var tagsJSON string
+	var gitBranch sql.NullString
+	var metadataJSON sql.NullString
+	var status string
+
+	if err := scanner.Scan(
+		&project.ID,
+		&project.Title,
+		&description,
+		&status,
+		&project.Progress,
+		&tagsJSON,
+		&gitBranch,
+		&project.CreatedAt,
+		&project.UpdatedAt,
+		&project.LastActive,
+		&metadataJSON,
+	); err != nil {
+		return nil, fmt.Errorf("scan project: %w", err)
+	}
+
+	project.Description = description.String
+	project.Status = ProjectStatus(status)
+	project.GitBranch = gitBranch.String
+
+	tags, err := unmarshalProjectStrings(tagsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("decode project tags: %w", err)
+	}
+	metadata, err := unmarshalProjectMetadata(metadataJSON.String)
+	if err != nil {
+		return nil, fmt.Errorf("decode project metadata: %w", err)
+	}
+	project.Tags = tags
+	project.Metadata = metadata
+	project.PlanIDs = []string{}
+	return &project, nil
+}
+
+func cloneProject(project *Project) *Project {
+	if project == nil {
+		return nil
+	}
+	cloned := *project
+	cloned.Tags = cloneProjectStrings(project.Tags)
+	cloned.PlanIDs = cloneProjectStrings(project.PlanIDs)
+	cloned.Metadata = cloneProjectMetadata(project.Metadata)
+	return &cloned
+}
+
+func cloneProjectStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string(nil), values...)
+}
+
+func marshalProjectStrings(values []string) (string, error) {
+	if len(values) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalProjectStrings(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func cloneProjectMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	var cloned map[string]interface{}
+	if err := json.Unmarshal(data, &cloned); err != nil {
+		return map[string]interface{}{}
+	}
+	return cloned
+}
+
+func marshalProjectMetadata(metadata map[string]interface{}) (string, error) {
+	if len(metadata) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalProjectMetadata(raw string) (map[string]interface{}, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return nil, err
+	}
+	return metadata, nil
+}
+
+func nullProjectString(value string) interface{} {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
 // 全局服务实例
 var defaultProjectService IProjectService
-var projectOnce sync.Once
 
 // GetProjectService 获取项目管理器实例
 func GetProjectService() IProjectService {
-	projectOnce.Do(func() {
+	if defaultProjectService == nil {
 		defaultProjectService = NewInMemoryProjectService()
-	})
+	}
 	return defaultProjectService
 }
 

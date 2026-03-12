@@ -3,6 +3,9 @@ package context
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // FileNode 文件树节点
@@ -27,18 +31,18 @@ type FileNode struct {
 
 // FileTreeRequest 文件树请求
 type FileTreeRequest struct {
-	RootPath   string   `json:"root_path" binding:"required"`
-	MaxDepth   int      `json:"max_depth"`
-	IncludeHidden bool  `json:"include_hidden"`
-	Extensions []string `json:"extensions,omitempty"`
+	RootPath      string   `json:"root_path" binding:"required"`
+	MaxDepth      int      `json:"max_depth"`
+	IncludeHidden bool     `json:"include_hidden"`
+	Extensions    []string `json:"extensions,omitempty"`
 }
 
 // FileTreeResponse 文件树响应
 type FileTreeResponse struct {
-	Root      *FileNode `json:"root"`
-	TotalFiles int      `json:"total_files"`
-	TotalDirs  int      `json:"total_dirs"`
-	TotalSize  int64    `json:"total_size"`
+	Root       *FileNode `json:"root"`
+	TotalFiles int       `json:"total_files"`
+	TotalDirs  int       `json:"total_dirs"`
+	TotalSize  int64     `json:"total_size"`
 }
 
 // ASTParseRequest AST解析请求
@@ -152,6 +156,228 @@ func NewInMemoryContextService() *InMemoryContextService {
 	}
 }
 
+// SQLiteContextService SQLite 持久化实现，仅将 preset CRUD 落盘。
+type SQLiteContextService struct {
+	*InMemoryContextService
+	db   *sql.DB
+	dbMu sync.RWMutex
+}
+
+const createContextPresetTableSQL = `
+CREATE TABLE IF NOT EXISTS context_presets (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	description TEXT,
+	paths_json TEXT NOT NULL,
+	extensions_json TEXT NOT NULL DEFAULT '[]',
+	max_tokens INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_presets_created_at
+ON context_presets(created_at DESC, id DESC);
+`
+
+// NewSQLiteContextService 创建 SQLite 持久化上下文服务。
+func NewSQLiteContextService(dbPath string) (*SQLiteContextService, error) {
+	connStr, err := buildContextSQLiteConnString(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+
+	svc := &SQLiteContextService{
+		InMemoryContextService: NewInMemoryContextService(),
+		db:                     db,
+	}
+
+	if err := svc.initialize(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return svc, nil
+}
+
+func buildContextSQLiteConnString(dbPath string) (string, error) {
+	if dbPath == "" || dbPath == ":memory:" {
+		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	}
+
+	dir := filepath.Dir(dbPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create context db dir: %w", err)
+		}
+	}
+
+	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+}
+
+func (s *SQLiteContextService) initialize() error {
+	if _, err := s.db.Exec(createContextPresetTableSQL); err != nil {
+		return fmt.Errorf("create context preset tables: %w", err)
+	}
+	return nil
+}
+
+// Close 关闭数据库连接。
+func (s *SQLiteContextService) Close() error {
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
+}
+
+// ListPresets 列出持久化预设。
+func (s *SQLiteContextService) ListPresets(ctx context.Context) (*PresetListResponse, error) {
+	s.dbMu.RLock()
+	defer s.dbMu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, description, paths_json, extensions_json, max_tokens, created_at, updated_at
+		FROM context_presets
+		ORDER BY created_at DESC, updated_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list presets: %w", err)
+	}
+	defer rows.Close()
+
+	presets := make([]ContextPreset, 0)
+	for rows.Next() {
+		preset, err := scanContextPreset(rows)
+		if err != nil {
+			return nil, err
+		}
+		presets = append(presets, *preset)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate presets: %w", err)
+	}
+
+	return &PresetListResponse{Presets: presets, Total: len(presets)}, nil
+}
+
+// CreatePreset 创建持久化预设。
+func (s *SQLiteContextService) CreatePreset(ctx context.Context, req *PresetCreateRequest) (*ContextPreset, error) {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	now := time.Now().Unix()
+	preset := &ContextPreset{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Description: req.Description,
+		Paths:       cloneStringSlice(req.Paths),
+		Extensions:  cloneStringSlice(req.Extensions),
+		MaxTokens:   req.MaxTokens,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	pathsJSON, err := marshalStringSlice(preset.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("marshal preset paths: %w", err)
+	}
+	extensionsJSON, err := marshalStringSlice(preset.Extensions)
+	if err != nil {
+		return nil, fmt.Errorf("marshal preset extensions: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO context_presets (id, name, description, paths_json, extensions_json, max_tokens, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, preset.ID, preset.Name, preset.Description, pathsJSON, extensionsJSON, preset.MaxTokens, preset.CreatedAt, preset.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("insert preset: %w", err)
+	}
+
+	return preset, nil
+}
+
+// DeletePreset 删除持久化预设。
+func (s *SQLiteContextService) DeletePreset(ctx context.Context, id string) error {
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM context_presets WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete preset: %w", err)
+	}
+	return nil
+}
+
+func scanContextPreset(scanner interface{ Scan(dest ...any) error }) (*ContextPreset, error) {
+	var preset ContextPreset
+	var description sql.NullString
+	var pathsJSON string
+	var extensionsJSON string
+
+	if err := scanner.Scan(
+		&preset.ID,
+		&preset.Name,
+		&description,
+		&pathsJSON,
+		&extensionsJSON,
+		&preset.MaxTokens,
+		&preset.CreatedAt,
+		&preset.UpdatedAt,
+	); err != nil {
+		return nil, fmt.Errorf("scan preset: %w", err)
+	}
+
+	preset.Description = description.String
+
+	paths, err := unmarshalStringSlice(pathsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("decode preset paths: %w", err)
+	}
+	extensions, err := unmarshalStringSlice(extensionsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("decode preset extensions: %w", err)
+	}
+	preset.Paths = paths
+	preset.Extensions = extensions
+
+	return &preset, nil
+}
+
+func marshalStringSlice(values []string) (string, error) {
+	if len(values) == 0 {
+		return "[]", nil
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func unmarshalStringSlice(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func cloneStringSlice(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string(nil), values...)
+}
+
 // GetFileTree 获取文件树
 func (s *InMemoryContextService) GetFileTree(ctx context.Context, req *FileTreeRequest) (*FileTreeResponse, error) {
 	maxDepth := req.MaxDepth
@@ -250,35 +476,35 @@ func (s *InMemoryContextService) buildFileNode(path string, info os.FileInfo, de
 // detectLanguage 检测语言
 func (s *InMemoryContextService) detectLanguage(ext string) string {
 	langMap := map[string]string{
-		".ts":   "typescript",
-		".tsx":  "typescript",
-		".js":   "javascript",
-		".jsx":  "javascript",
-		".go":   "go",
-		".py":   "python",
-		".java": "java",
-		".rs":   "rust",
-		".cpp":  "cpp",
-		".cc":   "cpp",
-		".c":    "c",
-		".h":    "c",
-		".rb":   "ruby",
-		".php":  "php",
-		".cs":   "csharp",
+		".ts":    "typescript",
+		".tsx":   "typescript",
+		".js":    "javascript",
+		".jsx":   "javascript",
+		".go":    "go",
+		".py":    "python",
+		".java":  "java",
+		".rs":    "rust",
+		".cpp":   "cpp",
+		".cc":    "cpp",
+		".c":     "c",
+		".h":     "c",
+		".rb":    "ruby",
+		".php":   "php",
+		".cs":    "csharp",
 		".swift": "swift",
-		".kt":   "kotlin",
+		".kt":    "kotlin",
 		".scala": "scala",
-		".md":   "markdown",
-		".json": "json",
-		".yaml": "yaml",
-		".yml":  "yaml",
-		".xml":  "xml",
-		".html": "html",
-		".css":  "css",
-		".scss": "scss",
-		".sql":  "sql",
-		".sh":   "shell",
-		".bash": "shell",
+		".md":    "markdown",
+		".json":  "json",
+		".yaml":  "yaml",
+		".yml":   "yaml",
+		".xml":   "xml",
+		".html":  "html",
+		".css":   "css",
+		".scss":  "scss",
+		".sql":   "sql",
+		".sh":    "shell",
+		".bash":  "shell",
 	}
 	if lang, ok := langMap[ext]; ok {
 		return lang
@@ -691,11 +917,20 @@ func (s *InMemoryContextService) ListPresets(ctx context.Context) (*PresetListRe
 
 	presets := make([]ContextPreset, 0, len(s.presets))
 	for _, p := range s.presets {
-		presets = append(presets, *p)
+		preset := *p
+		preset.Paths = cloneStringSlice(p.Paths)
+		preset.Extensions = cloneStringSlice(p.Extensions)
+		presets = append(presets, preset)
 	}
 
 	sort.Slice(presets, func(i, j int) bool {
-		return presets[i].CreatedAt > presets[j].CreatedAt
+		if presets[i].CreatedAt != presets[j].CreatedAt {
+			return presets[i].CreatedAt > presets[j].CreatedAt
+		}
+		if presets[i].UpdatedAt != presets[j].UpdatedAt {
+			return presets[i].UpdatedAt > presets[j].UpdatedAt
+		}
+		return presets[i].ID > presets[j].ID
 	})
 
 	return &PresetListResponse{
@@ -714,8 +949,8 @@ func (s *InMemoryContextService) CreatePreset(ctx context.Context, req *PresetCr
 		ID:          uuid.New().String(),
 		Name:        req.Name,
 		Description: req.Description,
-		Paths:       req.Paths,
-		Extensions:  req.Extensions,
+		Paths:       cloneStringSlice(req.Paths),
+		Extensions:  cloneStringSlice(req.Extensions),
 		MaxTokens:   req.MaxTokens,
 		CreatedAt:   now,
 		UpdatedAt:   now,

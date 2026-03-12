@@ -4,8 +4,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/codeflow/backend/internal/api"
+	ctxsvc "github.com/codeflow/backend/internal/context"
+	"github.com/codeflow/backend/internal/planner"
+	"github.com/codeflow/backend/internal/project"
 )
 
 const version = "0.1.0"
@@ -39,6 +44,27 @@ func run() error {
 	// Check if debug mode is enabled
 	debugMode := os.Getenv("DEBUG") == "true"
 
+	plannerSvc, plannerClose, err := initPlannerService()
+	if err != nil {
+		return err
+	}
+	defer plannerClose()
+	planner.SetPlanner(plannerSvc)
+
+	projectSvc, projectClose, err := initProjectService()
+	if err != nil {
+		return err
+	}
+	defer projectClose()
+	project.SetProjectService(projectSvc)
+
+	contextSvc, contextClose, err := initContextService()
+	if err != nil {
+		return err
+	}
+	defer contextClose()
+	ctxsvc.SetContextService(contextSvc)
+
 	// Create API server
 	config := &api.Config{
 		Port:            port,
@@ -63,4 +89,48 @@ func run() error {
 	fmt.Printf("\nListening on http://localhost:%s\n", port)
 
 	return server.Run()
+}
+
+type closer interface {
+	Close() error
+}
+
+func initPlannerService() (planner.IPlanner, func(), error) {
+	dbPath := durableDBPath("planner.db")
+	svc, err := planner.NewSQLitePlanner(dbPath)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("init planner sqlite service: %w", err)
+	}
+	return svc, closeFunc(svc), nil
+}
+
+func initProjectService() (project.IProjectService, func(), error) {
+	dbPath := durableDBPath("project.db")
+	svc, err := project.NewSQLiteProjectService(dbPath)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("init project sqlite service: %w", err)
+	}
+	return svc, closeFunc(svc), nil
+}
+
+func initContextService() (ctxsvc.IContextService, func(), error) {
+	dbPath := durableDBPath("context.db")
+	svc, err := ctxsvc.NewSQLiteContextService(dbPath)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("init context sqlite service: %w", err)
+	}
+	return svc, closeFunc(svc), nil
+}
+
+func closeFunc(c closer) func() {
+	return func() {
+		_ = c.Close()
+	}
+}
+
+func durableDBPath(filename string) string {
+	if root := strings.TrimSpace(os.Getenv("CODEFLOW_DATA_DIR")); root != "" {
+		return filepath.Join(root, filename)
+	}
+	return filepath.Join(".", "data", filename)
 }
