@@ -54,7 +54,7 @@ type RegisterRoleRequest struct {
 func GetContainers(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
@@ -71,11 +71,11 @@ func GetContainers(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	respondOK(c, gin.H{
 		"containers": containers,
 		"count":      len(containers),
 	})
@@ -86,13 +86,13 @@ func GetContainers(c *gin.Context) {
 func CreateContainer(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	var req CreateContainerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -100,18 +100,18 @@ func CreateContainer(c *gin.Context) {
 	container, err := svc.CreateContainer(ctx, isolation.IsolationAgentRole(req.Role), req.ParentID)
 	if err != nil {
 		if err == isolation.ErrRoleNotFound {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+			respondError(c, http.StatusBadRequest, "invalid role")
 			return
 		}
 		if err == isolation.ErrMaxConcurrent {
-			c.JSON(http.StatusConflict, gin.H{"error": "max concurrent containers exceeded for this role"})
+			respondError(c, http.StatusConflict, "max concurrent containers exceeded for this role")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, container)
+	respondCreated(c, container)
 }
 
 // GetContainer retrieves a specific container.
@@ -119,7 +119,7 @@ func CreateContainer(c *gin.Context) {
 func GetContainer(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
@@ -129,14 +129,14 @@ func GetContainer(c *gin.Context) {
 	container, err := svc.GetContainer(ctx, containerID)
 	if err != nil {
 		if err == isolation.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "container not found"})
+			respondError(c, http.StatusNotFound, "container not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, container)
+	respondOK(c, container)
 }
 
 // DeleteContainer destroys a container.
@@ -144,7 +144,7 @@ func GetContainer(c *gin.Context) {
 func DeleteContainer(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
@@ -154,14 +154,14 @@ func DeleteContainer(c *gin.Context) {
 	err := svc.DestroyContainer(ctx, containerID)
 	if err != nil {
 		if err == isolation.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "container not found"})
+			respondError(c, http.StatusNotFound, "container not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "container destroyed"})
+	respondOK(c, gin.H{"message": "container destroyed"})
 }
 
 // SetContainerQuota sets resource quota for a container.
@@ -169,14 +169,14 @@ func DeleteContainer(c *gin.Context) {
 func SetContainerQuota(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	containerID := c.Param("id")
 	var req SetQuotaRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -192,14 +192,14 @@ func SetContainerQuota(c *gin.Context) {
 	err := svc.SetResourceQuota(ctx, containerID, quota)
 	if err != nil {
 		if err == isolation.ErrContainerNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"error": "container not found"})
+			respondError(c, http.StatusNotFound, "container not found")
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "quota updated", "quota": quota})
+	respondOK(c, gin.H{"message": "quota updated", "quota": quota})
 }
 
 // CheckAccess checks access permissions.
@@ -207,13 +207,13 @@ func SetContainerQuota(c *gin.Context) {
 func CheckAccess(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	var req CheckAccessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -231,13 +231,13 @@ func CheckAccess(c *gin.Context) {
 	elapsed := time.Since(startTime)
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"decision":    decision,
-		"latency_ms":  float64(elapsed.Microseconds()) / 1000.0,
+	respondOK(c, gin.H{
+		"decision":   decision,
+		"latency_ms": float64(elapsed.Microseconds()) / 1000.0,
 	})
 }
 
@@ -246,13 +246,13 @@ func CheckAccess(c *gin.Context) {
 func ValidateIO(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	var req ValidateIORequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -264,11 +264,11 @@ func ValidateIO(c *gin.Context) {
 	ctx := context.Background()
 	result, err := svc.ValidateIO(ctx, req.ContainerID, req.Input, direction)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	respondOK(c, result)
 }
 
 // GetRoles retrieves all role definitions.
@@ -276,7 +276,7 @@ func ValidateIO(c *gin.Context) {
 func GetRoles(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
@@ -288,7 +288,7 @@ func GetRoles(c *gin.Context) {
 		roleList = append(roleList, role)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	respondOK(c, gin.H{
 		"roles": roleList,
 		"count": len(roleList),
 	})
@@ -299,18 +299,18 @@ func GetRoles(c *gin.Context) {
 func GetRole(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	roleName := c.Param("name")
 	role, ok := svc.GetRole(isolation.IsolationAgentRole(roleName))
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+		respondError(c, http.StatusNotFound, "role not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, role)
+	respondOK(c, role)
 }
 
 // RegisterRole registers a custom role.
@@ -318,13 +318,13 @@ func GetRole(c *gin.Context) {
 func RegisterRole(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	var req RegisterRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -344,11 +344,11 @@ func RegisterRole(c *gin.Context) {
 
 	err := svc.RegisterRole(definition)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
+	respondCreated(c, gin.H{
 		"message": "role registered",
 		"role":    definition,
 	})
@@ -359,20 +359,20 @@ func RegisterRole(c *gin.Context) {
 func GetRolePermissions(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
 	roleName := c.Param("name")
 	_, ok := svc.GetRole(isolation.IsolationAgentRole(roleName))
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+		respondError(c, http.StatusNotFound, "role not found")
 		return
 	}
 
 	permissions := svc.GetEffectivePermissions(isolation.IsolationAgentRole(roleName))
 
-	c.JSON(http.StatusOK, gin.H{
+	respondOK(c, gin.H{
 		"role":        roleName,
 		"permissions": permissions,
 		"count":       len(permissions),
@@ -384,7 +384,7 @@ func GetRolePermissions(c *gin.Context) {
 func CheckRolePermission(c *gin.Context) {
 	svc := isolation.GetIsolationService()
 	if svc == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "isolation service not available"})
+		respondError(c, http.StatusServiceUnavailable, "isolation service not available")
 		return
 	}
 
@@ -394,7 +394,7 @@ func CheckRolePermission(c *gin.Context) {
 		Level    string `json:"level" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -404,7 +404,7 @@ func CheckRolePermission(c *gin.Context) {
 		isolation.PermissionLevel(req.Level),
 	)
 
-	c.JSON(http.StatusOK, gin.H{
+	respondOK(c, gin.H{
 		"role":           roleName,
 		"resource":       req.Resource,
 		"level":          req.Level,

@@ -1776,13 +1776,30 @@ paths:
     get:
       tags: [Isolation]
       summary: List isolation containers
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
       responses:
         '200':
           description: Container list
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContainerListResponse'
+                $ref: '#/components/schemas/ContainerListEnvelope'
+        '500':
+          description: Failed to list containers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     post:
       tags: [Isolation]
       summary: Create isolation container
@@ -1795,6 +1812,34 @@ paths:
       responses:
         '201':
           description: Container created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContainerEnvelope'
+        '400':
+          description: Invalid request or role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: Max concurrent containers exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to create container
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/containers/{id}:
     get:
@@ -1809,6 +1854,28 @@ paths:
       responses:
         '200':
           description: Container details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContainerEnvelope'
+        '404':
+          description: Container not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to get container
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     delete:
       tags: [Isolation]
       summary: Delete container
@@ -1821,6 +1888,28 @@ paths:
       responses:
         '200':
           description: Container deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
+        '404':
+          description: Container not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to delete container
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/containers/{id}/quota:
     put:
@@ -1841,6 +1930,34 @@ paths:
       responses:
         '200':
           description: Quota set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaUpdateEnvelope'
+        '400':
+          description: Invalid quota request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Container not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to set quota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/access/check:
     post:
@@ -1858,7 +1975,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AccessCheckResponse'
+                $ref: '#/components/schemas/AccessCheckEnvelope'
+        '400':
+          description: Invalid access check request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to check access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/io/validate:
     post:
@@ -1876,7 +2011,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IOValidateResponse'
+                $ref: '#/components/schemas/IOValidateEnvelope'
+        '400':
+          description: Invalid I/O validation request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to validate I/O
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/roles:
     get:
@@ -1885,6 +2038,16 @@ paths:
       responses:
         '200':
           description: Role list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleListEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
     post:
       tags: [Isolation]
       summary: Register role
@@ -1897,6 +2060,28 @@ paths:
       responses:
         '201':
           description: Role registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleRegisterEnvelope'
+        '400':
+          description: Invalid role registration request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to register role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/roles/{name}:
     get:
@@ -1911,6 +2096,22 @@ paths:
       responses:
         '200':
           description: Role details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleEnvelope'
+        '404':
+          description: Role not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/roles/{name}/permissions:
     get:
@@ -1925,6 +2126,22 @@ paths:
       responses:
         '200':
           description: Role permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolePermissionsEnvelope'
+        '404':
+          description: Role not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /api/v1/isolation/roles/{name}/check:
     post:
@@ -1945,6 +2162,22 @@ paths:
       responses:
         '200':
           description: Permission check result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolePermissionCheckEnvelope'
+        '400':
+          description: Invalid permission check request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '503':
+          description: Isolation service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   # ==================== SAMG ====================
   /api/v1/samg/triples:
@@ -3560,14 +3793,21 @@ components:
       properties:
         id:
           type: string
-        agent_id:
-          type: string
         role:
           type: string
-        quota:
-          $ref: '#/components/schemas/ResourceQuota'
+        parent_id:
+          type: string
         created_at:
           type: integer
+        expires_at:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        isolation_level:
+          type: string
+        resource_quota:
+          $ref: '#/components/schemas/ResourceQuota'
 
     ContainerListResponse:
       type: object
@@ -3576,77 +3816,113 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Container'
+        count:
+          type: integer
 
     ContainerCreateRequest:
       type: object
-      required: [agent_id, role]
+      required: [role]
       properties:
-        agent_id:
-          type: string
         role:
           type: string
-        quota:
-          $ref: '#/components/schemas/ResourceQuota'
+        parent_id:
+          type: string
 
     ResourceQuota:
       type: object
       properties:
         max_memory_mb:
           type: integer
-        max_cpu_percent:
-          type: number
-        max_tokens:
+        max_file_size_mb:
           type: integer
-        max_api_calls:
+        max_file_count:
+          type: integer
+        max_network_conns:
+          type: integer
+        max_cpu_percent:
           type: integer
 
     QuotaRequest:
       type: object
       properties:
+        max_memory_mb:
+          type: integer
+        max_file_size_mb:
+          type: integer
+        max_file_count:
+          type: integer
+        max_network_conns:
+          type: integer
+        max_cpu_percent:
+          type: integer
+
+    QuotaUpdateResponse:
+      type: object
+      properties:
+        message:
+          type: string
         quota:
           $ref: '#/components/schemas/ResourceQuota'
 
     AccessCheckRequest:
       type: object
-      required: [agent_id, resource, action]
+      required: [container_id, resource, action]
       properties:
-        agent_id:
+        container_id:
           type: string
         resource:
+          type: string
+        resource_path:
           type: string
         action:
           type: string
 
-    AccessCheckResponse:
+    AccessDecision:
       type: object
       properties:
         allowed:
           type: boolean
         reason:
           type: string
+        constraints:
+          type: array
+          items:
+            type: string
+        audit_id:
+          type: string
+
+    AccessCheckResponse:
+      type: object
+      properties:
+        decision:
+          $ref: '#/components/schemas/AccessDecision'
         latency_ms:
           type: number
 
     IOValidateRequest:
       type: object
-      required: [agent_id, direction, content]
+      required: [container_id, input]
       properties:
-        agent_id:
+        container_id:
+          type: string
+        input:
           type: string
         direction:
           type: string
           enum: [input, output]
-        content:
-          type: string
 
     IOValidateResponse:
       type: object
       properties:
         valid:
           type: boolean
-        sanitized:
+        sanitized_input:
           type: string
         warnings:
+          type: array
+          items:
+            type: string
+        blocked_patterns:
           type: array
           items:
             type: string
@@ -3657,19 +3933,209 @@ components:
       properties:
         name:
           type: string
-        parent:
+        description:
           type: string
         permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+        inherits:
+          type: array
+          items:
+            type: string
+        max_concurrent:
+          type: integer
+
+    Permission:
+      type: object
+      properties:
+        resource:
+          type: string
+        level:
+          type: string
+        pattern:
+          type: string
+        conditions:
           type: array
           items:
             type: string
 
     RoleCheckRequest:
       type: object
-      required: [permission]
+      required: [resource, level]
       properties:
-        permission:
+        resource:
           type: string
+        level:
+          type: string
+
+    RoleListResponse:
+      type: object
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleDefinition'
+        count:
+          type: integer
+
+    RolePermissionsResponse:
+      type: object
+      properties:
+        role:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+        count:
+          type: integer
+
+    RolePermissionCheckResponse:
+      type: object
+      properties:
+        role:
+          type: string
+        resource:
+          type: string
+        level:
+          type: string
+        has_permission:
+          type: boolean
+
+    ContainerListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ContainerListResponse'
+        error:
+          type: string
+
+    ContainerEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Container'
+        error:
+          type: string
+
+    QuotaUpdateEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/QuotaUpdateResponse'
+        error:
+          type: string
+
+    AccessCheckEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/AccessCheckResponse'
+        error:
+          type: string
+
+    IOValidateEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/IOValidateResponse'
+        error:
+          type: string
+
+    RoleListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RoleListResponse'
+        error:
+          type: string
+
+    RoleEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RoleDefinition'
+        error:
+          type: string
+
+    RoleRegisterResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        role:
+          $ref: '#/components/schemas/RoleDefinition'
+
+    RoleRegisterEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RoleRegisterResponse'
+        error:
+          type: string
+
+    RolePermissionsEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RolePermissionsResponse'
+        error:
+          type: string
+
+    RolePermissionCheckEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RolePermissionCheckResponse'
+        error:
+          type: string
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        error:
+          type: string
+
+    RoleDefinition:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+        inherits:
+          type: array
+          items:
+            type: string
+        max_concurrent:
+          type: integer
 
     # ==================== SAMG Schemas ====================
     TripleNode:

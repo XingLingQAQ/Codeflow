@@ -13,6 +13,50 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func decodeIsolationResponseData[T any](t *testing.T, body []byte) T {
+	t.Helper()
+
+	var envelope Response
+	err := json.Unmarshal(body, &envelope)
+	assert.NoError(t, err)
+	assert.True(t, envelope.Success)
+
+	raw, err := json.Marshal(envelope.Data)
+	assert.NoError(t, err)
+
+	var data T
+	err = json.Unmarshal(raw, &data)
+	assert.NoError(t, err)
+	return data
+}
+
+func decodeIsolationErrorResponse(t *testing.T, body []byte) Response {
+	t.Helper()
+
+	var envelope Response
+	err := json.Unmarshal(body, &envelope)
+	assert.NoError(t, err)
+	assert.False(t, envelope.Success)
+	return envelope
+}
+
+func mustCreateIsolationContainer(t *testing.T, router *gin.Engine, role string) isolation.ContextContainer {
+	t.Helper()
+
+	body, err := json.Marshal(CreateContainerRequest{Role: role})
+	assert.NoError(t, err)
+
+	req, err := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(body))
+	assert.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code)
+
+	return decodeIsolationResponseData[isolation.ContextContainer](t, w.Body.Bytes())
+}
+
 func setupIsolationTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -52,9 +96,7 @@ func TestGetContainers_Empty(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "containers")
 	assert.Contains(t, response, "count")
 }
@@ -75,9 +117,7 @@ func TestCreateContainer(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	var response isolation.ContextContainer
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[isolation.ContextContainer](t, w.Body.Bytes())
 	assert.NotEmpty(t, response.ID)
 	assert.Equal(t, isolation.RoleMain, response.Role)
 }
@@ -97,32 +137,22 @@ func TestCreateContainer_InvalidRole(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	response := decodeIsolationErrorResponse(t, w.Body.Bytes())
+	assert.Equal(t, "invalid role", response.Error)
 }
 
 func TestGetContainer(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// First create a container
-	reqBody := CreateContainerRequest{Role: "coder"}
-	body, _ := json.Marshal(reqBody)
-	createReq, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(body))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	router.ServeHTTP(createW, createReq)
+	created := mustCreateIsolationContainer(t, router, "coder")
 
-	var created isolation.ContextContainer
-	json.Unmarshal(createW.Body.Bytes(), &created)
-
-	// Then get it
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/containers/"+created.ID, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response isolation.ContextContainer
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[isolation.ContextContainer](t, w.Body.Bytes())
 	assert.Equal(t, created.ID, response.ID)
 }
 
@@ -134,30 +164,23 @@ func TestGetContainer_NotFound(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+	response := decodeIsolationErrorResponse(t, w.Body.Bytes())
+	assert.Equal(t, "container not found", response.Error)
 }
 
 func TestDeleteContainer(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// First create a container
-	reqBody := CreateContainerRequest{Role: "reviewer"}
-	body, _ := json.Marshal(reqBody)
-	createReq, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(body))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	router.ServeHTTP(createW, createReq)
+	created := mustCreateIsolationContainer(t, router, "reviewer")
 
-	var created isolation.ContextContainer
-	json.Unmarshal(createW.Body.Bytes(), &created)
-
-	// Then delete it
 	req, _ := http.NewRequest("DELETE", "/api/v1/isolation/containers/"+created.ID, nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
+	assert.Equal(t, "container destroyed", response["message"])
 
-	// Verify it's gone
 	getReq, _ := http.NewRequest("GET", "/api/v1/isolation/containers/"+created.ID, nil)
 	getW := httptest.NewRecorder()
 	router.ServeHTTP(getW, getReq)
@@ -167,17 +190,8 @@ func TestDeleteContainer(t *testing.T) {
 func TestSetContainerQuota(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// First create a container
-	createBody, _ := json.Marshal(CreateContainerRequest{Role: "main"})
-	createReq, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	router.ServeHTTP(createW, createReq)
+	created := mustCreateIsolationContainer(t, router, "main")
 
-	var created isolation.ContextContainer
-	json.Unmarshal(createW.Body.Bytes(), &created)
-
-	// Set quota
 	quotaBody, _ := json.Marshal(SetQuotaRequest{
 		MaxMemoryMB:   512,
 		MaxFileSizeMB: 10,
@@ -190,26 +204,15 @@ func TestSetContainerQuota(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "quota updated", response["message"])
 }
 
 func TestCheckAccess(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// First create a container
-	createBody, _ := json.Marshal(CreateContainerRequest{Role: "main"})
-	createReq, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	router.ServeHTTP(createW, createReq)
+	created := mustCreateIsolationContainer(t, router, "main")
 
-	var created isolation.ContextContainer
-	json.Unmarshal(createW.Body.Bytes(), &created)
-
-	// Check access
 	checkBody, _ := json.Marshal(CheckAccessRequest{
 		ContainerID:  created.ID,
 		Resource:     "file",
@@ -223,9 +226,7 @@ func TestCheckAccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "decision")
 	assert.Contains(t, response, "latency_ms")
 }
@@ -233,17 +234,8 @@ func TestCheckAccess(t *testing.T) {
 func TestValidateIO(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// First create a container
-	createBody, _ := json.Marshal(CreateContainerRequest{Role: "coder"})
-	createReq, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	router.ServeHTTP(createW, createReq)
+	created := mustCreateIsolationContainer(t, router, "coder")
 
-	var created isolation.ContextContainer
-	json.Unmarshal(createW.Body.Bytes(), &created)
-
-	// Validate I/O
 	validateBody, _ := json.Marshal(ValidateIORequest{
 		ContainerID: created.ID,
 		Input:       "SELECT * FROM users",
@@ -256,9 +248,7 @@ func TestValidateIO(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response isolation.IOValidationResult
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	_ = decodeIsolationResponseData[isolation.IOValidationResult](t, w.Body.Bytes())
 }
 
 func TestGetRoles(t *testing.T) {
@@ -270,9 +260,7 @@ func TestGetRoles(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "roles")
 	assert.Contains(t, response, "count")
 	assert.Greater(t, int(response["count"].(float64)), 0)
@@ -287,9 +275,7 @@ func TestGetRole(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response isolation.RoleDefinition
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[isolation.RoleDefinition](t, w.Body.Bytes())
 	assert.Equal(t, isolation.RoleMain, response.Name)
 }
 
@@ -301,6 +287,8 @@ func TestGetRole_NotFound(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+	response := decodeIsolationErrorResponse(t, w.Body.Bytes())
+	assert.Equal(t, "role not found", response.Error)
 }
 
 func TestRegisterRole(t *testing.T) {
@@ -323,9 +311,7 @@ func TestRegisterRole(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "role registered", response["message"])
 }
 
@@ -338,9 +324,7 @@ func TestGetRolePermissions(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "main", response["role"])
 	assert.Contains(t, response, "permissions")
 	assert.Contains(t, response, "count")
@@ -362,9 +346,7 @@ func TestCheckRolePermission(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "main", response["role"])
 	assert.Equal(t, "file", response["resource"])
 	assert.Equal(t, "read", response["level"])
@@ -374,42 +356,26 @@ func TestCheckRolePermission(t *testing.T) {
 func TestGetContainers_FilterByRole(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// Create containers with different roles
 	for _, role := range []string{"main", "coder", "reviewer"} {
-		body, _ := json.Marshal(CreateContainerRequest{Role: role})
-		req, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		router.ServeHTTP(w, req)
+		_, _ = json.Marshal(CreateContainerRequest{Role: role})
+		_ = mustCreateIsolationContainer(t, router, role)
 	}
 
-	// Filter by role
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/containers?role=main", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.GreaterOrEqual(t, int(response["count"].(float64)), 1)
 }
 
 func TestCheckAccess_Performance(t *testing.T) {
 	router := setupIsolationTestRouter()
 
-	// Create a container
-	createBody, _ := json.Marshal(CreateContainerRequest{Role: "main"})
-	createReq, _ := http.NewRequest("POST", "/api/v1/isolation/containers", bytes.NewBuffer(createBody))
-	createReq.Header.Set("Content-Type", "application/json")
-	createW := httptest.NewRecorder()
-	router.ServeHTTP(createW, createReq)
+	created := mustCreateIsolationContainer(t, router, "main")
 
-	var created isolation.ContextContainer
-	json.Unmarshal(createW.Body.Bytes(), &created)
-
-	// Check access and verify latency < 50ms
 	checkBody, _ := json.Marshal(CheckAccessRequest{
 		ContainerID:  created.ID,
 		Resource:     "file",
@@ -423,8 +389,7 @@ func TestCheckAccess_Performance(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
+	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	latency := response["latency_ms"].(float64)
 	assert.Less(t, latency, 50.0, "Access check should complete in <50ms")
 }
