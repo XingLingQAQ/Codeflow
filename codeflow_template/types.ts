@@ -144,9 +144,9 @@ export interface Conversation {
 
 // --- Memory ---
 
-export type MemoryType = 'fact' | 'preference' | 'decision' | 'context' | 'summary';
-export type MemoryStatus = 'active' | 'archived' | 'deleted';
-export type MemorySource = 'user' | 'agent' | 'system' | 'extraction';
+export type MemoryType = 'stm' | 'ltm';
+export type MemoryStatus = 'active' | 'archived' | 'pending_archive' | 'pending_delete';
+export type MemorySource = 'user' | 'assistant' | 'system';
 
 export interface MemoryItem {
   id: string;
@@ -162,6 +162,13 @@ export interface MemoryItem {
   source: MemorySource;
   is_permanent: boolean;
   archived_at?: number;
+}
+
+export interface MemoryListResponse {
+  items: MemoryItem[];
+  total: number;
+  has_more: boolean;
+  next_offset?: number;
 }
 
 // --- Atomic Memory (Unified STM/LTM) ---
@@ -232,6 +239,9 @@ export interface SAMGEntity {
   properties?: Record<string, unknown>;
   aliases?: string[];
   pointers?: SAMGPointer[];
+  activation?: number;
+  access_count?: number;
+  hidden?: boolean;
   created_at: number;
   updated_at: number;
 }
@@ -265,6 +275,21 @@ export interface QueryMemoryResponse {
   context_block: string;
 }
 
+export interface SAMGGraphStats {
+  created_at: number;
+  updated_at: number;
+  triple_count: number;
+  entity_count: number;
+  predicate_count: number;
+  version: string;
+}
+
+export interface SAMGStats {
+  graph_stats: SAMGGraphStats;
+  decay_stats: Record<string, unknown>;
+  extractor_info: Record<string, unknown>;
+}
+
 // --- Config ---
 
 export interface APIChannel {
@@ -287,10 +312,22 @@ export interface GlobalConfig {
 
 export interface SessionConfig {
   session_id: string;
-  mode: string;
+  mode: 'development' | 'research' | 'creative';
   override_model?: string;
   temperature?: number;
   max_tokens?: number;
+}
+
+export interface ResolvedConfig {
+  model: string;
+  temperature: number;
+  top_p?: number;
+  max_tokens?: number;
+  api_channel?: APIChannel;
+  mcp_tools: string[];
+  system_prompt?: string;
+  timeout?: number;
+  max_retries?: number;
 }
 
 // --- Blackboard ---

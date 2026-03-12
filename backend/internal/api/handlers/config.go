@@ -2,8 +2,6 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 
 	"github.com/codeflow/backend/internal/config"
@@ -13,55 +11,86 @@ import (
 func GetGlobalConfig(c *gin.Context) {
 	svc := config.GetConfigService()
 	cfg := svc.LoadGlobalConfig()
-	c.JSON(http.StatusOK, cfg)
+	respondOK(c, cfg)
 }
 
 // UpdateGlobalConfig updates the global configuration.
 func UpdateGlobalConfig(c *gin.Context) {
 	var req config.GlobalConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, 400, err.Error())
 		return
 	}
 
 	svc := config.GetConfigService()
-	if err := svc.SaveGlobalConfig(&req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	current := svc.LoadGlobalConfig()
+	if current == nil {
+		current = &config.DefaultGlobalConfig
+	}
+	merged := mergeGlobalConfig(current, &req)
+
+	if err := svc.SaveGlobalConfig(&merged); err != nil {
+		respondError(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, req)
+	respondOK(c, merged)
+}
+
+func mergeGlobalConfig(current, updates *config.GlobalConfig) config.GlobalConfig {
+	merged := *current
+
+	if updates.DefaultModel != "" {
+		merged.DefaultModel = updates.DefaultModel
+	}
+	if updates.APIPool != nil {
+		merged.APIPool = updates.APIPool
+	}
+	if updates.PublicMCP != nil {
+		merged.PublicMCP = updates.PublicMCP
+	}
+	if updates.SummaryThreshold != 0 {
+		merged.SummaryThreshold = updates.SummaryThreshold
+	}
+	if updates.MaxRetries != 0 {
+		merged.MaxRetries = updates.MaxRetries
+	}
+	if updates.Timeout != 0 {
+		merged.Timeout = updates.Timeout
+	}
+
+	return merged
 }
 
 // GetSessionConfig returns the session configuration.
 func GetSessionConfig(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		respondError(c, 400, "session_id is required")
 		return
 	}
 
 	svc := config.GetConfigService()
 	cfg := svc.LoadSessionConfig(sessionID)
 	if cfg == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "session config not found"})
+		respondError(c, 404, "session config not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, cfg)
+	respondOK(c, cfg)
 }
 
 // UpdateSessionConfig updates the session configuration.
 func UpdateSessionConfig(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
+		respondError(c, 400, "session_id is required")
 		return
 	}
 
 	var req config.SessionConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, 400, err.Error())
 		return
 	}
 
@@ -70,64 +99,64 @@ func UpdateSessionConfig(c *gin.Context) {
 
 	svc := config.GetConfigService()
 	if err := svc.SaveSessionConfig(&req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, req)
+	respondOK(c, req)
 }
 
 // GetRoleConfig returns the role configuration.
 func GetRoleConfig(c *gin.Context) {
 	roleStr := c.Param("role")
 	if roleStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "role is required"})
+		respondError(c, 400, "role is required")
 		return
 	}
 
 	role := config.RoleType(roleStr)
 	if role != config.RoleMain && role != config.RoleCoder && role != config.RoleSub {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role, must be main, coder, or sub"})
+		respondError(c, 400, "invalid role, must be main, coder, or sub")
 		return
 	}
 
 	svc := config.GetConfigService()
 	cfg := svc.LoadRoleConfig(role)
 	if cfg == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "role config not found"})
+		respondError(c, 404, "role config not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, cfg)
+	respondOK(c, cfg)
 }
 
 // UpdateRoleConfig updates the role configuration.
 func UpdateRoleConfig(c *gin.Context) {
 	roleStr := c.Param("role")
 	if roleStr == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "role is required"})
+		respondError(c, 400, "role is required")
 		return
 	}
 
 	role := config.RoleType(roleStr)
 	if role != config.RoleMain && role != config.RoleCoder && role != config.RoleSub {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role, must be main, coder, or sub"})
+		respondError(c, 400, "invalid role, must be main, coder, or sub")
 		return
 	}
 
 	var req config.RoleConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, 400, err.Error())
 		return
 	}
 
 	svc := config.GetConfigService()
 	if err := svc.SaveRoleConfig(role, &req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, req)
+	respondOK(c, req)
 }
 
 // ResolveConfig resolves the effective configuration for a session and role.
@@ -141,12 +170,12 @@ func ResolveConfig(c *gin.Context) {
 
 	role := config.RoleType(roleStr)
 	if role != config.RoleMain && role != config.RoleCoder && role != config.RoleSub {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role, must be main, coder, or sub"})
+		respondError(c, 400, "invalid role, must be main, coder, or sub")
 		return
 	}
 
 	svc := config.GetConfigService()
 	resolved := svc.ResolveConfig(sessionID, role)
 
-	c.JSON(http.StatusOK, resolved)
+	respondOK(c, resolved)
 }

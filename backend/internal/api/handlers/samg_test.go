@@ -51,6 +51,23 @@ func setupSAMGTestRouter() *gin.Engine {
 	return router
 }
 
+func decodeSAMGResponseData[T any](t *testing.T, body []byte) T {
+	t.Helper()
+
+	var envelope Response
+	err := json.Unmarshal(body, &envelope)
+	assert.NoError(t, err)
+	assert.True(t, envelope.Success)
+
+	raw, err := json.Marshal(envelope.Data)
+	assert.NoError(t, err)
+
+	var data T
+	err = json.Unmarshal(raw, &data)
+	assert.NoError(t, err)
+	return data
+}
+
 func TestGetTriples_Empty(t *testing.T) {
 	router := setupSAMGTestRouter()
 
@@ -60,9 +77,7 @@ func TestGetTriples_Empty(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "triples")
 	assert.Contains(t, response, "count")
 }
@@ -92,9 +107,7 @@ func TestAddTriples(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "triples added", response["message"])
 	assert.Equal(t, float64(1), response["count"])
 }
@@ -127,9 +140,7 @@ func TestGetTriple(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response samg.Triple
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[samg.Triple](t, w.Body.Bytes())
 	assert.Equal(t, "test-get-triple", response.ID)
 }
 
@@ -160,9 +171,7 @@ func TestExtractTriples(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "triples")
 	assert.Greater(t, int(response["count"].(float64)), 0)
 }
@@ -199,9 +208,7 @@ func TestActivate(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response samg.ActivationResult
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[samg.ActivationResult](t, w.Body.Bytes())
 	assert.Equal(t, []string{"entity:act-a"}, response.SourceNodes)
 }
 
@@ -249,9 +256,7 @@ func TestFindPaths(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "paths")
 }
 
@@ -264,9 +269,7 @@ func TestGetDecayConfig(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response samg.DecayConfig
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[samg.DecayConfig](t, w.Body.Bytes())
 	assert.Greater(t, response.DecayRate, 0.0)
 }
 
@@ -292,9 +295,7 @@ func TestUpdateDecayConfig(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "decay config updated", response["message"])
 }
 
@@ -307,9 +308,7 @@ func TestApplyDecay(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "decayed_nodes")
 	assert.Contains(t, response, "hidden_nodes")
 }
@@ -323,9 +322,7 @@ func TestGetVisibleNodes(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "nodes")
 	assert.Contains(t, response, "count")
 }
@@ -339,9 +336,7 @@ func TestGetHiddenNodes(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "nodes")
 }
 
@@ -354,9 +349,7 @@ func TestGetTopNodes(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "nodes")
 }
 
@@ -369,9 +362,7 @@ func TestRecordAccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "access recorded", response["message"])
 	assert.Equal(t, "test-node", response["node_id"])
 }
@@ -385,9 +376,7 @@ func TestGetActivationConfig(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response samg.ActivationConfig
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[samg.ActivationConfig](t, w.Body.Bytes())
 	assert.Greater(t, response.MaxHops, 0)
 }
 
@@ -412,9 +401,7 @@ func TestUpdateActivationConfig(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "activation config updated", response["message"])
 }
 
@@ -427,9 +414,7 @@ func TestExportGraph(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response samg.JsonLdGraph
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[samg.JsonLdGraph](t, w.Body.Bytes())
 	assert.NotEmpty(t, response.ID)
 }
 
@@ -464,9 +449,7 @@ func TestImportGraph(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "graph imported", response["message"])
 	assert.Equal(t, float64(1), response["triple_count"])
 }
@@ -480,9 +463,7 @@ func TestGetSAMGStats(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response samg.SAMGStats
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[samg.SAMGStats](t, w.Body.Bytes())
 	assert.NotNil(t, response.GraphStats)
 	assert.NotNil(t, response.DecayStats)
 }
@@ -514,9 +495,7 @@ func TestGetRelations(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "relations")
 	assert.Contains(t, response, "node_id")
 }
@@ -551,8 +530,6 @@ func TestDeleteTriples(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &response)
-	assert.NoError(t, err)
+	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Equal(t, "triples deleted", response["message"])
 }

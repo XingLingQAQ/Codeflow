@@ -35,6 +35,23 @@ func setupConfigRouter() *gin.Engine {
 	return router
 }
 
+func decodeConfigResponseData[T any](t *testing.T, body []byte) T {
+	t.Helper()
+
+	var envelope Response
+	err := json.Unmarshal(body, &envelope)
+	assert.NoError(t, err)
+	assert.True(t, envelope.Success)
+
+	raw, err := json.Marshal(envelope.Data)
+	assert.NoError(t, err)
+
+	var data T
+	err = json.Unmarshal(raw, &data)
+	assert.NoError(t, err)
+	return data
+}
+
 func TestGetGlobalConfigAPI(t *testing.T) {
 	router := setupConfigRouter()
 	config.SetConfigService(config.NewConfigManager(nil))
@@ -46,9 +63,7 @@ func TestGetGlobalConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.GlobalConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	_ = decodeConfigResponseData[config.GlobalConfig](t, w.Body.Bytes())
 }
 
 func TestUpdateGlobalConfigAPI(t *testing.T) {
@@ -71,11 +86,48 @@ func TestUpdateGlobalConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.GlobalConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	resp := decodeConfigResponseData[config.GlobalConfig](t, w.Body.Bytes())
 	assert.Equal(t, "test-model", resp.DefaultModel)
 	assert.Equal(t, 10000, resp.SummaryThreshold)
+}
+
+func TestUpdateGlobalConfigPartialPreservesExistingFields(t *testing.T) {
+	router := setupConfigRouter()
+	svc := config.NewConfigManager(nil)
+	config.SetConfigService(svc)
+
+	seed := &config.GlobalConfig{
+		DefaultModel: "old-model",
+		APIPool: []config.APIChannel{
+			{
+				ID:       "provider-1",
+				Name:     "AIHubMix-Provider",
+				Provider: config.ProviderCustom,
+				APIKey:   "secret",
+				BaseURL:  "http://154.217.240.67:8090/",
+				Enabled:  true,
+			},
+		},
+		PublicMCP:        []string{"playwright", "memory"},
+		SummaryThreshold: 20000,
+		MaxRetries:       3,
+		Timeout:          60000,
+	}
+	_ = svc.SaveGlobalConfig(seed)
+
+	body := []byte(`{"default_model":"AIHubMix-Provider"}`)
+	req, _ := http.NewRequest("PUT", "/api/v1/config/global", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	updated := decodeConfigResponseData[config.GlobalConfig](t, w.Body.Bytes())
+	assert.Equal(t, "AIHubMix-Provider", updated.DefaultModel)
+	assert.Len(t, updated.APIPool, 1)
+	assert.Equal(t, "provider-1", updated.APIPool[0].ID)
+	assert.Equal(t, "http://154.217.240.67:8090/", updated.APIPool[0].BaseURL)
+	assert.Equal(t, []string{"playwright", "memory"}, updated.PublicMCP)
 }
 
 func TestGetSessionConfigAPI(t *testing.T) {
@@ -100,9 +152,7 @@ func TestGetSessionConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.SessionConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	resp := decodeConfigResponseData[config.SessionConfig](t, w.Body.Bytes())
 	assert.Equal(t, "test-session", resp.SessionID)
 	assert.Equal(t, "test-model", resp.OverrideModel)
 }
@@ -139,9 +189,7 @@ func TestUpdateSessionConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.SessionConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	resp := decodeConfigResponseData[config.SessionConfig](t, w.Body.Bytes())
 	assert.Equal(t, "test-session", resp.SessionID)
 	assert.Equal(t, "session-model", resp.OverrideModel)
 }
@@ -168,9 +216,7 @@ func TestGetRoleConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.RoleConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	resp := decodeConfigResponseData[config.RoleConfig](t, w.Body.Bytes())
 	assert.Equal(t, "test-model", resp.Model)
 	assert.Equal(t, 0.9, resp.Temperature)
 }
@@ -206,9 +252,7 @@ func TestUpdateRoleConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.RoleConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	resp := decodeConfigResponseData[config.RoleConfig](t, w.Body.Bytes())
 	assert.Equal(t, "role-model", resp.Model)
 }
 
@@ -245,9 +289,7 @@ func TestResolveConfigAPI(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	var resp config.ResolvedConfig
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	resp := decodeConfigResponseData[config.ResolvedConfig](t, w.Body.Bytes())
 	// Role config should override session and global
 	assert.Equal(t, "role-model", resp.Model)
 	assert.Equal(t, 0.9, resp.Temperature)

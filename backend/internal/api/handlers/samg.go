@@ -359,11 +359,14 @@ func enrichNodeActivations(svc *samg.SAMGService, ctx context.Context, activatio
 	result := make([]gin.H, 0, len(activations))
 	for _, na := range activations {
 		node := gin.H{
-			"@id":        na.NodeID,
-			"@type":      []string{na.Type},
-			"label":      na.Label,
-			"created_at": na.CreatedTime,
-			"updated_at": na.LastAccessTime,
+			"@id":          na.NodeID,
+			"@type":        []string{na.Type},
+			"label":        na.Label,
+			"activation":   na.Activation,
+			"access_count": na.AccessCount,
+			"hidden":       na.Hidden,
+			"created_at":   na.CreatedTime,
+			"updated_at":   na.LastAccessTime,
 		}
 		// Try to enrich with full entity data (pointers, description, aliases)
 		if entity, err := store.GetEntity(ctx, na.NodeID); err == nil && entity != nil {

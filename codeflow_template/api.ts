@@ -186,6 +186,12 @@ export function patch<T>(url: string, body?: unknown, signal?: AbortSignal): Pro
   return request<T>(url, { method: 'PATCH', body: body != null ? JSON.stringify(body) : undefined }, signal);
 }
 
-export function del<T>(url: string, signal?: AbortSignal): Promise<T> {
-  return request<T>(url, { method: 'DELETE' }, signal);
+export function del<T>(url: string, bodyOrSignal?: unknown | AbortSignal, signal?: AbortSignal): Promise<T> {
+  const hasBody = bodyOrSignal !== undefined && !(bodyOrSignal instanceof AbortSignal);
+  const resolvedSignal = bodyOrSignal instanceof AbortSignal ? bodyOrSignal : signal;
+  return request<T>(
+    url,
+    { method: 'DELETE', body: hasBody ? JSON.stringify(bodyOrSignal) : undefined },
+    resolvedSignal,
+  );
 }

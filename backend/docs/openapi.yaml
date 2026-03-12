@@ -79,11 +79,25 @@ paths:
           schema:
             type: string
             enum: [stm, ltm]
+        - name: session_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, archived, pending_archive, pending_delete]
         - name: sort_by
           in: query
           schema:
             type: string
-            enum: [created_at, heat, surprise]
+            enum: [timestamp, heat, surprise]
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
         - name: limit
           in: query
           schema:
@@ -100,7 +114,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MemoryListResponse'
+                $ref: '#/components/schemas/MemoryListEnvelope'
     post:
       tags: [Memory]
       summary: Create memory item
@@ -116,7 +130,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MemoryItem'
+                $ref: '#/components/schemas/MemoryItemEnvelope'
 
   /api/v1/memory/items/{id}:
     patch:
@@ -137,6 +151,10 @@ paths:
       responses:
         '200':
           description: Memory item updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryItemEnvelope'
     delete:
       tags: [Memory]
       summary: Delete memory item
@@ -149,6 +167,10 @@ paths:
       responses:
         '200':
           description: Memory item deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryDeleteEnvelope'
 
   /api/v1/memory/items/{id}/archive:
     post:
@@ -163,6 +185,10 @@ paths:
       responses:
         '200':
           description: Memory item archived
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryItemEnvelope'
 
   /api/v1/memory/items/{id}/restore:
     post:
@@ -177,6 +203,10 @@ paths:
       responses:
         '200':
           description: Memory item restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryItemEnvelope'
 
   /api/v1/search/vector:
     post:
@@ -889,18 +919,31 @@ paths:
       tags: [Snapshots]
       summary: List snapshots
       parameters:
-        - name: start_time
-          in: query
-          schema:
-            type: integer
-        - name: end_time
-          in: query
-          schema:
-            type: integer
-        - name: tags
+        - name: session_id
           in: query
           schema:
             type: string
+        - name: start_time
+          in: query
+          description: RFC3339 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          description: RFC3339 timestamp
+          schema:
+            type: string
+            format: date-time
+        - name: tags
+          in: query
+          description: Repeat the query parameter to filter by multiple tags
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
         - name: limit
           in: query
           schema:
@@ -918,6 +961,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SnapshotListResponse'
+  /api/v1/samg/extract-with-pointers:
+    post:
+      tags: [SAMG]
+      summary: Extract triples from text and attach raw archive pointers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractWithPointersRequest'
+      responses:
+        '200':
+          description: Extracted triples with pointers attached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractResponseEnvelope'
+
+  /api/v1/samg/query-memory:
+    post:
+      tags: [SAMG]
+      summary: Query memory via SAMG neural index
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryMemoryRequest'
+      responses:
+        '200':
+          description: Memory query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryMemoryEnvelope'
+
+  /api/v1/samg/nodes/{id}/pointers:
+    get:
+      tags: [SAMG]
+      summary: Get pointers bound to a node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node pointers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodePointersEnvelope'
+    post:
+      tags: [SAMG]
+      summary: Add a pointer to a node
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddNodePointerRequest'
+      responses:
+        '201':
+          description: Pointer added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
 
   /api/v1/snapshots/{id}:
     get:
@@ -948,6 +1066,10 @@ paths:
       responses:
         '200':
           description: Snapshot deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotDeleteResponse'
 
   /api/v1/snapshots/{id}/restore:
     post:
@@ -962,6 +1084,10 @@ paths:
       responses:
         '200':
           description: Snapshot restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreResult'
 
   # ==================== Memory Preflight ====================
   /api/v1/memory/preflight:
@@ -1030,7 +1156,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConfigResponse'
+                $ref: '#/components/schemas/GlobalConfigEnvelope'
     put:
       tags: [Config]
       summary: Update global configuration
@@ -1039,10 +1165,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConfigUpdateRequest'
+              $ref: '#/components/schemas/GlobalConfig'
       responses:
         '200':
           description: Config updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlobalConfigEnvelope'
 
   /api/v1/config/sessions/{id}:
     get:
@@ -1057,6 +1187,10 @@ paths:
       responses:
         '200':
           description: Session config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionConfigEnvelope'
     put:
       tags: [Config]
       summary: Update session configuration
@@ -1071,10 +1205,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConfigUpdateRequest'
+              $ref: '#/components/schemas/SessionConfig'
       responses:
         '200':
           description: Config updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionConfigEnvelope'
 
   /api/v1/config/roles/{role}:
     get:
@@ -1090,6 +1228,10 @@ paths:
       responses:
         '200':
           description: Role config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleConfigEnvelope'
     put:
       tags: [Config]
       summary: Update role configuration
@@ -1099,15 +1241,20 @@ paths:
           required: true
           schema:
             type: string
+            enum: [main, coder, sub]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConfigUpdateRequest'
+              $ref: '#/components/schemas/RoleConfig'
       responses:
         '200':
           description: Config updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleConfigEnvelope'
 
   /api/v1/config/resolve:
     get:
@@ -1122,9 +1269,14 @@ paths:
           in: query
           schema:
             type: string
+            enum: [main, coder, sub]
       responses:
         '200':
           description: Resolved config
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedConfigEnvelope'
 
   # ==================== PAPI ====================
   /api/v1/config/papi:
@@ -1832,7 +1984,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TripleListResponse'
+                $ref: '#/components/schemas/TripleListEnvelope'
     post:
       tags: [SAMG]
       summary: Add triples
@@ -1845,6 +1997,10 @@ paths:
       responses:
         '201':
           description: Triples added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageCountEnvelope'
     delete:
       tags: [SAMG]
       summary: Delete triples
@@ -1857,6 +2013,10 @@ paths:
       responses:
         '200':
           description: Triples deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageCountEnvelope'
 
   /api/v1/samg/triples/{id}:
     get:
@@ -1874,7 +2034,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Triple'
+                $ref: '#/components/schemas/TripleEnvelope'
         '404':
           description: Triple not found
 
@@ -1894,7 +2054,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RelationsResponse'
+                $ref: '#/components/schemas/RelationsEnvelope'
 
   /api/v1/samg/extract:
     post:
@@ -1912,7 +2072,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExtractResponse'
+                $ref: '#/components/schemas/ExtractResponseEnvelope'
 
   /api/v1/samg/activate:
     post:
@@ -1930,7 +2090,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivationResult'
+                $ref: '#/components/schemas/ActivationResultEnvelope'
 
   /api/v1/samg/paths:
     post:
@@ -1948,7 +2108,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PathsResponse'
+                $ref: '#/components/schemas/PathsEnvelope'
 
   /api/v1/samg/activation:
     get:
@@ -1960,7 +2120,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivationConfig'
+                $ref: '#/components/schemas/ActivationConfigEnvelope'
     put:
       tags: [SAMG]
       summary: Update activation config
@@ -1973,6 +2133,10 @@ paths:
       responses:
         '200':
           description: Config updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigUpdateMessageEnvelope'
 
   /api/v1/samg/decay:
     get:
@@ -1984,7 +2148,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DecayConfig'
+                $ref: '#/components/schemas/DecayConfigEnvelope'
     put:
       tags: [SAMG]
       summary: Update decay config
@@ -1997,6 +2161,10 @@ paths:
       responses:
         '200':
           description: Config updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigUpdateMessageEnvelope'
 
   /api/v1/samg/decay/apply:
     post:
@@ -2008,7 +2176,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DecayApplyResponse'
+                $ref: '#/components/schemas/DecayApplyEnvelope'
 
   /api/v1/samg/nodes/visible:
     get:
@@ -2020,7 +2188,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodesResponse'
+                $ref: '#/components/schemas/NodesEnvelope'
 
   /api/v1/samg/nodes/hidden:
     get:
@@ -2032,7 +2200,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodesResponse'
+                $ref: '#/components/schemas/NodesEnvelope'
 
   /api/v1/samg/nodes/top:
     get:
@@ -2050,7 +2218,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NodesResponse'
+                $ref: '#/components/schemas/NodesEnvelope'
 
   /api/v1/samg/nodes/{id}/access:
     post:
@@ -2065,6 +2233,10 @@ paths:
       responses:
         '200':
           description: Access recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeAccessEnvelope'
 
   /api/v1/samg/graph/export:
     get:
@@ -2076,7 +2248,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JsonLdGraph'
+                $ref: '#/components/schemas/JsonLdGraphEnvelope'
 
   /api/v1/samg/graph/import:
     post:
@@ -2091,6 +2263,10 @@ paths:
       responses:
         '200':
           description: Graph imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphImportEnvelope'
 
   /api/v1/samg/stats:
     get:
@@ -2102,7 +2278,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SAMGStats'
+                $ref: '#/components/schemas/SAMGStatsEnvelope'
 
 components:
   schemas:
@@ -2139,17 +2315,29 @@ components:
         type:
           type: string
           enum: [stm, ltm]
-        tags:
-          type: array
-          items:
-            type: string
+        status:
+          type: string
+          enum: [active, archived, pending_archive, pending_delete]
+        session_id:
+          type: string
+        message_index:
+          type: integer
+        timestamp:
+          type: integer
         heat:
           type: number
         surprise:
           type: number
-        created_at:
-          type: integer
-        updated_at:
+        tags:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+          enum: [user, assistant, system]
+        is_permanent:
+          type: boolean
+        archived_at:
           type: integer
 
     MemoryListResponse:
@@ -2163,6 +2351,8 @@ components:
           type: integer
         has_more:
           type: boolean
+        next_offset:
+          type: integer
 
     MemoryCreateRequest:
       type: object
@@ -2173,20 +2363,65 @@ components:
         type:
           type: string
           enum: [stm, ltm]
+        session_id:
+          type: string
+        source:
+          type: string
+          enum: [user, assistant, system]
         tags:
           type: array
           items:
             type: string
+        is_permanent:
+          type: boolean
 
     MemoryUpdateRequest:
       type: object
       properties:
-        content:
-          type: string
         tags:
           type: array
           items:
             type: string
+        is_permanent:
+          type: boolean
+
+    MemoryListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemoryListResponse'
+        error:
+          type: string
+
+    MemoryItemEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemoryItem'
+        error:
+          type: string
+
+    MemoryDeleteResponse:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+        id:
+          type: string
+
+    MemoryDeleteEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemoryDeleteResponse'
+        error:
+          type: string
 
     VectorSearchRequest:
       type: object
@@ -2729,8 +2964,6 @@ components:
       properties:
         id:
           type: string
-        name:
-          type: string
         git_hash:
           type: string
         conversation_state:
@@ -2739,18 +2972,24 @@ components:
           type: string
         memory_graph_version:
           type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        session_id:
+          type: string
         tags:
           type: array
           items:
             type: string
-        created_at:
-          type: integer
 
     SnapshotCreateRequest:
       type: object
-      required: [name]
       properties:
-        name:
+        description:
+          type: string
+        session_id:
           type: string
         tags:
           type: array
@@ -2760,11 +2999,15 @@ components:
     SnapshotListResponse:
       type: object
       properties:
-        snapshots:
+        items:
           type: array
           items:
             $ref: '#/components/schemas/Snapshot'
         total:
+          type: integer
+        has_more:
+          type: boolean
+        next_offset:
           type: integer
 
     # ==================== Memory Preflight Schemas ====================
@@ -2835,20 +3078,139 @@ components:
             type: string
 
     # ==================== Config Schemas ====================
-    ConfigResponse:
+    APIChannel:
       type: object
       properties:
-        config:
-          type: object
-        level:
+        id:
           type: string
-          enum: [global, session, role]
+        name:
+          type: string
+        provider:
+          type: string
+          enum: [anthropic, openai, google, custom]
+        api_key:
+          type: string
+        base_url:
+          type: string
+        enabled:
+          type: boolean
 
-    ConfigUpdateRequest:
+    GlobalConfig:
       type: object
       properties:
-        config:
-          type: object
+        default_model:
+          type: string
+        api_pool:
+          type: array
+          items:
+            $ref: '#/components/schemas/APIChannel'
+        public_mcp:
+          type: array
+          items:
+            type: string
+        summary_threshold:
+          type: integer
+        max_retries:
+          type: integer
+        timeout:
+          type: integer
+
+    SessionConfig:
+      type: object
+      properties:
+        session_id:
+          type: string
+        mode:
+          type: string
+          enum: [development, research, creative]
+        override_model:
+          type: string
+        temperature:
+          type: number
+        max_tokens:
+          type: integer
+
+    RoleConfig:
+      type: object
+      properties:
+        model:
+          type: string
+        temperature:
+          type: number
+        top_p:
+          type: number
+        api_channel:
+          type: string
+        mcp_tools:
+          type: array
+          items:
+            type: string
+        system_prompt:
+          type: string
+
+    ResolvedConfig:
+      type: object
+      properties:
+        model:
+          type: string
+        temperature:
+          type: number
+        top_p:
+          type: number
+        max_tokens:
+          type: integer
+        api_channel:
+          $ref: '#/components/schemas/APIChannel'
+        mcp_tools:
+          type: array
+          items:
+            type: string
+        system_prompt:
+          type: string
+        timeout:
+          type: integer
+        max_retries:
+          type: integer
+
+    GlobalConfigEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/GlobalConfig'
+        error:
+          type: string
+
+    SessionConfigEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/SessionConfig'
+        error:
+          type: string
+
+    RoleConfigEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RoleConfig'
+        error:
+          type: string
+
+    ResolvedConfigEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ResolvedConfig'
+        error:
+          type: string
 
     # ==================== PAPI Schemas ====================
     PAPIVariable:
@@ -3310,33 +3672,35 @@ components:
           type: string
 
     # ==================== SAMG Schemas ====================
-    Triple:
+    TripleNode:
       type: object
       properties:
-        id:
+        '@id':
           type: string
-        subject:
-          $ref: '#/components/schemas/Node'
-        predicate:
-          type: string
-        object:
-          type: object
-        confidence:
-          type: number
-        timestamp:
-          type: integer
-        source:
-          $ref: '#/components/schemas/TripleSource'
-
-    Node:
-      type: object
-      properties:
-        id:
-          type: string
-        type:
-          type: string
+        '@type':
+          type: array
+          items:
+            type: string
         label:
           type: string
+
+    LiteralValue:
+      type: object
+      properties:
+        '@value':
+          nullable: true
+        '@type':
+          type: string
+        '@language':
+          type: string
+
+    TripleObject:
+      type: object
+      properties:
+        node:
+          $ref: '#/components/schemas/TripleNode'
+        literal:
+          $ref: '#/components/schemas/LiteralValue'
 
     TripleSource:
       type: object
@@ -3347,8 +3711,32 @@ components:
           type: integer
         agent_role:
           type: string
+        git_commit_hash:
+          type: string
         extraction_method:
           type: string
+          enum: [llm, rule, user, inferred]
+
+    Triple:
+      type: object
+      properties:
+        '@id':
+          type: string
+        subject:
+          $ref: '#/components/schemas/TripleNode'
+        predicate:
+          type: string
+        object:
+          $ref: '#/components/schemas/TripleObject'
+        confidence:
+          type: number
+        timestamp:
+          type: integer
+        source:
+          $ref: '#/components/schemas/TripleSource'
+        metadata:
+          type: object
+          additionalProperties: true
 
     TripleListResponse:
       type: object
@@ -3403,6 +3791,21 @@ components:
         agent_role:
           type: string
 
+    ExtractWithPointersRequest:
+      type: object
+      required: [content, raw_archive_id]
+      properties:
+        content:
+          type: string
+        session_id:
+          type: string
+        message_index:
+          type: integer
+        agent_role:
+          type: string
+        raw_archive_id:
+          type: string
+
     ExtractResponse:
       type: object
       properties:
@@ -3422,6 +3825,24 @@ components:
           items:
             type: string
 
+    ActivatedNode:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+        activation:
+          type: number
+        hop:
+          type: integer
+        path:
+          type: array
+          items:
+            type: string
+
     ActivationResult:
       type: object
       properties:
@@ -3430,13 +3851,13 @@ components:
           items:
             type: string
         activated_nodes:
-          type: object
-          additionalProperties:
-            type: number
-        hops_used:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivatedNode'
+        total_hops:
           type: integer
-        duration_ms:
-          type: number
+        paths_found:
+          type: integer
 
     FindPathsRequest:
       type: object
@@ -3500,6 +3921,16 @@ components:
         enable_auto_decay:
           type: boolean
 
+    ConfigUpdateMessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        config:
+          oneOf:
+            - $ref: '#/components/schemas/ActivationConfig'
+            - $ref: '#/components/schemas/DecayConfig'
+
     DecayApplyResponse:
       type: object
       properties:
@@ -3508,22 +3939,162 @@ components:
         hidden_nodes:
           type: integer
 
+    Pointer:
+      type: object
+      properties:
+        source_id:
+          type: string
+        source_type:
+          type: string
+        summary:
+          type: string
+        line_range:
+          type: string
+        file_path:
+          type: string
+        timestamp:
+          type: integer
+        relevance:
+          type: number
+
+    ResolvedPointer:
+      allOf:
+        - $ref: '#/components/schemas/Pointer'
+        - type: object
+          properties:
+            resolved_content:
+              type: string
+
+    QueryMemoryNode:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        activation:
+          type: number
+        hop:
+          type: integer
+        pointers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResolvedPointer'
+
+    QueryMemoryRequest:
+      type: object
+      required: [topic]
+      properties:
+        topic:
+          type: string
+        type:
+          type: string
+        max_results:
+          type: integer
+        resolve_pointers:
+          type: boolean
+        min_bla:
+          type: number
+
+    QueryMemoryResponse:
+      type: object
+      properties:
+        activated_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryMemoryNode'
+        context_block:
+          type: string
+
+    NodePointersResponse:
+      type: object
+      properties:
+        node_id:
+          type: string
+        pointers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pointer'
+        count:
+          type: integer
+
+    AddNodePointerRequest:
+      type: object
+      required: [source_id, source_type]
+      properties:
+        source_id:
+          type: string
+        source_type:
+          type: string
+        summary:
+          type: string
+        line_range:
+          type: string
+        file_path:
+          type: string
+        relevance:
+          type: number
+
+    SAMGEntity:
+      type: object
+      properties:
+        '@id':
+          type: string
+        '@type':
+          type: array
+          items:
+            type: string
+        label:
+          type: string
+        description:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+        aliases:
+          type: array
+          items:
+            type: string
+        pointers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pointer'
+        activation:
+          type: number
+        access_count:
+          type: integer
+        hidden:
+          type: boolean
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
     NodesResponse:
       type: object
       properties:
         nodes:
           type: array
           items:
-            type: object
-            properties:
-              id:
-                type: string
-              activation:
-                type: number
-              last_access:
-                type: integer
+            $ref: '#/components/schemas/SAMGEntity'
         count:
           type: integer
+
+    GraphMetadata:
+      type: object
+      properties:
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+        triple_count:
+          type: integer
+        entity_count:
+          type: integer
+        predicate_count:
+          type: integer
+        version:
+          type: string
 
     JsonLdGraph:
       type: object
@@ -3538,25 +4109,267 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Triple'
+        metadata:
+          $ref: '#/components/schemas/GraphMetadata'
 
     SAMGStats:
       type: object
       properties:
         graph_stats:
-          type: object
-          properties:
-            total_triples:
-              type: integer
-            total_nodes:
-              type: integer
-            total_predicates:
-              type: integer
+          $ref: '#/components/schemas/GraphMetadata'
         decay_stats:
           type: object
-          properties:
-            visible_nodes:
-              type: integer
-            hidden_nodes:
-              type: integer
-            avg_activation:
-              type: number
+          additionalProperties: true
+        extractor_info:
+          type: object
+          additionalProperties: true
+
+    GenericMessage:
+      type: object
+      properties:
+        message:
+          type: string
+
+    GenericMessageCount:
+      type: object
+      properties:
+        message:
+          type: string
+        count:
+          type: integer
+
+    GenericMessageEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/GenericMessage'
+        error:
+          type: string
+
+    GenericMessageCountEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/GenericMessageCount'
+        error:
+          type: string
+
+    NodeAccessResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        node_id:
+          type: string
+
+    NodeAccessEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/NodeAccessResponse'
+        error:
+          type: string
+
+    GraphImportResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        triple_count:
+          type: integer
+
+    GraphImportEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/GraphImportResponse'
+        error:
+          type: string
+
+    TripleListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/TripleListResponse'
+        error:
+          type: string
+
+    TripleEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Triple'
+        error:
+          type: string
+
+    RelationsEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RelationsResponse'
+        error:
+          type: string
+
+    ExtractResponseEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ExtractResponse'
+        error:
+          type: string
+
+    ActivationResultEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ActivationResult'
+        error:
+          type: string
+
+    PathsEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/PathsResponse'
+        error:
+          type: string
+
+    ActivationConfigEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ActivationConfig'
+        error:
+          type: string
+
+    DecayConfigEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/DecayConfig'
+        error:
+          type: string
+
+    ConfigUpdateMessageEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ConfigUpdateMessageResponse'
+        error:
+          type: string
+
+    DecayApplyEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/DecayApplyResponse'
+        error:
+          type: string
+
+    QueryMemoryEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/QueryMemoryResponse'
+        error:
+          type: string
+
+    NodePointersEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/NodePointersResponse'
+        error:
+          type: string
+
+    NodesEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/NodesResponse'
+        error:
+          type: string
+
+    JsonLdGraphEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/JsonLdGraph'
+        error:
+          type: string
+
+    SAMGStatsEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/SAMGStats'
+        error:
+          type: string
+
+    RestoreResult:
+      type: object
+      properties:
+        snapshot_id:
+          type: string
+        git_restored:
+          type: boolean
+        conversation_restored:
+          type: boolean
+        vector_restored:
+          type: boolean
+        memory_graph_restored:
+          type: boolean
+        restored_at:
+          type: string
+          format: date-time
+        errors:
+          type: array
+          items:
+            type: string
+
+    SnapshotDeleteResponse:
+      type: object
+      properties:
+        message:
+          type: string
+
+    SnapshotRestoreResponse:
+      $ref: '#/components/schemas/RestoreResult'
