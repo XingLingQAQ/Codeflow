@@ -1,3 +1,9 @@
 .ace-tool/
 node_modules
 .nx/
+.tmp-playwright/
+tmp-playwright/
+artifacts/
+archive/
+*.log
+*.err
