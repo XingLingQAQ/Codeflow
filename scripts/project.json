@@ -1,0 +1,32 @@
+{
+  "name": "e2e",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "scripts",
+  "root": "scripts",
+  "tags": ["scope:tools", "type:e2e"],
+  "targets": {
+    "all": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["core:build"],
+      "options": {
+        "command": "node scripts/test-all-e2e.mjs",
+        "cwd": "."
+      }
+    },
+    "check-api-contracts": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/check-api-contracts.mjs",
+        "cwd": "."
+      }
+    },
+    "check-garbled-comments": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/check-garbled-comments.mjs",
+        "cwd": "."
+      }
+    }
+  }
+}

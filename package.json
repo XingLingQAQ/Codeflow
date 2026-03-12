@@ -13,7 +13,12 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e:all": "node scripts/test-all-e2e.mjs",
     "check:garbled-comments": "node scripts/check-garbled-comments.mjs",
-    "check:api-contracts": "node scripts/check-api-contracts.mjs"
+    "check:api-contracts": "node scripts/check-api-contracts.mjs",
+    "nx:build": "nx run-many -t build",
+    "nx:test": "nx run-many -t test",
+    "nx:lint": "nx run-many -t lint",
+    "nx:graph": "nx graph",
+    "nx:affected": "nx affected -t build test lint"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +26,7 @@
   "packageManager": "pnpm@10.30.3",
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@nx/js": "^22.5.4",
     "@types/node": "^25.0.6",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
@@ -28,6 +34,7 @@
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
+    "nx": "^22.5.4",
     "playwright": "^1.58.2",
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",

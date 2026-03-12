@@ -1,0 +1,25 @@
+{
+  "name": "core",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "packages/core/src",
+  "tags": ["scope:libs", "lang:ts"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "pnpm --filter @codeflow/core build",
+        "cwd": "."
+      },
+      "inputs": ["production"],
+      "outputs": ["{projectRoot}/dist"]
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "pnpm --filter @codeflow/core clean",
+        "cwd": "."
+      }
+    }
+  }
+}
