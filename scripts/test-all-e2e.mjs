@@ -9,7 +9,8 @@ const autoStartDev = getBooleanEnv('CODEFLOW_AUTOSTART_DEV_SERVER', true);
 const runRealUser = getBooleanEnv('CODEFLOW_RUN_REAL_USER', true);
 const devCwd = getEnv('CODEFLOW_DEV_CWD', path.resolve(repoRoot, 'codeflow_template'));
 const devPort = getEnv('CODEFLOW_DEV_PORT', '3000');
-const devPm = getEnv('CODEFLOW_DEV_PM', 'pnpm').toLowerCase();
+const devPm = getEnv('CODEFLOW_DEV_PM', 'npm').toLowerCase();
+const coreDistEntry = path.resolve(repoRoot, 'packages', 'core', 'dist', 'index.js');
 
 const report = {
   timestamp: new Date().toISOString(),
@@ -40,6 +41,92 @@ const step = async (name, fn) => {
     });
     return false;
   }
+};
+
+const ensureCoreDist = async () => {
+  if (fs.existsSync(coreDistEntry)) {
+    return { reused: true };
+  }
+
+  const command = 'pnpm --filter @codeflow/core build';
+  await new Promise((resolve, reject) => {
+    const child =
+      process.platform === 'win32'
+        ? spawn('cmd.exe', ['/d', '/s', '/c', command], {
+            cwd: repoRoot,
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        : spawn('sh', ['-lc', command], {
+            cwd: repoRoot,
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+    child.stdout.on('data', (buf) => process.stdout.write(String(buf)));
+    child.stderr.on('data', (buf) => process.stderr.write(String(buf)));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Command failed (${command}) with exit code ${code}`));
+    });
+  });
+
+  if (!fs.existsSync(coreDistEntry)) {
+    throw new Error(`Missing core dist after build: ${coreDistEntry}`);
+  }
+
+  return { built: true, command };
+};
+
+const normalizeDevPm = () => {
+  if (devPm === 'npm' || devPm === 'pnpm') {
+    return devPm;
+  }
+  throw new Error(`Unsupported CODEFLOW_DEV_PM: ${devPm}`);
+};
+
+const resolvedDevPm = normalizeDevPm();
+
+const ensureFrontendDeps = async () => {
+  const lockfile = path.resolve(devCwd, 'package-lock.json');
+  const nodeModulesDir = path.resolve(devCwd, 'node_modules');
+  const command = resolvedDevPm === 'npm' && fs.existsSync(lockfile) ? 'npm ci' : `${resolvedDevPm} install`;
+
+  if (fs.existsSync(nodeModulesDir)) {
+    return { reused: true, packageManager: resolvedDevPm };
+  }
+
+  await new Promise((resolve, reject) => {
+    const child =
+      process.platform === 'win32'
+        ? spawn('cmd.exe', ['/d', '/s', '/c', command], {
+            cwd: devCwd,
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          })
+        : spawn('sh', ['-lc', command], {
+            cwd: devCwd,
+            env: { ...process.env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+    child.stdout.on('data', (buf) => process.stdout.write(String(buf)));
+    child.stderr.on('data', (buf) => process.stderr.write(String(buf)));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Command failed (${command}) with exit code ${code}`));
+    });
+  });
+
+  return { installed: true, packageManager: resolvedDevPm, command };
 };
 
 const runNodeScript = (scriptName, env = {}) =>
@@ -96,7 +183,7 @@ const waitBaseUrlReady = async (timeoutMs = 120000) => {
 
 const startDevServer = async () => {
   const command =
-    devPm === 'npm'
+    resolvedDevPm === 'npm'
       ? `npm run dev -- --host 127.0.0.1 --port ${devPort}`
       : `pnpm dev --host 127.0.0.1 --port ${devPort}`;
 
@@ -143,6 +230,9 @@ const stopDevServer = async (child) => {
 let startedDevServer = null;
 
 try {
+  await step('prepare_core_dist', ensureCoreDist);
+  await step('prepare_frontend_dependencies', ensureFrontendDeps);
+
   const prepared = await step('prepare_server', async () => {
     const ready = await isBaseUrlReady();
     if (ready) return { mode: 'reuse_existing' };
@@ -150,7 +240,7 @@ try {
       throw new Error(`Base URL not reachable and auto-start is disabled: ${baseUrl}`);
     }
     startedDevServer = await startDevServer();
-    return { mode: 'started', pid: startedDevServer.pid, devCwd };
+    return { mode: 'started', pid: startedDevServer.pid, devCwd, devPm: resolvedDevPm };
   });
 
   if (prepared) {

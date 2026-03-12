@@ -35,10 +35,21 @@
 - 不再允许把 `codeflow_extracted` 作为默认浏览器 smoke、E2E 或 CI 前端入口
 - 不再把 `packages/gui` 描述为默认产品前端
 
+## 测试 / 构建 / 发布基线补充
+
+- 浏览器 E2E 默认使用 `codeflow_template` + `npm` 启动前端，`scripts/test-all-e2e.mjs` 会在执行 smoke 前自动确保 `packages/core/dist` 已构建，避免 CLI hook 脚本因缺少 dist 伪失败。
+- CI 继续使用根目录 `pnpm install --frozen-lockfile` 管理 monorepo 依赖，同时在 `codeflow_template` 内执行 `npm ci`，并显式构建 `@codeflow/core` dist 后再跑 E2E。
+- 嵌入式构建脚本会把 `codeflow_template/dist` 同步到 `backend/internal/web/dist`，与 `backend/internal/web/embed.go` 的嵌入路径保持一致。
+- 默认 Go 打包链采用 `CGO_ENABLED=1`，与 `backend/README.md` 中 `go-sqlite3` 需要 CGO 的要求保持一致；Tauri/sidecar 继续沿用同一 CGO 决策。
+
 ## 当前证据
 
 - `codeflow_template/index.tsx:11`
 - `scripts/test-all-e2e.mjs:10`
+- `scripts/_shared/runtime.mjs:15`
 - `.github/workflows/e2e-smoke.yml:34`
 - `scripts/build-all.ps1:20`
+- `scripts/build-all.sh:19`
+- `backend/internal/web/embed.go:6`
+- `backend/README.md:30`
 - `codeflow_template/src-tauri/tauri.conf.json:7`

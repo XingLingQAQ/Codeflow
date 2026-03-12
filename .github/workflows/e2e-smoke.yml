@@ -35,6 +35,9 @@ jobs:
         working-directory: codeflow_template
         run: npm ci
 
+      - name: Build @codeflow/core dist
+        run: pnpm --filter @codeflow/core build
+
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
 
