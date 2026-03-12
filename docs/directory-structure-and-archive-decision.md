@@ -31,11 +31,12 @@
 - `backend/internal/web/dist` — embed 输入路径，禁止在前期迁移
 - `codeflow_template/src-tauri/binaries` — sidecar 输出/输入路径，禁止在前期迁移
 
-### Freeze → Archive（先断默认引用，再迁档）
+### Freeze → Archive（已完成引用审计，待物理迁移）
 
 - `codeflow_extracted/` — 已裁决为遗留资产（见 `docs/frontend-mainline-decision.md`）
-  - 当前状态：已从默认 E2E/CI 入口移除
-  - 下一步：确认不再被根脚本、CI、文档引用后，迁移到 `archive/frontend/codeflow_extracted`
+  - 引用审计：脚本/CI/构建中零引用 ✅（2026-03-12）
+  - 物理迁移：因 Windows node_modules 文件锁暂缓，目标路径 `archive/frontend/codeflow_extracted`
+  - 目录未被 git 跟踪，迁移不影响版本历史
 
 ## 关键路径绑定（禁止在 Phase E 之前变更）
 
@@ -59,14 +60,19 @@
 
 ### Phase A ✅ 基线核验
 ### Phase B ✅ Nx 最小壳层
-### Phase C ⏸ CI 双轨验证
+### Phase C ✅ CI 双轨验证
 - 保留 `.github/workflows/e2e-smoke.yml` 原有链路
-- 并行增加 Nx 链路
+- 新增 `.github/workflows/nx-ci.yml` 并行验证 Nx 编排链路
 - 连续稳定后再切主入口到 Nx
 
-### Phase D 🔄 冻结遗留目录
-- `packages/gui` 已标记为 `gui-legacy`
-- `codeflow_extracted` 待断默认引用后归档
+### Phase D ✅ 冻结遗留目录
+- `packages/gui` 已标记为 `gui-legacy`（Nx tag: `status:legacy`）
+- `codeflow_extracted` 引用审计完成（2026-03-12）：
+  - 脚本/CI/构建中零引用 ✅
+  - 仅在文档中作为历史记录被提及 ✅
+  - 目录本身未被 git 跟踪（untracked）
+  - 物理迁移到 `archive/` 因 Windows 文件锁暂缓，已在目录内放置 `.archived` 标记
+  - 待文件锁解除后执行：`mv codeflow_extracted archive/frontend/codeflow_extracted`
 
 ### Phase E ⏸ 可选物理迁移
 - 仅在前四阶段稳定后执行

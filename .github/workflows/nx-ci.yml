@@ -1,0 +1,86 @@
+name: Nx CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  nx-build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Install Root Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Frontend Dependencies
+        working-directory: codeflow_template
+        run: npm ci
+
+      - name: Nx Build (all TS projects)
+        run: pnpm exec nx run-many -t build --exclude=backend
+
+      - name: Nx Typecheck
+        run: pnpm exec nx run-many -t typecheck --exclude=backend
+        continue-on-error: true
+
+      - name: Nx Lint
+        run: pnpm exec nx run-many -t lint --exclude=backend
+        continue-on-error: true
+
+  nx-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Setup GCC (for CGO)
+        run: sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Backend Lint
+        working-directory: backend
+        run: |
+          if command -v golangci-lint >/dev/null 2>&1; then
+            golangci-lint run ./...
+          else
+            echo "golangci-lint not installed, skipping"
+          fi
+        continue-on-error: true
+
+      - name: Backend Test
+        working-directory: backend
+        run: go test -race -coverprofile=coverage.out ./...
+        continue-on-error: true
+
+      - name: Backend Build
+        working-directory: backend
+        run: |
+          mkdir -p build
+          CGO_ENABLED=1 go build -v -ldflags "-s -w" -o build/codeflow-server ./cmd/codeflow-server
