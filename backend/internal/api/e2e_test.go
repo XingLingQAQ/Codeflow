@@ -665,7 +665,9 @@ func TestE2E_IsolationWorkflow(t *testing.T) {
 	var containerResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&containerResp)
 	resp.Body.Close()
-	containerID := containerResp["id"].(string)
+	// isolation API 使用 Response envelope: {"success":true,"data":{...}}
+	containerData := containerResp["data"].(map[string]interface{})
+	containerID := containerData["id"].(string)
 	assert.NotEmpty(t, containerID)
 
 	// 4. Check access

@@ -7,6 +7,9 @@
   "targets": {
     "build": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "开发构建 (CGO_ENABLED=1, 依赖 go-sqlite3)"
+      },
       "options": {
         "command": "make build",
         "cwd": "backend"
@@ -16,6 +19,9 @@
     },
     "build-embedded": {
       "executor": "nx:run-commands",
+      "metadata": {
+        "description": "嵌入式发布构建 (CGO_ENABLED=0, 静态链接, 含前端 dist)"
+      },
       "dependsOn": ["desktop:build"],
       "options": {
         "command": "make build-all",
