@@ -31,12 +31,12 @@
 - `backend/internal/web/dist` — embed 输入路径，禁止在前期迁移
 - `codeflow_template/src-tauri/binaries` — sidecar 输出/输入路径，禁止在前期迁移
 
-### Freeze → Archive（已完成引用审计，待物理迁移）
+### Freeze → Archive（已完成）
 
-- `codeflow_extracted/` — 已裁决为遗留资产（见 `docs/frontend-mainline-decision.md`）
-  - 引用审计：脚本/CI/构建中零引用 ✅（2026-03-12）
-  - 物理迁移：因 Windows node_modules 文件锁暂缓，目标路径 `archive/frontend/codeflow_extracted`
-  - 目录未被 git 跟踪，迁移不影响版本历史
+- `codeflow_extracted/` → `archive/frontend/codeflow_extracted/` ✅
+  - 引用审计：脚本/CI/构建中零引用 ✅
+  - 物理迁移完成（2026-03-12），node_modules 已清理
+  - 目录未纳入 git 跟踪，不影响版本历史
 
 ## 关键路径绑定（禁止在 Phase E 之前变更）
 
@@ -71,13 +71,12 @@
   - 脚本/CI/构建中零引用 ✅
   - 仅在文档中作为历史记录被提及 ✅
   - 目录本身未被 git 跟踪（untracked）
-  - 物理迁移到 `archive/` 因 Windows 文件锁暂缓，已在目录内放置 `.archived` 标记
-  - 待文件锁解除后执行：`mv codeflow_extracted archive/frontend/codeflow_extracted`
+  - 物理迁移完成 ✅（2026-03-12）：`archive/frontend/codeflow_extracted`
+  - node_modules 已清理，目录未纳入 git 跟踪
 
-### Phase E ⏸ 可选物理迁移
-- 仅在前四阶段稳定后执行
-- 一次只迁一个目录
-- 每次迁移保留兼容层与快速回滚点
+### Phase E ✅ 物理迁移
+- `codeflow_extracted` → `archive/frontend/codeflow_extracted` ✅
+- `packages/gui` 保持原位（仍被 tsconfig references 引用，标记为 legacy 即可）
 
 ## 回滚策略
 
