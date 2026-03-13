@@ -1,8 +1,9 @@
-// --- API Configuration (dynamic port for Tauri sidecar) ---
+// --- API Configuration (dynamic port for browser + Tauri sidecar) ---
 
 const DEFAULT_PORT = 8080;
+const FALLBACK_PORT = 18080;
 
-/** Mutable base URLs — updated by initApiBase() when running inside Tauri. */
+/** Mutable base URLs updated by initApiBase(). */
 let _apiBase = `http://localhost:${DEFAULT_PORT}`;
 let _wsBase = `ws://localhost:${DEFAULT_PORT}`;
 let _initialized = false;
@@ -10,22 +11,91 @@ let _initialized = false;
 export function getApiBase(): string { return _apiBase; }
 export function getWsBase(): string { return _wsBase; }
 
+function normalizeBase(raw: string): string {
+  return raw.trim().replace(/\/+$/, '');
+}
+
+function httpToWs(base: string): string {
+  if (base.startsWith('https://')) return `wss://${base.slice('https://'.length)}`;
+  if (base.startsWith('http://')) return `ws://${base.slice('http://'.length)}`;
+  return base;
+}
+
+function setApiBases(base: string): void {
+  const normalized = normalizeBase(base);
+  _apiBase = normalized;
+  _wsBase = httpToWs(normalized);
+}
+
+function getBrowserCandidates(): string[] {
+  const envBase = (import.meta as unknown as { env?: { VITE_API_BASE?: string } }).env?.VITE_API_BASE;
+  const candidates = [
+    envBase ? normalizeBase(envBase) : '',
+    `http://localhost:${DEFAULT_PORT}`,
+    `http://127.0.0.1:${DEFAULT_PORT}`,
+    `http://localhost:${FALLBACK_PORT}`,
+    `http://127.0.0.1:${FALLBACK_PORT}`,
+  ].filter(Boolean);
+
+  return Array.from(new Set(candidates));
+}
+
+async function isCodeFlowBackend(base: string): Promise<boolean> {
+  try {
+    const resp = await fetch(`${base}/health`, { method: 'GET' });
+    if (!resp.ok) return false;
+
+    const body = await resp.json().catch(() => null) as Record<string, unknown> | null;
+    if (!body || typeof body !== 'object') return false;
+
+    const topStatus = String(body.status ?? '').toLowerCase();
+    const topService = String(body.service ?? '').toLowerCase();
+
+    const nested = typeof body.data === 'object' && body.data !== null
+      ? (body.data as Record<string, unknown>)
+      : null;
+    const nestedStatus = String(nested?.status ?? '').toLowerCase();
+    const nestedService = String(nested?.service ?? '').toLowerCase();
+
+    return (
+      topStatus === 'healthy' ||
+      topService.includes('codeflow') ||
+      nestedStatus === 'healthy' ||
+      nestedService.includes('codeflow')
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function resolveBrowserApiBase(): Promise<void> {
+  const candidates = getBrowserCandidates();
+  for (const base of candidates) {
+    if (await isCodeFlowBackend(base)) {
+      setApiBases(base);
+      console.log(`[CodeFlow] Browser mode backend resolved: ${_apiBase}`);
+      return;
+    }
+  }
+
+  console.warn(`[CodeFlow] Could not resolve backend from candidates, fallback to ${_apiBase}`);
+}
+
 /**
  * Detect Tauri environment and resolve the sidecar port.
  * Call once at app startup (before first render).
- * In browser dev mode this is a no-op and keeps the default port.
  */
 export async function initApiBase(): Promise<void> {
   if (_initialized) return;
   _initialized = true;
 
-  // Quick check: not in Tauri → skip immediately
+  // Not in Tauri: auto-detect backend in browser mode.
   if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
-    console.log('[CodeFlow] Browser mode, using default port', DEFAULT_PORT);
+    await resolveBrowserApiBase();
     return;
   }
 
-  // In Tauri — resolve sidecar port
+  // In Tauri: resolve sidecar port.
   console.log('[CodeFlow] Tauri detected, resolving sidecar port...');
   try {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -34,8 +104,7 @@ export async function initApiBase(): Promise<void> {
     for (let i = 0; i < 20; i++) {
       const port = await invoke<number | null>('get_backend_port');
       if (port) {
-        _apiBase = `http://localhost:${port}`;
-        _wsBase = `ws://localhost:${port}`;
+        setApiBases(`http://localhost:${port}`);
         console.log(`[CodeFlow] Sidecar port resolved: ${port}, apiBase=${_apiBase}`);
         return;
       }
@@ -48,11 +117,12 @@ export async function initApiBase(): Promise<void> {
   }
 }
 
-/** Computed endpoint helpers — always use current _apiBase/_wsBase. */
+/** Computed endpoint helpers, always using current _apiBase/_wsBase. */
 export const API_ENDPOINTS = {
   get health() { return `${_apiBase}/health`; },
   get projects() { return `${_apiBase}/api/v1/projects`; },
   get memory() { return `${_apiBase}/api/v1/memory`; },
+  get memoryAgent() { return `${_apiBase}/api/v1/memory/agent`; },
   get search() { return `${_apiBase}/api/v1/search`; },
   get context() { return `${_apiBase}/api/v1/context`; },
   get agents() { return `${_apiBase}/api/v1/agents`; },

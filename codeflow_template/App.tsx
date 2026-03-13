@@ -11,9 +11,9 @@ import {
   LogOut, CreditCard, Key, Smartphone,
   Flame, Snowflake, Archive, ExternalLink, RefreshCw
 } from 'lucide-react';
-import { ViewMode, NavItem, MemoryNode, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, SAMGEntity, SAMGTriple, MemoryItem, GlobalConfig, AtomicMemory, MemoryTier, RawEntry, SAMGPointer, QueryMemoryResponse } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier } from './types';
 import { LogModal } from './components/LogModal';
-import { useApi, useMutation } from './hooks/useApi';
+import { useApi } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { ErrorState } from './components/ErrorState';
@@ -23,11 +23,10 @@ import { listProjects, createProject } from './services/projects';
 import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
 import { listAgents } from './services/agents';
 import { getConversationTrace, stopConversation, retryConversation } from './services/conversations';
-import { getVisibleNodes, getTriples, getNodePointers, queryMemory } from './services/samg';
-import { getMemoryItems } from './services/memory';
-import { getAtomicMemoriesByTier, boostHeat, applyHeatDecay, recomputeTiers } from './services/atomic_memory';
-import { listRawArchive, getRawArchiveStats } from './services/raw_archive';
+import { retrieveMemoryAgent, buildMemoryAgentContext } from './services/memory_agent';
 import { getGlobalConfig, updateGlobalConfig } from './services/config';
+import { healthCheck } from './services/health';
+import { listHooks } from './services/hooks';
 import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
@@ -50,7 +49,15 @@ const ToastContainer = ({ toasts }: { toasts: ToastMsg[] }) => (
   </div>
 );
 
-const Sidebar = ({ activeMode, setMode }: { activeMode: ViewMode, setMode: (m: ViewMode) => void }) => {
+const Sidebar = ({
+  activeMode,
+  setMode,
+  userName,
+}: {
+  activeMode: ViewMode,
+  setMode: (m: ViewMode) => void,
+  userName: string,
+}) => {
   const navItems: NavItem[] = [
     { id: ViewMode.HOME, label: 'Home', icon: <Home size={20} /> },
     { id: ViewMode.PROJECTS, label: 'Projects', icon: <Folder size={20} /> },
@@ -109,8 +116,8 @@ const Sidebar = ({ activeMode, setMode }: { activeMode: ViewMode, setMode: (m: V
         >
           <div className="size-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 ring-2 ring-white shadow-sm"></div>
           <div className="flex flex-col text-left">
-            <span className="text-xs font-semibold text-slate-700">Alex Designer</span>
-            <span className="text-[10px] text-slate-400">Pro Plan</span>
+            <span className="text-xs font-semibold text-slate-700">{userName || 'Workspace User'}</span>
+            <span className="text-[10px] text-slate-400">Local Profile</span>
           </div>
         </div>
       </div>
@@ -450,12 +457,35 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
     );
 };
 
-const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
+type SettingsProfile = {
+  name: string;
+  email: string;
+  role: string;
+};
+
+const SettingsView = ({
+  showToast,
+  profile,
+  onProfileChange,
+}: {
+  showToast: (msg: string) => void,
+  profile: SettingsProfile,
+  onProfileChange: (profile: SettingsProfile) => void,
+}) => {
   const [darkMode, setDarkMode] = useState(false);
   const [configError, setConfigError] = useState(false);
+  const [profileName, setProfileName] = useState(profile.name);
+  const [profileEmail, setProfileEmail] = useState(profile.email);
+  const [profileRole, setProfileRole] = useState(profile.role);
 
   const { data: config, loading, error, refetch } = useApi<GlobalConfig>(
     (signal) => getGlobalConfig(signal), [],
+  );
+  const { data: backendHealth } = useApi<{ status: string }>(
+    (signal) => healthCheck(signal), [],
+  );
+  const { data: hookData } = useApi<{ hooks: { name: string; enabled: boolean; type: string }[] }>(
+    (signal) => listHooks(signal), [],
   );
 
   const [model, setModel] = useState('');
@@ -471,16 +501,44 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
     }
   }, [config, error]);
 
+  useEffect(() => {
+    setProfileName(profile.name || '');
+    setProfileEmail(profile.email || '');
+    setProfileRole(profile.role || '');
+  }, [profile]);
+
   const handleSave = async () => {
     try {
       await updateGlobalConfig({ default_model: model });
+      onProfileChange({
+        name: profileName.trim(),
+        email: profileEmail.trim(),
+        role: profileRole.trim(),
+      });
       showToast("Settings saved successfully");
     } catch {
       showToast("Failed to save settings");
     }
   };
 
-  const modelOptions = config?.api_pool?.map(ch => ch.name) ?? ['Claude 3.5 Sonnet', 'GPT-4o', 'Gemini 1.5 Pro'];
+  const modelOptions = Array.from(
+    new Set(
+      [
+        ...(config?.api_pool?.map(ch => ch.name) ?? []),
+        config?.default_model,
+      ].filter((v): v is string => Boolean(v && v.trim())),
+    ),
+  );
+  const backendConnected = (backendHealth?.status ?? '').toLowerCase() === 'healthy';
+  const hooks = hookData?.hooks ?? [];
+  const enabledHooks = hooks.filter(h => h.enabled).length;
+  const profileInitials = profileName
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(part => part[0]?.toUpperCase() ?? '')
+    .slice(0, 2)
+    .join('') || 'U';
+  const apiChannels = config?.api_pool ?? [];
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
@@ -515,21 +573,38 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
                 
                 <div className="flex flex-col md:flex-row gap-8 items-start">
                     <div className="flex flex-col items-center gap-3">
-                         <div className="size-24 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 ring-4 ring-slate-50 shadow-inner flex items-center justify-center text-white text-2xl font-bold">AD</div>
+                         <div className="size-24 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 ring-4 ring-slate-50 shadow-inner flex items-center justify-center text-white text-2xl font-bold">
+                           {profileInitials}
+                         </div>
                          <button className="text-xs font-bold text-blue-600 hover:underline">Change Avatar</button>
                     </div>
                     <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                              <label className="text-xs font-bold text-slate-700 uppercase">Full Name</label>
-                             <input type="text" defaultValue="Alex Designer" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" />
+                             <input
+                               type="text"
+                               value={profileName}
+                               onChange={(e) => setProfileName(e.target.value)}
+                               className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                             />
                         </div>
                         <div className="space-y-2">
                              <label className="text-xs font-bold text-slate-700 uppercase">Email Address</label>
-                             <input type="email" defaultValue="alex@codeflow.ai" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" />
+                             <input
+                               type="email"
+                               value={profileEmail}
+                               onChange={(e) => setProfileEmail(e.target.value)}
+                               className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                             />
                         </div>
                         <div className="space-y-2">
                              <label className="text-xs font-bold text-slate-700 uppercase">Role</label>
-                             <input type="text" defaultValue="Senior Architect" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all" />
+                             <input
+                               type="text"
+                               value={profileRole}
+                               onChange={(e) => setProfileRole(e.target.value)}
+                               className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                             />
                         </div>
                     </div>
                 </div>
@@ -555,17 +630,23 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
                     )}
                     <div className="space-y-3">
                          <label className="text-xs font-bold text-slate-700 uppercase">Default Model</label>
-                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                            {modelOptions.map(m => (
-                                <button
-                                    key={m}
-                                    onClick={() => setModel(m)}
-                                    className={`px-4 py-3 rounded-xl border text-sm font-bold text-left transition-all ${model === m ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm ring-1 ring-indigo-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-100'}`}
-                                >
-                                    {m}
-                                </button>
-                            ))}
-                         </div>
+                         {modelOptions.length === 0 ? (
+                           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-500">
+                             No model channels configured yet.
+                           </div>
+                         ) : (
+                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {modelOptions.map(m => (
+                                  <button
+                                      key={m}
+                                      onClick={() => setModel(m)}
+                                      className={`px-4 py-3 rounded-xl border text-sm font-bold text-left transition-all ${model === m ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm ring-1 ring-indigo-500/20' : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-100'}`}
+                                  >
+                                      {m}
+                                  </button>
+                              ))}
+                           </div>
+                         )}
                     </div>
                     
                     <div className="space-y-3">
@@ -601,20 +682,53 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
                  </div>
 
                  <div className="space-y-3">
+                     <div className={`flex items-center justify-between p-4 border rounded-xl ${backendConnected ? 'border-emerald-100 bg-emerald-50/40' : 'border-amber-100 bg-amber-50/40'}`}>
+                        <div className="flex items-center gap-3">
+                            <Globe size={20} />
+                            <span className="font-bold text-slate-700">Backend API</span>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${backendConnected ? 'text-emerald-700 bg-emerald-100' : 'text-amber-700 bg-amber-100'}`}>
+                          {backendConnected ? 'Healthy' : 'Unavailable'}
+                        </span>
+                     </div>
+
                      <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-slate-50">
                         <div className="flex items-center gap-3">
-                            <Github size={20} />
-                            <span className="font-bold text-slate-700">GitHub</span>
+                            <Key size={20} />
+                            <span className="font-bold text-slate-700">CLI Hooks</span>
                         </div>
-                        <span className="text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded">Connected</span>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${hooks.length > 0 ? 'text-blue-700 bg-blue-100' : 'text-slate-600 bg-slate-200'}`}>
+                          {hooks.length > 0 ? `${enabledHooks}/${hooks.length} enabled` : 'No hooks'}
+                        </span>
                      </div>
-                     <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-white hover:border-blue-200 transition-colors cursor-pointer">
-                        <div className="flex items-center gap-3">
-                            <div className="size-5 rounded-full bg-black text-white flex items-center justify-center font-bold text-[10px]">V</div>
-                            <span className="font-bold text-slate-700">Vercel</span>
-                        </div>
-                        <button className="text-xs font-bold text-slate-500 hover:text-blue-600">Connect</button>
-                     </div>
+
+                     {loading ? (
+                       <div className="p-4 border border-slate-100 rounded-xl bg-white text-sm text-slate-400">Loading API channels...</div>
+                     ) : apiChannels.length === 0 ? (
+                       <div className="p-4 border border-slate-100 rounded-xl bg-white text-sm text-slate-500">
+                         No API channels configured. Add providers in global config.
+                       </div>
+                     ) : (
+                       apiChannels.map(channel => {
+                         const isEnabled = Boolean(channel.enabled);
+                         return (
+                           <div key={channel.id} className="flex items-center justify-between p-4 border border-slate-100 rounded-xl bg-white">
+                             <div className="flex items-center gap-3">
+                               <div className="size-5 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-[10px]">
+                                 {channel.provider?.charAt(0).toUpperCase() || 'A'}
+                               </div>
+                               <div className="flex flex-col">
+                                 <span className="font-bold text-slate-700">{channel.name}</span>
+                                 <span className="text-[11px] text-slate-400">{channel.provider}{channel.base_url ? ` - ${channel.base_url}` : ''}</span>
+                               </div>
+                             </div>
+                             <span className={`text-xs font-bold px-2 py-1 rounded ${isEnabled ? 'text-emerald-700 bg-emerald-100' : 'text-slate-600 bg-slate-200'}`}>
+                               {isEnabled ? 'Enabled' : 'Disabled'}
+                             </span>
+                           </div>
+                         );
+                       })
+                     )}
                  </div>
              </section>
 
@@ -650,23 +764,28 @@ const SettingsView = ({ showToast }: { showToast: (msg: string) => void }) => {
 const SessionsView = () => {
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   const { data: agents, loading, error, refetch } = useApi<Agent[]>(
     (signal) => listAgents(signal), [],
   );
 
-  const { data: trace } = useApi<CallTrace>(
-    (signal) => selectedAgentId ? getConversationTrace(selectedAgentId, signal) : Promise.resolve(null as unknown as CallTrace),
-    [selectedAgentId],
-    { enabled: !!selectedAgentId },
+  const { data: traceData } = useApi<ConversationTraceResponse | null>(
+    (signal) => selectedSessionId
+      ? getConversationTrace(selectedSessionId, signal)
+      : Promise.resolve(null),
+    [selectedSessionId],
+    { enabled: !!selectedSessionId },
   );
 
-  const handleSelectAgent = (id: string) => {
-    setSelectedAgentId(id);
+  const handleSelectAgent = (agent: Agent) => {
+    setSelectedAgentId(agent.id);
+    setSelectedSessionId(agent.session_id || agent.id);
     setMobileView('chat');
   };
 
   const selectedAgent = agents?.find(a => a.id === selectedAgentId);
+  const trace = traceData?.trace;
   const agentList = agents ?? [];
 
   const SidebarContent = () => (
@@ -681,7 +800,7 @@ const SessionsView = () => {
          agentList.map(agent => (
           <div
             key={agent.id}
-            onClick={() => handleSelectAgent(agent.id)}
+            onClick={() => handleSelectAgent(agent)}
             className={`p-3 border rounded-xl cursor-pointer transition-all ${selectedAgentId === agent.id ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-slate-200 hover:border-blue-200'}`}
           >
             <div className="flex justify-between items-center mb-1">
@@ -719,8 +838,8 @@ const SessionsView = () => {
           </div>
           {selectedAgent && (
             <div className="flex items-center gap-2">
-              <button onClick={() => selectedAgent && stopConversation(selectedAgent.session_id || selectedAgent.id)} className="px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded-lg">Stop</button>
-              <button onClick={() => selectedAgent && retryConversation(selectedAgent.session_id || selectedAgent.id)} className="px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 rounded-lg">Retry</button>
+              <button onClick={() => selectedSessionId && stopConversation(selectedSessionId)} className="px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded-lg">Stop</button>
+              <button onClick={() => selectedSessionId && retryConversation(selectedSessionId)} className="px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 rounded-lg">Retry</button>
             </div>
           )}
         </header>
@@ -761,8 +880,6 @@ const SessionsView = () => {
   );
 };
 
-type MemoryTab = 'atomic' | 'samg' | 'archive';
-
 const tierConfig: Record<MemoryTier, { icon: React.ReactNode; color: string; bg: string; label: string }> = {
   hot:  { icon: <Flame size={14} />,    color: 'text-red-500',  bg: 'bg-red-50 border-red-200',    label: '🔴 Hot' },
   warm: { icon: <Zap size={14} />,      color: 'text-amber-500', bg: 'bg-amber-50 border-amber-200', label: '🟡 Warm' },
@@ -770,306 +887,460 @@ const tierConfig: Record<MemoryTier, { icon: React.ReactNode; color: string; bg:
 };
 
 const MemoryView = () => {
-  const [tab, setTab] = useState<MemoryTab>('atomic');
-  const [tierFilter, setTierFilter] = useState<MemoryTier | 'all'>('all');
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [nodePointers, setNodePointers] = useState<SAMGPointer[]>([]);
-  const [archivePage, setArchivePage] = useState(0);
-
-  // --- Atomic Memory ---
-  const { data: hotMemories, loading: hotLoading, refetch: refetchHot } = useApi<AtomicMemory[]>(
-    (signal) => getAtomicMemoriesByTier('hot', 50, signal), [],
-  );
-  const { data: warmMemories, refetch: refetchWarm } = useApi<AtomicMemory[]>(
-    (signal) => getAtomicMemoriesByTier('warm', 50, signal), [],
-  );
-  const { data: coldMemories, refetch: refetchCold } = useApi<AtomicMemory[]>(
-    (signal) => getAtomicMemoriesByTier('cold', 50, signal), [],
-  );
-
-  const allAtomicMemories = [
-    ...(hotMemories ?? []),
-    ...(warmMemories ?? []),
-    ...(coldMemories ?? []),
-  ];
-  const filteredMemories = tierFilter === 'all'
-    ? allAtomicMemories
-    : allAtomicMemories.filter(m => m.tier === tierFilter);
-
-  const refetchAllAtomic = () => { refetchHot(); refetchWarm(); refetchCold(); };
-
-  // --- SAMG ---
-  const { data: entities, loading: samgLoading, error: samgError, refetch: refetchSamg } = useApi<SAMGEntity[]>(
-    (signal) => getVisibleNodes(signal), [],
-  );
-  const { data: triples } = useApi<SAMGTriple[]>(
-    (signal) => getTriples(signal), [],
-  );
-  const nodeList = entities ?? [];
-  const tripleList = triples ?? [];
-  const selectedEntity = nodeList.find(e => e['@id'] === selectedNodeId);
+  const [query, setQuery] = useState('');
+  const [sessionId, setSessionId] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [debouncedSessionId, setDebouncedSessionId] = useState('');
+  const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedNodeId) { setNodePointers([]); return; }
-    getNodePointers(selectedNodeId).then(setNodePointers).catch(() => setNodePointers([]));
-  }, [selectedNodeId]);
+    const timer = setTimeout(() => setDebouncedQuery(query), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-  const getNodePosition = (index: number, total: number) => {
-    const angle = (2 * Math.PI * index) / Math.max(total, 1);
-    const radius = 30;
-    return { x: 50 + radius * Math.cos(angle), y: 50 + radius * Math.sin(angle) };
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSessionId(sessionId), 250);
+    return () => clearTimeout(timer);
+  }, [sessionId]);
+
+  const normalizedQuery = debouncedQuery.trim();
+  const normalizedSessionId = debouncedSessionId.trim();
+  const shouldRetrieve = normalizedQuery.length > 0;
+  const shouldContext = normalizedQuery.length > 0 || normalizedSessionId.length > 0;
+
+  const {
+    data: retrieveData,
+    loading: retrieveLoading,
+    error: retrieveError,
+    refetch: refetchRetrieve,
+  } = useApi<MemoryAgentRetrieveResult>(
+    (signal) => retrieveMemoryAgent(
+      {
+        query: normalizedQuery,
+        session_id: normalizedSessionId || undefined,
+        max_results: 10,
+      },
+      signal,
+    ),
+    [normalizedQuery, normalizedSessionId],
+    { enabled: shouldRetrieve },
+  );
+
+  const {
+    data: contextData,
+    loading: contextLoading,
+    error: contextError,
+    refetch: refetchContext,
+  } = useApi<MemoryAgentContextResult>(
+    (signal) => buildMemoryAgentContext(
+      {
+        session_id: normalizedSessionId,
+        query: normalizedQuery || undefined,
+        max_tokens: 600,
+      },
+      signal,
+    ),
+    [normalizedQuery, normalizedSessionId],
+    { enabled: shouldContext },
+  );
+
+  const buildSourceKey = (source: MemoryAgentSource) => [
+    source.kind,
+    source.id,
+    source.node_id ?? '',
+    source.source_id ?? '',
+  ].join(':');
+
+  const mergeAtomicMemories = (
+    primary: MemoryAgentRetrieveResult['atomic_memories'] = [],
+    secondary: NonNullable<MemoryAgentContextResult['atomic_memories']> = [],
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(primary.map((memory) => memory.id));
+    for (const memory of secondary) {
+      if (seen.has(memory.id)) {
+        continue;
+      }
+      merged.push(memory);
+      seen.add(memory.id);
+    }
+    return merged;
   };
 
-  const typeColors: Record<string, string> = {
-    service: 'bg-blue-100 border-blue-300 text-blue-600',
-    entity: 'bg-emerald-100 border-emerald-300 text-emerald-600',
-    concept: 'bg-violet-100 border-violet-300 text-violet-600',
-    default: 'bg-slate-100 border-slate-300 text-slate-600',
+  const mergeSamgNodes = (
+    primary: NonNullable<MemoryAgentRetrieveResult['samg_nodes']> = [],
+    secondary: NonNullable<MemoryAgentContextResult['samg_nodes']> = [],
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(primary.map((node) => node.id));
+    for (const node of secondary) {
+      if (seen.has(node.id)) {
+        continue;
+      }
+      merged.push(node);
+      seen.add(node.id);
+    }
+    return merged;
   };
 
-  // --- Raw Archive ---
-  const { data: archiveData, loading: archiveLoading, refetch: refetchArchive } = useApi<{ entries: RawEntry[]; count: number; total: number }>(
-    (signal) => listRawArchive({ limit: 30, offset: archivePage * 30 }, signal), [archivePage],
+  const mergeSources = (
+    primary: NonNullable<MemoryAgentRetrieveResult['sources']> = [],
+    secondary: NonNullable<MemoryAgentContextResult['sources']> = [],
+  ) => {
+    const merged = [...primary];
+    const seen = new Set(primary.map((source) => buildSourceKey(source)));
+    for (const source of secondary) {
+      const key = buildSourceKey(source);
+      if (seen.has(key)) {
+        continue;
+      }
+      merged.push(source);
+      seen.add(key);
+    }
+    return merged;
+  };
+
+  const atomicMemories = mergeAtomicMemories(
+    retrieveData?.atomic_memories ?? [],
+    contextData?.atomic_memories ?? [],
   );
-  const { data: archiveStats } = useApi<{ total_entries: number }>(
-    (signal) => getRawArchiveStats(signal), [],
+  const samgNodes = mergeSamgNodes(
+    retrieveData?.samg_nodes ?? [],
+    contextData?.samg_nodes ?? [],
+  );
+  const sources = mergeSources(
+    retrieveData?.sources ?? [],
+    contextData?.sources ?? [],
   );
 
-  const archiveEntries = archiveData?.entries ?? [];
-  const archiveTotal = archiveData?.total ?? archiveStats?.total_entries ?? 0;
+  useEffect(() => {
+    if (sources.length === 0) {
+      setSelectedSourceKey(null);
+      return;
+    }
+    if (!selectedSourceKey || !sources.some((source) => buildSourceKey(source) === selectedSourceKey)) {
+      setSelectedSourceKey(buildSourceKey(sources[0]));
+    }
+  }, [selectedSourceKey, sources]);
 
-  const tabs: { id: MemoryTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'atomic', label: 'Atomic Memory', icon: <Layers size={16} /> },
-    { id: 'samg', label: 'SAMG Graph', icon: <Activity size={16} /> },
-    { id: 'archive', label: 'Raw Archive', icon: <Archive size={16} /> },
-  ];
+  const selectedSource = sources.find((source) => buildSourceKey(source) === selectedSourceKey) ?? null;
+  const loading = (shouldRetrieve && retrieveLoading) || (shouldContext && contextLoading);
+  const error = retrieveError ?? contextError;
+  const totalFound = retrieveData?.total_found ?? atomicMemories.length + samgNodes.length;
+  const sourceCount = contextData?.source_count ?? sources.length;
+  const contextBlock = contextData?.context_block?.trim() ?? '';
+
+  const refetchAll = () => {
+    if (shouldRetrieve) {
+      refetchRetrieve();
+    }
+    if (shouldContext) {
+      refetchContext();
+    }
+  };
+
+  const getSourceKindMeta = (kind: MemoryAgentSource['kind']) => {
+    switch (kind) {
+      case 'atomic_memory':
+        return {
+          label: 'Atomic Memory',
+          icon: <Layers size={14} />,
+          badge: 'bg-red-50 text-red-600 border-red-200',
+        };
+      case 'samg_pointer':
+        return {
+          label: 'SAMG Pointer',
+          icon: <Activity size={14} />,
+          badge: 'bg-violet-50 text-violet-600 border-violet-200',
+        };
+      default:
+        return {
+          label: 'Raw Archive',
+          icon: <Archive size={14} />,
+          badge: 'bg-slate-100 text-slate-600 border-slate-200',
+        };
+    }
+  };
+
+  const getSourceTitle = (source: MemoryAgentSource) => {
+    return source.title || source.node_label || source.summary || source.source_id || source.id;
+  };
+
+  const getSourcePreview = (source: MemoryAgentSource) => {
+    const preview = source.summary || source.content || source.source_id || source.id;
+    return preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
+  };
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 pb-16 md:pb-0 overflow-hidden">
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 px-4 pt-3 pb-2 border-b border-slate-200 bg-white shrink-0">
-        {tabs.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tab === t.id ? 'bg-blue-50 text-blue-600' : 'text-slate-500 hover:bg-slate-100'
-            }`}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
+      <div className="border-b border-slate-200 bg-white shrink-0">
+        <div className="px-4 py-4 md:px-6 space-y-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">MemoryAgent</h1>
+              <p className="text-sm text-slate-500">统一检索 Atomic Memory、SAMG Pointer 和 Raw Archive。</p>
+            </div>
+            <button
+              onClick={refetchAll}
+              disabled={!shouldRetrieve && !shouldContext}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={14} />
+              刷新结果
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] gap-3">
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Query</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="输入问题、文件名或实现线索"
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-700 outline-none focus:border-blue-400 focus:bg-white"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Session ID</span>
+              <input
+                value={sessionId}
+                onChange={(event) => setSessionId(event.target.value)}
+                placeholder="可选，用于限定上下文和 recent hot memory"
+                className="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-700 outline-none focus:border-blue-400 focus:bg-white"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Retrieve hits</div>
+              <div className="mt-2 text-2xl font-bold text-slate-800">{totalFound}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Context sources</div>
+              <div className="mt-2 text-2xl font-bold text-slate-800">{sourceCount}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Atomic memories</div>
+              <div className="mt-2 text-2xl font-bold text-slate-800">{atomicMemories.length}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">SAMG nodes</div>
+              <div className="mt-2 text-2xl font-bold text-slate-800">{samgNodes.length}</div>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400">填 query 会同时走 retrieve 和 context。只填 session_id 时，会优先展示 context 里的 recent hot memory 与来源。</p>
+        </div>
       </div>
 
-      {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {/* === Atomic Memory Tab === */}
-        {tab === 'atomic' && (
-          <div className="h-full flex flex-col">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-white shrink-0">
-              <span className="text-xs text-slate-400 mr-2">Filter:</span>
-              {(['all', 'hot', 'warm', 'cold'] as const).map(f => (
-                <button
-                  key={f}
-                  onClick={() => setTierFilter(f)}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    tierFilter === f ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                  }`}
-                >
-                  {f === 'all' ? 'All' : tierConfig[f].label}
-                </button>
-              ))}
-              <div className="flex-1" />
-              <button onClick={refetchAllAtomic} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400" title="Refresh">
-                <RefreshCw size={14} />
-              </button>
-              <span className="text-xs text-slate-400">{filteredMemories.length} items</span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {hotLoading ? <LoadingSkeleton variant="text" count={4} /> :
-               filteredMemories.length === 0 ? (
-                <EmptyState icon={<Layers size={48} />} title="No memories" description="Atomic memory is empty" />
-              ) : (
-                <div className="space-y-2">
-                  {filteredMemories.map(mem => {
-                    const tc = tierConfig[mem.tier] ?? tierConfig.hot;
-                    return (
-                      <div key={mem.id} className={`p-3 rounded-xl border ${tc.bg} transition-all hover:shadow-sm`}>
-                        <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 ${tc.color}`}>{tc.icon}</div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-slate-700 leading-relaxed">{mem.content.length > 200 ? mem.content.slice(0, 200) + '...' : mem.content}</p>
-                            <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400">
-                              <span className={`font-bold uppercase ${tc.color}`}>{mem.tier}</span>
-                              <span>Heat: {mem.heat.toFixed(2)}</span>
-                              <span>Surprise: {mem.surprise.toFixed(2)}</span>
-                              <span>{mem.source}</span>
-                              {mem.tags?.length > 0 && <span>{mem.tags.join(', ')}</span>}
-                              <span>{new Date(mem.timestamp * 1000).toLocaleString()}</span>
+        {!shouldRetrieve && !shouldContext ? (
+          <EmptyState
+            icon={<Database size={48} />}
+            title="MemoryAgent 已接管默认入口"
+            description="输入 query 检索统一记忆结果，或只填 session_id 查看上下文组装。"
+          />
+        ) : error ? (
+          <ErrorState title="MemoryAgent 请求失败" message={error.message} onRetry={refetchAll} />
+        ) : loading ? (
+          <div className="p-4 md:p-6">
+            <LoadingSkeleton variant="text" count={10} />
+          </div>
+        ) : (
+          <div className="h-full grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)] overflow-hidden">
+            <div className="overflow-y-auto p-4 md:p-6 space-y-4">
+              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-900">Context block</h2>
+                    <p className="text-xs text-slate-400">来自 /api/v1/memory/agent/context 的统一上下文。</p>
+                  </div>
+                  <span className="text-xs text-slate-400">{contextBlock ? `${contextBlock.length} chars` : 'empty'}</span>
+                </div>
+                {contextBlock ? (
+                  <pre className="whitespace-pre-wrap break-words text-xs leading-6 text-slate-600 bg-slate-50 rounded-2xl p-4 overflow-x-auto">{contextBlock}</pre>
+                ) : (
+                  <EmptyState icon={<FileText size={32} />} title="暂无上下文块" description="当前输入还没有组装出 memory_context。" />
+                )}
+              </section>
+
+              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-900">Atomic memories</h2>
+                    <p className="text-xs text-slate-400">统一入口返回的原子记忆结果。</p>
+                  </div>
+                  <span className="text-xs text-slate-400">{atomicMemories.length} items</span>
+                </div>
+                {atomicMemories.length === 0 ? (
+                  <EmptyState icon={<Layers size={32} />} title="没有 atomic 命中" description="当前 query 没有命中原子记忆。" />
+                ) : (
+                  <div className="space-y-3">
+                    {atomicMemories.map((memory) => {
+                      const config = tierConfig[memory.tier] ?? tierConfig.hot;
+                      return (
+                        <div key={memory.id} className={`rounded-2xl border p-4 ${config.bg}`}>
+                          <div className="flex items-start gap-3">
+                            <div className={`mt-0.5 ${config.color}`}>{config.icon}</div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm leading-6 text-slate-700 whitespace-pre-wrap break-words">{memory.content}</p>
+                              <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] text-slate-400">
+                                <span className={`font-semibold uppercase ${config.color}`}>{memory.tier}</span>
+                                <span>heat {memory.heat.toFixed(2)}</span>
+                                <span>surprise {memory.surprise.toFixed(2)}</span>
+                                <span>{memory.source}</span>
+                                <span>{new Date(memory.timestamp * 1000).toLocaleString()}</span>
+                                {memory.session_id && <span>session {memory.session_id}</span>}
+                                {memory.tags.length > 0 && <span>{memory.tags.join(', ')}</span>}
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* === SAMG Graph Tab === */}
-        {tab === 'samg' && (
-          <div className="h-full flex flex-col md:flex-row overflow-hidden">
-            <div className="flex-1 relative h-[60vh] md:h-auto border-b md:border-b-0 md:border-r border-slate-200">
-              <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '40px 40px', opacity: 0.5 }} />
-              {samgLoading ? <LoadingSkeleton variant="text" count={2} /> :
-               samgError ? <ErrorState message={samgError.message} onRetry={refetchSamg} /> :
-               nodeList.length === 0 ? (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <EmptyState icon={<Activity size={48} />} title="No nodes yet" description="Semantic graph is empty" />
-                </div>
-              ) : (
-                <>
-                  <svg className="absolute inset-0 pointer-events-none w-full h-full">
-                    {tripleList.slice(0, 50).map((t, i) => {
-                      const si = nodeList.findIndex(n => n['@id'] === t.subject['@id']);
-                      const oi = nodeList.findIndex(n => n['@id'] === t.object.node?.['@id']);
-                      if (si < 0 || oi < 0) return null;
-                      const sp = getNodePosition(si, nodeList.length);
-                      const op = getNodePosition(oi, nodeList.length);
-                      return <line key={i} x1={`${sp.x}%`} y1={`${sp.y}%`} x2={`${op.x}%`} y2={`${op.y}%`} stroke="#cbd5e1" strokeWidth="2" />;
+                      );
                     })}
-                  </svg>
-                  {nodeList.map((node, i) => {
-                    const pos = getNodePosition(i, nodeList.length);
-                    const color = typeColors[node['@type']?.[0] ?? 'default'] ?? typeColors.default;
-                    return (
-                      <div
-                        key={node['@id']}
-                        onClick={() => setSelectedNodeId(node['@id'])}
-                        className="absolute flex flex-col items-center gap-2 cursor-pointer group hover:z-50 transition-all duration-300"
-                        style={{ left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-50%, -50%)' }}
-                      >
-                        <div className={`size-12 md:size-16 rounded-full border-4 border-white shadow-lg flex items-center justify-center ${color} ${selectedNodeId === node['@id'] ? 'ring-4 ring-blue-500/20 scale-110' : ''} group-hover:scale-110 transition-all`}>
-                          <div className="size-3 rounded-full bg-current opacity-50" />
-                        </div>
-                        <div className={`px-2 py-1 md:px-3 bg-white/90 backdrop-blur border border-slate-200 rounded-full text-[10px] md:text-xs font-bold text-slate-700 shadow-sm ${selectedNodeId === node['@id'] ? 'text-blue-600 border-blue-200' : ''}`}>
-                          {node.label}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </div>
-            {/* SAMG Detail Panel */}
-            <div className="h-[40vh] md:h-full w-full md:w-80 bg-white z-10 flex flex-col shadow-xl overflow-hidden">
-              {selectedEntity ? (
-                <>
-                  <div className="p-5 border-b border-slate-100 bg-slate-50/50 shrink-0">
-                    <h3 className="font-bold text-slate-800">{selectedEntity.label}</h3>
-                    <span className="text-xs text-slate-500">{selectedEntity['@type']?.join(', ') || 'Unknown type'}</span>
-                    {selectedEntity.description && <p className="text-xs text-slate-400 mt-1">{selectedEntity.description}</p>}
                   </div>
-                  <div className="flex-1 overflow-y-auto p-5">
-                    {/* Pointers section */}
-                    {nodePointers.length > 0 && (
-                      <>
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Pointers ({nodePointers.length})</h4>
-                        <div className="space-y-2 mb-5">
-                          {nodePointers.map((ptr, i) => (
-                            <div key={i} className="p-2 bg-violet-50 border border-violet-200 rounded-lg">
-                              <div className="flex items-center gap-2">
-                                <ExternalLink size={12} className="text-violet-400 shrink-0" />
-                                <span className="text-xs font-medium text-violet-700 truncate">{ptr.summary || ptr.source_id}</span>
-                              </div>
-                              <div className="flex items-center gap-2 mt-1 text-[10px] text-violet-400">
-                                <span>{ptr.source_type}</span>
-                                <span>relevance: {ptr.relevance.toFixed(2)}</span>
-                                {ptr.file_path && <span>{ptr.file_path}{ptr.line_range ? `:${ptr.line_range}` : ''}</span>}
-                              </div>
-                            </div>
-                          ))}
+                )}
+              </section>
+
+              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h2 className="text-base font-semibold text-slate-900">SAMG nodes</h2>
+                    <p className="text-xs text-slate-400">统一入口解析出的图谱节点与 pointer。</p>
+                  </div>
+                  <span className="text-xs text-slate-400">{samgNodes.length} nodes</span>
+                </div>
+                {samgNodes.length === 0 ? (
+                  <EmptyState icon={<Activity size={32} />} title="没有 SAMG 命中" description="当前 query 没有返回图谱节点。" />
+                ) : (
+                  <div className="space-y-3">
+                    {samgNodes.map((node) => (
+                      <div key={node.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <span className="text-sm font-semibold text-slate-800">{node.label}</span>
+                          <span className="px-2 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-[10px] font-medium text-violet-600">hop {node.hop}</span>
+                          <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-white text-[10px] font-medium text-slate-500">activation {node.activation.toFixed(2)}</span>
                         </div>
-                      </>
-                    )}
-                    {/* Relations section */}
-                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Relations</h4>
-                    <div className="space-y-2">
-                      {tripleList.filter(t => t.subject['@id'] === selectedNodeId || t.object.node?.['@id'] === selectedNodeId).slice(0, 10).map((t, i) => (
-                        <div key={i} className="flex items-center gap-3 p-2 bg-white border border-slate-100 rounded-xl shadow-sm">
-                          <div className="size-8 rounded-lg bg-slate-50 text-slate-500 flex items-center justify-center"><Database size={16} /></div>
-                          <div className="flex-1">
-                            <span className="text-sm font-semibold text-slate-700">{t.predicate}</span>
-                            <p className="text-[10px] text-slate-400">{t.subject['@id'] === selectedNodeId ? t.object.node?.label ?? 'literal' : t.subject.label ?? t.subject['@id']}</p>
+                        {node.pointers && node.pointers.length > 0 ? (
+                          <div className="space-y-2">
+                            {node.pointers.map((pointer, index) => (
+                              <div key={`${node.id}-${pointer.source_id}-${index}`} className="rounded-xl border border-slate-200 bg-white p-3">
+                                <div className="flex items-center gap-2 text-xs text-slate-500">
+                                  <ExternalLink size={12} className="text-violet-400" />
+                                  <span className="font-medium text-slate-700">{pointer.summary || pointer.source_id}</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] text-slate-400">
+                                  <span>{pointer.source_type}</span>
+                                  <span>relevance {pointer.relevance.toFixed(2)}</span>
+                                  {pointer.file_path && <span>{pointer.file_path}{pointer.line_range ? `:${pointer.line_range}` : ''}</span>}
+                                  {pointer.session_id && <span>session {pointer.session_id}</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-400">这个节点暂时没有可展示的 pointer。</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <aside className="border-t xl:border-t-0 xl:border-l border-slate-200 bg-white/70 backdrop-blur-sm overflow-hidden flex flex-col">
+              <div className="p-4 border-b border-slate-200 shrink-0">
+                <h2 className="text-base font-semibold text-slate-900">Sources</h2>
+                <p className="text-xs text-slate-400 mt-1">统一来源卡片。点选后可查看可追溯内容。</p>
+              </div>
+
+              {sources.length === 0 ? (
+                <div className="flex-1 overflow-y-auto">
+                  <EmptyState icon={<Archive size={32} />} title="没有来源卡片" description="当前输入还没有返回可追溯来源。" />
+                </div>
+              ) : (
+                <>
+                  <div className="max-h-[40%] overflow-y-auto p-3 space-y-2 border-b border-slate-200 shrink-0">
+                    {sources.map((source) => {
+                      const meta = getSourceKindMeta(source.kind);
+                      const sourceKey = buildSourceKey(source);
+                      const active = sourceKey === selectedSourceKey;
+                      return (
+                        <button
+                          key={sourceKey}
+                          onClick={() => setSelectedSourceKey(sourceKey)}
+                          className={`w-full text-left rounded-2xl border p-3 transition-colors ${
+                            active ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
+                              {meta.icon}
+                              {meta.label}
+                            </span>
+                          </div>
+                          <div className="text-sm font-medium text-slate-800 truncate">{getSourceTitle(source)}</div>
+                          <div className="text-xs text-slate-400 mt-1 line-clamp-2">{getSourcePreview(source)}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {selectedSource ? (
+                      <div className="space-y-4">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 mb-3">
+                            {(() => {
+                              const meta = getSourceKindMeta(selectedSource.kind);
+                              return (
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
+                                  {meta.icon}
+                                  {meta.label}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                          <h3 className="text-lg font-semibold text-slate-900 break-words">{getSourceTitle(selectedSource)}</h3>
+                          <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] text-slate-400">
+                            <span>{selectedSource.id}</span>
+                            {selectedSource.session_id && <span>session {selectedSource.session_id}</span>}
+                            {selectedSource.timestamp && <span>{new Date(selectedSource.timestamp * 1000).toLocaleString()}</span>}
+                            {typeof selectedSource.relevance === 'number' && <span>relevance {selectedSource.relevance.toFixed(2)}</span>}
                           </div>
                         </div>
-                      ))}
-                    </div>
+
+                        {(selectedSource.file_path || selectedSource.line_range || selectedSource.source_type) && (
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm text-slate-600">
+                            {selectedSource.source_type && <div><span className="text-slate-400">source_type</span> {selectedSource.source_type}</div>}
+                            {selectedSource.file_path && <div><span className="text-slate-400">file</span> {selectedSource.file_path}</div>}
+                            {selectedSource.line_range && <div><span className="text-slate-400">line</span> {selectedSource.line_range}</div>}
+                            {selectedSource.node_label && <div><span className="text-slate-400">node</span> {selectedSource.node_label}</div>}
+                          </div>
+                        )}
+
+                        {selectedSource.summary && (
+                          <div>
+                            <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Summary</div>
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words">{selectedSource.summary}</div>
+                          </div>
+                        )}
+
+                        <div>
+                          <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Content</div>
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words min-h-32">
+                            {selectedSource.content || selectedSource.summary || '这个来源暂时没有展开内容。'}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <EmptyState icon={<ExternalLink size={32} />} title="选择来源卡片" description="右侧会展示来源详情和可追溯内容。" />
+                    )}
                   </div>
                 </>
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-sm text-slate-400">Select a node to view details</div>
               )}
-            </div>
-          </div>
-        )}
-
-        {/* === Raw Archive Tab === */}
-        {tab === 'archive' && (
-          <div className="h-full flex flex-col">
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 bg-white shrink-0">
-              <Archive size={16} className="text-slate-400" />
-              <span className="text-sm font-medium text-slate-600">Total: {archiveTotal} entries</span>
-              <div className="flex-1" />
-              <button onClick={refetchArchive} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400" title="Refresh">
-                <RefreshCw size={14} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {archiveLoading ? <LoadingSkeleton variant="text" count={5} /> :
-               archiveEntries.length === 0 ? (
-                <EmptyState icon={<Archive size={48} />} title="No entries" description="Raw archive is empty" />
-              ) : (
-                <div className="space-y-2">
-                  {archiveEntries.map(entry => (
-                    <div key={entry.id} className="p-3 bg-white border border-slate-200 rounded-xl hover:shadow-sm transition-all">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                          entry.type === 'conversation' ? 'bg-blue-100 text-blue-600' :
-                          entry.type === 'code_diff' ? 'bg-emerald-100 text-emerald-600' :
-                          'bg-slate-100 text-slate-600'
-                        }`}>{entry.type}</span>
-                        <span className="text-[10px] text-slate-400">{new Date(entry.timestamp * 1000).toLocaleString()}</span>
-                        <span className="text-[10px] text-slate-300 truncate">{entry.id}</span>
-                      </div>
-                      <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{entry.content.length > 300 ? entry.content.slice(0, 300) + '...' : entry.content}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {/* Pagination */}
-            {archiveTotal > 30 && (
-              <div className="flex items-center justify-center gap-3 px-4 py-3 border-t border-slate-200 bg-white shrink-0">
-                <button
-                  onClick={() => setArchivePage(p => Math.max(0, p - 1))}
-                  disabled={archivePage === 0}
-                  className="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                >
-                  Prev
-                </button>
-                <span className="text-xs text-slate-400">Page {archivePage + 1} / {Math.ceil(archiveTotal / 30)}</span>
-                <button
-                  onClick={() => setArchivePage(p => p + 1)}
-                  disabled={(archivePage + 1) * 30 >= archiveTotal}
-                  className="px-3 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            )}
+            </aside>
           </div>
         )}
       </div>
@@ -1406,6 +1677,30 @@ const App = () => {
   const [activeMode, setActiveMode] = useState<ViewMode>(ViewMode.HOME);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
+  const [profile, setProfile] = useState<SettingsProfile>(() => {
+    try {
+      const raw = window.localStorage.getItem('codeflow.profile');
+      if (!raw) {
+        return { name: 'Workspace User', email: '', role: 'Operator' };
+      }
+      const parsed = JSON.parse(raw) as Partial<SettingsProfile>;
+      return {
+        name: parsed.name?.trim() || 'Workspace User',
+        email: parsed.email?.trim() || '',
+        role: parsed.role?.trim() || 'Operator',
+      };
+    } catch {
+      return { name: 'Workspace User', email: '', role: 'Operator' };
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('codeflow.profile', JSON.stringify(profile));
+    } catch {
+      // ignore localStorage failures
+    }
+  }, [profile]);
 
   const showToast = (message: string, type: 'success' | 'info' = 'success') => {
       const id = Date.now();
@@ -1431,7 +1726,7 @@ const App = () => {
       case ViewMode.PLAN:
         return <PlanView onOpenModal={() => setIsLogModalOpen(true)} showToast={showToast} />;
       case ViewMode.SETTINGS:
-        return <SettingsView showToast={showToast} />;
+        return <SettingsView showToast={showToast} profile={profile} onProfileChange={setProfile} />;
       default:
         return <HomeView onNavigate={setActiveMode} showToast={showToast} />;
     }
@@ -1439,7 +1734,7 @@ const App = () => {
 
   return (
     <div className="flex h-screen w-full bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-900 overflow-hidden">
-      <Sidebar activeMode={activeMode} setMode={setActiveMode} />
+      <Sidebar activeMode={activeMode} setMode={setActiveMode} userName={profile.name} />
       {renderView()}
       <MobileNav activeMode={activeMode} setMode={setActiveMode} />
       <LogModal isOpen={isLogModalOpen} onClose={() => setIsLogModalOpen(false)} />

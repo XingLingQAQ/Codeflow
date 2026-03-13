@@ -3,17 +3,23 @@
  *
  * 注册到 HookEvent.BEFORE_SEND，在发送请求前自动检索相关记忆
  * 并注入为 system 消息。
+ *
+ * 支持两种模式：
+ * - agent: 使用后端 MemoryAgent /agent/context API（默认）
+ * - local: 使用前端 PassiveRAG 本地检索（兼容回退）
  */
 import { HookEvent } from './types.js';
 const DEFAULT_CONFIG = {
     enabled: true,
     position: 'prepend',
     maxInjectionLength: 2000,
+    mode: 'agent',
 };
 export class MemoryInjectionHook {
-    constructor(hookManager, ragService, config = {}) {
+    constructor(hookManager, ragService, config = {}, agentClient) {
         this.hookManager = hookManager;
         this.ragService = ragService;
+        this.agentClient = agentClient;
         this.config = { ...DEFAULT_CONFIG, ...config };
         this.boundHandler = this.onBeforeSend.bind(this);
     }
@@ -59,11 +65,27 @@ export class MemoryInjectionHook {
             if (!lastUserMessage) {
                 return payload;
             }
-            const memories = await this.ragService.retrieve(lastUserMessage, this.config.sessionId);
-            if (memories.length === 0) {
+            let contextText;
+            if (this.config.mode === 'agent' && this.agentClient) {
+                // 后端 MemoryAgent 模式
+                const result = await this.agentClient.assembleContext({
+                    session_id: this.config.sessionId || '',
+                    query: lastUserMessage,
+                    max_tokens: Math.floor(this.config.maxInjectionLength / 4),
+                });
+                contextText = result.context_block;
+            }
+            else {
+                // 本地 PassiveRAG 模式（兼容回退）
+                const memories = await this.ragService.retrieve(lastUserMessage, this.config.sessionId);
+                if (memories.length === 0) {
+                    return payload;
+                }
+                contextText = this.ragService.formatForInjection(memories);
+            }
+            if (!contextText) {
                 return payload;
             }
-            let contextText = this.ragService.formatForInjection(memories);
             if (contextText.length > this.config.maxInjectionLength) {
                 contextText = contextText.slice(0, this.config.maxInjectionLength) + '\n...（已截断）';
             }

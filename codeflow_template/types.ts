@@ -142,6 +142,13 @@ export interface Conversation {
   message_count: number;
 }
 
+export interface ConversationTraceResponse {
+  session_id: string;
+  trace?: CallTrace;
+  agents?: Agent[];
+  duration_ms?: number;
+}
+
 // --- Memory ---
 
 export type MemoryType = 'stm' | 'ltm';
@@ -260,6 +267,7 @@ export interface SAMGPointer {
 
 export interface ResolvedPointer extends SAMGPointer {
   resolved_content?: string;
+  session_id?: string;
 }
 
 export interface QueryMemoryNode {
@@ -273,6 +281,40 @@ export interface QueryMemoryNode {
 export interface QueryMemoryResponse {
   activated_nodes: QueryMemoryNode[];
   context_block: string;
+}
+
+export type MemorySourceKind = 'atomic_memory' | 'samg_pointer' | 'raw_archive';
+
+export interface MemoryAgentSource {
+  kind: MemorySourceKind;
+  id: string;
+  title?: string;
+  summary?: string;
+  content?: string;
+  session_id?: string;
+  timestamp?: number;
+  node_id?: string;
+  node_label?: string;
+  source_id?: string;
+  source_type?: string;
+  file_path?: string;
+  line_range?: string;
+  relevance?: number;
+}
+
+export interface MemoryAgentRetrieveResult {
+  atomic_memories: AtomicMemory[];
+  samg_nodes?: QueryMemoryNode[];
+  sources?: MemoryAgentSource[];
+  total_found: number;
+}
+
+export interface MemoryAgentContextResult {
+  context_block: string;
+  source_count: number;
+  atomic_memories?: AtomicMemory[];
+  samg_nodes?: QueryMemoryNode[];
+  sources?: MemoryAgentSource[];
 }
 
 export interface SAMGGraphStats {

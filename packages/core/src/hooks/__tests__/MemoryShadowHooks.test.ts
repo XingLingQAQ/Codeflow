@@ -6,6 +6,7 @@ import { MemoryExtractor } from '../../memory/MemoryExtractor.js';
 import { UserProfileService } from '../../memory/UserProfileService.js';
 import { ShadowScaffold } from '../../shadow/ShadowScaffold.js';
 import { AtomicMemoryService } from '../../memory/AtomicMemoryService.js';
+import { MemoryAgentClient } from '../../memory/MemoryAgentClient.js';
 
 vi.mock('../../memory/AtomicMemoryService.js', () => ({
   AtomicMemoryService: vi.fn().mockImplementation(() => ({
@@ -29,6 +30,7 @@ describe('MemoryShadowHooks', () => {
   let profileService: UserProfileService;
   let shadowScaffold: ShadowScaffold;
   let hooks: MemoryShadowHooks;
+  let agentClient: Pick<MemoryAgentClient, 'ingest'>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,6 +39,13 @@ describe('MemoryShadowHooks', () => {
     memoryExtractor = new MemoryExtractor(mockLLMAdapter, memoryService);
     profileService = new UserProfileService(mockLLMAdapter, memoryService);
     shadowScaffold = new ShadowScaffold();
+    agentClient = {
+      ingest: vi.fn().mockResolvedValue({
+        raw_archive_id: 'raw-1',
+        atomic_memory_id: 'atomic-1',
+        samg_triples_count: 1,
+      }),
+    };
 
     hooks = new MemoryShadowHooks(
       hookManager,
@@ -80,6 +89,38 @@ describe('MemoryShadowHooks', () => {
         '好的，我记住了',
         'session-1'
       );
+    });
+
+    it('should ingest full conversation through MemoryAgent when enabled', async () => {
+      hooks = new MemoryShadowHooks(
+        hookManager,
+        {
+          userId: 'user-1',
+          sessionId: 'session-1',
+          projectRoot: '/tmp/test',
+          enableAgentIngest: true,
+        },
+        memoryExtractor,
+        profileService,
+        shadowScaffold,
+        agentClient as MemoryAgentClient,
+      );
+      hooks.register();
+
+      await hookManager.hook_on_message_complete({
+        role: 'user',
+        content: '请记住 UserService 的实现',
+      });
+      await hookManager.hook_post_response({ content: '我已经记录到记忆系统', model: 'test' });
+      await Promise.resolve();
+
+      expect(agentClient.ingest).toHaveBeenCalledWith({
+        content: 'User: 请记住 UserService 的实现\nAssistant: 我已经记录到记忆系统',
+        type: 'conversation',
+        session_id: 'session-1',
+        source: 'assistant',
+        tags: ['auto-ingest'],
+      });
     });
 
     it('should not extract when disabled', async () => {

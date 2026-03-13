@@ -5,8 +5,8 @@
  * 并注入为 system 消息。
  *
  * 支持两种模式：
- * - local: 使用前端 PassiveRAG 本地检索（默认）
- * - agent: 使用后端 MemoryAgent /agent/context API
+ * - agent: 使用后端 MemoryAgent /agent/context API（默认）
+ * - local: 使用前端 PassiveRAG 本地检索（兼容回退）
  */
 
 import { HookManager } from './HookManager.js';
@@ -34,7 +34,7 @@ const DEFAULT_CONFIG: MemoryInjectionConfig = {
   enabled: true,
   position: 'prepend',
   maxInjectionLength: 2000,
-  mode: 'local',
+  mode: 'agent',
 };
 
 export class MemoryInjectionHook {
@@ -117,7 +117,7 @@ export class MemoryInjectionHook {
         });
         contextText = result.context_block;
       } else {
-        // 本地 PassiveRAG 模式（默认）
+        // 本地 PassiveRAG 模式（兼容回退）
         const memories = await this.ragService.retrieve(
           lastUserMessage,
           this.config.sessionId

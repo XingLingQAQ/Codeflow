@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PassiveRAGService } from '../PassiveRAG.js';
 import { MemoryInjectionHook } from '../../hooks/MemoryInjectionHook.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { MemoryAgentClient } from '../MemoryAgentClient.js';
 import type { AtomicMemory } from '../types.js';
 
 function createMockMemoryService() {
@@ -147,6 +148,7 @@ describe('MemoryInjectionHook', () => {
   let ragService: PassiveRAGService;
   let hookManager: HookManager;
   let hook: MemoryInjectionHook;
+  let agentClient: Pick<MemoryAgentClient, 'assembleContext'>;
 
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -156,6 +158,15 @@ describe('MemoryInjectionHook', () => {
       threshold: 0,
     });
     hookManager = new HookManager();
+    agentClient = {
+      assembleContext: vi.fn().mockResolvedValue({
+        context_block: '<memory_context>agent context</memory_context>',
+        source_count: 1,
+        atomic_memories: [],
+        samg_nodes: [],
+        sources: [],
+      }),
+    };
     hook = new MemoryInjectionHook(hookManager, ragService);
   });
 
@@ -218,6 +229,46 @@ describe('MemoryInjectionHook', () => {
 
     const result = await hookManager.hook_before_send(payload);
     expect(result.messages.length).toBe(1);
+  });
+
+  it('should inject MemoryAgent context in agent mode', async () => {
+    hook = new MemoryInjectionHook(
+      hookManager,
+      ragService,
+      { mode: 'agent', sessionId: 'session-agent', maxInjectionLength: 160 },
+      agentClient as MemoryAgentClient,
+    );
+    hook.register();
+
+    const payload = {
+      messages: [{ role: 'user' as const, content: 'UserService memory context' }],
+    };
+
+    const result = await hookManager.hook_before_send(payload);
+
+    expect(agentClient.assembleContext).toHaveBeenCalledWith({
+      session_id: 'session-agent',
+      query: 'UserService memory context',
+      max_tokens: 40,
+    });
+    expect(mockMemoryService.search).not.toHaveBeenCalled();
+    expect(result.messages[0]?.role).toBe('system');
+    expect(result.messages[0]?.content).toContain('agent context');
+  });
+
+  it('should fall back to local retrieval when agent mode has no client', async () => {
+    mockMemoryService.search.mockResolvedValue(sampleMemories);
+    hook = new MemoryInjectionHook(hookManager, ragService, { mode: 'agent', sessionId: 'session-agent' });
+    hook.register();
+
+    const payload = {
+      messages: [{ role: 'user' as const, content: 'TypeScript' }],
+    };
+
+    const result = await hookManager.hook_before_send(payload);
+
+    expect(mockMemoryService.search).toHaveBeenCalled();
+    expect(result.messages.some((m) => m.role === 'system' && m.content.includes('[相关记忆上下文]'))).toBe(true);
   });
 
   it('should unregister correctly', async () => {

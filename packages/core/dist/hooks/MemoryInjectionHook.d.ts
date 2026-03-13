@@ -3,9 +3,14 @@
  *
  * 注册到 HookEvent.BEFORE_SEND，在发送请求前自动检索相关记忆
  * 并注入为 system 消息。
+ *
+ * 支持两种模式：
+ * - agent: 使用后端 MemoryAgent /agent/context API（默认）
+ * - local: 使用前端 PassiveRAG 本地检索（兼容回退）
  */
 import { HookManager } from './HookManager.js';
 import { PassiveRAGService } from '../memory/PassiveRAG.js';
+import { MemoryAgentClient } from '../memory/MemoryAgentClient.js';
 /**
  * MemoryInjectionHook 配置
  */
@@ -18,13 +23,16 @@ export interface MemoryInjectionConfig {
     position: 'prepend' | 'append';
     /** 最大注入字符数 */
     maxInjectionLength: number;
+    /** 检索模式: local (PassiveRAG) 或 agent (MemoryAgent API) */
+    mode: 'local' | 'agent';
 }
 export declare class MemoryInjectionHook {
     private readonly hookManager;
     private readonly ragService;
+    private readonly agentClient?;
     private config;
     private boundHandler;
-    constructor(hookManager: HookManager, ragService: PassiveRAGService, config?: Partial<MemoryInjectionConfig>);
+    constructor(hookManager: HookManager, ragService: PassiveRAGService, config?: Partial<MemoryInjectionConfig>, agentClient?: MemoryAgentClient);
     /**
      * 注册到 hook_before_send
      */
