@@ -3,10 +3,6 @@ package audit
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -48,6 +44,10 @@ func (s *AuditService) Log(ctx context.Context, entry *AuditLogEntry) error {
 		entry.PreviousHash = GenesisHash
 	} else {
 		entry.PreviousHash = lastEntry.Hash
+	}
+
+	if entry.Trace == nil {
+		entry.Trace = TraceFromContext(ctx)
 	}
 
 	// Calculate hash for this entry
@@ -153,30 +153,7 @@ func (s *AuditService) GetStatistics(ctx context.Context) (*AuditStatistics, err
 
 // calculateHash calculates SHA-256 hash of an audit log entry.
 func (s *AuditService) calculateHash(entry *AuditLogEntry) string {
-	// Create a copy without the hash field
-	data := map[string]interface{}{
-		"id":            entry.ID,
-		"timestamp":     entry.Timestamp,
-		"event_type":    entry.EventType,
-		"severity":      entry.Severity,
-		"actor":         entry.Actor,
-		"resource":      entry.Resource,
-		"action":        entry.Action,
-		"outcome":       entry.Outcome,
-		"details":       entry.Details,
-		"previous_hash": entry.PreviousHash,
-	}
-
-	// Marshal to JSON
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		// Fallback to simple hash
-		return fmt.Sprintf("%x", sha256.Sum256([]byte(entry.ID)))
-	}
-
-	// Calculate SHA-256
-	hash := sha256.Sum256(jsonData)
-	return hex.EncodeToString(hash[:])
+	return CalculateEntryHash(entry)
 }
 
 // Close closes the audit service.
@@ -200,4 +177,11 @@ func SetAuditService(svc *AuditService) {
 	auditMu.Lock()
 	defer auditMu.Unlock()
 	defaultAuditService = svc
+}
+
+// HasAuditService reports whether the global audit service has been configured.
+func HasAuditService() bool {
+	auditMu.RLock()
+	defer auditMu.RUnlock()
+	return defaultAuditService != nil
 }

@@ -3,11 +3,14 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/codeflow/backend/internal/api/middleware"
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/isolation"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -57,16 +60,24 @@ func mustCreateIsolationContainer(t *testing.T, router *gin.Engine, role string)
 	return decodeIsolationResponseData[isolation.ContextContainer](t, w.Body.Bytes())
 }
 
-func setupIsolationTestRouter() *gin.Engine {
+func setupIsolationTestRouter(t *testing.T) (*gin.Engine, *audit.MemoryStorage) {
+	t.Helper()
+
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	router.Use(middleware.Trace())
 
-	// Initialize isolation service
+	storage := audit.NewMemoryStorage()
+	audit.SetAuditService(audit.NewAuditService(storage))
+
 	rbac := isolation.NewRBACManager()
 	svc := isolation.NewIsolationService(rbac)
 	isolation.SetIsolationService(svc)
 
-	// Setup routes
+	t.Cleanup(func() {
+		cleanupIsolationTestState()
+	})
+
 	v1 := router.Group("/api/v1")
 	isolationGroup := v1.Group("/isolation")
 	{
@@ -84,11 +95,64 @@ func setupIsolationTestRouter() *gin.Engine {
 		isolationGroup.POST("/roles/:name/check", CheckRolePermission)
 	}
 
-	return router
+	return router, storage
+}
+
+func cleanupIsolationTestState() {
+	audit.SetAuditService(nil)
+	isolation.SetIsolationService(nil)
+}
+
+func lastIsolationAuditEntry(t *testing.T, storage *audit.MemoryStorage) *audit.AuditLogEntry {
+	t.Helper()
+
+	entry, err := storage.GetLastEntry(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, audit.EventIsolation, entry.EventType)
+	return entry
+}
+
+func assertIsolationTraceHeaders(t *testing.T, w *httptest.ResponseRecorder, requestID, sessionID, taskID, agentID string) {
+	t.Helper()
+	assert.Equal(t, requestID, w.Header().Get(middleware.HeaderRequestID))
+	assert.Equal(t, sessionID, w.Header().Get(middleware.HeaderSessionID))
+	assert.Equal(t, taskID, w.Header().Get(middleware.HeaderTaskID))
+	assert.Equal(t, agentID, w.Header().Get(middleware.HeaderAgentID))
+}
+
+func setIsolationTraceHeaders(req *http.Request, requestID, sessionID, taskID, agentID string) {
+	req.Header.Set(middleware.HeaderRequestID, requestID)
+	req.Header.Set(middleware.HeaderSessionID, sessionID)
+	req.Header.Set(middleware.HeaderTaskID, taskID)
+	req.Header.Set(middleware.HeaderAgentID, agentID)
+}
+
+func assertIsolationAuditTrace(t *testing.T, entry *audit.AuditLogEntry, requestID, sessionID, taskID, agentID, method, path string) {
+	t.Helper()
+	if assert.NotNil(t, entry.Trace) {
+		assert.Equal(t, requestID, entry.Trace.RequestID)
+		assert.Equal(t, sessionID, entry.Trace.SessionID)
+		assert.Equal(t, taskID, entry.Trace.TaskID)
+		assert.Equal(t, agentID, entry.Trace.AgentID)
+		assert.Equal(t, method, entry.Trace.Method)
+		assert.Equal(t, path, entry.Trace.Path)
+	}
+}
+
+func newIsolationTraceValues() (string, string, string, string) {
+	return "req-isolation-001", "session-isolation-001", "task-isolation-001", "agent-isolation-001"
+}
+
+func extractIsolationDecision(t *testing.T, response map[string]interface{}) map[string]interface{} {
+	t.Helper()
+
+	decision, ok := response["decision"].(map[string]interface{})
+	assert.True(t, ok)
+	return decision
 }
 
 func TestGetContainers_Empty(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/containers", nil)
 	w := httptest.NewRecorder()
@@ -102,7 +166,7 @@ func TestGetContainers_Empty(t *testing.T) {
 }
 
 func TestCreateContainer(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	reqBody := CreateContainerRequest{
 		Role: "main",
@@ -123,7 +187,7 @@ func TestCreateContainer(t *testing.T) {
 }
 
 func TestCreateContainer_InvalidRole(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	reqBody := CreateContainerRequest{
 		Role: "invalid_role",
@@ -142,7 +206,7 @@ func TestCreateContainer_InvalidRole(t *testing.T) {
 }
 
 func TestGetContainer(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	created := mustCreateIsolationContainer(t, router, "coder")
 
@@ -157,7 +221,7 @@ func TestGetContainer(t *testing.T) {
 }
 
 func TestGetContainer_NotFound(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/containers/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -169,7 +233,7 @@ func TestGetContainer_NotFound(t *testing.T) {
 }
 
 func TestDeleteContainer(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	created := mustCreateIsolationContainer(t, router, "reviewer")
 
@@ -188,7 +252,7 @@ func TestDeleteContainer(t *testing.T) {
 }
 
 func TestSetContainerQuota(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	created := mustCreateIsolationContainer(t, router, "main")
 
@@ -209,7 +273,8 @@ func TestSetContainerQuota(t *testing.T) {
 }
 
 func TestCheckAccess(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, storage := setupIsolationTestRouter(t)
+	requestID, sessionID, taskID, agentID := newIsolationTraceValues()
 
 	created := mustCreateIsolationContainer(t, router, "main")
 
@@ -221,38 +286,74 @@ func TestCheckAccess(t *testing.T) {
 	})
 	req, _ := http.NewRequest("POST", "/api/v1/isolation/access/check", bytes.NewBuffer(checkBody))
 	req.Header.Set("Content-Type", "application/json")
+	setIsolationTraceHeaders(req, requestID, sessionID, taskID, agentID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assertIsolationTraceHeaders(t, w, requestID, sessionID, taskID, agentID)
 
 	response := decodeIsolationResponseData[map[string]interface{}](t, w.Body.Bytes())
 	assert.Contains(t, response, "decision")
 	assert.Contains(t, response, "latency_ms")
+
+	decision := extractIsolationDecision(t, response)
+	auditID, ok := decision["audit_id"].(string)
+	if assert.True(t, ok) {
+		assert.NotEmpty(t, auditID)
+	}
+	assert.Equal(t, true, decision["allowed"])
+	assert.Equal(t, "access granted by RBAC policy", decision["reason"])
+
+	entry := lastIsolationAuditEntry(t, storage)
+	assert.Equal(t, auditID, entry.ID)
+	assert.Equal(t, audit.OutcomeSuccess, entry.Outcome)
+	assert.Equal(t, "check_access", entry.Action)
+	assert.Equal(t, created.ID, entry.Actor.ID)
+	assert.Equal(t, "/src/main.go", entry.Resource.Path)
+	assert.Equal(t, true, entry.Details["allowed"])
+	assert.Equal(t, string(isolation.RoleMain), entry.Details["container_role"])
+	assertIsolationAuditTrace(t, entry, requestID, sessionID, taskID, agentID, http.MethodPost, "/api/v1/isolation/access/check")
 }
 
 func TestValidateIO(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, storage := setupIsolationTestRouter(t)
+	requestID, sessionID, taskID, agentID := newIsolationTraceValues()
 
 	created := mustCreateIsolationContainer(t, router, "coder")
 
 	validateBody, _ := json.Marshal(ValidateIORequest{
 		ContainerID: created.ID,
-		Input:       "SELECT * FROM users",
+		Input:       "api_key: sk-12345secret",
 		Direction:   "input",
 	})
 	req, _ := http.NewRequest("POST", "/api/v1/isolation/io/validate", bytes.NewBuffer(validateBody))
 	req.Header.Set("Content-Type", "application/json")
+	setIsolationTraceHeaders(req, requestID, sessionID, taskID, agentID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
+	assertIsolationTraceHeaders(t, w, requestID, sessionID, taskID, agentID)
 
-	_ = decodeIsolationResponseData[isolation.IOValidationResult](t, w.Body.Bytes())
+	result := decodeIsolationResponseData[isolation.IOValidationResult](t, w.Body.Bytes())
+	assert.True(t, result.Valid)
+	assert.NotEmpty(t, result.Warnings)
+	assert.Contains(t, result.SanitizedInput, "[REDACTED]")
+
+	entry := lastIsolationAuditEntry(t, storage)
+	assert.Equal(t, audit.OutcomeSuccess, entry.Outcome)
+	assert.Equal(t, "validate_io", entry.Action)
+	assert.Equal(t, created.ID, entry.Actor.ID)
+	assert.Equal(t, "input", entry.Resource.Path)
+	assert.Equal(t, "input", entry.Details["direction"])
+	assert.Equal(t, true, entry.Details["contains_sensitive_warning"])
+	assert.Equal(t, true, entry.Details["sanitized_changed"])
+	assertIsolationAuditTrace(t, entry, requestID, sessionID, taskID, agentID, http.MethodPost, "/api/v1/isolation/io/validate")
 }
 
 func TestGetRoles(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/roles", nil)
 	w := httptest.NewRecorder()
@@ -267,7 +368,7 @@ func TestGetRoles(t *testing.T) {
 }
 
 func TestGetRole(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/roles/main", nil)
 	w := httptest.NewRecorder()
@@ -280,7 +381,7 @@ func TestGetRole(t *testing.T) {
 }
 
 func TestGetRole_NotFound(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/roles/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -292,7 +393,7 @@ func TestGetRole_NotFound(t *testing.T) {
 }
 
 func TestRegisterRole(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	reqBody := RegisterRoleRequest{
 		Name:        "custom_role",
@@ -316,7 +417,7 @@ func TestRegisterRole(t *testing.T) {
 }
 
 func TestGetRolePermissions(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	req, _ := http.NewRequest("GET", "/api/v1/isolation/roles/main/permissions", nil)
 	w := httptest.NewRecorder()
@@ -331,7 +432,7 @@ func TestGetRolePermissions(t *testing.T) {
 }
 
 func TestCheckRolePermission(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	reqBody := map[string]string{
 		"resource": "file",
@@ -354,7 +455,7 @@ func TestCheckRolePermission(t *testing.T) {
 }
 
 func TestGetContainers_FilterByRole(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	for _, role := range []string{"main", "coder", "reviewer"} {
 		_, _ = json.Marshal(CreateContainerRequest{Role: role})
@@ -372,7 +473,7 @@ func TestGetContainers_FilterByRole(t *testing.T) {
 }
 
 func TestCheckAccess_Performance(t *testing.T) {
-	router := setupIsolationTestRouter()
+	router, _ := setupIsolationTestRouter(t)
 
 	created := mustCreateIsolationContainer(t, router, "main")
 

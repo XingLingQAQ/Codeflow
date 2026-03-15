@@ -49,14 +49,30 @@ func NewServer(config *Config) *Server {
 
 	// Apply middleware
 	router.Use(gin.Recovery())
+	router.Use(middleware.Trace())
 	router.Use(middleware.Logger())
 	router.Use(cors.New(cors.Config{
 		AllowOriginFunc: func(origin string) bool {
 			return true // Desktop app — all local origins allowed
 		},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		ExposeHeaders:    []string{"Content-Length"},
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin",
+			"Content-Type",
+			"Accept",
+			"Authorization",
+			middleware.HeaderRequestID,
+			middleware.HeaderSessionID,
+			middleware.HeaderTaskID,
+			middleware.HeaderAgentID,
+		},
+		ExposeHeaders: []string{
+			"Content-Length",
+			middleware.HeaderRequestID,
+			middleware.HeaderSessionID,
+			middleware.HeaderTaskID,
+			middleware.HeaderAgentID,
+		},
 		AllowCredentials: true,
 	}))
 
@@ -74,6 +90,8 @@ func NewServer(config *Config) *Server {
 func (s *Server) setupRoutes() {
 	// Health check
 	s.router.GET("/health", handlers.HealthCheck)
+	s.router.GET("/ready", handlers.ReadinessCheck)
+	s.router.GET("/metrics", handlers.Metrics)
 
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")

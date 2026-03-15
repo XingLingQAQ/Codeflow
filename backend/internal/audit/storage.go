@@ -750,6 +750,7 @@ func CalculateEntryHash(entry *AuditLogEntry) string {
 		"resource":      entry.Resource,
 		"action":        entry.Action,
 		"outcome":       entry.Outcome,
+		"trace":         entry.Trace,
 		"details":       entry.Details,
 		"previous_hash": entry.PreviousHash,
 	}

@@ -4,9 +4,11 @@ package hooks
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -394,10 +396,10 @@ func TestHookManager_UpdateConfig(t *testing.T) {
 func TestHookManager_TriggerAsync(t *testing.T) {
 	mgr := NewHookManager()
 
-	callCount := 0
+	var callCount int32
 	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
 		time.Sleep(50 * time.Millisecond)
-		callCount++
+		atomic.AddInt32(&callCount, 1)
 		return payload, nil
 	}
 
@@ -413,11 +415,124 @@ func TestHookManager_TriggerAsync(t *testing.T) {
 	err := mgr.TriggerAsync(ctx, HookBeforeSend, "test")
 
 	assert.NoError(t, err)
-	assert.Equal(t, 0, callCount) // Should not be called yet
+	assert.Equal(t, int32(0), atomic.LoadInt32(&callCount)) // Should not be called yet
 
 	// Wait for async execution
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, 1, callCount)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&callCount))
+}
+
+func newHookAuditContext() context.Context {
+	return audit.ContextWithTrace(context.Background(), &audit.AuditTrace{
+		RequestID: "req-hook-001",
+		SessionID: "session-hook-001",
+		TaskID:    "task-hook-001",
+		AgentID:   "agent-hook-001",
+		Method:    "HOOK",
+		Path:      "hooks/trigger",
+	})
+}
+
+func lastHookAuditEntry(t *testing.T, storage *audit.MemoryStorage) *audit.AuditLogEntry {
+	t.Helper()
+
+	entry, err := storage.GetLastEntry(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, audit.EventHook, entry.EventType)
+	return entry
+}
+
+func assertHookAuditTrace(t *testing.T, entry *audit.AuditLogEntry) {
+	t.Helper()
+	if assert.NotNil(t, entry.Trace) {
+		assert.Equal(t, "req-hook-001", entry.Trace.RequestID)
+		assert.Equal(t, "session-hook-001", entry.Trace.SessionID)
+		assert.Equal(t, "task-hook-001", entry.Trace.TaskID)
+		assert.Equal(t, "agent-hook-001", entry.Trace.AgentID)
+		assert.Equal(t, "HOOK", entry.Trace.Method)
+		assert.Equal(t, "hooks/trigger", entry.Trace.Path)
+	}
+}
+
+func TestHookManager_Trigger_AuditSuccess(t *testing.T) {
+	storage := audit.NewMemoryStorage()
+	audit.SetAuditService(audit.NewAuditService(storage))
+	t.Cleanup(func() {
+		audit.SetAuditService(nil)
+	})
+
+	mgr := NewHookManager()
+	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
+		return payload, nil
+	}
+
+	err := mgr.Register(HookConfig{
+		Name:       "audit_hook_success",
+		Type:       HookBeforeSend,
+		Enabled:    true,
+		Priority:   2,
+		Timeout:    100 * time.Millisecond,
+		RetryCount: 1,
+	}, handler)
+	assert.NoError(t, err)
+
+	result, err := mgr.Trigger(newHookAuditContext(), HookBeforeSend, "payload")
+	assert.NoError(t, err)
+	assert.Equal(t, "payload", result)
+
+	entry := lastHookAuditEntry(t, storage)
+	assert.Equal(t, audit.OutcomeSuccess, entry.Outcome)
+	assert.Equal(t, audit.SeverityInfo, entry.Severity)
+	assert.Equal(t, string(HookBeforeSend), entry.Action)
+	assert.Equal(t, "hook", entry.Resource.Type)
+	assert.Equal(t, "audit_hook_success", entry.Resource.ID)
+	assert.Equal(t, "audit_hook_success", entry.Actor.ID)
+	assert.Equal(t, "service", entry.Actor.Type)
+	assert.Equal(t, "session-hook-001", entry.Actor.SessionID)
+	assert.Equal(t, "audit_hook_success", entry.Details["hook_name"])
+	assert.Equal(t, string(HookBeforeSend), entry.Details["hook_type"])
+	assert.Equal(t, 2, entry.Details["priority"])
+	assert.Equal(t, int64(100), entry.Details["timeout_ms"])
+	assert.Equal(t, 1, entry.Details["retry_count"])
+	assertHookAuditTrace(t, entry)
+}
+
+func TestHookManager_Trigger_AuditFailure(t *testing.T) {
+	storage := audit.NewMemoryStorage()
+	audit.SetAuditService(audit.NewAuditService(storage))
+	t.Cleanup(func() {
+		audit.SetAuditService(nil)
+	})
+
+	mgr := NewHookManager()
+	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
+		return nil, errors.New("hook error")
+	}
+
+	err := mgr.Register(HookConfig{
+		Name:       "audit_hook_failure",
+		Type:       HookBeforeSend,
+		Enabled:    true,
+		Timeout:    100 * time.Millisecond,
+		RetryCount: 0,
+	}, handler)
+	assert.NoError(t, err)
+
+	_, err = mgr.Trigger(newHookAuditContext(), HookBeforeSend, "payload")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "hook error")
+
+	entry := lastHookAuditEntry(t, storage)
+	assert.Equal(t, audit.OutcomeFailure, entry.Outcome)
+	assert.Equal(t, audit.SeverityError, entry.Severity)
+	assert.Equal(t, string(HookBeforeSend), entry.Action)
+	assert.Equal(t, "hook", entry.Resource.Type)
+	assert.Equal(t, "audit_hook_failure", entry.Resource.ID)
+	assert.Equal(t, "audit_hook_failure", entry.Actor.ID)
+	assert.Equal(t, "hook error", entry.Details["error"])
+	assert.Equal(t, "audit_hook_failure", entry.Details["hook_name"])
+	assert.Equal(t, string(HookBeforeSend), entry.Details["hook_type"])
+	assertHookAuditTrace(t, entry)
 }
 
 func TestHookTypes(t *testing.T) {

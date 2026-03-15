@@ -3,6 +3,8 @@ package isolation
 import (
 	"context"
 	"testing"
+
+	"github.com/codeflow/backend/internal/audit"
 )
 
 func TestRBACManagerBasic(t *testing.T) {
@@ -176,18 +178,25 @@ func TestIsolationManagerDestroyContainer(t *testing.T) {
 }
 
 func TestIsolationManagerCheckAccess(t *testing.T) {
+	storage := audit.NewMemoryStorage()
+	audit.SetAuditService(audit.NewAuditService(storage))
+	t.Cleanup(func() {
+		audit.SetAuditService(nil)
+	})
+
 	mgr := NewIsolationManager(nil)
 	ctx := context.Background()
 
-	// 创建coder容器
 	container, _ := mgr.CreateContainer(ctx, RoleCoder, "")
 
-	// 检查文件写入权限
 	decision, err := mgr.CheckAccess(ctx, AccessRequest{
 		ContainerID:  container.ID,
 		Resource:     ResourceFile,
 		ResourcePath: "src/app.ts",
 		Action:       "write",
+		Context: map[string]interface{}{
+			"source": "unit-test",
+		},
 	})
 	if err != nil {
 		t.Fatalf("check access: %v", err)
@@ -195,8 +204,27 @@ func TestIsolationManagerCheckAccess(t *testing.T) {
 	if !decision.Allowed {
 		t.Error("coder should have write access to .ts files")
 	}
+	if decision.AuditID == "" {
+		t.Fatal("expected audit id for allowed decision")
+	}
 
-	// 检查network权限（coder没有）
+	allowedEntry, err := storage.Get(ctx, decision.AuditID)
+	if err != nil {
+		t.Fatalf("get allowed audit entry: %v", err)
+	}
+	if allowedEntry.EventType != audit.EventIsolation {
+		t.Fatalf("expected isolation event, got %s", allowedEntry.EventType)
+	}
+	if allowedEntry.Outcome != audit.OutcomeSuccess {
+		t.Fatalf("expected success outcome, got %s", allowedEntry.Outcome)
+	}
+	if allowedEntry.Actor.ID != container.ID {
+		t.Fatalf("expected actor id %s, got %s", container.ID, allowedEntry.Actor.ID)
+	}
+	if allowedEntry.Resource.Path != "src/app.ts" {
+		t.Fatalf("expected resource path src/app.ts, got %s", allowedEntry.Resource.Path)
+	}
+
 	decision, err = mgr.CheckAccess(ctx, AccessRequest{
 		ContainerID: container.ID,
 		Resource:    ResourceNetwork,
@@ -208,15 +236,34 @@ func TestIsolationManagerCheckAccess(t *testing.T) {
 	if decision.Allowed {
 		t.Error("coder should not have network access")
 	}
+	if decision.AuditID == "" {
+		t.Fatal("expected audit id for denied decision")
+	}
+
+	deniedEntry, err := storage.Get(ctx, decision.AuditID)
+	if err != nil {
+		t.Fatalf("get denied audit entry: %v", err)
+	}
+	if deniedEntry.Outcome != audit.OutcomeFailure {
+		t.Fatalf("expected failure outcome, got %s", deniedEntry.Outcome)
+	}
+	if deniedEntry.Details["allowed"] != false {
+		t.Fatalf("expected allowed=false in audit details, got %#v", deniedEntry.Details["allowed"])
+	}
 }
 
 func TestIsolationManagerValidateIO(t *testing.T) {
+	storage := audit.NewMemoryStorage()
+	audit.SetAuditService(audit.NewAuditService(storage))
+	t.Cleanup(func() {
+		audit.SetAuditService(nil)
+	})
+
 	mgr := NewIsolationManager(nil)
 	ctx := context.Background()
 
 	container, _ := mgr.CreateContainer(ctx, RoleCoder, "")
 
-	// 正常输入
 	result, err := mgr.ValidateIO(ctx, container.ID, "Hello, world!", "input")
 	if err != nil {
 		t.Fatalf("validate IO: %v", err)
@@ -225,7 +272,20 @@ func TestIsolationManagerValidateIO(t *testing.T) {
 		t.Error("expected valid input")
 	}
 
-	// 注入攻击
+	validEntry, err := storage.GetLastEntry(ctx)
+	if err != nil {
+		t.Fatalf("get valid audit entry: %v", err)
+	}
+	if validEntry.EventType != audit.EventIsolation {
+		t.Fatalf("expected isolation event, got %s", validEntry.EventType)
+	}
+	if validEntry.Action != "validate_io" {
+		t.Fatalf("expected validate_io action, got %s", validEntry.Action)
+	}
+	if validEntry.Details["direction"] != "input" {
+		t.Fatalf("expected input direction, got %#v", validEntry.Details["direction"])
+	}
+
 	result, _ = mgr.ValidateIO(ctx, container.ID, "test; rm -rf /", "input")
 	if result.Valid {
 		t.Error("expected invalid input for injection attack")
@@ -234,13 +294,37 @@ func TestIsolationManagerValidateIO(t *testing.T) {
 		t.Error("expected blocked patterns")
 	}
 
-	// 敏感数据
+	blockedEntry, err := storage.GetLastEntry(ctx)
+	if err != nil {
+		t.Fatalf("get blocked audit entry: %v", err)
+	}
+	if blockedEntry.Outcome != audit.OutcomeFailure {
+		t.Fatalf("expected failure outcome, got %s", blockedEntry.Outcome)
+	}
+	if blockedEntry.Details["blocked_pattern_count"] != len(result.BlockedPatterns) {
+		t.Fatalf("expected blocked_pattern_count %d, got %#v", len(result.BlockedPatterns), blockedEntry.Details["blocked_pattern_count"])
+	}
+
 	result, _ = mgr.ValidateIO(ctx, container.ID, "api_key: sk-12345secret", "input")
 	if len(result.Warnings) == 0 {
 		t.Error("expected warnings for sensitive data")
 	}
 	if result.SanitizedInput == "api_key: sk-12345secret" {
 		t.Error("expected sensitive data to be redacted")
+	}
+
+	redactedEntry, err := storage.GetLastEntry(ctx)
+	if err != nil {
+		t.Fatalf("get redacted audit entry: %v", err)
+	}
+	if redactedEntry.Details["contains_sensitive_warning"] != true {
+		t.Fatalf("expected contains_sensitive_warning=true, got %#v", redactedEntry.Details["contains_sensitive_warning"])
+	}
+	if redactedEntry.Details["sanitized_changed"] != true {
+		t.Fatalf("expected sanitized_changed=true, got %#v", redactedEntry.Details["sanitized_changed"])
+	}
+	if _, ok := redactedEntry.Details["input_preview"]; ok {
+		t.Fatal("audit details should not contain raw input preview")
 	}
 }
 

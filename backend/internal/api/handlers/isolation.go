@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"context"
 	"net/http"
 	"time"
 
@@ -58,7 +57,7 @@ func GetContainers(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	role := c.Query("role")
 
 	var containers []*isolation.ContextContainer
@@ -96,7 +95,7 @@ func CreateContainer(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	container, err := svc.CreateContainer(ctx, isolation.IsolationAgentRole(req.Role), req.ParentID)
 	if err != nil {
 		if err == isolation.ErrRoleNotFound {
@@ -124,7 +123,7 @@ func GetContainer(c *gin.Context) {
 	}
 
 	containerID := c.Param("id")
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	container, err := svc.GetContainer(ctx, containerID)
 	if err != nil {
@@ -149,7 +148,7 @@ func DeleteContainer(c *gin.Context) {
 	}
 
 	containerID := c.Param("id")
-	ctx := context.Background()
+	ctx := c.Request.Context()
 
 	err := svc.DestroyContainer(ctx, containerID)
 	if err != nil {
@@ -180,7 +179,7 @@ func SetContainerQuota(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	quota := isolation.ResourceQuota{
 		MaxMemoryMB:     req.MaxMemoryMB,
 		MaxFileSizeMB:   req.MaxFileSizeMB,
@@ -217,7 +216,7 @@ func CheckAccess(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	startTime := time.Now()
 
 	decision, err := svc.CheckAccess(ctx, isolation.AccessRequest{
@@ -261,7 +260,7 @@ func ValidateIO(c *gin.Context) {
 		direction = "input"
 	}
 
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	result, err := svc.ValidateIO(ctx, req.ContainerID, req.Input, direction)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())

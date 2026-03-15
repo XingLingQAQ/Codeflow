@@ -16,6 +16,10 @@ const (
 	EventConfigChange     AuditEventType = "config_change"
 	EventError            AuditEventType = "error"
 	EventSecurity         AuditEventType = "security"
+	EventHook             AuditEventType = "hook"
+	EventApproval         AuditEventType = "approval"
+	EventPrivacy          AuditEventType = "privacy"
+	EventIsolation        AuditEventType = "isolation"
 )
 
 // AuditSeverity 审计严重级别
@@ -56,6 +60,19 @@ type AuditResource struct {
 	Path string `json:"path,omitempty"`
 }
 
+// AuditTrace 审计追踪信息
+type AuditTrace struct {
+	RequestID  string  `json:"request_id,omitempty"`
+	SessionID  string  `json:"session_id,omitempty"`
+	TaskID     string  `json:"task_id,omitempty"`
+	AgentID    string  `json:"agent_id,omitempty"`
+	Method     string  `json:"method,omitempty"`
+	Path       string  `json:"path,omitempty"`
+	Route      string  `json:"route,omitempty"`
+	StatusCode int     `json:"status_code,omitempty"`
+	LatencyMs  float64 `json:"latency_ms,omitempty"`
+}
+
 // AuditLogEntry 审计日志条目
 type AuditLogEntry struct {
 	ID           string                 `json:"id"`
@@ -66,6 +83,7 @@ type AuditLogEntry struct {
 	Resource     AuditResource          `json:"resource"`
 	Action       string                 `json:"action"`
 	Outcome      AuditOutcome           `json:"outcome"`
+	Trace        *AuditTrace            `json:"trace,omitempty"`
 	Details      map[string]interface{} `json:"details,omitempty"`
 	PreviousHash string                 `json:"previous_hash"`
 	Hash         string                 `json:"hash"`

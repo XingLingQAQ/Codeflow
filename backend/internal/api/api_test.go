@@ -45,6 +45,76 @@ func TestHealthCheck(t *testing.T) {
 	}
 }
 
+// TestReadinessCheck tests GET /ready endpoint.
+func TestReadinessCheck(t *testing.T) {
+	server := setupTestServer()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/ready", nil)
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	if resp["success"] != false {
+		t.Error("Expected success to be false")
+	}
+
+	data, ok := resp["data"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected data object")
+	}
+	if data["status"] != "not_ready" {
+		t.Errorf("Expected readiness status not_ready, got %#v", data["status"])
+	}
+	components, ok := data["components"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected components object")
+	}
+	for _, name := range []string{"planner", "project", "context"} {
+		component, ok := components[name].(map[string]interface{})
+		if !ok {
+			t.Fatalf("Expected %s component payload", name)
+		}
+		if component["required"] != true {
+			t.Fatalf("Expected %s to be required", name)
+		}
+		if component["ready"] != false {
+			t.Fatalf("Expected %s to be not ready", name)
+		}
+	}
+}
+
+// TestMetricsEndpoint tests GET /metrics endpoint.
+func TestMetricsEndpoint(t *testing.T) {
+	server := setupTestServer()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/metrics", nil)
+	req.Header.Set("X-Request-ID", "req-metrics")
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+	if got := w.Header().Get("X-Request-ID"); got != "req-metrics" {
+		t.Errorf("Expected X-Request-ID header to be echoed, got %q", got)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+
+	if resp["success"] != true {
+		t.Error("Expected success to be true")
+	}
+}
+
 // TestMemoryAPI tests /api/v1/memory endpoints
 func TestMemoryAPI(t *testing.T) {
 	server := setupTestServer()

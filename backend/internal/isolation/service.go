@@ -37,6 +37,13 @@ func GetIsolationService() *IsolationService {
 	return globalIsolationService
 }
 
+// HasIsolationService reports whether the global isolation service has been configured.
+func HasIsolationService() bool {
+	globalServiceMu.RLock()
+	defer globalServiceMu.RUnlock()
+	return globalIsolationService != nil
+}
+
 // CreateContainer creates a new isolation container
 func (s *IsolationService) CreateContainer(ctx context.Context, role IsolationAgentRole, parentID string) (*ContextContainer, error) {
 	return s.manager.CreateContainer(ctx, role, parentID)

@@ -165,9 +165,25 @@ func (m *MemoryStorage) VerifyHashChain(ctx context.Context) (*IntegrityVerifica
 		result.BrokenChainAt = m.entries[0].ID
 	}
 
+	firstHash := CalculateEntryHash(&m.entries[0])
+	if m.entries[0].Hash != firstHash {
+		result.Valid = false
+		result.InvalidEntries = append(result.InvalidEntries, m.entries[0].ID)
+		if result.BrokenChainAt == "" {
+			result.BrokenChainAt = m.entries[0].ID
+		}
+	}
+
 	// Verify chain continuity
 	for i := 1; i < len(m.entries); i++ {
 		if m.entries[i].PreviousHash != m.entries[i-1].Hash {
+			result.Valid = false
+			result.InvalidEntries = append(result.InvalidEntries, m.entries[i].ID)
+			if result.BrokenChainAt == "" {
+				result.BrokenChainAt = m.entries[i].ID
+			}
+		}
+		if m.entries[i].Hash != CalculateEntryHash(&m.entries[i]) {
 			result.Valid = false
 			result.InvalidEntries = append(result.InvalidEntries, m.entries[i].ID)
 			if result.BrokenChainAt == "" {

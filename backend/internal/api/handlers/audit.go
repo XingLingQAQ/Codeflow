@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -62,8 +61,7 @@ func GetAuditLogs(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	query.Offset = offset
 
-	// Query logs
-	result, err := svc.Query(context.Background(), query)
+	result, err := svc.Query(c.Request.Context(), query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -81,7 +79,7 @@ func VerifyAuditChain(c *gin.Context) {
 		return
 	}
 
-	result, err := svc.VerifyChain(context.Background())
+	result, err := svc.VerifyChain(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -99,7 +97,7 @@ func GetAuditStatistics(c *gin.Context) {
 		return
 	}
 
-	stats, err := svc.GetStatistics(context.Background())
+	stats, err := svc.GetStatistics(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -122,13 +120,7 @@ func ExportAuditLogs(c *gin.Context) {
 		Limit: 10000,
 	}
 
-	result, err := svc.Query(context.Background(), query)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Set headers for file download
+	result, err := svc.Query(c.Request.Context(), query)
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=audit-logs-%d.json", getCurrentTimestamp()))
 

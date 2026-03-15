@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/google/uuid"
 )
 
@@ -125,6 +126,10 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload in
 			HookName:  hook.Config.Name,
 			HookType:  hookType,
 			Timestamp: time.Now(),
+			Metadata: map[string]interface{}{
+				"priority":    hook.Config.Priority,
+				"retry_count": hook.Config.RetryCount,
+			},
 		}
 
 		// Execute with timeout
@@ -138,16 +143,72 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload in
 		if err != nil {
 			event.Success = false
 			event.Error = err.Error()
+			m.recordAuditEvent(hookCtx, event, hook.Config, false)
 			m.recordEvent(event)
 			return result, fmt.Errorf("hook %s failed: %w", hook.Config.Name, err)
 		}
 
 		event.Success = true
 		result = output
+		m.recordAuditEvent(hookCtx, event, hook.Config, true)
 		m.recordEvent(event)
 	}
 
 	return result, nil
+}
+
+func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, config HookConfig, success bool) {
+	if event == nil {
+		return
+	}
+
+	severity := audit.SeverityInfo
+	outcome := audit.OutcomeSuccess
+	if !success {
+		severity = audit.SeverityError
+		outcome = audit.OutcomeFailure
+	}
+
+	details := map[string]interface{}{
+		"hook_name":     event.HookName,
+		"hook_type":     string(event.HookType),
+		"duration_ms":   float64(event.Duration.Microseconds()) / 1000.0,
+		"priority":      config.Priority,
+		"timeout_ms":    config.Timeout.Milliseconds(),
+		"retry_count":   config.RetryCount,
+		"input_size":    event.InputSize,
+		"output_size":   event.OutputSize,
+		"metadata_keys": sortedMapKeys(config.Metadata),
+	}
+	if event.Error != "" {
+		details["error"] = event.Error
+	}
+
+	_, _ = audit.Record(ctx, &audit.AuditLogEntry{
+		EventType: audit.EventHook,
+		Severity:  severity,
+		Actor:     audit.AuditActor{ID: event.HookName, Type: "service", Name: event.HookName},
+		Resource: audit.AuditResource{
+			Type: "hook",
+			ID:   event.HookName,
+			Name: event.HookName,
+		},
+		Action:  string(event.HookType),
+		Outcome: outcome,
+		Details: details,
+	})
+}
+
+func sortedMapKeys(values map[string]interface{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // TriggerAsync triggers hooks asynchronously.
@@ -362,4 +423,9 @@ func GetHookManager() IHookManager {
 // SetHookManager sets the global hook manager instance (for testing).
 func SetHookManager(manager IHookManager) {
 	defaultHookManager = manager
+}
+
+// HasHookManager reports whether the global hook manager has been configured.
+func HasHookManager() bool {
+	return defaultHookManager != nil
 }

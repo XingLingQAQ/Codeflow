@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"context"
 	"net/http"
 	"strconv"
 
@@ -139,8 +138,7 @@ func TriggerHook(c *gin.Context) {
 		return
 	}
 
-	ctx := context.Background()
-	result, err := mgr.Trigger(ctx, hook.Config.Type, req.Payload)
+	result, err := mgr.Trigger(c.Request.Context(), hook.Config.Type, req.Payload)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

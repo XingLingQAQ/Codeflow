@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/google/uuid"
 )
 
@@ -501,7 +502,72 @@ func (bb *InMemoryBlackboard) CreateVote(ctx context.Context, req *VoteCreateReq
 	}
 
 	bb.votes[vote.ID] = vote
+	bb.recordVoteAudit(ctx, vote, "vote_created", audit.OutcomeSuccess, audit.SeverityInfo, map[string]interface{}{
+		"threshold":    vote.Threshold,
+		"timeout_sec":  timeoutSec,
+		"metadata_keys": mapKeys(req.Metadata),
+	})
 	return vote, nil
+}
+
+func (bb *InMemoryBlackboard) recordVoteAudit(ctx context.Context, vote *Vote, action string, outcome audit.AuditOutcome, severity audit.AuditSeverity, details map[string]interface{}) {
+	if vote == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		"status":        string(vote.Status),
+		"entry_id":      vote.EntryID,
+		"threshold":     vote.Threshold,
+		"approve_count": countApprovals(vote),
+		"reject_count":  len(vote.Votes) - countApprovals(vote),
+		"total_votes":   len(vote.Votes),
+	}
+	for key, value := range details {
+		payload[key] = value
+	}
+
+	_, _ = audit.Record(ctx, &audit.AuditLogEntry{
+		EventType: audit.EventApproval,
+		Severity:  severity,
+		Actor: audit.AuditActor{
+			ID:   vote.Initiator,
+			Type: "user",
+			Name: vote.Initiator,
+		},
+		Resource: audit.AuditResource{
+			Type: "vote",
+			ID:   vote.ID,
+			Name: vote.Title,
+		},
+		Action:  action,
+		Outcome: outcome,
+		Details: payload,
+	})
+}
+
+func countApprovals(vote *Vote) int {
+	if vote == nil {
+		return 0
+	}
+	approveCount := 0
+	for _, approved := range vote.Votes {
+		if approved {
+			approveCount++
+		}
+	}
+	return approveCount
+}
+
+func mapKeys(values map[string]interface{}) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // GetVote 获取投票状态
@@ -534,20 +600,27 @@ func (bb *InMemoryBlackboard) CastVote(ctx context.Context, voteID string, req *
 	if time.Now().Unix() > vote.ExpiresAt {
 		vote.Status = VoteStatusTimeout
 		vote.ResolvedAt = time.Now().Unix()
+		bb.recordVoteAudit(ctx, vote, "vote_expired", audit.OutcomeFailure, audit.SeverityWarning, map[string]interface{}{
+			"agent_id": req.AgentID,
+		})
 		return nil, errors.New("vote has expired")
 	}
 
 	// 记录投票
 	vote.Votes[req.AgentID] = req.Approve
+	bb.recordVoteAudit(ctx, vote, "vote_cast", audit.OutcomeSuccess, audit.SeverityInfo, map[string]interface{}{
+		"agent_id": req.AgentID,
+		"approved": req.Approve,
+	})
 
 	// 检查是否达成共识
-	bb.checkConsensus(vote)
+	bb.checkConsensus(ctx, vote)
 
 	return bb.buildVoteResponse(vote), nil
 }
 
 // checkConsensus 检查BFT共识
-func (bb *InMemoryBlackboard) checkConsensus(vote *Vote) {
+func (bb *InMemoryBlackboard) checkConsensus(ctx context.Context, vote *Vote) {
 	if vote.Status != VoteStatusPending {
 		return
 	}
@@ -557,22 +630,22 @@ func (bb *InMemoryBlackboard) checkConsensus(vote *Vote) {
 		return
 	}
 
-	approveCount := 0
-	for _, approved := range vote.Votes {
-		if approved {
-			approveCount++
-		}
-	}
-
+	approveCount := countApprovals(vote)
 	approveRate := float64(approveCount) / float64(total)
 	rejectRate := float64(total-approveCount) / float64(total)
 
 	if approveRate >= vote.Threshold {
 		vote.Status = VoteStatusApproved
 		vote.ResolvedAt = time.Now().Unix()
+		bb.recordVoteAudit(ctx, vote, "vote_approved", audit.OutcomeSuccess, audit.SeverityInfo, map[string]interface{}{
+			"approve_rate": approveRate,
+		})
 	} else if rejectRate > (1 - vote.Threshold) {
 		vote.Status = VoteStatusRejected
 		vote.ResolvedAt = time.Now().Unix()
+		bb.recordVoteAudit(ctx, vote, "vote_rejected", audit.OutcomeFailure, audit.SeverityWarning, map[string]interface{}{
+			"reject_rate": rejectRate,
+		})
 	}
 }
 
@@ -610,6 +683,7 @@ func (bb *InMemoryBlackboard) CheckExpiredVotes() {
 		if vote.Status == VoteStatusPending && now > vote.ExpiresAt {
 			vote.Status = VoteStatusTimeout
 			vote.ResolvedAt = now
+			bb.recordVoteAudit(context.Background(), vote, "vote_timeout", audit.OutcomeFailure, audit.SeverityWarning, nil)
 		}
 	}
 }
