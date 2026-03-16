@@ -448,15 +448,37 @@ export class PlanModeOrchestrator extends EventEmitter {
   /**
    * 添加事件监听器
    */
-  addListener(listener: PlanEventListener): void {
-    this.on('event', listener);
+  addListener<E extends string | symbol>(eventName: E, listener: (...args: any[]) => void): this;
+  addListener(listener: PlanEventListener): this;
+  addListener<E extends string | symbol>(
+    eventNameOrListener: E | PlanEventListener,
+    listener?: (...args: any[]) => void
+  ): this {
+    if (typeof eventNameOrListener === 'function') {
+      return super.addListener('event', eventNameOrListener);
+    }
+    if (!listener) {
+      return this;
+    }
+    return super.addListener(eventNameOrListener, listener);
   }
 
   /**
    * 移除事件监听器
    */
-  removeListener(listener: PlanEventListener): void {
-    this.off('event', listener);
+  removeListener<E extends string | symbol>(eventName: E, listener: (...args: any[]) => void): this;
+  removeListener(listener: PlanEventListener): this;
+  removeListener<E extends string | symbol>(
+    eventNameOrListener: E | PlanEventListener,
+    listener?: (...args: any[]) => void
+  ): this {
+    if (typeof eventNameOrListener === 'function') {
+      return super.removeListener('event', eventNameOrListener);
+    }
+    if (!listener) {
+      return this;
+    }
+    return super.removeListener(eventNameOrListener, listener);
   }
 
   /**
