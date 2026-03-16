@@ -166,6 +166,90 @@ export interface ExecutorCapabilities {
 }
 
 /**
+ * 执行器注册信息
+ */
+export interface ExecutorRegistration {
+  name: string;
+  editor: ICodeEditor;
+  capabilities: ExecutorCapabilities;
+  modelId?: string;
+}
+
+/**
+ * 运行时执行选项
+ */
+export interface RuntimeExecutionOptions {
+  cwd?: string;
+  worktreePath?: string;
+  executorOverride?: ExecutorRegistration;
+}
+
+/**
+ * ModelPool 抽象
+ */
+export interface ModelPool {
+  registerExecutor(executor: ExecutorRegistration): void;
+  getModelId(executorName: string): string | undefined;
+}
+
+/**
+ * ContextAssembler 抽象
+ */
+export interface ContextAssembler {
+  buildContextFromResult(result: ExecutionResult): string;
+  attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask;
+}
+
+/**
+ * PolicyGuard 抽象
+ */
+export interface PolicyDecision {
+  allowed: boolean;
+  reason?: string;
+}
+
+export interface PolicyGuard {
+  canExecute(
+    task: CoworkTask,
+    executor: ExecutorRegistration
+  ): Promise<PolicyDecision> | PolicyDecision;
+}
+
+/**
+ * ExecutionSandbox 抽象
+ */
+export interface SandboxedTask {
+  task: CoworkTask;
+  executor?: ExecutorRegistration;
+  release?: () => Promise<void>;
+}
+
+export interface ExecutionSandbox {
+  prepare(
+    task: CoworkTask,
+    executor: ExecutorRegistration,
+    options?: RuntimeExecutionOptions
+  ): Promise<SandboxedTask> | SandboxedTask;
+}
+
+/**
+ * AgentRuntime 抽象
+ */
+export interface AgentRuntimeLike {
+  registerExecutor(
+    name: string,
+    editor: ICodeEditor,
+    capabilities: ExecutorCapabilities,
+    modelId?: string
+  ): void;
+  getExecutor(name: string): ExecutorRegistration | undefined;
+  getAllExecutors(): ExecutorRegistration[];
+  executeTask(task: CoworkTask, options?: RuntimeExecutionOptions): Promise<ExecutionResult>;
+  buildContextFromResult(result: ExecutionResult): string;
+  attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask;
+}
+
+/**
  * 协作模式
  */
 export type CoworkMode = 'parallel' | 'sequential' | 'debate';
@@ -222,6 +306,12 @@ export interface ExecutionResult {
   output?: CoworkTaskOutput;
   executor: string;
   duration: number;
+  /**
+   * Backward-compatible fields for legacy parallel modules.
+   */
+  success?: boolean;
+  diffs?: Diff[];
+  error?: string;
 }
 
 /**

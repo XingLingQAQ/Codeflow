@@ -5,6 +5,7 @@
 
 import { EventEmitter } from 'events';
 import {
+  AgentRuntimeLike,
   CoworkTask,
   CoworkTaskStatus,
   ICodeEditor,
@@ -22,18 +23,15 @@ import {
   OrchestratorEvent,
   OrchestratorEventListener,
   Diff,
+  ExecutorRegistration,
 } from './types.js';
 import { CLIProcessManager } from './process/CLIProcessManager.js';
 import { GitConflictDetector } from './GitConflictDetector.js';
+import { AgentRuntime } from './runtime.js';
 
 /**
  * 执行器注册信息
  */
-interface ExecutorRegistration {
-  name: string;
-  editor: ICodeEditor;
-  capabilities: ExecutorCapabilities;
-}
 
 /**
  * Blackboard 条目
@@ -49,16 +47,17 @@ interface BlackboardEntry {
  * Cowork Orchestrator
  */
 export class CoworkOrchestrator extends EventEmitter {
-  private executors: Map<string, ExecutorRegistration> = new Map();
+  private runtime: AgentRuntimeLike;
   private processManager: CLIProcessManager;
   private blackboard: Map<string, BlackboardEntry> = new Map();
   private runningTasks: Map<string, CoworkTask> = new Map();
   private gitConflictDetector: GitConflictDetector;
 
-  constructor(processManager?: CLIProcessManager, cwd?: string) {
+  constructor(processManager?: CLIProcessManager, cwd?: string, runtime?: AgentRuntimeLike) {
     super();
     this.processManager = processManager || new CLIProcessManager();
     this.gitConflictDetector = new GitConflictDetector({ cwd });
+    this.runtime = runtime || new AgentRuntime();
   }
 
   /**
@@ -67,9 +66,10 @@ export class CoworkOrchestrator extends EventEmitter {
   registerExecutor(
     name: string,
     editor: ICodeEditor,
-    capabilities: ExecutorCapabilities
+    capabilities: ExecutorCapabilities,
+    modelId?: string
   ): void {
-    this.executors.set(name, { name, editor, capabilities });
+    this.runtime.registerExecutor(name, editor, capabilities, modelId);
     this.emitEvent({ type: 'task:start', task: { id: `register_${name}` } as CoworkTask });
   }
 
@@ -77,14 +77,14 @@ export class CoworkOrchestrator extends EventEmitter {
    * 获取执行器
    */
   getExecutor(name: string): ExecutorRegistration | undefined {
-    return this.executors.get(name);
+    return this.runtime.getExecutor(name);
   }
 
   /**
    * 获取所有执行器
    */
   getAllExecutors(): ExecutorRegistration[] {
-    return Array.from(this.executors.values());
+    return this.runtime.getAllExecutors();
   }
 
   /**
@@ -93,91 +93,26 @@ export class CoworkOrchestrator extends EventEmitter {
   async execute(task: CoworkTask): Promise<ExecutionResult> {
     const startTime = Date.now();
 
-    // 获取执行器
-    const executor = this.executors.get(task.executor);
-    if (!executor) {
-      return {
-        taskId: task.id,
-        status: 'failed',
-        output: { error: `Executor '${task.executor}' not found` },
-        executor: task.executor,
-        duration: Date.now() - startTime,
-      };
-    }
-
-    // 更新任务状态
     task.status = 'running';
     task.startedAt = startTime;
     this.runningTasks.set(task.id, task);
 
     this.emitEvent({ type: 'task:start', task });
 
-    try {
-      // 执行编辑
-      const diffs: Diff[] = [];
+    const result = await this.runtime.executeTask(task);
 
-      if (task.input.files.length === 1) {
-        const result = await executor.editor.edit(
-          task.input.files[0],
-          task.input.instruction
-        );
-        if (result.success) {
-          diffs.push(result.diff);
-        }
-      } else if (task.input.files.length > 1) {
-        const results = await executor.editor.editMultiple(
-          task.input.files,
-          task.input.instruction
-        );
-        for (const result of results) {
-          if (result.success) {
-            diffs.push(result.diff);
-          }
-        }
-      }
+    task.status = result.status;
+    task.completedAt = Date.now();
+    task.output = result.output;
 
-      // 更新任务状态
-      task.status = 'completed';
-      task.completedAt = Date.now();
-      task.output = {
-        diffs,
-        metrics: {
-          duration: Date.now() - startTime,
-        },
-      };
-
-      const result: ExecutionResult = {
-        taskId: task.id,
-        status: 'completed',
-        output: task.output,
-        executor: task.executor,
-        duration: Date.now() - startTime,
-      };
-
+    if (result.status === 'completed') {
       this.emitEvent({ type: 'task:complete', taskId: task.id, result });
-      this.runningTasks.delete(task.id);
-
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-      task.status = 'failed';
-      task.completedAt = Date.now();
-      task.output = { error: errorMessage };
-
-      const result: ExecutionResult = {
-        taskId: task.id,
-        status: 'failed',
-        output: task.output,
-        executor: task.executor,
-        duration: Date.now() - startTime,
-      };
-
-      this.emitEvent({ type: 'task:error', taskId: task.id, error: errorMessage });
-      this.runningTasks.delete(task.id);
-
-      return result;
+    } else {
+      this.emitEvent({ type: 'task:error', taskId: task.id, error: result.output?.error || 'Unknown error' });
     }
+
+    this.runningTasks.delete(task.id);
+    return result;
   }
 
   /**
@@ -335,10 +270,9 @@ export class CoworkOrchestrator extends EventEmitter {
       if (passContext && i > 0) {
         const prevResult = results[i - 1];
         if (prevResult.status === 'completed' && prevResult.output) {
-          // 将前一个任务的输出添加到当前任务的上下文
-          task.input.context = this.buildContextFromResult(prevResult);
+          const nextTask = this.runtime.attachPreviousResult(task, prevResult);
+          task.input.context = nextTask.input.context;
 
-          // 写入 Blackboard
           this.setBlackboardEntry(
             `task_${tasks[i - 1].id}_output`,
             prevResult.output,
@@ -410,8 +344,8 @@ export class CoworkOrchestrator extends EventEmitter {
     let interrupted = false;
 
     // 获取执行器
-    const generatorExecutor = this.executors.get(generator);
-    const criticExecutor = this.executors.get(critic);
+    const generatorExecutor = this.runtime.getExecutor(generator);
+    const criticExecutor = this.runtime.getExecutor(critic);
 
     if (!generatorExecutor || !criticExecutor) {
       return {
@@ -616,24 +550,6 @@ export class CoworkOrchestrator extends EventEmitter {
 
   private emitEvent(event: OrchestratorEvent): void {
     this.emit('event', event);
-  }
-
-  private buildContextFromResult(result: ExecutionResult): string {
-    if (!result.output) return '';
-
-    const parts: string[] = [];
-
-    if (result.output.result) {
-      parts.push(`Previous output:\n${result.output.result}`);
-    }
-
-    if (result.output.diffs && result.output.diffs.length > 0) {
-      parts.push(
-        `Previous changes:\n${result.output.diffs.map((d) => `- ${d.file}: +${d.additions}/-${d.deletions}`).join('\n')}`
-      );
-    }
-
-    return parts.join('\n\n');
   }
 
   private parseIssues(criticOutput: string): DebateIssue[] {

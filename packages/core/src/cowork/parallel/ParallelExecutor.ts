@@ -6,12 +6,23 @@
 import { EventEmitter } from 'events';
 import { WorktreeManager, WorktreeInfo } from '../../git/WorktreeManager.js';
 import {
+  AgentRuntimeLike,
   CoworkTask,
   CoworkTaskStatus,
   ExecutionResult,
-  ICodeEditor,
   ExecutorCapabilities,
+  ExecutorRegistration,
+  ICodeEditor,
 } from '../types.js';
+import { AgentRuntime } from '../runtime.js';
+import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
+import { ClaudeCodeEditor } from '../editors/ClaudeCodeEditor.js';
+import { CodexCodeEditor } from '../editors/CodexCodeEditor.js';
+import { GeminiCodeEditor } from '../editors/GeminiCodeEditor.js';
+import { AiderAdapter } from '../adapters/AiderAdapter.js';
+import { ClaudeAdapter } from '../../adapters/ClaudeAdapter.js';
+import { CodexAdapter } from '../../adapters/CodexAdapter.js';
+import { GeminiAdapter } from '../../adapters/GeminiAdapter.js';
 
 /**
  * Agent Worker 状态
@@ -85,13 +96,6 @@ const DEFAULT_CONFIG: ParallelExecutorConfig = {
 /**
  * 执行器注册信息
  */
-interface ExecutorRegistration {
-  name: string;
-  editor: ICodeEditor;
-  capabilities: ExecutorCapabilities;
-  modelId: string;
-}
-
 /**
  * ParallelExecutor - 多 Agent 并行执行器
  */
@@ -99,17 +103,61 @@ export class ParallelExecutor extends EventEmitter {
   private config: ParallelExecutorConfig;
   private worktreeManager: WorktreeManager;
   private workers: Map<string, AgentWorker> = new Map();
-  private executors: Map<string, ExecutorRegistration> = new Map();
+  private runtime: AgentRuntimeLike;
   private isRunning: boolean = false;
   private abortController?: AbortController;
 
   constructor(
     worktreeManager: WorktreeManager,
-    config: Partial<ParallelExecutorConfig> = {}
+    config: Partial<ParallelExecutorConfig> = {},
+    runtime?: AgentRuntimeLike
   ) {
     super();
     this.worktreeManager = worktreeManager;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.runtime = runtime || new AgentRuntime();
+  }
+
+  private cloneEditorForCwd(editor: ICodeEditor, cwd: string): ICodeEditor {
+    if (editor instanceof AiderCodeEditor) {
+      return new AiderCodeEditor((editor as any).adapter as AiderAdapter, {
+        ...(editor as any).config,
+        cwd,
+      });
+    }
+
+    if (editor instanceof ClaudeCodeEditor) {
+      return new ClaudeCodeEditor((editor as any).adapter as ClaudeAdapter, {
+        ...(editor as any).config,
+        cwd,
+      });
+    }
+
+    if (editor instanceof CodexCodeEditor) {
+      return new CodexCodeEditor((editor as any).adapter as CodexAdapter, {
+        ...(editor as any).config,
+        cwd,
+      });
+    }
+
+    if (editor instanceof GeminiCodeEditor) {
+      return new GeminiCodeEditor((editor as any).adapter as GeminiAdapter, {
+        ...(editor as any).config,
+        cwd,
+      });
+    }
+
+    return editor;
+  }
+
+  private createSandboxedExecutor(
+    executor: ExecutorRegistration,
+    worktree: WorktreeInfo
+  ): ExecutorRegistration {
+    return {
+      ...executor,
+      editor: this.cloneEditorForCwd(executor.editor, worktree.path),
+    };
   }
 
   /**
@@ -121,21 +169,21 @@ export class ParallelExecutor extends EventEmitter {
     capabilities: ExecutorCapabilities,
     modelId: string
   ): void {
-    this.executors.set(name, { name, editor, capabilities, modelId });
+    this.runtime.registerExecutor(name, editor, capabilities, modelId);
   }
 
   /**
    * 获取执行器
    */
   getExecutor(name: string): ExecutorRegistration | undefined {
-    return this.executors.get(name);
+    return this.runtime.getExecutor(name);
   }
 
   /**
    * 获取所有执行器
    */
   getAllExecutors(): ExecutorRegistration[] {
-    return Array.from(this.executors.values());
+    return this.runtime.getAllExecutors();
   }
 
   /**
@@ -177,7 +225,7 @@ export class ParallelExecutor extends EventEmitter {
     this.emit('worker:started', worker);
 
     try {
-      const executor = this.executors.get(worker.name);
+      const executor = this.runtime.getExecutor(worker.name);
       if (!executor) {
         throw new Error(`Executor not found: ${worker.name}`);
       }
@@ -208,6 +256,9 @@ export class ParallelExecutor extends EventEmitter {
 
       return {
         taskId: worker.task?.id || worker.id,
+        status: 'failed',
+        output: { error: err.message },
+        executor: worker.name,
         success: false,
         error: err.message,
         duration: Date.now() - (worker.startedAt || Date.now()),
@@ -223,34 +274,12 @@ export class ParallelExecutor extends EventEmitter {
     task: CoworkTask,
     worktree: WorktreeInfo
   ): Promise<ExecutionResult> {
-    const startTime = Date.now();
-
-    try {
-      // 使用编辑器执行任务
-      const editResults = await executor.editor.editMultiple(
-        task.input.files,
-        task.input.instruction
-      );
-
-      const success = editResults.every(r => r.success);
-      const diffs = editResults.map(r => r.diff);
-
-      return {
-        taskId: task.id,
-        success,
-        diffs,
-        duration: Date.now() - startTime,
-        output: success ? 'Task completed successfully' : 'Some edits failed',
-      };
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      return {
-        taskId: task.id,
-        success: false,
-        error: err.message,
-        duration: Date.now() - startTime,
-      };
-    }
+    const sandboxedExecutor = this.createSandboxedExecutor(executor, worktree);
+    return this.runtime.executeTask(task, {
+      cwd: worktree.path,
+      worktreePath: worktree.path,
+      executorOverride: sandboxedExecutor,
+    });
   }
 
   /**
@@ -278,13 +307,13 @@ export class ParallelExecutor extends EventEmitter {
       // 创建所有 workers
       const workers: AgentWorker[] = [];
       for (const { executorName, task } of tasks) {
-        const executor = this.executors.get(executorName);
+        const executor = this.runtime.getExecutor(executorName);
         if (!executor) {
           throw new Error(`Executor not found: ${executorName}`);
         }
         const worker = await this.createWorker(
           executorName,
-          executor.modelId,
+          executor.modelId || executorName,
           task
         );
         workers.push(worker);
@@ -346,6 +375,9 @@ export class ParallelExecutor extends EventEmitter {
         this.emit('worker:failed', worker, worker.error);
         resolve({
           taskId: worker.task?.id || worker.id,
+          status: 'failed',
+          output: { error: 'Worker timeout' },
+          executor: worker.name,
           success: false,
           error: 'Worker timeout',
           duration: this.config.timeout,
@@ -364,6 +396,9 @@ export class ParallelExecutor extends EventEmitter {
           } else {
             resolve({
               taskId: worker.task?.id || worker.id,
+              status: 'failed',
+              output: { error: error.message },
+              executor: worker.name,
               success: false,
               error: error.message,
               duration: Date.now() - (worker.startedAt || Date.now()),

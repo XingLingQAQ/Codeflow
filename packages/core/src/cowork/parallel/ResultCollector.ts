@@ -48,12 +48,25 @@ export interface ResultCollectorEvents {
   'summary:updated': (summary: ResultSummary) => void;
 }
 
+export type WorkerResult = ExecutionResult;
+
 /**
  * ResultCollector - 结果收集器
  */
 export class ResultCollector extends EventEmitter {
   private results: Map<string, ExecutionResult> = new Map();
   private workers: Map<string, AgentWorker> = new Map();
+
+  private isSuccessful(result: ExecutionResult): boolean {
+    if (typeof result.success === 'boolean') {
+      return result.success;
+    }
+    return result.status === 'completed' && !result.output?.error;
+  }
+
+  private getDiffs(result: ExecutionResult): Diff[] {
+    return result.diffs ?? result.output?.diffs ?? [];
+  }
 
   /**
    * 添加结果
@@ -106,14 +119,14 @@ export class ResultCollector extends EventEmitter {
    * 获取成功的结果
    */
   getSuccessfulResults(): ExecutionResult[] {
-    return Array.from(this.results.values()).filter(r => r.success);
+    return Array.from(this.results.values()).filter(r => this.isSuccessful(r));
   }
 
   /**
    * 获取失败的结果
    */
   getFailedResults(): ExecutionResult[] {
-    return Array.from(this.results.values()).filter(r => !r.success);
+    return Array.from(this.results.values()).filter(r => !this.isSuccessful(r));
   }
 
   /**
@@ -123,15 +136,15 @@ export class ResultCollector extends EventEmitter {
     const results = Array.from(this.results.values());
     const workers = Array.from(this.workers.values());
 
-    const successCount = results.filter(r => r.success).length;
-    const failedCount = results.filter(r => !r.success).length;
+    const successCount = results.filter(r => this.isSuccessful(r)).length;
+    const failedCount = results.filter(r => !this.isSuccessful(r)).length;
     const cancelledCount = workers.filter(w => w.status === 'cancelled').length;
 
     const durations = results.map(r => r.duration || 0);
     const totalDuration = durations.reduce((a, b) => a + b, 0);
     const averageDuration = durations.length > 0 ? totalDuration / durations.length : 0;
 
-    const allDiffs = results.flatMap(r => r.diffs || []);
+    const allDiffs = results.flatMap(r => this.getDiffs(r));
     const totalAdditions = allDiffs.reduce((a, d) => a + d.additions, 0);
     const totalDeletions = allDiffs.reduce((a, d) => a + d.deletions, 0);
 
@@ -159,13 +172,13 @@ export class ResultCollector extends EventEmitter {
 
     for (const [workerId, result] of this.results) {
       const worker = this.workers.get(workerId);
-      const diffs = result.diffs || [];
+      const diffs = this.getDiffs(result);
 
       comparisons.push({
         workerId,
         workerName: worker?.name || 'unknown',
         modelId: worker?.modelId || 'unknown',
-        success: result.success,
+        success: this.isSuccessful(result),
         duration: result.duration || 0,
         diffCount: diffs.length,
         additions: diffs.reduce((a, d) => a + d.additions, 0),
@@ -214,7 +227,7 @@ export class ResultCollector extends EventEmitter {
     const comparison = new Map<string, Diff | undefined>();
 
     for (const [workerId, result] of this.results) {
-      const diff = result.diffs?.find(d => d.file === file);
+      const diff = this.getDiffs(result).find(d => d.file === file);
       comparison.set(workerId, diff);
     }
 
@@ -228,7 +241,7 @@ export class ResultCollector extends EventEmitter {
     const files = new Set<string>();
 
     for (const result of this.results.values()) {
-      for (const diff of result.diffs || []) {
+      for (const diff of this.getDiffs(result)) {
         files.add(diff.file);
       }
     }
@@ -243,7 +256,7 @@ export class ResultCollector extends EventEmitter {
     const fileWorkers = new Map<string, string[]>();
 
     for (const [workerId, result] of this.results) {
-      for (const diff of result.diffs || []) {
+      for (const diff of this.getDiffs(result)) {
         const workers = fileWorkers.get(diff.file) || [];
         workers.push(workerId);
         fileWorkers.set(diff.file, workers);
@@ -260,7 +273,7 @@ export class ResultCollector extends EventEmitter {
     const fileWorkers = new Map<string, string[]>();
 
     for (const [workerId, result] of this.results) {
-      for (const diff of result.diffs || []) {
+      for (const diff of this.getDiffs(result)) {
         const workers = fileWorkers.get(diff.file) || [];
         workers.push(workerId);
         fileWorkers.set(diff.file, workers);

@@ -5,8 +5,15 @@
 
 import { EventEmitter } from 'events';
 import { WorktreeManager } from '../../git/WorktreeManager.js';
-import { AgentWorker, WorkerStatus } from './ParallelExecutor.js';
-import { CoworkTask, ICodeEditor, ExecutorCapabilities } from '../types.js';
+import { AgentWorker } from './ParallelExecutor.js';
+import {
+  AgentRuntimeLike,
+  CoworkTask,
+  ICodeEditor,
+  ExecutorCapabilities,
+  ExecutorRegistration,
+} from '../types.js';
+import { AgentRuntime } from '../runtime.js';
 
 /**
  * Worker 池配置
@@ -52,33 +59,25 @@ const DEFAULT_CONFIG: WorkerPoolConfig = {
 };
 
 /**
- * 执行器注册信息
- */
-interface ExecutorInfo {
-  name: string;
-  editor: ICodeEditor;
-  capabilities: ExecutorCapabilities;
-  modelId: string;
-}
-
-/**
  * WorkerPool - Worker 池
  */
 export class WorkerPool extends EventEmitter {
   private config: WorkerPoolConfig;
   private worktreeManager: WorktreeManager;
   private workers: Map<string, AgentWorker> = new Map();
-  private executors: Map<string, ExecutorInfo> = new Map();
+  private runtime: AgentRuntimeLike;
   private idleTimers: Map<string, NodeJS.Timeout> = new Map();
   private workerCounter: number = 0;
 
   constructor(
     worktreeManager: WorktreeManager,
-    config: Partial<WorkerPoolConfig> = {}
+    config: Partial<WorkerPoolConfig> = {},
+    runtime?: AgentRuntimeLike
   ) {
     super();
     this.worktreeManager = worktreeManager;
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.runtime = runtime || new AgentRuntime();
   }
 
   /**
@@ -88,16 +87,16 @@ export class WorkerPool extends EventEmitter {
     name: string,
     editor: ICodeEditor,
     capabilities: ExecutorCapabilities,
-    modelId: string
+    modelId?: string
   ): void {
-    this.executors.set(name, { name, editor, capabilities, modelId });
+    this.runtime.registerExecutor(name, editor, capabilities, modelId);
   }
 
   /**
    * 获取执行器
    */
-  getExecutor(name: string): ExecutorInfo | undefined {
-    return this.executors.get(name);
+  getExecutor(name: string): ExecutorRegistration | undefined {
+    return this.runtime.getExecutor(name);
   }
 
   /**
@@ -107,7 +106,7 @@ export class WorkerPool extends EventEmitter {
     executorName: string,
     task?: CoworkTask
   ): Promise<AgentWorker> {
-    const executor = this.executors.get(executorName);
+    const executor = this.runtime.getExecutor(executorName);
     if (!executor) {
       throw new Error(`Executor not found: ${executorName}`);
     }
@@ -122,7 +121,7 @@ export class WorkerPool extends EventEmitter {
     const worker: AgentWorker = {
       id: workerId,
       name: executorName,
-      modelId: executor.modelId,
+      modelId: executor.modelId || executorName,
       worktree,
       status: 'idle',
       task,
