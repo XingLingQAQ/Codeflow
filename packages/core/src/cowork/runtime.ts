@@ -3,6 +3,16 @@
  * 收敛执行器注册、上下文装配、策略校验与沙箱准备
  */
 
+import type { IAuditManager } from '../audit/types.js';
+import { HeadlessToolRuntime } from '../tool-runtime/HeadlessToolRuntime.js';
+import type { FileOperationService } from '../tool-runtime/FileOperationService.js';
+import type { ToolExecutor } from '../tool-runtime/ToolExecutor.js';
+import type { ToolRegistry } from '../tool-runtime/ToolRegistry.js';
+import type {
+  ToolCallTrace,
+  ToolContext,
+  ToolExecutionResult,
+} from '../tool-runtime/types.js';
 import {
   AgentRuntimeLike,
   ContextAssembler,
@@ -18,6 +28,7 @@ import {
   SandboxedTask,
   ExecutionSandbox,
   Diff,
+  EditResult,
 } from './types.js';
 
 class InMemoryModelPool implements ModelPool {
@@ -110,6 +121,11 @@ export interface AgentRuntimeDeps {
   contextAssembler?: ContextAssembler;
   policyGuard?: PolicyGuard;
   sandbox?: ExecutionSandbox;
+  auditManager?: IAuditManager;
+  toolRegistry?: ToolRegistry;
+  toolExecutor?: ToolExecutor;
+  fileOperationService?: FileOperationService;
+  headlessToolRuntime?: HeadlessToolRuntime;
 }
 
 export class AgentRuntime implements AgentRuntimeLike {
@@ -118,12 +134,27 @@ export class AgentRuntime implements AgentRuntimeLike {
   private contextAssembler: ContextAssembler;
   private policyGuard: PolicyGuard;
   private sandbox: ExecutionSandbox;
+  private headlessToolRuntime: HeadlessToolRuntime;
+  private toolRegistry: ToolRegistry;
+  private toolExecutor: ToolExecutor;
+  private fileOperationService: FileOperationService;
 
   constructor(deps: AgentRuntimeDeps = {}) {
     this.modelPool = deps.modelPool ?? new InMemoryModelPool();
     this.contextAssembler = deps.contextAssembler ?? new DefaultContextAssembler();
     this.policyGuard = deps.policyGuard ?? new AllowAllPolicyGuard();
     this.sandbox = deps.sandbox ?? new PassthroughSandbox();
+    this.headlessToolRuntime =
+      deps.headlessToolRuntime ??
+      new HeadlessToolRuntime({
+        auditManager: deps.auditManager,
+        toolRegistry: deps.toolRegistry,
+        toolExecutor: deps.toolExecutor,
+        fileOperationService: deps.fileOperationService,
+      });
+    this.toolRegistry = this.headlessToolRuntime.getToolRegistry();
+    this.toolExecutor = this.headlessToolRuntime.getToolExecutor();
+    this.fileOperationService = this.headlessToolRuntime.getFileOperationService();
   }
 
   registerExecutor(
@@ -165,6 +196,18 @@ export class AgentRuntime implements AgentRuntimeLike {
 
   attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask {
     return this.contextAssembler.attachPreviousResult(task, result);
+  }
+
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
+  }
+
+  getToolExecutor(): ToolExecutor {
+    return this.toolExecutor;
+  }
+
+  getToolTraces(): ToolCallTrace[] {
+    return this.toolExecutor.getTraces();
   }
 
   async executeTask(task: CoworkTask, options: RuntimeExecutionOptions = {}): Promise<ExecutionResult> {
@@ -220,20 +263,52 @@ export class AgentRuntime implements AgentRuntimeLike {
       const sandboxedTask = sandboxed.task;
 
       if (sandboxedTask.input.files.length === 1) {
-        const result = await activeExecutor.editor.edit(
-          sandboxedTask.input.files[0],
-          sandboxedTask.input.instruction
+        const editResult = await this.executeTool<EditResult>(
+          'file.edit',
+          {
+            file: sandboxedTask.input.files[0],
+            instruction: sandboxedTask.input.instruction,
+          },
+          sandboxedTask,
+          activeExecutor,
+          options
         );
-        if (result.success) {
+        if (!editResult.ok) {
+          return normalizeExecutionResult(
+            task,
+            activeExecutor,
+            startTime,
+            diffs,
+            editResult.error?.message
+          );
+        }
+        const result = editResult.output;
+        if (result?.success) {
           diffs.push(result.diff);
-        } else if (result.message) {
-          return normalizeExecutionResult(task, executor, startTime, diffs, result.message);
+        } else if (result?.message) {
+          return normalizeExecutionResult(task, activeExecutor, startTime, diffs, result.message);
         }
       } else if (sandboxedTask.input.files.length > 1) {
-        const results = await activeExecutor.editor.editMultiple(
-          sandboxedTask.input.files,
-          sandboxedTask.input.instruction
+        const batchResult = await this.executeTool<EditResult[]>(
+          'file.edit_multiple',
+          {
+            files: sandboxedTask.input.files,
+            instruction: sandboxedTask.input.instruction,
+          },
+          sandboxedTask,
+          activeExecutor,
+          options
         );
+        if (!batchResult.ok) {
+          return normalizeExecutionResult(
+            task,
+            activeExecutor,
+            startTime,
+            diffs,
+            batchResult.error?.message
+          );
+        }
+        const results = batchResult.output ?? [];
         const failed = results.find((result) => !result.success);
         for (const result of results) {
           if (result.success) {
@@ -252,6 +327,46 @@ export class AgentRuntime implements AgentRuntimeLike {
     } finally {
       await sandboxed.release?.();
     }
+  }
+
+
+  private async executeTool<TOutput>(
+    toolId: string,
+    input: unknown,
+    task: CoworkTask,
+    executor: ExecutorRegistration,
+    options: RuntimeExecutionOptions
+  ): Promise<ToolExecutionResult<TOutput>> {
+    return this.toolExecutor.execute<TOutput>({
+      toolId,
+      input,
+      context: this.createToolContext(task, executor, options),
+    });
+  }
+
+  private createToolContext(
+    task: CoworkTask,
+    executor: ExecutorRegistration,
+    options: RuntimeExecutionOptions
+  ): ToolContext {
+    return {
+      entryPoint: 'agent',
+      taskId: task.id,
+      agentId: executor.name,
+      actor: {
+        id: executor.name,
+        type: 'agent',
+        name: executor.name,
+      },
+      metadata: {
+        cwd: options.cwd,
+        worktreePath: options.worktreePath,
+        modelId: executor.modelId,
+      },
+      resources: {
+        editor: executor.editor,
+      },
+    };
   }
 }
 
