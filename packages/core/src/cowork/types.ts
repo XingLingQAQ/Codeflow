@@ -1,3 +1,5 @@
+import type { SkillRegistration } from '../tool-runtime/types.js';
+
 /**
  * Cowork Mode - 多 CLI 协作类型定义
  */
@@ -242,11 +244,22 @@ export interface AgentRuntimeLike {
     capabilities: ExecutorCapabilities,
     modelId?: string
   ): void;
+  registerSkill(skill: SkillRegistration, replace?: boolean): void;
   getExecutor(name: string): ExecutorRegistration | undefined;
   getAllExecutors(): ExecutorRegistration[];
   executeTask(task: CoworkTask, options?: RuntimeExecutionOptions): Promise<ExecutionResult>;
   buildContextFromResult(result: ExecutionResult): string;
   attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask;
+  executeSkill<TOutput = unknown>(
+    skillId: string,
+    input: unknown,
+    context: {
+      taskId?: string;
+      sessionId?: string;
+      agentId?: string;
+      triggerReason?: string;
+    }
+  ): Promise<TOutput>;
 }
 
 /**

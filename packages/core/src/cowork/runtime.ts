@@ -9,6 +9,8 @@ import type { FileOperationService } from '../tool-runtime/FileOperationService.
 import type { ToolExecutor } from '../tool-runtime/ToolExecutor.js';
 import type { ToolRegistry } from '../tool-runtime/ToolRegistry.js';
 import type {
+  SkillExecutionRecord,
+  SkillRegistration,
   ToolCallTrace,
   ToolContext,
   ToolExecutionResult,
@@ -173,6 +175,10 @@ export class AgentRuntime implements AgentRuntimeLike {
     this.modelPool.registerExecutor(registration);
   }
 
+  registerSkill(skill: SkillRegistration, replace = false): void {
+    this.headlessToolRuntime.registerSkill(skill, replace);
+  }
+
   getExecutor(name: string): ExecutorRegistration | undefined {
     const executor = this.executors.get(name);
     if (!executor) return undefined;
@@ -208,6 +214,42 @@ export class AgentRuntime implements AgentRuntimeLike {
 
   getToolTraces(): ToolCallTrace[] {
     return this.toolExecutor.getTraces();
+  }
+
+  getSkillExecutionRecords(): SkillExecutionRecord[] {
+    return this.headlessToolRuntime.getSkillExecutionRecords();
+  }
+
+  async executeSkill<TOutput = unknown>(
+    skillId: string,
+    input: unknown,
+    context: {
+      taskId?: string;
+      sessionId?: string;
+      agentId?: string;
+      triggerReason?: string;
+    } = {}
+  ): Promise<TOutput> {
+    const result = await this.headlessToolRuntime.executeSkill<TOutput>({
+      skillId,
+      input,
+      triggerReason: context.triggerReason,
+      context: {
+        entryPoint: 'agent',
+        taskId: context.taskId,
+        sessionId: context.sessionId,
+        agentId: context.agentId,
+        actor: {
+          id: context.agentId ?? 'agent-runtime',
+          type: 'agent',
+          name: context.agentId ?? 'agent-runtime',
+        },
+      },
+    });
+    if (!result.ok) {
+      throw new Error(result.error?.message ?? `Skill execution failed: ${skillId}`);
+    }
+    return result.output as TOutput;
   }
 
   async executeTask(task: CoworkTask, options: RuntimeExecutionOptions = {}): Promise<ExecutionResult> {

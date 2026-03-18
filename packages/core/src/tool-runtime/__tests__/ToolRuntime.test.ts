@@ -163,6 +163,138 @@ describe('headless tool runtime', () => {
     expect(auditEntries[0]?.resource.id).toBe('search.memory');
   });
 
+  it('dispatches skills through shared runtime with execution records', async () => {
+    const auditManager = new AuditManager(new InMemoryAuditStorage());
+    const runtime = new HeadlessToolRuntime({ auditManager });
+
+    runtime.registerSkill({
+      manifest: {
+        skillId: 'skill.summarize',
+        version: '1.0.0',
+        description: 'summarize content',
+        tags: ['skill', 'summary'],
+        riskLevel: 'low',
+        source: 'internal',
+        entryPoints: ['agent', 'api'],
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+          },
+          required: ['text'],
+        },
+        toolIds: ['search.code'],
+      },
+      handler: {
+        execute: async (input, context) => {
+          await context.runtime.executeSearch('code', { query: String((input as { text: string }).text) }, {
+            entryPoint: 'agent',
+            sessionId: context.sessionId,
+            taskId: context.taskId,
+            agentId: context.agentId,
+          });
+          return {
+            summary: String((input as { text: string }).text).slice(0, 8),
+          };
+        },
+      },
+    });
+
+    runtime.registerSearchProvider(
+      new StaticSearchProvider('code-default', 'code', async (request) => ({
+        provider: 'code-default',
+        total: 1,
+        items: [
+          {
+            id: 'code-1',
+            title: request.query,
+            snippet: 'code result',
+            source: 'code',
+          },
+        ],
+      }))
+    );
+
+    const result = await runtime.executeSkill<{ summary: string }>({
+      skillId: 'skill.summarize',
+      input: { text: 'runtime summary text' },
+      triggerReason: 'agent requested summary',
+      context: {
+        entryPoint: 'agent',
+        sessionId: 'sess-1',
+        taskId: 'task-1',
+        agentId: 'tester',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.output?.summary).toBe('runtime ');
+    expect(result.record.skillId).toBe('skill.summarize');
+    expect(result.record.lifecycle).toEqual(['registered', 'authorized', 'loaded', 'executed', 'recorded']);
+    expect(result.record.toolIds).toContain('search.code');
+    expect(runtime.getSkillExecutionRecords()).toHaveLength(1);
+
+    const auditEntries = await auditManager.getLatestEntries(10);
+    expect(auditEntries.some((entry) => entry.resource.type === 'skill')).toBe(true);
+  });
+
+  it('lets AgentRuntime execute registered skills through headless runtime', async () => {
+    const runtime = new AgentRuntime();
+    const editor = createEditor();
+
+    runtime.registerExecutor(
+      'claude',
+      editor,
+      {
+        name: 'claude',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: {
+          streaming: false,
+          multiFile: true,
+          contextAware: true,
+          codeReview: false,
+        },
+      },
+      'claude-opus-4.6'
+    );
+
+    runtime.registerSkill({
+      manifest: {
+        skillId: 'skill.inspect',
+        version: '1.0.0',
+        description: 'inspect text',
+        tags: ['skill', 'inspect'],
+        riskLevel: 'low',
+        source: 'internal',
+        entryPoints: ['agent'],
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+          },
+          required: ['text'],
+        },
+      },
+      handler: {
+        execute: async (input) => ({
+          echoed: (input as { text: string }).text,
+        }),
+      },
+    });
+
+    const output = await runtime.executeSkill<{ echoed: string }>('skill.inspect', { text: 'runtime' }, {
+      taskId: 'task-skill',
+      sessionId: 'sess-skill',
+      agentId: 'claude',
+      triggerReason: 'follow-up task',
+    });
+
+    expect(output.echoed).toBe('runtime');
+    expect(runtime.getSkillExecutionRecords()).toHaveLength(1);
+  });
+
   it('shares registry and traces across file search skill and mcp gateways', async () => {
     const runtime = new HeadlessToolRuntime();
     const editor = createEditor();
@@ -230,7 +362,11 @@ describe('headless tool runtime', () => {
       resources: { editor },
     });
     const searchResult = await runtime.executeSearch('code', { query: 'runtime' }, { entryPoint: 'api' });
-    const skillResult = await runtime.execute('skill.summarize', { text: 'runtime summary text' }, { entryPoint: 'agent' });
+    const skillResult = await runtime.executeSkill<{ summary: string }>({
+      skillId: 'skill.summarize',
+      input: { text: 'runtime summary text' },
+      context: { entryPoint: 'agent', agentId: 'tester', sessionId: 'sess-runtime' },
+    });
     const mcpResult = await runtime.getMCPGateway().execute(
       'mock-search',
       'query',
@@ -244,7 +380,7 @@ describe('headless tool runtime', () => {
     expect(mcpResult.ok).toBe(true);
     expect(runtime.getToolRegistry().has('file.edit')).toBe(true);
     expect(runtime.getToolRegistry().has('search.code')).toBe(true);
-    expect(runtime.getToolRegistry().has('skill.summarize')).toBe(true);
+    expect(runtime.listSkills().map((skill) => skill.skillId)).toContain('skill.summarize');
     expect(runtime.getToolRegistry().has('mock-search.query')).toBe(true);
     expect(runtime.getToolTraces().map((trace) => trace.toolId)).toEqual([
       'file.edit',
