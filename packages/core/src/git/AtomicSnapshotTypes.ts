@@ -72,6 +72,10 @@ export interface AtomicSnapshot {
     trigger: SnapshotTrigger;
     parentSnapshotId?: string;
     tags?: string[];
+    sessionId?: string;
+    taskId?: string;
+    agentId?: string;
+    codeChangeEventIds?: string[];
   };
 }
 
@@ -124,6 +128,13 @@ export interface SnapshotValidation {
   errors: string[];
 }
 
+export interface CreateAtomicSnapshotOptions {
+  sessionId?: string;
+  taskId?: string;
+  agentId?: string;
+  codeChangeEventIds?: string[];
+}
+
 /**
  * 原子快照管理器接口
  */
@@ -131,7 +142,8 @@ export interface IAtomicSnapshotManager {
   // 快照创建
   createSnapshot(
     description?: string,
-    trigger?: SnapshotTrigger
+    trigger?: SnapshotTrigger,
+    options?: CreateAtomicSnapshotOptions
   ): Promise<AtomicSnapshot>;
 
   // 快照查询

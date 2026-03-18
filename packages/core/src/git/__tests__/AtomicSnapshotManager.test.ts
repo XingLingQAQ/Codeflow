@@ -212,6 +212,22 @@ describe('AtomicSnapshotManager', () => {
       expect(snapshot.conversation.messageCount).toBe(0);
     });
 
+    it('should attach code change linkage metadata when provided', async () => {
+      vi.mocked(mockGitManager.createSnapshot).mockResolvedValue(createMockGitSnapshot());
+
+      const snapshot = await manager.createSnapshot('Linked snapshot', 'hook_after_exec', {
+        sessionId: 'session-evt',
+        taskId: 'task-evt',
+        agentId: 'agent-evt',
+        codeChangeEventIds: ['change-1', 'change-2'],
+      });
+
+      expect(snapshot.metadata.sessionId).toBe('session-evt');
+      expect(snapshot.metadata.taskId).toBe('task-evt');
+      expect(snapshot.metadata.agentId).toBe('agent-evt');
+      expect(snapshot.metadata.codeChangeEventIds).toEqual(['change-1', 'change-2']);
+    });
+
     it('should prune old snapshots when limit exceeded', async () => {
       vi.mocked(mockGitManager.createSnapshot).mockResolvedValue(createMockGitSnapshot());
 

@@ -15,6 +15,7 @@ import {
   TaskExecutionContext,
   TaskExecutionResult,
   TaskFailureContext,
+  CodeChangeEventRecorder,
 } from './types.js';
 
 /**
@@ -23,9 +24,11 @@ import {
  */
 export class HookManager extends EventEmitter implements IHookManager {
   private handlers: Map<HookEvent, Set<HookHandler>> = new Map();
+  private readonly codeChangeEventRecorder?: CodeChangeEventRecorder;
 
-  constructor() {
+  constructor(codeChangeEventRecorder?: CodeChangeEventRecorder) {
     super();
+    this.codeChangeEventRecorder = codeChangeEventRecorder;
     this.initializeHandlers();
   }
 
@@ -147,7 +150,41 @@ export class HookManager extends EventEmitter implements IHookManager {
       HookEvent.AFTER_EXEC,
       result
     );
-    return snapshotId || `snapshot_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const resolvedSnapshotId =
+      snapshotId || `snapshot_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+    this.appendCodeChangeEvent(
+      this.determineExecEventType(result),
+      `Command executed: ${result.command}`,
+      {
+        sessionId: result.sessionId,
+        taskId: result.taskId,
+        agentId: result.agentId,
+        snapshotId: resolvedSnapshotId,
+        files: result.filesModified,
+        metadata: {
+          command: result.command,
+          exitCode: result.exitCode,
+          stderr: result.stderr ? result.stderr.slice(0, 200) : undefined,
+          ...result.metadata,
+        },
+      }
+    );
+
+    this.appendCodeChangeEvent('checkpoint_create', `Checkpoint created after command: ${result.command}`, {
+      sessionId: result.sessionId,
+      taskId: result.taskId,
+      agentId: result.agentId,
+      snapshotId: resolvedSnapshotId,
+      files: result.filesModified,
+      metadata: {
+        trigger: 'hook_after_exec',
+        command: result.command,
+        ...result.metadata,
+      },
+    });
+
+    return resolvedSnapshotId;
   }
 
   /**
@@ -155,6 +192,12 @@ export class HookManager extends EventEmitter implements IHookManager {
    */
   async hook_restore_state(snapshotId: SnapshotID): Promise<void> {
     await this.executeHandlers<SnapshotID, void>(HookEvent.RESTORE_STATE, snapshotId);
+    this.appendCodeChangeEvent('restore', `State restored from snapshot: ${snapshotId}`, {
+      snapshotId,
+      metadata: {
+        trigger: 'restore_state',
+      },
+    });
   }
 
   /**
@@ -207,6 +250,57 @@ export class HookManager extends EventEmitter implements IHookManager {
       HookEvent.ON_TASK_COMPLETE,
       result
     );
+  }
+
+  private determineExecEventType(result: ExecResult): 'file_edit' | 'batch_edit' | 'formatting' | 'command_mutation' {
+    const metadataType = result.metadata?.['codeChangeEventType'];
+    if (
+      metadataType === 'file_edit' ||
+      metadataType === 'batch_edit' ||
+      metadataType === 'formatting' ||
+      metadataType === 'command_mutation'
+    ) {
+      return metadataType;
+    }
+
+    if ((result.filesModified?.length ?? 0) > 1) {
+      return 'batch_edit';
+    }
+
+    const command = result.command.toLowerCase();
+    if (command.includes('prettier') || command.includes('eslint') || command.includes('format')) {
+      return 'formatting';
+    }
+
+    if ((result.filesModified?.length ?? 0) === 1) {
+      return 'file_edit';
+    }
+
+    return 'command_mutation';
+  }
+
+  private appendCodeChangeEvent(
+    type: 'file_edit' | 'batch_edit' | 'formatting' | 'command_mutation' | 'restore' | 'checkpoint_create',
+    summary: string,
+    options: {
+      sessionId?: string;
+      taskId?: string;
+      agentId?: string;
+      snapshotId?: string;
+      files?: string[];
+      metadata?: Record<string, unknown>;
+    } = {}
+  ): void {
+    this.codeChangeEventRecorder?.appendCodeChangeEvent({
+      type,
+      summary,
+      sessionId: options.sessionId,
+      taskId: options.taskId,
+      agentId: options.agentId,
+      snapshotId: options.snapshotId,
+      files: options.files,
+      metadata: options.metadata,
+    });
   }
 
   /**

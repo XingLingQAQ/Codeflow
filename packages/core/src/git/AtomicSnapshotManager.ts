@@ -17,6 +17,7 @@ import {
   IAtomicSnapshotManager,
   ISnapshotStorage,
   DEFAULT_SNAPSHOT_CONFIG,
+  CreateAtomicSnapshotOptions,
 } from './AtomicSnapshotTypes.js';
 import { IGitManager } from './types.js';
 import { Message } from '../hooks/types.js';
@@ -67,7 +68,8 @@ export class AtomicSnapshotManager implements IAtomicSnapshotManager {
 
   async createSnapshot(
     description?: string,
-    trigger: SnapshotTrigger = 'manual'
+    trigger: SnapshotTrigger = 'manual',
+    options: CreateAtomicSnapshotOptions = {}
   ): Promise<AtomicSnapshot> {
     const gitSnapshot = await this.gitManager.createSnapshot(description);
     const conversationSnapshot = await this.captureConversation();
@@ -94,6 +96,10 @@ export class AtomicSnapshotManager implements IAtomicSnapshotManager {
         createdBy: 'system',
         trigger,
         tags: [],
+        sessionId: options.sessionId,
+        taskId: options.taskId,
+        agentId: options.agentId,
+        codeChangeEventIds: options.codeChangeEventIds,
       },
     };
 

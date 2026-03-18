@@ -50,9 +50,51 @@ export interface ExecResult {
   stdout: string;
   stderr: string;
   timestamp: number;
+  sessionId?: string;
+  taskId?: string;
+  agentId?: string;
+  filesModified?: string[];
+  metadata?: Record<string, unknown>;
 }
 
 export type SnapshotID = string;
+
+export type CodeChangeEventType =
+  | 'file_edit'
+  | 'batch_edit'
+  | 'command_mutation'
+  | 'formatting'
+  | 'restore'
+  | 'checkpoint_create';
+
+export interface CodeChangeEvent {
+  id: string;
+  type: CodeChangeEventType;
+  timestamp: number;
+  summary: string;
+  sessionId?: string;
+  taskId?: string;
+  agentId?: string;
+  snapshotId?: string;
+  files?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface CodeChangeEventFilter {
+  type?: CodeChangeEventType;
+  sessionId?: string;
+  taskId?: string;
+  agentId?: string;
+  snapshotId?: string;
+  limit?: number;
+}
+
+export interface CodeChangeEventRecorder {
+  appendCodeChangeEvent(event: Omit<CodeChangeEvent, 'id' | 'timestamp'>): CodeChangeEvent;
+  listCodeChangeEvents(filter?: CodeChangeEventFilter): CodeChangeEvent[];
+  clearCodeChangeEvents(): void;
+  countCodeChangeEvents(): number;
+}
 
 export interface MemoryMatch {
   content: string;
