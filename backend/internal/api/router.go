@@ -245,19 +245,6 @@ func (s *Server) setupRoutes() {
 			debates.GET("/:id/stream", handlers.StreamDebate) // WebSocket
 		}
 
-		// Plan routes
-		plans := v1.Group("/plans")
-		{
-			plans.GET("", handlers.GetPlans)
-			plans.POST("", handlers.CreatePlan)
-			plans.GET("/:id/tasks", handlers.GetPlanTasks)
-			plans.POST("/:id/tasks", handlers.CreatePlanTask)
-			plans.PATCH("/:id/tasks/:tid", handlers.UpdatePlanTask)
-			plans.POST("/:id/tasks/:tid/reorder", handlers.ReorderPlanTask)
-			plans.POST("/:id/tasks/batch-model", handlers.BatchUpdateTaskModel)
-			plans.DELETE("/:id/tasks/:tid", handlers.DeletePlanTask)
-		}
-
 		// Project routes
 		projects := v1.Group("/projects")
 		{
@@ -271,7 +258,26 @@ func (s *Server) setupRoutes() {
 			projects.DELETE("/:id/plans/:planId", handlers.RemovePlanFromProject)
 		}
 
-		// Summarize routes
+		// Plan routes
+		plans := v1.Group("/plans")
+		{
+			plans.GET("", handlers.GetPlans)
+			plans.POST("", handlers.CreatePlan)
+			plans.GET("/:id/tasks", handlers.GetPlanTasks)
+			plans.POST("/:id/tasks", handlers.CreatePlanTask)
+			plans.PATCH("/:id/tasks/:tid", handlers.UpdatePlanTask)
+			plans.POST("/:id/tasks/:tid/reorder", handlers.ReorderPlanTask)
+			plans.POST("/:id/tasks/batch-model", handlers.BatchUpdateTaskModel)
+			plans.DELETE("/:id/tasks/:tid", handlers.DeletePlanTask)
+		}
+
+		// Workflow routes
+		workflows := v1.Group("/workflows")
+		{
+			workflows.GET("/:projectId/overview", handlers.GetWorkflowOverview)
+			workflows.GET("/:projectId/timeline", handlers.GetWorkflowTimeline)
+			workflows.GET("/:projectId/replay", handlers.GetWorkflowReplay)
+		}
 		summarizeGroup := v1.Group("/summarize")
 		{
 			summarizeGroup.POST("/conversation", handlers.SummarizeConversation)

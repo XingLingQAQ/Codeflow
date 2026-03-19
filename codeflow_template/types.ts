@@ -58,6 +58,138 @@ export interface ProjectListResponse {
   has_more: boolean;
 }
 
+export type WorkflowLane = 'project' | 'plan' | 'task' | 'trace' | 'archive' | 'audit';
+
+export interface WorkflowApproval {
+  stage: string;
+  status: 'pending' | 'in_review' | 'approved' | 'rejected' | string;
+  owner?: string;
+  note?: string;
+  updated_at?: number;
+}
+
+export interface WorkflowDecision {
+  id: string;
+  summary: string;
+  owner?: string;
+  reason?: string;
+  timestamp?: number;
+}
+
+export interface WorkflowReplayItem {
+  id: string;
+  lane: WorkflowLane;
+  title: string;
+  message: string;
+  timestamp?: number;
+  status?: string;
+  actor?: string;
+  evidence?: string;
+  sourceId?: string;
+}
+
+export interface WorkflowMetadata {
+  workflow_id?: string;
+  workflow_title?: string;
+  blueprint?: string;
+  template?: string;
+  replay_session_id?: string;
+  approval?: WorkflowApproval[];
+  decisions?: WorkflowDecision[];
+  timeline?: WorkflowReplayItem[];
+}
+
+export interface WorkflowReplayData {
+  title: string;
+  subtitle?: string;
+  status?: string;
+  summary?: string;
+  items: WorkflowReplayItem[];
+}
+
+export interface WorkflowOverviewSummary {
+  project_count: number;
+  plan_count: number;
+  task_count: number;
+  completed_tasks: number;
+  in_progress_tasks: number;
+  blocked_tasks: number;
+  pending_tasks: number;
+  agent_count: number;
+  session_count: number;
+  audit_count: number;
+  progress: number;
+}
+
+export interface WorkflowOverview {
+  project: Project;
+  plans: Plan[];
+  tasks: PlanTask[];
+  agents: Agent[];
+  session_ids: string[];
+  latest_audit?: AuditLogEntry;
+  summary: WorkflowOverviewSummary;
+}
+
+export interface WorkflowTimelineEvent {
+  id: string;
+  type: string;
+  lane: string;
+  title: string;
+  detail?: string;
+  status?: string;
+  source?: string;
+  timestamp: number;
+  project_id?: string;
+  plan_id?: string;
+  task_id?: string;
+  session_id?: string;
+  agent_id?: string;
+  audit_id?: string;
+  trace_id?: string;
+}
+
+export interface WorkflowTimelineResponse {
+  project_id: string;
+  session_ids: string[];
+  events: WorkflowTimelineEvent[];
+  summary: WorkflowOverviewSummary;
+}
+
+export interface WorkflowReplayEvent {
+  id: string;
+  type: string;
+  lane: string;
+  speaker: string;
+  message: string;
+  evidence?: string;
+  status?: string;
+  timestamp: number;
+  project_id?: string;
+  plan_id?: string;
+  task_id?: string;
+  session_id?: string;
+  agent_id?: string;
+  audit_id?: string;
+  trace_id?: string;
+}
+
+export interface WorkflowReplaySummary {
+  event_count: number;
+  trace_count: number;
+  audit_count: number;
+}
+
+export interface WorkflowReplayResponse {
+  project_id: string;
+  session_id?: string;
+  events: WorkflowReplayEvent[];
+  trace?: CallTrace;
+  agents?: Agent[];
+  audit_entries?: AuditLogEntry[];
+  summary: WorkflowReplaySummary;
+}
+
 // --- Plan ---
 
 export interface Plan {
@@ -198,7 +330,7 @@ export interface AtomicMemory {
 
 // --- Raw Archive ---
 
-export type RawEntryType = 'conversation' | 'code_diff' | 'document';
+export type RawEntryType = 'conversation' | 'code_diff' | 'document' | 'workflow_event';
 
 export interface RawEntry {
   id: string;
@@ -207,6 +339,59 @@ export interface RawEntry {
   metadata?: Record<string, unknown>;
   timestamp: number;
   session_id: string;
+}
+
+export interface RawArchiveListResponse {
+  entries: RawEntry[];
+  count: number;
+  total: number;
+}
+
+export interface AuditActor {
+  id: string;
+  type: string;
+  name?: string;
+  session_id?: string;
+}
+
+export interface AuditResource {
+  type: string;
+  id: string;
+  name?: string;
+  path?: string;
+}
+
+export interface AuditTrace {
+  request_id?: string;
+  session_id?: string;
+  task_id?: string;
+  agent_id?: string;
+  method?: string;
+  path?: string;
+  route?: string;
+  status_code?: number;
+  latency_ms?: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: number;
+  event_type: string;
+  severity: string;
+  actor: AuditActor;
+  resource: AuditResource;
+  action: string;
+  outcome: string;
+  trace?: AuditTrace;
+  details?: Record<string, unknown>;
+  previous_hash: string;
+  hash: string;
+}
+
+export interface AuditLogListResponse {
+  entries: AuditLogEntry[];
+  total: number;
+  has_more: boolean;
 }
 
 // --- SAMG (Semantic Graph) ---

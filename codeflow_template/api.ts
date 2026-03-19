@@ -121,6 +121,7 @@ export async function initApiBase(): Promise<void> {
 export const API_ENDPOINTS = {
   get health() { return `${_apiBase}/health`; },
   get projects() { return `${_apiBase}/api/v1/projects`; },
+  get workflows() { return `${_apiBase}/api/v1/workflows`; },
   get memory() { return `${_apiBase}/api/v1/memory`; },
   get memoryAgent() { return `${_apiBase}/api/v1/memory/agent`; },
   get search() { return `${_apiBase}/api/v1/search`; },

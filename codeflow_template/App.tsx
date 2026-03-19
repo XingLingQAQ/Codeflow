@@ -11,9 +11,9 @@ import {
   LogOut, CreditCard, Key, Smartphone,
   Flame, Snowflake, Archive, ExternalLink, RefreshCw
 } from 'lucide-react';
-import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse } from './types';
 import { LogModal } from './components/LogModal';
-import { useApi } from './hooks/useApi';
+import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { ErrorState } from './components/ErrorState';
@@ -23,6 +23,9 @@ import { listProjects, createProject } from './services/projects';
 import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
 import { listAgents } from './services/agents';
 import { getConversationTrace, stopConversation, retryConversation } from './services/conversations';
+import { listRawArchive } from './services/raw_archive';
+import { getWorkflowOverview, getWorkflowTimeline, getWorkflowReplay } from './services/workflows';
+import { listAuditLogs } from './services/audit';
 import { retrieveMemoryAgent, buildMemoryAgentContext } from './services/memory_agent';
 import { getGlobalConfig, updateGlobalConfig } from './services/config';
 import { healthCheck } from './services/health';
@@ -35,6 +38,234 @@ interface ToastMsg {
   message: string;
   type: 'success' | 'info';
 }
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
+const toStringValue = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+
+const toStringArray = (value: unknown): string[] => Array.isArray(value)
+  ? value.map((item) => toStringValue(item)).filter((item): item is string => Boolean(item))
+  : [];
+
+const normalizeWorkflowApproval = (value: unknown): WorkflowApproval[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      return {
+        stage: toStringValue(record.stage) ?? `Stage ${index + 1}`,
+        status: toStringValue(record.status) ?? 'pending',
+        owner: toStringValue(record.owner),
+        note: toStringValue(record.note),
+        updated_at: toNumber(record.updated_at),
+      } satisfies WorkflowApproval;
+    })
+    .filter((item): item is WorkflowApproval => Boolean(item));
+};
+
+const normalizeWorkflowDecisions = (value: unknown): WorkflowDecision[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      return {
+        id: toStringValue(record.id) ?? `decision-${index + 1}`,
+        summary: toStringValue(record.summary) ?? toStringValue(record.title) ?? 'Decision recorded',
+        owner: toStringValue(record.owner),
+        reason: toStringValue(record.reason),
+        timestamp: toNumber(record.timestamp),
+      } satisfies WorkflowDecision;
+    })
+    .filter((item): item is WorkflowDecision => Boolean(item));
+};
+
+const normalizeTimelineItems = (value: unknown): WorkflowReplayItem[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      return {
+        id: toStringValue(record.id) ?? `timeline-${index + 1}`,
+        lane: (toStringValue(record.lane) as WorkflowReplayItem['lane']) ?? 'plan',
+        title: toStringValue(record.title) ?? 'Workflow event',
+        message: toStringValue(record.message) ?? toStringValue(record.summary) ?? 'No details provided',
+        timestamp: toNumber(record.timestamp),
+        status: toStringValue(record.status),
+        actor: toStringValue(record.actor),
+        evidence: toStringValue(record.evidence),
+        sourceId: toStringValue(record.sourceId) ?? toStringValue(record.source_id),
+      } satisfies WorkflowReplayItem;
+    })
+    .filter((item): item is WorkflowReplayItem => Boolean(item));
+};
+
+const extractWorkflowMetadata = (metadata?: Record<string, unknown> | null): WorkflowMetadata => ({
+  workflow_id: toStringValue(metadata?.workflow_id),
+  workflow_title: toStringValue(metadata?.workflow_title),
+  blueprint: toStringValue(metadata?.blueprint),
+  template: toStringValue(metadata?.template),
+  replay_session_id: toStringValue(metadata?.replay_session_id),
+  approval: normalizeWorkflowApproval(metadata?.approval),
+  decisions: normalizeWorkflowDecisions(metadata?.decisions),
+  timeline: normalizeTimelineItems(metadata?.timeline),
+});
+
+const buildFallbackWorkflowMetadata = (project?: Project | null, plan?: Plan | null, tasks: PlanTask[] = []): WorkflowMetadata => {
+  const baseTime = project?.updated_at ?? plan?.updated_at ?? Math.floor(Date.now() / 1000);
+  const taskItems = tasks.slice(0, 4).map((task, index) => ({
+    id: `task-${task.id}`,
+    lane: 'task' as const,
+    title: task.title,
+    message: task.description || 'Task synchronized into workflow lane.',
+    timestamp: task.updated_at || baseTime + index,
+    status: task.status,
+    actor: task.assignee || task.model,
+    evidence: task.dependencies?.length ? `depends on ${task.dependencies.join(', ')}` : undefined,
+    sourceId: task.id,
+  }));
+
+  return {
+    workflow_id: project?.id ?? plan?.id,
+    workflow_title: plan?.title ?? project?.title,
+    blueprint: toStringValue(project?.metadata?.blueprint) ?? toStringValue(project?.metadata?.template),
+    template: toStringValue(project?.metadata?.template),
+    replay_session_id: toStringValue(project?.metadata?.replay_session_id),
+    approval: [
+      {
+        stage: 'Intent review',
+        status: plan?.status === 'completed' ? 'approved' : 'in_review',
+        owner: 'Plan reviewer',
+        note: 'Minimal approval surface derived from plan status.',
+        updated_at: plan?.updated_at,
+      },
+    ],
+    decisions: plan ? [{
+      id: `decision-${plan.id}`,
+      summary: 'Reuse existing Project / Plan / Task objects as workflow anchors.',
+      owner: 'Planner',
+      reason: 'Keep MVP on current entities without introducing a separate DSL.',
+      timestamp: plan.updated_at,
+    }] : [],
+    timeline: [
+      ...(project ? [{
+        id: `project-${project.id}`,
+        lane: 'project' as const,
+        title: project.title,
+        message: `Project opened${toStringValue(project.metadata?.blueprint) ? ` from ${toStringValue(project.metadata?.blueprint)}` : ''}.`,
+        timestamp: project.updated_at || project.created_at,
+        status: project.status,
+        actor: 'Project lead',
+        evidence: toStringArray(project.tags).join(' · ') || undefined,
+        sourceId: project.id,
+      }] : []),
+      ...(plan ? [{
+        id: `plan-${plan.id}`,
+        lane: 'plan' as const,
+        title: plan.title,
+        message: plan.description || 'Plan orchestrates approval, dependencies, and delivery checkpoints.',
+        timestamp: plan.updated_at || plan.created_at,
+        status: plan.status,
+        actor: 'Planner',
+        evidence: `${plan.completed_count}/${plan.task_count} tasks completed`,
+        sourceId: plan.id,
+      }] : []),
+      ...taskItems,
+    ],
+  };
+};
+
+const sortReplayItems = (items: WorkflowReplayItem[]) => [...items].sort((a, b) => {
+  const aTime = a.timestamp ?? 0;
+  const bTime = b.timestamp ?? 0;
+  return aTime - bTime;
+});
+
+const mergeWorkflowTimeline = (
+  metadataItems: WorkflowReplayItem[] = [],
+  trace?: CallTrace,
+  rawArchive: RawEntry[] = [],
+  auditEntries: AuditLogEntry[] = [],
+): WorkflowReplayItem[] => {
+  const traceItems = (trace?.children ?? []).map((child, index) => ({
+    id: `trace-${child.id || index}`,
+    lane: 'trace' as const,
+    title: child.tool_name || 'Trace event',
+    message: child.output || 'Trace completed without textual output.',
+    timestamp: child.end_time ?? child.start_time,
+    status: child.status,
+    actor: child.agent_role,
+    evidence: child.duration_ms ? `${child.duration_ms}ms` : undefined,
+    sourceId: child.id,
+  }));
+
+  const archiveItems = rawArchive.map((entry, index) => ({
+    id: `archive-${entry.id || index}`,
+    lane: 'archive' as const,
+    title: toStringValue(entry.metadata?.title) ?? `${entry.type} archive`,
+    message: entry.content,
+    timestamp: entry.timestamp,
+    status: entry.type,
+    actor: toStringValue(entry.metadata?.actor) ?? 'raw archive',
+    evidence: toStringValue(entry.metadata?.summary),
+    sourceId: entry.id,
+  }));
+
+  const auditItems = auditEntries.map((entry) => ({
+    id: `audit-${entry.id}`,
+    lane: 'audit' as const,
+    title: entry.action || entry.event_type,
+    message: toStringValue(entry.details?.message) ?? `${entry.resource.type}:${entry.resource.id}`,
+    timestamp: entry.timestamp,
+    status: entry.outcome,
+    actor: entry.actor.name || entry.actor.id,
+    evidence: entry.trace?.path || entry.resource.path,
+    sourceId: entry.id,
+  }));
+
+  const merged = [...metadataItems, ...traceItems, ...archiveItems, ...auditItems];
+  const seen = new Set<string>();
+  return sortReplayItems(
+    merged.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    }),
+  );
+};
+
+const buildWorkflowReplayData = (
+  title: string,
+  metadata: WorkflowMetadata,
+  timeline: WorkflowReplayItem[],
+): WorkflowReplayData => {
+  const approvals = metadata.approval ?? [];
+  const status = approvals.length === 0
+    ? 'In flight'
+    : approvals.some((item) => item.status === 'rejected')
+      ? 'Blocked'
+      : approvals.every((item) => item.status === 'approved')
+        ? 'Approved'
+        : 'In flight';
+
+  return {
+    title: metadata.workflow_title || title,
+    subtitle: [metadata.blueprint, metadata.template].filter(Boolean).join(' • ') || 'Template → Plan → Task → Trace → Archive → Audit',
+    status,
+    summary: 'Workflow replay aggregates project template metadata, plan orchestration, task dependencies, conversation trace, raw archive, and audit evidence in one minimal timeline.',
+    items: timeline,
+  };
+};
 
 // --- Shared Components ---
 
@@ -250,12 +481,25 @@ const HomeView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => v
     );
 };
 
-const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => void, showToast: (msg: string) => void }) => {
+type ProjectWorkflowDraft = {
+  blueprint: string;
+  template: string;
+  workflowTitle: string;
+  replaySessionId: string;
+};
+
+const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate: (mode: ViewMode) => void, showToast: (msg: string) => void, onProjectContext: (project: Project) => void }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [newTitle, setNewTitle] = useState('');
     const [newDesc, setNewDesc] = useState('');
+    const [workflowDraft, setWorkflowDraft] = useState<ProjectWorkflowDraft>({
+        blueprint: 'Governed Delivery Blueprint',
+        template: 'workflow-template-v1',
+        workflowTitle: 'Template to audit workflow',
+        replaySessionId: '',
+    });
 
     // Debounce search
     useEffect(() => {
@@ -275,9 +519,24 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
     const handleCreate = async () => {
         if (!newTitle.trim()) return;
         try {
-            await createMutation.execute({ title: newTitle.trim(), description: newDesc.trim() || undefined });
+            await createMutation.execute({
+                title: newTitle.trim(),
+                description: newDesc.trim() || undefined,
+                metadata: {
+                    blueprint: workflowDraft.blueprint.trim() || undefined,
+                    template: workflowDraft.template.trim() || undefined,
+                    workflow_title: workflowDraft.workflowTitle.trim() || undefined,
+                    replay_session_id: workflowDraft.replaySessionId.trim() || undefined,
+                },
+            });
             setNewTitle('');
             setNewDesc('');
+            setWorkflowDraft({
+                blueprint: 'Governed Delivery Blueprint',
+                template: 'workflow-template-v1',
+                workflowTitle: 'Template to audit workflow',
+                replaySessionId: '',
+            });
             setShowCreateForm(false);
             showToast('Project created');
             refetch();
@@ -287,7 +546,9 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
     };
 
     const handleProjectClick = (project: Project) => {
-        showToast(`Opening ${project.title}...`);
+        const workflow = extractWorkflowMetadata(project.metadata);
+        onProjectContext(project);
+        showToast(`Opening ${workflow.blueprint || workflow.template || project.title}...`);
         setTimeout(() => onNavigate(ViewMode.PLAN), 600);
     };
 
@@ -313,7 +574,6 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
 
     return (
         <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
-            {/* Header */}
             <div className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur shrink-0 px-6 md:px-10 flex items-center justify-between z-20">
                 <div className="flex flex-col">
                     <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Projects</h1>
@@ -340,7 +600,6 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
                 </div>
             </div>
 
-            {/* Create Form Modal */}
             {showCreateForm && (
                 <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCreateForm(false)}>
                     <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -357,8 +616,38 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
                             placeholder="Description (optional)"
                             value={newDesc}
                             onChange={e => setNewDesc(e.target.value)}
-                            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm mb-4 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none resize-none h-20"
+                            className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm mb-3 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none resize-none h-20"
                         />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                            <input
+                                type="text"
+                                placeholder="Blueprint"
+                                value={workflowDraft.blueprint}
+                                onChange={(e) => setWorkflowDraft(prev => ({ ...prev, blueprint: e.target.value }))}
+                                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none"
+                            />
+                            <input
+                                type="text"
+                                placeholder="Template"
+                                value={workflowDraft.template}
+                                onChange={(e) => setWorkflowDraft(prev => ({ ...prev, template: e.target.value }))}
+                                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none"
+                            />
+                            <input
+                                type="text"
+                                placeholder="Workflow title"
+                                value={workflowDraft.workflowTitle}
+                                onChange={(e) => setWorkflowDraft(prev => ({ ...prev, workflowTitle: e.target.value }))}
+                                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none md:col-span-2"
+                            />
+                            <input
+                                type="text"
+                                placeholder="Replay session id (optional)"
+                                value={workflowDraft.replaySessionId}
+                                onChange={(e) => setWorkflowDraft(prev => ({ ...prev, replaySessionId: e.target.value }))}
+                                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none md:col-span-2"
+                            />
+                        </div>
                         <div className="flex justify-end gap-2">
                             <button onClick={() => setShowCreateForm(false)} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg">Cancel</button>
                             <button
@@ -373,7 +662,6 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
                 </div>
             )}
 
-            {/* Content */}
             <div className="flex-1 overflow-y-auto p-6 md:p-10">
                 {loading ? (
                     <LoadingSkeleton variant="card" count={6} />
@@ -388,56 +676,73 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
                     />
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                        {projects.map((project) => (
-                            <div
-                                key={project.id}
-                                onClick={() => handleProjectClick(project)}
-                                className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden"
-                            >
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(project.status)}`}>
-                                        {project.status}
+                        {projects.map((project) => {
+                            const workflow = extractWorkflowMetadata(project.metadata);
+                            return (
+                                <div
+                                    key={project.id}
+                                    onClick={() => handleProjectClick(project)}
+                                    className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden"
+                                >
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(project.status)}`}>
+                                            {project.status}
+                                        </div>
+                                        <button className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
+                                            <MoreVertical size={16} />
+                                        </button>
                                     </div>
-                                    <button className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
-                                        <MoreVertical size={16} />
-                                    </button>
+
+                                    <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{project.title}</h3>
+                                    <p className="text-sm text-slate-500 mb-4 line-clamp-2 h-10">{project.description || 'No description provided'}</p>
+
+                                    {(workflow.blueprint || workflow.template || workflow.workflow_title) && (
+                                        <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-2">
+                                            <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-indigo-600">
+                                                <GitBranch size={12} /> Workflow seed
+                                            </div>
+                                            {workflow.workflow_title && <p className="text-sm font-semibold text-slate-700">{workflow.workflow_title}</p>}
+                                            <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
+                                                {workflow.blueprint && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Blueprint: {workflow.blueprint}</span>}
+                                                {workflow.template && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Template: {workflow.template}</span>}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="mb-6">
+                                        <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1.5">
+                                            <span>{project.progress === 0 ? 'Not started' : project.progress === 100 ? 'Completed' : 'Progress'}</span>
+                                            <span>{project.progress}%</span>
+                                        </div>
+                                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-1000 ${project.progress === 0 ? 'bg-slate-200' : project.progress === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-indigo-500'}`}
+                                                style={{ width: `${Math.max(project.progress, project.progress === 0 ? 0 : 2)}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between pt-4 border-t border-slate-50">
+                                        <div className="flex gap-2 flex-wrap">
+                                            {(project.tags ?? []).map(tag => (
+                                                <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{tag}</span>
+                                            ))}
+                                            {workflow.replay_session_id && (
+                                                <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold border border-amber-200">Replay linked</span>
+                                            )}
+                                            {(!project.tags || project.tags.length === 0) && !workflow.replay_session_id && (
+                                                <span className="text-[10px] text-slate-300">No tags</span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+                                            <Clock size={12} />
+                                            {formatTime(project.last_active)}
+                                        </div>
+                                    </div>
                                 </div>
+                            );
+                        })}
 
-                                <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{project.title}</h3>
-                                <p className="text-sm text-slate-500 mb-6 line-clamp-2 h-10">{project.description || 'No description provided'}</p>
-
-                                {/* Progress Bar */}
-                                <div className="mb-6">
-                                    <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1.5">
-                                        <span>{project.progress === 0 ? 'Not started' : project.progress === 100 ? 'Completed' : 'Progress'}</span>
-                                        <span>{project.progress}%</span>
-                                    </div>
-                                    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all duration-1000 ${project.progress === 0 ? 'bg-slate-200' : project.progress === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-indigo-500'}`}
-                                            style={{ width: `${Math.max(project.progress, project.progress === 0 ? 0 : 2)}%` }}
-                                        ></div>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                                    <div className="flex gap-2">
-                                        {(project.tags ?? []).map(tag => (
-                                            <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{tag}</span>
-                                        ))}
-                                        {(!project.tags || project.tags.length === 0) && (
-                                            <span className="text-[10px] text-slate-300">No tags</span>
-                                        )}
-                                    </div>
-                                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
-                                        <Clock size={12} />
-                                        {formatTime(project.last_active)}
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-
-                        {/* Add New Placeholder */}
                         <button
                             onClick={() => setShowCreateForm(true)}
                             className="border-2 border-dashed border-slate-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 hover:border-blue-300 hover:bg-blue-50/50 transition-all group min-h-[260px]"
@@ -447,7 +752,7 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
                             </div>
                             <div className="text-center">
                                 <h3 className="font-bold text-slate-700 group-hover:text-blue-600 transition-colors">Create New Project</h3>
-                                <p className="text-sm text-slate-400 mt-1">Start from scratch or import repo</p>
+                                <p className="text-sm text-slate-400 mt-1">Start from scratch or seed from blueprint/template</p>
                             </div>
                         </button>
                     </div>
@@ -456,6 +761,54 @@ const ProjectsView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) 
         </div>
     );
 };
+
+type AppWorkflowContext = {
+  project: Project | null;
+  overview: WorkflowOverview | null;
+  timeline: WorkflowTimelineResponse | null;
+  replay: WorkflowReplayResponse | null;
+};
+
+const toTimelineLane = (lane?: string): WorkflowReplayItem['lane'] => {
+  switch ((lane || '').toLowerCase()) {
+    case 'project':
+      return 'project';
+    case 'plan':
+      return 'plan';
+    case 'task':
+      return 'task';
+    case 'audit':
+      return 'audit';
+    case 'trace':
+    case 'agent':
+    default:
+      return 'trace';
+  }
+};
+
+const workflowTimelineEventToItem = (event: WorkflowTimelineEvent): WorkflowReplayItem => ({
+  id: event.id,
+  lane: toTimelineLane(event.lane),
+  title: event.title,
+  message: event.detail || event.title,
+  timestamp: event.timestamp,
+  status: event.status,
+  actor: event.source,
+  evidence: [event.session_id, event.agent_id].filter(Boolean).join(' · ') || undefined,
+  sourceId: event.trace_id || event.audit_id || event.task_id || event.plan_id || event.project_id,
+});
+
+const workflowReplayEventToItem = (event: WorkflowReplayEvent): WorkflowReplayItem => ({
+  id: event.id,
+  lane: toTimelineLane(event.lane),
+  title: event.speaker || event.type,
+  message: event.message,
+  timestamp: event.timestamp,
+  status: event.status,
+  actor: event.speaker,
+  evidence: event.evidence,
+  sourceId: event.trace_id || event.audit_id || event.task_id || event.plan_id || event.project_id,
+});
 
 type SettingsProfile = {
   name: string;
@@ -761,7 +1114,7 @@ const SettingsView = ({
   )
 }
 
-const SessionsView = () => {
+const SessionsView = ({ onOpenReplay, onReplayData }: { onOpenReplay: () => void; onReplayData: (replay: WorkflowReplayData) => void }) => {
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -778,6 +1131,22 @@ const SessionsView = () => {
     { enabled: !!selectedSessionId },
   );
 
+  const { data: rawArchiveData } = useApi<RawArchiveListResponse | null>(
+    (signal) => selectedSessionId
+      ? listRawArchive({ session_id: selectedSessionId, limit: 20 }, signal)
+      : Promise.resolve(null),
+    [selectedSessionId],
+    { enabled: !!selectedSessionId },
+  );
+
+  const { data: auditData } = useApi<AuditLogListResponse | null>(
+    (signal) => selectedSessionId
+      ? listAuditLogs({ limit: 20 }, signal)
+      : Promise.resolve(null),
+    [selectedSessionId],
+    { enabled: !!selectedSessionId },
+  );
+
   const handleSelectAgent = (agent: Agent) => {
     setSelectedAgentId(agent.id);
     setSelectedSessionId(agent.session_id || agent.id);
@@ -787,6 +1156,19 @@ const SessionsView = () => {
   const selectedAgent = agents?.find(a => a.id === selectedAgentId);
   const trace = traceData?.trace;
   const agentList = agents ?? [];
+  const workflowTimeline = mergeWorkflowTimeline([], trace, rawArchiveData?.entries ?? [], (auditData?.entries ?? []).filter(entry => !selectedSessionId || entry.trace?.session_id === selectedSessionId || entry.actor.session_id === selectedSessionId));
+  const replayData = buildWorkflowReplayData(selectedAgent?.name || 'Session workflow', {
+    workflow_title: selectedAgent?.name,
+    replay_session_id: selectedSessionId || undefined,
+    approval: [],
+    decisions: [],
+    timeline: workflowTimeline,
+  }, workflowTimeline);
+
+  const handleOpenReplay = () => {
+    onReplayData(replayData);
+    onOpenReplay();
+  };
 
   const SidebarContent = () => (
     <>
@@ -838,6 +1220,7 @@ const SessionsView = () => {
           </div>
           {selectedAgent && (
             <div className="flex items-center gap-2">
+              <button onClick={handleOpenReplay} className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg">Replay</button>
               <button onClick={() => selectedSessionId && stopConversation(selectedSessionId)} className="px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded-lg">Stop</button>
               <button onClick={() => selectedSessionId && retryConversation(selectedSessionId)} className="px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 rounded-lg">Retry</button>
             </div>
@@ -849,16 +1232,41 @@ const SessionsView = () => {
           ) : !trace ? (
             <div className="text-center py-8 text-sm text-slate-400">No conversation trace available</div>
           ) : (
-            <div className="space-y-4">
-              {trace.children?.map((child, i) => (
-                <div key={child.id || i} className={`flex ${child.agent_role === 'orchestrator' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`rounded-2xl px-4 py-3 max-w-[90%] md:max-w-2xl shadow-sm ${child.agent_role === 'orchestrator' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 rounded-tl-sm'}`}>
-                    <p className="text-xs font-bold mb-1 opacity-70">{child.agent_role} • {child.tool_name}</p>
-                    <p className="text-sm leading-relaxed">{child.output || 'Processing...'}</p>
+            <>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800">Workflow timeline</h3>
+                    <p className="text-xs text-slate-500">Trace, raw archive, and audit evidence are merged into one replay surface.</p>
                   </div>
+                  <button onClick={handleOpenReplay} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold">Open replay</button>
                 </div>
-              )) ?? <div className="text-center py-4 text-sm text-slate-400">Empty trace</div>}
-            </div>
+                <div className="space-y-3">
+                  {workflowTimeline.slice(0, 6).map((item) => (
+                    <div key={item.id} className="flex gap-3 text-sm">
+                      <div className="w-20 shrink-0 text-[10px] uppercase tracking-widest text-slate-400">{item.lane}</div>
+                      <div className="flex-1 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-700">{item.title}</span>
+                          {item.status && <span className="text-[10px] text-slate-400 uppercase">{item.status}</span>}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">{item.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-4">
+                {trace.children?.map((child, i) => (
+                  <div key={child.id || i} className={`flex ${child.agent_role === 'orchestrator' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`rounded-2xl px-4 py-3 max-w-[90%] md:max-w-2xl shadow-sm ${child.agent_role === 'orchestrator' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 rounded-tl-sm'}`}>
+                      <p className="text-xs font-bold mb-1 opacity-70">{child.agent_role} • {child.tool_name}</p>
+                      <p className="text-sm leading-relaxed">{child.output || 'Processing...'}</p>
+                    </div>
+                  </div>
+                )) ?? <div className="text-center py-4 text-sm text-slate-400">Empty trace</div>}
+              </div>
+            </>
           )}
         </main>
         <div className="p-4 md:p-6 bg-white border-t border-slate-100 absolute bottom-0 md:static w-full">
@@ -1413,33 +1821,62 @@ const AgentsView = ({ showToast, onNavigate }: { showToast: (msg: string) => voi
     );
 }
 
-const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToast: (m: string) => void }) => {
+const PlanView = ({
+  workflowContext,
+  onOpenModal,
+  showToast,
+  onReplayData,
+}: {
+  workflowContext?: AppWorkflowContext | null,
+  onOpenModal: () => void,
+  showToast: (m: string) => void,
+  onReplayData: (replay: WorkflowReplayData) => void,
+}) => {
     const [mobileTab, setMobileTab] = useState<'editor' | 'status'>('editor');
-    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+    const workflowProject = workflowContext?.project ?? null;
+    const workflowOverview = workflowContext?.overview ?? null;
+    const workflowTimelineResponse = workflowContext?.timeline ?? null;
+    const workflowReplayResponse = workflowContext?.replay ?? null;
+    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(workflowOverview?.plans?.[0]?.id ?? null);
 
-    // Fetch plans
     const { data: plans, loading: plansLoading, error: plansError, refetch: refetchPlans } = useApi<Plan[]>(
-        (signal) => listPlans(signal),
-        [],
+        (signal) => workflowProject ? Promise.resolve(workflowOverview?.plans ?? []) : listPlans(signal),
+        [workflowProject?.id, workflowOverview?.plans?.length ?? 0],
     );
 
-    // Fetch tasks for selected plan
     const { data: tasks, loading: tasksLoading, refetch: refetchTasks } = useApi<PlanTask[]>(
-        (signal) => selectedPlanId ? getPlanTasks(selectedPlanId, signal) : Promise.resolve([]),
-        [selectedPlanId],
-        { enabled: !!selectedPlanId },
+        (signal) => {
+            if (workflowProject) {
+                if (!selectedPlanId) return Promise.resolve(workflowOverview?.tasks ?? []);
+                return Promise.resolve((workflowOverview?.tasks ?? []).filter(task => task.plan_id === selectedPlanId));
+            }
+            return selectedPlanId ? getPlanTasks(selectedPlanId, signal) : Promise.resolve([]);
+        },
+        [workflowProject?.id, selectedPlanId, workflowOverview?.tasks?.length ?? 0],
+        { enabled: workflowProject ? Boolean(workflowOverview) : !!selectedPlanId },
     );
 
-    const selectedPlan = plans?.find(p => p.id === selectedPlanId) ?? plans?.[0] ?? null;
+    const selectedPlan = workflowProject
+        ? (workflowOverview?.plans.find(p => p.id === selectedPlanId) ?? workflowOverview?.plans?.[0] ?? null)
+        : (plans?.find(p => p.id === selectedPlanId) ?? plans?.[0] ?? null);
 
-    // Auto-select first plan
     useEffect(() => {
-        if (plans && plans.length > 0 && !selectedPlanId) {
+        if (workflowOverview?.plans?.length) {
+            setSelectedPlanId(prev => prev ?? workflowOverview.plans[0].id);
+        }
+    }, [workflowOverview]);
+
+    useEffect(() => {
+        if (!workflowProject && plans && plans.length > 0 && !selectedPlanId) {
             setSelectedPlanId(plans[0].id);
         }
-    }, [plans, selectedPlanId]);
+    }, [workflowProject, plans, selectedPlanId]);
 
     const handleCreatePlan = async () => {
+        if (workflowProject) {
+            showToast('Workflow-backed project is read-only in this MVP');
+            return;
+        }
         try {
             const plan = await createPlan({ title: 'New Plan', description: '' });
             showToast('Plan created');
@@ -1449,7 +1886,7 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
     };
 
     const handleTaskStatusToggle = async (task: PlanTask) => {
-        if (!selectedPlanId) return;
+        if (!selectedPlanId || workflowProject) return;
         const nextStatus = task.status === 'completed' ? 'pending' : task.status === 'pending' ? 'in_progress' : 'completed';
         try {
             await updatePlanTask(selectedPlanId, task.id, { status: nextStatus } as Partial<PlanTask>);
@@ -1462,12 +1899,71 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
             case 'completed': return { bg: 'bg-green-50', border: 'border-green-100', badge: 'text-green-600 bg-green-50', icon: <Check size={16} className="text-green-500" />, label: 'DONE' };
             case 'in_progress': return { bg: 'bg-blue-50/50', border: 'border-blue-100', badge: 'text-blue-600 bg-blue-100 animate-pulse', icon: <Code size={16} className="text-blue-600" />, label: 'RUNNING' };
             case 'failed': return { bg: 'bg-red-50', border: 'border-red-100', badge: 'text-red-600 bg-red-50', icon: <X size={16} className="text-red-500" />, label: 'FAILED' };
+            case 'blocked': return { bg: 'bg-amber-50', border: 'border-amber-100', badge: 'text-amber-600 bg-amber-50', icon: <Shield size={16} className="text-amber-500" />, label: 'BLOCKED' };
             default: return { bg: 'bg-white', border: 'border-slate-200', badge: 'text-slate-400 bg-slate-50', icon: <Clock size={16} className="text-slate-400" />, label: 'PENDING' };
         }
     };
 
     const taskList = tasks ?? [];
     const completedCount = taskList.filter(t => t.status === 'completed').length;
+    const workflow = selectedPlan ? extractWorkflowMetadata(selectedPlan.metadata) : { approval: [], decisions: [], timeline: [] } as WorkflowMetadata;
+    const backendProjectWorkflow = extractWorkflowMetadata(workflowProject?.metadata);
+    const overviewDecisions = workflowOverview?.plans.map((plan, index) => ({
+        id: `overview-plan-${plan.id}`,
+        summary: `Plan ${index + 1}: ${plan.title}`,
+        owner: 'Workflow overview',
+        reason: plan.description || `${plan.completed_count}/${plan.task_count} tasks completed`,
+        timestamp: plan.updated_at,
+    })) ?? [];
+    const backendTimeline = workflowTimelineResponse?.events.map(workflowTimelineEventToItem) ?? [];
+    const replayTimeline = workflowReplayResponse?.events.map(workflowReplayEventToItem) ?? [];
+    const latestAuditTimeline = workflowOverview?.latest_audit ? [{
+        id: `audit-${workflowOverview.latest_audit.id}`,
+        lane: 'audit' as const,
+        title: workflowOverview.latest_audit.action || workflowOverview.latest_audit.event_type,
+        message: String(workflowOverview.latest_audit.resource?.name || workflowOverview.latest_audit.resource?.id || 'Audit evidence'),
+        timestamp: workflowOverview.latest_audit.timestamp,
+        status: workflowOverview.latest_audit.outcome,
+        actor: workflowOverview.latest_audit.actor?.name || workflowOverview.latest_audit.actor?.id,
+        evidence: workflowOverview.latest_audit.trace?.path,
+        sourceId: workflowOverview.latest_audit.id,
+    }] : [];
+    const fallbackWorkflow = buildFallbackWorkflowMetadata(workflowProject, selectedPlan, taskList);
+    const mergedWorkflow: WorkflowMetadata = {
+        ...fallbackWorkflow,
+        ...backendProjectWorkflow,
+        ...workflow,
+        workflow_id: workflowProject?.id ?? backendProjectWorkflow.workflow_id ?? workflow.workflow_id ?? fallbackWorkflow.workflow_id,
+        workflow_title: backendProjectWorkflow.workflow_title ?? workflow.workflow_title ?? fallbackWorkflow.workflow_title,
+        blueprint: backendProjectWorkflow.blueprint ?? workflow.blueprint ?? fallbackWorkflow.blueprint,
+        template: backendProjectWorkflow.template ?? workflow.template ?? fallbackWorkflow.template,
+        replay_session_id: workflowReplayResponse?.session_id ?? backendProjectWorkflow.replay_session_id ?? workflow.replay_session_id ?? fallbackWorkflow.replay_session_id,
+        approval: backendProjectWorkflow.approval?.length
+            ? backendProjectWorkflow.approval
+            : workflow.approval && workflow.approval.length > 0
+                ? workflow.approval
+                : fallbackWorkflow.approval,
+        decisions: [
+            ...(backendProjectWorkflow.decisions ?? []),
+            ...(workflow.decisions ?? []),
+            ...overviewDecisions,
+            ...(fallbackWorkflow.decisions ?? []),
+        ].filter((item, index, arr) => arr.findIndex(candidate => candidate.id === item.id) === index),
+        timeline: [
+            ...(workflow.timeline ?? []),
+            ...backendTimeline,
+            ...replayTimeline,
+            ...latestAuditTimeline,
+            ...(fallbackWorkflow.timeline ?? []),
+        ],
+    };
+    const timeline = sortReplayItems(mergedWorkflow.timeline ?? []);
+    const dependencyRows = taskList.filter(task => (task.dependencies?.length ?? 0) > 0);
+    const handleOpenReplay = () => {
+        onReplayData(buildWorkflowReplayData(selectedPlan?.title || workflowProject?.title || 'Plan replay', mergedWorkflow, timeline));
+        onOpenModal();
+        showToast(workflowProject ? 'Workflow replay opened' : 'Execution started');
+    };
 
     return (
         <div className="flex-1 flex flex-col h-full bg-slate-50 relative z-0 overflow-hidden pb-16 md:pb-0">
@@ -1488,7 +1984,6 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                     )}
                 </div>
 
-                {/* Stepper */}
                 <div className="flex items-center">
                    <div className="flex flex-col items-center group cursor-pointer">
                         <div className="size-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-1 shadow-sm">
@@ -1522,16 +2017,15 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                      </div>
                 </div>
             </header>
-            
-            {/* Mobile Tab Switcher */}
+
             <div className="md:hidden flex border-b border-slate-200 bg-white">
-                <button 
+                <button
                     className={`flex-1 py-3 text-sm font-bold ${mobileTab === 'editor' ? 'text-blue-600 border-b-2 border-blue-500' : 'text-slate-500'}`}
                     onClick={() => setMobileTab('editor')}
                 >
                     Editor
                 </button>
-                <button 
+                <button
                     className={`flex-1 py-3 text-sm font-bold ${mobileTab === 'status' ? 'text-blue-600 border-b-2 border-blue-500' : 'text-slate-500'}`}
                     onClick={() => setMobileTab('status')}
                 >
@@ -1540,7 +2034,6 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
             </div>
 
             <div className="flex-1 flex overflow-hidden relative">
-                {/* Main Content (Editor) */}
                 <div className={`flex-1 overflow-y-auto p-4 md:p-10 flex flex-col items-center transition-opacity duration-300 ${mobileTab === 'status' ? 'opacity-0 absolute pointer-events-none' : 'opacity-100'} md:opacity-100 md:static md:pointer-events-auto`}>
                     {plansLoading ? (
                         <LoadingSkeleton variant="text" count={3} />
@@ -1554,7 +2047,7 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                             action={{ label: 'New Plan', onClick: handleCreatePlan }}
                         />
                     ) : (
-                    <div className="w-full max-w-3xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="w-full max-w-4xl space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                          <div className="flex items-start justify-between flex-wrap gap-2">
                             <div>
                                 <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight mb-2">{selectedPlan.title}</h2>
@@ -1570,23 +2063,90 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                             </span>
                          </div>
 
-                         {/* Editor Card */}
-                         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-[400px] flex flex-col group focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
-                             <div className="bg-slate-50 border-b border-slate-100 p-2 flex gap-1">
-                                <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Edit3 size={16} /></button>
-                                <div className="w-px h-4 bg-slate-200 my-auto mx-1"></div>
-                                <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Grid size={16} /></button>
-                             </div>
-                             <textarea
-                                className="flex-1 w-full p-6 md:p-8 resize-none border-none focus:ring-0 text-slate-700 leading-relaxed font-mono text-xs md:text-sm"
-                                defaultValue={selectedPlan.description || '# Plan\nDescribe your plan here...'}
-                             />
+                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-[320px] flex flex-col group focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
+                                 <div className="bg-slate-50 border-b border-slate-100 p-2 flex gap-1">
+                                    <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Edit3 size={16} /></button>
+                                    <div className="w-px h-4 bg-slate-200 my-auto mx-1"></div>
+                                    <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Grid size={16} /></button>
+                                 </div>
+                                 <textarea
+                                    className="flex-1 w-full p-6 md:p-8 resize-none border-none focus:ring-0 text-slate-700 leading-relaxed font-mono text-xs md:text-sm"
+                                    defaultValue={selectedPlan.description || '# Plan\nDescribe your plan here...'}
+                                 />
+                            </div>
+                            <div className="space-y-4">
+                                <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-800">Workflow details</h3>
+                                            <p className="text-xs text-slate-500">Minimal approval, dependency, decision, and timeline surface attached to Plan / Task.</p>
+                                        </div>
+                                        <button onClick={handleOpenReplay} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold">Replay</button>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Approvals</div>
+                                            <div className="space-y-2">
+                                                {(mergedWorkflow.approval ?? []).map((item, index) => (
+                                                    <div key={`${item.stage}-${index}`} className="flex items-start justify-between gap-2">
+                                                        <div>
+                                                            <p className="font-semibold text-slate-700">{item.stage}</p>
+                                                            {item.owner && <p className="text-xs text-slate-400">{item.owner}</p>}
+                                                        </div>
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">{item.status}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Decisions</div>
+                                            <div className="space-y-2">
+                                                {(mergedWorkflow.decisions ?? []).map((item) => (
+                                                    <div key={item.id}>
+                                                        <p className="font-semibold text-slate-700">{item.summary}</p>
+                                                        {item.reason && <p className="text-xs text-slate-400 mt-1">{item.reason}</p>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Dependencies</div>
+                                        {dependencyRows.length === 0 ? (
+                                            <p className="text-xs text-slate-400">No explicit task dependencies</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {dependencyRows.map((task) => (
+                                                    <div key={task.id} className="text-sm text-slate-600">
+                                                        <span className="font-semibold text-slate-700">{task.title}</span>
+                                                        <span className="text-slate-400"> ← {task.dependencies?.join(', ')}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Timeline</div>
+                                        <div className="space-y-2">
+                                            {timeline.slice(0, 4).map((item) => (
+                                                <div key={item.id} className="flex gap-3 text-xs">
+                                                    <span className="w-16 shrink-0 uppercase tracking-widest text-slate-400">{item.lane}</span>
+                                                    <div>
+                                                        <p className="font-semibold text-slate-700">{item.title}</p>
+                                                        <p className="text-slate-500">{item.message}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                          </div>
                     </div>
                     )}
                 </div>
 
-                {/* Status Sidebar (Desktop: Sidebar, Mobile: Full View) */}
                 <aside className={`w-full md:w-96 bg-white/60 backdrop-blur-md border-l border-slate-200 flex flex-col z-10 shadow-[-5px_0_30px_rgba(0,0,0,0.02)] absolute inset-0 md:static transition-transform duration-300 ${mobileTab === 'status' ? 'translate-x-0 bg-white' : 'translate-x-full md:translate-x-0'}`}>
                     <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white/50">
                         <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm">
@@ -1626,16 +2186,16 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                                          {task.description && (
                                              <p className="text-xs text-slate-500 pl-6 border-l-2 border-slate-100 ml-1.5 line-clamp-2">{task.description}</p>
                                          )}
-                                         {task.assignee && (
-                                             <p className="text-[10px] text-slate-400 font-mono mt-2 pl-6 ml-1.5">{task.assignee}</p>
-                                         )}
+                                         <div className="flex flex-wrap gap-2 mt-2 pl-6 ml-1.5 text-[10px] text-slate-400">
+                                             {task.assignee && <span>{task.assignee}</span>}
+                                             {task.dependencies && task.dependencies.length > 0 && <span>depends on {task.dependencies.join(', ')}</span>}
+                                         </div>
                                      </div>
                                  );
                              })
                          )}
                     </div>
 
-                    {/* Progress Summary */}
                     <div className="h-1/3 bg-slate-50 border-t border-slate-200 flex flex-col">
                         <div className="p-4 border-b border-slate-200 flex justify-between items-center">
                             <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
@@ -1661,7 +2221,7 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
                     </div>
 
                     <div className="p-4 bg-white border-t border-slate-200">
-                         <button onClick={() => { onOpenModal(); showToast("Execution started") }} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95">
+                         <button onClick={handleOpenReplay} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95">
                             <Zap size={18} /> Execute Plan
                          </button>
                     </div>
@@ -1676,6 +2236,8 @@ const PlanView = ({ onOpenModal, showToast }: { onOpenModal: () => void, showToa
 const App = () => {
   const [activeMode, setActiveMode] = useState<ViewMode>(ViewMode.HOME);
   const [isLogModalOpen, setIsLogModalOpen] = useState(false);
+  const [replayData, setReplayData] = useState<WorkflowReplayData | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [profile, setProfile] = useState<SettingsProfile>(() => {
     try {
@@ -1710,21 +2272,63 @@ const App = () => {
       }, 3000);
   };
 
-  // Helper to render the correct view
+  const handleProjectContext = (project: Project) => {
+    setSelectedProject(project);
+    setReplayData(null);
+  };
+
+  const workflowProjectId = selectedProject?.id;
+  const workflowReplaySessionId = extractWorkflowMetadata(selectedProject?.metadata).replay_session_id;
+  const { data: workflowOverview } = useApi<WorkflowOverview | null>(
+    (signal) => workflowProjectId ? getWorkflowOverview(workflowProjectId, signal) : Promise.resolve(null),
+    [workflowProjectId],
+    { enabled: !!workflowProjectId },
+  );
+  const { data: workflowTimeline } = useApi<WorkflowTimelineResponse | null>(
+    (signal) => workflowProjectId ? getWorkflowTimeline(workflowProjectId, signal) : Promise.resolve(null),
+    [workflowProjectId],
+    { enabled: !!workflowProjectId },
+  );
+  const { data: workflowReplay } = useApi<WorkflowReplayResponse | null>(
+    (signal) => workflowProjectId ? getWorkflowReplay(workflowProjectId, { session_id: workflowReplaySessionId }, signal) : Promise.resolve(null),
+    [workflowProjectId, workflowReplaySessionId],
+    { enabled: !!workflowProjectId },
+  );
+  const workflowContext: AppWorkflowContext | null = workflowProjectId
+    ? {
+        project: selectedProject,
+        overview: workflowOverview,
+        timeline: workflowTimeline,
+        replay: workflowReplay,
+      }
+    : null;
+
   const renderView = () => {
     switch (activeMode) {
       case ViewMode.HOME:
         return <HomeView onNavigate={setActiveMode} showToast={showToast} />;
       case ViewMode.PROJECTS:
-        return <ProjectsView onNavigate={setActiveMode} showToast={showToast} />;
+        return <ProjectsView onNavigate={setActiveMode} showToast={showToast} onProjectContext={handleProjectContext} />;
       case ViewMode.SESSIONS:
-        return <SessionsView />;
+        return (
+          <SessionsView
+            onOpenReplay={() => setIsLogModalOpen(true)}
+            onReplayData={setReplayData}
+          />
+        );
       case ViewMode.MEMORY:
         return <MemoryView />;
       case ViewMode.AGENTS:
         return <AgentsView showToast={showToast} onNavigate={setActiveMode} />;
       case ViewMode.PLAN:
-        return <PlanView onOpenModal={() => setIsLogModalOpen(true)} showToast={showToast} />;
+        return (
+          <PlanView
+            workflowContext={workflowContext}
+            onOpenModal={() => setIsLogModalOpen(true)}
+            showToast={showToast}
+            onReplayData={setReplayData}
+          />
+        );
       case ViewMode.SETTINGS:
         return <SettingsView showToast={showToast} profile={profile} onProfileChange={setProfile} />;
       default:
@@ -1737,7 +2341,11 @@ const App = () => {
       <Sidebar activeMode={activeMode} setMode={setActiveMode} userName={profile.name} />
       {renderView()}
       <MobileNav activeMode={activeMode} setMode={setActiveMode} />
-      <LogModal isOpen={isLogModalOpen} onClose={() => setIsLogModalOpen(false)} />
+      <LogModal
+        isOpen={isLogModalOpen}
+        onClose={() => setIsLogModalOpen(false)}
+        replay={replayData}
+      />
       <ToastContainer toasts={toasts} />
     </div>
   );
