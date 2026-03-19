@@ -1,4 +1,8 @@
-import type { SkillRegistration } from '../tool-runtime/types.js';
+import type {
+  SkillRegistration,
+  ToolRuntimeDecision,
+  ToolRuntimeRiskLevel,
+} from '../tool-runtime/types.js';
 
 /**
  * Cowork Mode - 多 CLI 协作类型定义
@@ -79,6 +83,45 @@ export interface EditResult {
   message?: string;
 }
 
+export interface ToolRuntimeExecutionOutcome {
+  decision: ToolRuntimeDecision;
+  risk: ToolRuntimeRiskLevel;
+  isolated: boolean;
+  processId?: string;
+  notes: string[];
+}
+
+export interface ExecutorRuntimePolicy {
+  profileId?: string;
+  command?: string;
+  env?: Record<string, string>;
+  metadata?: Record<string, unknown>;
+  boundaries?: Array<{
+    type: 'command' | 'path' | 'network' | 'resource';
+    value: string;
+    risk: ToolRuntimeRiskLevel;
+    required?: boolean;
+    metadata?: Record<string, unknown>;
+  }>;
+  requestedBoundaries?: Array<{
+    type: 'command' | 'path' | 'network' | 'resource';
+    value: string;
+    risk: ToolRuntimeRiskLevel;
+    required?: boolean;
+    metadata?: Record<string, unknown>;
+  }>;
+}
+
+export interface ExecutorRuntimeContext {
+  actor?: {
+    id: string;
+    type: 'user' | 'system' | 'agent' | 'service';
+    name?: string;
+    sessionId?: string;
+  };
+  policy?: ExecutorRuntimePolicy;
+}
+
 /**
  * 代码编辑器接口
  */
@@ -128,6 +171,7 @@ export interface CoworkTaskOutput {
   result?: string;
   diffs?: Diff[];
   error?: string;
+  runtime?: ToolRuntimeExecutionOutcome;
   metrics?: {
     duration: number;
     tokensUsed?: number;
@@ -143,6 +187,7 @@ export interface CoworkTask {
   executor: string;
   input: CoworkTaskInput;
   config?: CoworkTaskConfig;
+  runtime?: ExecutorRuntimeContext;
   status: CoworkTaskStatus;
   output?: CoworkTaskOutput;
   createdAt: number;
@@ -167,9 +212,6 @@ export interface ExecutorCapabilities {
   };
 }
 
-/**
- * 执行器注册信息
- */
 export interface ExecutorRegistration {
   name: string;
   editor: ICodeEditor;
@@ -177,49 +219,31 @@ export interface ExecutorRegistration {
   modelId?: string;
 }
 
-/**
- * 运行时执行选项
- */
 export interface RuntimeExecutionOptions {
   cwd?: string;
   worktreePath?: string;
   executorOverride?: ExecutorRegistration;
 }
 
-/**
- * ModelPool 抽象
- */
 export interface ModelPool {
   registerExecutor(executor: ExecutorRegistration): void;
   getModelId(executorName: string): string | undefined;
 }
 
-/**
- * ContextAssembler 抽象
- */
 export interface ContextAssembler {
   buildContextFromResult(result: ExecutionResult): string;
   attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask;
 }
 
-/**
- * PolicyGuard 抽象
- */
 export interface PolicyDecision {
   allowed: boolean;
   reason?: string;
 }
 
 export interface PolicyGuard {
-  canExecute(
-    task: CoworkTask,
-    executor: ExecutorRegistration
-  ): Promise<PolicyDecision> | PolicyDecision;
+  canExecute(task: CoworkTask, executor: ExecutorRegistration): Promise<PolicyDecision> | PolicyDecision;
 }
 
-/**
- * ExecutionSandbox 抽象
- */
 export interface SandboxedTask {
   task: CoworkTask;
   executor?: ExecutorRegistration;
@@ -230,19 +254,16 @@ export interface ExecutionSandbox {
   prepare(
     task: CoworkTask,
     executor: ExecutorRegistration,
-    options?: RuntimeExecutionOptions
+    options?: RuntimeExecutionOptions,
   ): Promise<SandboxedTask> | SandboxedTask;
 }
 
-/**
- * AgentRuntime 抽象
- */
 export interface AgentRuntimeLike {
   registerExecutor(
     name: string,
     editor: ICodeEditor,
     capabilities: ExecutorCapabilities,
-    modelId?: string
+    modelId?: string,
   ): void;
   registerSkill(skill: SkillRegistration, replace?: boolean): void;
   getExecutor(name: string): ExecutorRegistration | undefined;
@@ -258,7 +279,7 @@ export interface AgentRuntimeLike {
       sessionId?: string;
       agentId?: string;
       triggerReason?: string;
-    }
+    },
   ): Promise<TOutput>;
 }
 
@@ -319,9 +340,6 @@ export interface ExecutionResult {
   output?: CoworkTaskOutput;
   executor: string;
   duration: number;
-  /**
-   * Backward-compatible fields for legacy parallel modules.
-   */
   success?: boolean;
   diffs?: Diff[];
   error?: string;

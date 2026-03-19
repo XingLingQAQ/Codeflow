@@ -6,6 +6,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   CoworkOrchestrator,
 } from '../CoworkOrchestrator.js';
+import { AgentRuntime } from '../runtime.js';
+import { AuditManager } from '../../audit/AuditManager.js';
 import {
   ICodeEditor,
   ExecutorCapabilities,
@@ -510,6 +512,127 @@ describe('CoworkOrchestrator', () => {
 
       expect(result.interrupted).toBe(true);
       expect(result.results.length).toBe(1);
+    });
+  });
+
+
+  describe('runtime policy', () => {
+    function createTask(id: string, policy?: CoworkTask['runtime']): CoworkTask {
+      return {
+        id,
+        type: 'code-edit',
+        executor: 'test',
+        input: {
+          files: ['src/runtime.ts'],
+          instruction: 'Apply runtime policy aware edit',
+        },
+        runtime: policy,
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+    }
+
+    function createPolicyRuntime(boundaries: NonNullable<NonNullable<CoworkTask['runtime']>['policy']>['boundaries']) {
+      const auditManager = new AuditManager();
+      const runtime = new AgentRuntime({ auditManager });
+      runtime.registerExecutor('test', mockEditor, mockCapabilities);
+
+      const orchestratorWithRuntime = new CoworkOrchestrator(undefined, undefined, runtime);
+      return { auditManager, orchestratorWithRuntime, runtimeTask: { policy: { boundaries } } };
+    }
+
+    it('should allow execution and write runtime outcome when policy matches request boundaries', async () => {
+      const { auditManager, orchestratorWithRuntime, runtimeTask } = createPolicyRuntime([
+        { type: 'command', value: 'test', risk: 'low' },
+      ]);
+      const task = createTask('task-runtime-allow', runtimeTask);
+
+      const result = await orchestratorWithRuntime.execute(task);
+      const auditEntries = await auditManager.query({ resourceType: 'tool-runtime', outcome: 'success' });
+
+      expect(result.status).toBe('completed');
+      expect(task.output?.runtime).toMatchObject({
+        decision: 'allow',
+        isolated: false,
+        risk: 'low',
+      });
+      expect(mockEditor.editCalls.length).toBe(1);
+      expect(auditEntries.entries[0]?.action).toBe('policy_execute');
+    });
+
+    it('should isolate execution for unmatched low-risk boundary and continue editing', async () => {
+      const { orchestratorWithRuntime, runtimeTask } = createPolicyRuntime([
+        { type: 'command', value: 'test', risk: 'low' },
+      ]);
+      const task = createTask('task-runtime-isolated', {
+        ...runtimeTask,
+        policy: {
+          ...runtimeTask.policy,
+          requestedBoundaries: [{ type: 'resource', value: 'memory:burst', risk: 'low' }],
+        },
+      });
+
+      const result = await orchestratorWithRuntime.execute(task);
+
+      expect(result.status).toBe('completed');
+      expect(task.output?.runtime).toMatchObject({
+        decision: 'allow_with_isolation',
+        isolated: true,
+        processId: 'isolated:task-runtime-isolated',
+      });
+      expect(mockEditor.editCalls.length).toBe(1);
+    });
+
+    it('should require approval for unmatched medium-risk boundary and skip editing', async () => {
+      const { auditManager, orchestratorWithRuntime, runtimeTask } = createPolicyRuntime([
+        { type: 'command', value: 'test', risk: 'low' },
+      ]);
+      const task = createTask('task-runtime-approval', {
+        ...runtimeTask,
+        policy: {
+          ...runtimeTask.policy,
+          requestedBoundaries: [{ type: 'network', value: 'api.internal', risk: 'medium' }],
+        },
+      });
+
+      const result = await orchestratorWithRuntime.execute(task);
+      const auditEntries = await auditManager.query({ resourceType: 'tool-runtime', outcome: 'failure' });
+
+      expect(result.status).toBe('failed');
+      expect(result.output?.error).toBe('Execution requires manual approval');
+      expect(task.output?.runtime).toMatchObject({
+        decision: 'require_approval',
+        isolated: false,
+        risk: 'medium',
+      });
+      expect(mockEditor.editCalls.length).toBe(0);
+      expect(auditEntries.entries[0]?.details?.decision).toBe('require_approval');
+    });
+
+    it('should deny execution for unmatched high-risk boundary and skip editing', async () => {
+      const { auditManager, orchestratorWithRuntime, runtimeTask } = createPolicyRuntime([
+        { type: 'command', value: 'test', risk: 'low' },
+      ]);
+      const task = createTask('task-runtime-deny', {
+        ...runtimeTask,
+        policy: {
+          ...runtimeTask.policy,
+          requestedBoundaries: [{ type: 'command', value: 'powershell', risk: 'high' }],
+        },
+      });
+
+      const result = await orchestratorWithRuntime.execute(task);
+      const auditEntries = await auditManager.query({ resourceType: 'tool-runtime', outcome: 'failure' });
+
+      expect(result.status).toBe('failed');
+      expect(result.output?.error).toBe('Execution blocked by runtime policy');
+      expect(task.output?.runtime).toMatchObject({
+        decision: 'deny',
+        isolated: false,
+        risk: 'high',
+      });
+      expect(mockEditor.editCalls.length).toBe(0);
+      expect(auditEntries.entries[0]?.details?.decision).toBe('deny');
     });
   });
 
