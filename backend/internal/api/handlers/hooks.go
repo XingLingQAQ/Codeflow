@@ -132,13 +132,12 @@ func TriggerHook(c *gin.Context) {
 	}
 
 	mgr := hooks.GetHookManager()
-	hook, err := mgr.GetHook(name)
-	if err != nil {
+	if _, err := mgr.GetHook(name); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
-	result, err := mgr.Trigger(c.Request.Context(), hook.Config.Type, req.Payload)
+	result, err := mgr.TriggerHook(c.Request.Context(), name, req.Payload)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

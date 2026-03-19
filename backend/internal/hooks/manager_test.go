@@ -157,6 +157,29 @@ func TestHookManager_TriggerMultipleHooks(t *testing.T) {
 	assert.Equal(t, []string{"hook2", "hook1", "hook3"}, executionOrder)
 }
 
+func TestHookManager_TriggerHookByName(t *testing.T) {
+	mgr := NewHookManager()
+
+	var executionOrder []string
+	mgr.Register(HookConfig{Name: "hook-a", Type: HookBeforeSend, Enabled: true, Priority: 1}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		executionOrder = append(executionOrder, "hook-a")
+		return map[string]interface{}{"handler": "a", "payload": payload}, nil
+	})
+	mgr.Register(HookConfig{Name: "hook-b", Type: HookBeforeSend, Enabled: true, Priority: 2}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		executionOrder = append(executionOrder, "hook-b")
+		return map[string]interface{}{"handler": "b", "payload": payload}, nil
+	})
+
+	result, err := mgr.TriggerHook(context.Background(), "hook-b", "test-payload")
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"hook-b"}, executionOrder)
+
+	resultMap, ok := result.(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "b", resultMap["handler"])
+	assert.Equal(t, "test-payload", resultMap["payload"])
+}
+
 func TestHookManager_TriggerDisabledHook(t *testing.T) {
 	mgr := NewHookManager()
 

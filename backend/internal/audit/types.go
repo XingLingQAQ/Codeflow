@@ -63,6 +63,8 @@ type AuditResource struct {
 // AuditTrace 审计追踪信息
 type AuditTrace struct {
 	RequestID  string  `json:"request_id,omitempty"`
+	ProjectID  string  `json:"project_id,omitempty"`
+	PlanID     string  `json:"plan_id,omitempty"`
 	SessionID  string  `json:"session_id,omitempty"`
 	TaskID     string  `json:"task_id,omitempty"`
 	AgentID    string  `json:"agent_id,omitempty"`

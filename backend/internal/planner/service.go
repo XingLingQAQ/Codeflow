@@ -1283,6 +1283,11 @@ func GetPlanner() IPlanner {
 	return defaultPlanner
 }
 
+// HasPlanner reports whether the global planner has been configured.
+func HasPlanner() bool {
+	return defaultPlanner != nil
+}
+
 // SetPlanner 设置计划管理器实例
 func SetPlanner(planner IPlanner) {
 	defaultPlanner = planner
