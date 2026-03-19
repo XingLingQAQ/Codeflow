@@ -457,7 +457,11 @@ export interface ResolvedPointer extends SAMGPointer {
 
 export interface QueryMemoryNode {
   id: string;
+  '@type'?: string[];
   label: string;
+  description?: string;
+  properties?: Record<string, unknown>;
+  aliases?: string[];
   activation: number;
   hop: number;
   pointers?: ResolvedPointer[];
@@ -466,6 +470,33 @@ export interface QueryMemoryNode {
 export interface QueryMemoryResponse {
   activated_nodes: QueryMemoryNode[];
   context_block: string;
+}
+
+export interface SAMGPathResponse {
+  source_id: string;
+  target_id: string;
+  paths: string[][];
+  count: number;
+}
+
+export interface SAMGGraphContext {
+  '@vocab'?: string;
+  '@base'?: string;
+}
+
+export interface SAMGGraph {
+  '@context': SAMGGraphContext;
+  '@id': string;
+  '@type': string;
+  '@graph': SAMGTriple[];
+  metadata: SAMGGraphStats;
+}
+
+export interface SAMGGraphImportResult {
+  message: string;
+  triple_count: number;
+  deduplicated_count: number;
+  total_triples: number;
 }
 
 export type MemorySourceKind = 'atomic_memory' | 'samg_pointer' | 'raw_archive';

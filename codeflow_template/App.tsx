@@ -11,7 +11,7 @@ import {
   LogOut, CreditCard, Key, Smartphone,
   Flame, Snowflake, Archive, ExternalLink, RefreshCw
 } from 'lucide-react';
-import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse, QueryMemoryResponse, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -30,6 +30,7 @@ import { retrieveMemoryAgent, buildMemoryAgentContext } from './services/memory_
 import { getGlobalConfig, updateGlobalConfig } from './services/config';
 import { healthCheck } from './services/health';
 import { listHooks } from './services/hooks';
+import { queryMemory, findPaths, exportGraph, importGraph } from './services/samg';
 import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
@@ -1838,6 +1839,16 @@ const PlanView = ({
     const workflowTimelineResponse = workflowContext?.timeline ?? null;
     const workflowReplayResponse = workflowContext?.replay ?? null;
     const [selectedPlanId, setSelectedPlanId] = useState<string | null>(workflowOverview?.plans?.[0]?.id ?? null);
+    const [knowledgeScenario, setKnowledgeScenario] = useState<'startup' | 'debug' | 'reuse'>('startup');
+    const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
+    const [graphSourceNodeId, setGraphSourceNodeId] = useState<string | null>(null);
+    const [selectedGraphNodeId, setSelectedGraphNodeId] = useState<string | null>(null);
+    const [packDraft, setPackDraft] = useState('');
+    const [exportedPack, setExportedPack] = useState<SAMGGraph | null>(null);
+    const [lastImportResult, setLastImportResult] = useState<SAMGGraphImportResult | null>(null);
+    const sourceCardsRef = useRef<HTMLDivElement | null>(null);
+    const graphJumpRef = useRef<HTMLDivElement | null>(null);
+    const knowledgePackRef = useRef<HTMLDivElement | null>(null);
 
     const { data: plans, loading: plansLoading, error: plansError, refetch: refetchPlans } = useApi<Plan[]>(
         (signal) => workflowProject ? Promise.resolve(workflowOverview?.plans ?? []) : listPlans(signal),
@@ -1959,6 +1970,363 @@ const PlanView = ({
     };
     const timeline = sortReplayItems(mergedWorkflow.timeline ?? []);
     const dependencyRows = taskList.filter(task => (task.dependencies?.length ?? 0) > 0);
+    const activeTask = taskList.find((task) => task.status === 'in_progress') ?? taskList[0] ?? null;
+    const blockedTasks = taskList.filter((task) => task.status === 'blocked');
+    const latestTimelineItem = timeline[timeline.length - 1] ?? null;
+    const knowledgeSessionId = workflowReplayResponse?.session_id
+        ?? backendProjectWorkflow.replay_session_id
+        ?? workflow.replay_session_id
+        ?? fallbackWorkflow.replay_session_id
+        ?? undefined;
+    const scenarioMeta = {
+        startup: {
+            label: '任务启动',
+            caption: '自动召回来源卡片、图谱跳转与知识包规则。',
+            query: `启动任务 ${activeTask?.title ?? selectedPlan?.title ?? '当前计划'} 所需的背景、依赖、来源与图谱关系`,
+        },
+        debug: {
+            label: '问题排查',
+            caption: '聚焦阻塞、异常、依赖链与证据回放。',
+            query: `排查 ${activeTask?.title ?? selectedPlan?.title ?? '当前计划'} 的阻塞、历史问题、依赖与证据`,
+        },
+        reuse: {
+            label: '历史复用',
+            caption: '汇总可迁移经验、实现线索与 pack 边界。',
+            query: `复用 ${selectedPlan?.title ?? workflowProject?.title ?? '当前计划'} 相关的历史实现、知识包与可追溯来源`,
+        },
+    } as const;
+    const activeScenario = scenarioMeta[knowledgeScenario];
+    const knowledgeQuery = activeScenario.query.trim();
+
+    const buildSourceKey = (source: MemoryAgentSource) => [
+        source.kind,
+        source.id,
+        source.node_id ?? '',
+        source.source_id ?? '',
+    ].join(':');
+
+    const mergeSources = (
+        primary: MemoryAgentSource[] = [],
+        secondary: MemoryAgentSource[] = [],
+    ) => {
+        const merged = [...primary];
+        const seen = new Set(primary.map((source) => buildSourceKey(source)));
+        for (const source of secondary) {
+            const key = buildSourceKey(source);
+            if (seen.has(key)) continue;
+            merged.push(source);
+            seen.add(key);
+        }
+        return merged;
+    };
+
+    const mergeGraphNodes = (
+        primary: NonNullable<MemoryAgentRetrieveResult['samg_nodes']> = [],
+        secondary: QueryMemoryResponse['activated_nodes'] = [],
+    ) => {
+        const merged = [...primary];
+        const seen = new Set(primary.map((node) => node.id));
+        for (const node of secondary) {
+            if (seen.has(node.id)) continue;
+            merged.push(node);
+            seen.add(node.id);
+        }
+        return merged;
+    };
+
+    const getSourceKindMeta = (kind: MemoryAgentSource['kind']) => {
+        switch (kind) {
+            case 'atomic_memory':
+                return {
+                    label: 'Atomic Memory',
+                    icon: <Layers size={14} />,
+                    badge: 'bg-red-50 text-red-600 border-red-200',
+                };
+            case 'samg_pointer':
+                return {
+                    label: 'SAMG Pointer',
+                    icon: <Activity size={14} />,
+                    badge: 'bg-violet-50 text-violet-600 border-violet-200',
+                };
+            default:
+                return {
+                    label: 'Raw Archive',
+                    icon: <Archive size={14} />,
+                    badge: 'bg-slate-100 text-slate-600 border-slate-200',
+                };
+        }
+    };
+
+    const getSourceTitle = (source: MemoryAgentSource) => source.title || source.node_label || source.summary || source.source_id || source.id;
+    const getSourcePreview = (source: MemoryAgentSource) => {
+        const preview = source.summary || source.content || source.source_id || source.id;
+        return preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
+    };
+    const formatNodeTypes = (types?: string[]) => types?.filter(Boolean).join(' · ') || 'Unclassified node';
+    const formatNodeProperties = (properties?: Record<string, unknown>) => Object.entries(properties ?? {}).filter(([, value]) => value !== undefined && value !== null);
+    const buildNodeSummary = (node: QueryMemoryResponse['activated_nodes'][number] | null) => {
+        if (!node) return 'No node selected';
+        return node.description || formatNodeTypes(node['@type']) || node.id;
+    };
+    const jumpToSection = (ref: React.RefObject<HTMLDivElement | null>) => {
+        ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    const openSourceFromNode = (nodeId: string) => {
+        const firstSource = knowledgeSources.find((source) => source.node_id === nodeId);
+        if (!firstSource) return;
+        setSelectedSourceKey(buildSourceKey(firstSource));
+        jumpToSection(sourceCardsRef);
+    };
+    const focusGraphNode = (nodeId: string) => {
+        if (!knowledgeNodes.some((node) => node.id === nodeId)) return;
+        setSelectedGraphNodeId(nodeId);
+        setGraphSourceNodeId((prev) => {
+            if (prev && prev !== nodeId && knowledgeNodes.some((node) => node.id === prev)) {
+                return prev;
+            }
+            return knowledgeNodes.find((node) => node.id !== nodeId)?.id ?? nodeId;
+        });
+        jumpToSection(graphJumpRef);
+    };
+    const parseEmbeddedWiki = (contextBlock: string) => {
+        const lines = contextBlock
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean);
+        return lines.map((line, index) => {
+            const lower = line.toLowerCase();
+            if (lower.startsWith('pack rule:')) {
+                return {
+                    id: `wiki-pack-${index}`,
+                    label: 'Pack rule',
+                    content: line.slice('pack rule:'.length).trim(),
+                    actionLabel: '查看 pack',
+                    onClick: () => jumpToSection(knowledgePackRef),
+                };
+            }
+            if (lower.startsWith('latest evidence:')) {
+                return {
+                    id: `wiki-evidence-${index}`,
+                    label: 'Latest evidence',
+                    content: line.slice('latest evidence:'.length).trim(),
+                    actionLabel: selectedSource ? '打开来源' : '查看来源',
+                    onClick: () => jumpToSection(sourceCardsRef),
+                };
+            }
+            if (lower.startsWith('dependencies:')) {
+                return {
+                    id: `wiki-graph-${index}`,
+                    label: 'Dependencies',
+                    content: line.slice('dependencies:'.length).trim(),
+                    actionLabel: '查看 graph',
+                    onClick: () => jumpToSection(graphJumpRef),
+                };
+            }
+            if (line.startsWith('[atomic|') || line.startsWith('[samg|') || line.startsWith('[raw_archive|')) {
+                const sourceIndex = knowledgeSources.findIndex((source) => {
+                    const preview = source.content || source.summary || '';
+                    return preview && line.includes(preview.slice(0, Math.min(preview.length, 24)));
+                });
+                return {
+                    id: `wiki-source-${index}`,
+                    label: line.startsWith('[samg|') ? 'Graph memory' : line.startsWith('[atomic|') ? 'Atomic memory' : 'Raw archive',
+                    content: line.replace(/^\[[^\]]+\]\s*/, ''),
+                    actionLabel: '打开来源',
+                    onClick: () => {
+                        if (sourceIndex >= 0) {
+                            setSelectedSourceKey(buildSourceKey(knowledgeSources[sourceIndex]));
+                        }
+                        jumpToSection(sourceCardsRef);
+                    },
+                };
+            }
+            const matchedNode = knowledgeNodes.find((node) => line.includes(node.label) || line.includes(node.id));
+            if (matchedNode) {
+                return {
+                    id: `wiki-node-${matchedNode.id}-${index}`,
+                    label: matchedNode.label,
+                    content: line,
+                    actionLabel: '跳到 graph',
+                    onClick: () => focusGraphNode(matchedNode.id),
+                };
+            }
+            return {
+                id: `wiki-line-${index}`,
+                label: 'Context',
+                content: line,
+                actionLabel: '',
+                onClick: undefined,
+            };
+        });
+    };
+
+    const { data: memoryRetrieve, loading: memoryRetrieveLoading, error: memoryRetrieveError, refetch: refetchMemoryRetrieve } = useApi<MemoryAgentRetrieveResult>(
+        (signal) => retrieveMemoryAgent(
+            {
+                query: knowledgeQuery,
+                session_id: knowledgeSessionId,
+                max_results: 8,
+            },
+            signal,
+        ),
+        [knowledgeQuery, knowledgeSessionId],
+        { enabled: knowledgeQuery.length > 0 },
+    );
+
+    const { data: memoryContext, loading: memoryContextLoading, error: memoryContextError, refetch: refetchMemoryContext } = useApi<MemoryAgentContextResult>(
+        (signal) => buildMemoryAgentContext(
+            {
+                session_id: knowledgeSessionId!,
+                query: knowledgeQuery,
+                max_tokens: 700,
+            },
+            signal,
+        ),
+        [knowledgeQuery, knowledgeSessionId],
+        { enabled: Boolean(knowledgeSessionId) },
+    );
+
+    const { data: graphRecall, loading: graphRecallLoading, error: graphRecallError, refetch: refetchGraphRecall } = useApi<QueryMemoryResponse>(
+        (signal) => queryMemory(
+            {
+                topic: knowledgeQuery,
+                max_results: 6,
+                resolve_pointers: true,
+            },
+            signal,
+        ),
+        [knowledgeQuery],
+        { enabled: knowledgeQuery.length > 0 },
+    );
+
+    const knowledgeNodes = mergeGraphNodes(
+        mergeGraphNodes(memoryRetrieve?.samg_nodes ?? [], memoryContext?.samg_nodes ?? []),
+        graphRecall?.activated_nodes ?? [],
+    );
+    const pointerSources = knowledgeNodes.flatMap((node) =>
+        (node.pointers ?? []).map((pointer, index) => ({
+            kind: 'samg_pointer' as const,
+            id: `${node.id}:${pointer.source_id}:${pointer.line_range ?? index}`,
+            title: node.label,
+            summary: pointer.summary,
+            content: pointer.resolved_content || pointer.summary,
+            session_id: pointer.session_id,
+            timestamp: undefined,
+            node_id: node.id,
+            node_label: node.label,
+            source_id: pointer.source_id,
+            source_type: pointer.source_type,
+            file_path: pointer.file_path,
+            line_range: pointer.line_range,
+            relevance: pointer.relevance,
+        })),
+    );
+    const knowledgeSources = mergeSources(
+        mergeSources(memoryRetrieve?.sources ?? [], memoryContext?.sources ?? []),
+        pointerSources,
+    );
+    const selectedSource = knowledgeSources.find((source) => buildSourceKey(source) === selectedSourceKey) ?? null;
+    const knowledgeContextBlock = memoryContext?.context_block?.trim()
+        || graphRecall?.context_block?.trim()
+        || [
+            `Scenario: ${activeScenario.label}`,
+            `Focus task: ${activeTask?.title ?? selectedPlan?.title ?? 'No active task'}`,
+            `Dependencies: ${dependencyRows.length}`,
+            `Latest evidence: ${latestTimelineItem?.title ?? 'No timeline evidence yet'}`,
+            `Pack rule: export/import works on SAMG graph; pointer-level details stay on source cards.`,
+        ].join('\n');
+    const embeddedWikiEntries = parseEmbeddedWiki(knowledgeContextBlock);
+
+    useEffect(() => {
+        if (knowledgeSources.length === 0) {
+            setSelectedSourceKey(null);
+            return;
+        }
+        if (!selectedSourceKey || !knowledgeSources.some((source) => buildSourceKey(source) === selectedSourceKey)) {
+            setSelectedSourceKey(buildSourceKey(knowledgeSources[0]));
+        }
+    }, [knowledgeSources, selectedSourceKey]);
+
+    useEffect(() => {
+        if (knowledgeNodes.length === 0) {
+            setGraphSourceNodeId(null);
+            setSelectedGraphNodeId(null);
+            return;
+        }
+        setGraphSourceNodeId((prev) => prev && knowledgeNodes.some((node) => node.id === prev) ? prev : knowledgeNodes[0].id);
+        setSelectedGraphNodeId((prev) => {
+            if (prev && knowledgeNodes.some((node) => node.id === prev)) return prev;
+            return knowledgeNodes[1]?.id ?? knowledgeNodes[0].id;
+        });
+    }, [knowledgeNodes]);
+
+    const shouldLoadPath = Boolean(graphSourceNodeId && selectedGraphNodeId && graphSourceNodeId !== selectedGraphNodeId);
+    const { data: graphPath, loading: graphPathLoading, error: graphPathError, refetch: refetchGraphPath } = useApi<SAMGPathResponse>(
+        (signal) => findPaths(
+            {
+                source_id: graphSourceNodeId!,
+                target_id: selectedGraphNodeId!,
+                max_hops: 4,
+            },
+            signal,
+        ),
+        [graphSourceNodeId, selectedGraphNodeId],
+        { enabled: shouldLoadPath },
+    );
+
+    const exportPackMutation = useMutation<void, SAMGGraph>((_input, signal) => exportGraph(signal));
+    const importPackMutation = useMutation<SAMGGraph, SAMGGraphImportResult>((graph, signal) => importGraph(graph, signal));
+
+    const refetchKnowledgeRail = () => {
+        refetchMemoryRetrieve();
+        if (knowledgeSessionId) {
+            refetchMemoryContext();
+        }
+        refetchGraphRecall();
+        if (shouldLoadPath) {
+            refetchGraphPath();
+        }
+    };
+
+    const handleExportPack = async () => {
+        try {
+            const graph = await exportPackMutation.execute(undefined);
+            setExportedPack(graph);
+            setPackDraft(JSON.stringify(graph, null, 2));
+            showToast(`Knowledge pack exported (${graph.metadata?.triple_count ?? graph['@graph']?.length ?? 0} triples)`);
+        } catch {
+            showToast('Failed to export knowledge pack');
+        }
+    };
+
+    const handleImportPack = async () => {
+        try {
+            const parsed = JSON.parse(packDraft) as SAMGGraph;
+            if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed['@graph'])) {
+                throw new Error('Knowledge pack must be a SAMG JSON-LD graph');
+            }
+            const result = await importPackMutation.execute(parsed);
+            setExportedPack(parsed);
+            setLastImportResult(result);
+            showToast(`Knowledge pack imported (${result.triple_count} triples · dedup ${result.deduplicated_count} · total ${result.total_triples})`);
+            refetchKnowledgeRail();
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Failed to import knowledge pack');
+        }
+    };
+
+    const graphSourceNode = knowledgeNodes.find((node) => node.id === graphSourceNodeId) ?? null;
+    const selectedGraphNode = knowledgeNodes.find((node) => node.id === selectedGraphNodeId) ?? null;
+    const knowledgeLoading = memoryRetrieveLoading || memoryContextLoading || graphRecallLoading || graphPathLoading;
+    const knowledgeError = memoryRetrieveError ?? memoryContextError ?? graphRecallError ?? graphPathError;
+    const graphPaths = graphPath?.paths ?? [];
+    const packRules = [
+        'Pack boundary is SAMG graph export/import, not a parallel knowledge store.',
+        'Triple source metadata is carried with the graph and remains the main provenance anchor.',
+        'Duplicate resolution stays backend-owned: higher-confidence triples win in memory and persisted triples are replaced by id.',
+        'Pointer-level detail should still be verified from source cards and node details after import.',
+    ];
+
     const handleOpenReplay = () => {
         onReplayData(buildWorkflowReplayData(selectedPlan?.title || workflowProject?.title || 'Plan replay', mergedWorkflow, timeline));
         onOpenModal();
@@ -2076,6 +2444,396 @@ const PlanView = ({
                                  />
                             </div>
                             <div className="space-y-4">
+                                <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5 space-y-4">
+                                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-blue-600 mb-2">
+                                                <Database size={12} /> Knowledge rail
+                                            </div>
+                                            <h3 className="text-sm font-bold text-slate-800">{activeScenario.label}</h3>
+                                            <p className="text-xs text-slate-500 mt-1">{activeScenario.caption}</p>
+                                        </div>
+                                        <button
+                                            onClick={refetchKnowledgeRail}
+                                            disabled={knowledgeLoading}
+                                            className="px-3 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-bold text-blue-600 disabled:opacity-50"
+                                        >
+                                            {knowledgeLoading ? 'Loading...' : 'Refresh'}
+                                        </button>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2">
+                                        {(Object.entries(scenarioMeta) as Array<[keyof typeof scenarioMeta, typeof activeScenario]>).map(([key, meta]) => {
+                                            const active = key === knowledgeScenario;
+                                            return (
+                                                <button
+                                                    key={key}
+                                                    onClick={() => setKnowledgeScenario(key)}
+                                                    className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${
+                                                        active
+                                                            ? 'border-blue-200 bg-blue-600 text-white'
+                                                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                                                    }`}
+                                                >
+                                                    {meta.label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Sources</div>
+                                            <div className="text-lg font-bold text-slate-800">{knowledgeSources.length}</div>
+                                        </div>
+                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Graph nodes</div>
+                                            <div className="text-lg font-bold text-slate-800">{knowledgeNodes.length}</div>
+                                        </div>
+                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Blocked</div>
+                                            <div className="text-lg font-bold text-slate-800">{blockedTasks.length}</div>
+                                        </div>
+                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Replay session</div>
+                                            <div className="text-xs font-semibold text-slate-700 break-all">{knowledgeSessionId || 'Unavailable'}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                            <div>
+                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Embedded wiki</div>
+                                                <div className="text-sm font-semibold text-slate-800">Task-start context block</div>
+                                            </div>
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">{activeTask?.title ?? selectedPlan.title}</span>
+                                        </div>
+                                        <div className="grid gap-3">
+                                            {embeddedWikiEntries.map((entry) => (
+                                                <div key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">{entry.label}</div>
+                                                            <div className="leading-6 whitespace-pre-wrap break-words">{entry.content}</div>
+                                                        </div>
+                                                        {entry.onClick && entry.actionLabel ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={entry.onClick}
+                                                                className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
+                                                            >
+                                                                {entry.actionLabel}
+                                                                <ExternalLink size={12} />
+                                                            </button>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {knowledgeError && (
+                                            <div className="text-xs text-red-600 rounded-xl border border-red-200 bg-red-50 p-3">
+                                                {knowledgeError.message}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div ref={sourceCardsRef} className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                                    <div className="p-4 border-b border-slate-200">
+                                        <h3 className="text-sm font-bold text-slate-800">Sources</h3>
+                                        <p className="text-xs text-slate-500 mt-1">统一来源卡片，保留到原始材料的追溯入口。</p>
+                                    </div>
+                                    {knowledgeSources.length === 0 ? (
+                                        <div className="p-6">
+                                            <EmptyState icon={<Archive size={28} />} title="没有来源卡片" description="当前场景还没有返回可追溯来源。" />
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="max-h-56 overflow-y-auto p-3 space-y-2 border-b border-slate-200">
+                                                {knowledgeSources.map((source) => {
+                                                    const meta = getSourceKindMeta(source.kind);
+                                                    const sourceKey = buildSourceKey(source);
+                                                    const active = sourceKey === selectedSourceKey;
+                                                    return (
+                                                        <button
+                                                            key={sourceKey}
+                                                            onClick={() => setSelectedSourceKey(sourceKey)}
+                                                            className={`w-full text-left rounded-2xl border p-3 transition-colors ${
+                                                                active ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                                                            }`}
+                                                        >
+                                                            <div className="flex items-center gap-2 mb-2">
+                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
+                                                                    {meta.icon}
+                                                                    {meta.label}
+                                                                </span>
+                                                            </div>
+                                                            <div className="text-sm font-medium text-slate-800 truncate">{getSourceTitle(source)}</div>
+                                                            <div className="text-xs text-slate-400 mt-1 line-clamp-2">{getSourcePreview(source)}</div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            <div className="p-4">
+                                                {selectedSource ? (
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                                                                {(() => {
+                                                                    const meta = getSourceKindMeta(selectedSource.kind);
+                                                                    return (
+                                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
+                                                                            {meta.icon}
+                                                                            {meta.label}
+                                                                        </span>
+                                                                    );
+                                                                })()}
+                                                            </div>
+                                                            <h3 className="text-lg font-semibold text-slate-900 break-words">{getSourceTitle(selectedSource)}</h3>
+                                                            <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] text-slate-400">
+                                                                <span>{selectedSource.id}</span>
+                                                                {selectedSource.session_id && <span>session {selectedSource.session_id}</span>}
+                                                                {typeof selectedSource.relevance === 'number' && <span>relevance {selectedSource.relevance.toFixed(2)}</span>}
+                                                            </div>
+                                                        </div>
+
+                                                        {(selectedSource.file_path || selectedSource.line_range || selectedSource.source_type) && (
+                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm text-slate-600">
+                                                                {selectedSource.source_type && <div><span className="text-slate-400">source_type</span> {selectedSource.source_type}</div>}
+                                                                {selectedSource.file_path && <div><span className="text-slate-400">file</span> {selectedSource.file_path}</div>}
+                                                                {selectedSource.line_range && <div><span className="text-slate-400">line</span> {selectedSource.line_range}</div>}
+                                                                {selectedSource.node_label && <div><span className="text-slate-400">node</span> {selectedSource.node_label}</div>}
+                                                            </div>
+                                                        )}
+
+                                                        {selectedSource.summary && (
+                                                            <div>
+                                                                <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Summary</div>
+                                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words">{selectedSource.summary}</div>
+                                                            </div>
+                                                        )}
+
+                                                        <div>
+                                                            <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Content</div>
+                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words min-h-24">
+                                                                {selectedSource.content || selectedSource.summary || '这个来源暂时没有展开内容。'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <EmptyState icon={<ExternalLink size={28} />} title="选择来源卡片" description="下方展示会保留 source type / file / line 等追溯信息。" />
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                <div ref={graphJumpRef} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-800">Graph jumps</h3>
+                                            <p className="text-xs text-slate-500">任务启动时可直接在 SAMG 节点之间跳转并查看 path。</p>
+                                        </div>
+                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-200">{graphPaths.length} paths</span>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <label className="text-xs text-slate-500 space-y-2">
+                                            <span className="block uppercase tracking-widest">Source node</span>
+                                            <select
+                                                value={graphSourceNodeId ?? ''}
+                                                onChange={(e) => setGraphSourceNodeId(e.target.value || null)}
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                            >
+                                                {knowledgeNodes.map((node) => (
+                                                    <option key={node.id} value={node.id}>{node.label} · hop {node.hop}</option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                        <label className="text-xs text-slate-500 space-y-2">
+                                            <span className="block uppercase tracking-widest">Target node</span>
+                                            <select
+                                                value={selectedGraphNodeId ?? ''}
+                                                onChange={(e) => setSelectedGraphNodeId(e.target.value || null)}
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                                            >
+                                                {knowledgeNodes.map((node) => (
+                                                    <option key={node.id} value={node.id}>{node.label} · hop {node.hop}</option>
+                                                ))}
+                                            </select>
+                                        </label>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                        {[{ title: 'From', node: graphSourceNode }, { title: 'To', node: selectedGraphNode }].map(({ title, node }) => {
+                                            const propertyEntries = formatNodeProperties(node?.properties);
+                                            return (
+                                                <div key={title} className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
+                                                    <div>
+                                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">{title}</div>
+                                                        <div className="font-semibold text-slate-800 break-words">{node?.label || 'No node selected'}</div>
+                                                        {node && <div className="text-xs text-slate-400 mt-1 break-all">{node.id}</div>}
+                                                    </div>
+                                                    {node ? (
+                                                        <>
+                                                            <div className="text-xs text-slate-500">{buildNodeSummary(node)}</div>
+                                                            <div className="flex flex-wrap gap-2 text-[11px]">
+                                                                <span className="px-2 py-1 rounded-full border border-slate-200 bg-white text-slate-600">hop {node.hop}</span>
+                                                                <span className="px-2 py-1 rounded-full border border-slate-200 bg-white text-slate-600">activation {node.activation.toFixed(2)}</span>
+                                                                <span className="px-2 py-1 rounded-full border border-slate-200 bg-white text-slate-600">{formatNodeTypes(node['@type'])}</span>
+                                                            </div>
+                                                            {node.aliases && node.aliases.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Aliases</div>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {node.aliases.map((alias) => (
+                                                                            <span key={alias} className="px-2 py-1 rounded-full border border-violet-200 bg-white text-[11px] text-violet-600">{alias}</span>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {propertyEntries.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Properties</div>
+                                                                    <div className="space-y-2">
+                                                                        {propertyEntries.slice(0, 4).map(([key, value]) => (
+                                                                            <div key={key} className="rounded-lg border border-white bg-white px-3 py-2 text-xs text-slate-600 break-words">
+                                                                                <span className="text-slate-400">{key}</span> {typeof value === 'string' ? value : JSON.stringify(value)}
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {node.pointers && node.pointers.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Pointers</div>
+                                                                    <div className="space-y-2">
+                                                                        {node.pointers.slice(0, 2).map((pointer, index) => (
+                                                                            <button
+                                                                                key={`${pointer.source_id}-${index}`}
+                                                                                type="button"
+                                                                                onClick={() => openSourceFromNode(node.id)}
+                                                                                className="w-full rounded-lg border border-white bg-white px-3 py-2 text-left text-xs text-slate-600 hover:border-blue-200 hover:bg-blue-50"
+                                                                            >
+                                                                                <div className="font-medium text-slate-700">{pointer.summary || pointer.source_id}</div>
+                                                                                <div className="text-slate-400 mt-1">{pointer.file_path || pointer.source_type || 'source'} {pointer.line_range ? `· ${pointer.line_range}` : ''}</div>
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : null}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Paths</div>
+                                        {graphSourceNodeId && selectedGraphNodeId && graphSourceNodeId === selectedGraphNodeId ? (
+                                            <p className="text-sm text-slate-500">选择两个不同节点即可查看图谱跳转。</p>
+                                        ) : graphPathLoading ? (
+                                            <p className="text-sm text-slate-500">正在计算图谱路径...</p>
+                                        ) : graphPaths.length === 0 ? (
+                                            <p className="text-sm text-slate-500">当前节点组合没有返回 path。</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {graphPaths.map((path, index) => (
+                                                    <div key={`${path.join('>')}-${index}`} className="rounded-xl border border-white bg-white p-3 text-xs text-slate-600 break-words">
+                                                        {path.join(' → ')}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div ref={knowledgePackRef} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div>
+                                            <h3 className="text-sm font-bold text-slate-800">Knowledge pack</h3>
+                                            <p className="text-xs text-slate-500">跨项目复用通过现有 SAMG graph export/import 实现，不引入并行知识系统。</p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={handleExportPack}
+                                                disabled={exportPackMutation.loading}
+                                                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 disabled:opacity-50"
+                                            >
+                                                {exportPackMutation.loading ? 'Exporting...' : 'Export'}
+                                            </button>
+                                            <button
+                                                onClick={handleImportPack}
+                                                disabled={importPackMutation.loading || !packDraft.trim()}
+                                                className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold disabled:opacity-50"
+                                            >
+                                                {importPackMutation.loading ? 'Importing...' : 'Import'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-3">Pack rules</div>
+                                        <div className="space-y-2">
+                                            {packRules.map((rule) => (
+                                                <div key={rule} className="flex gap-2 text-sm text-slate-600">
+                                                    <span className="mt-1 size-1.5 rounded-full bg-slate-300 shrink-0"></span>
+                                                    <span>{rule}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {lastImportResult && (
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                                                <div className="text-[10px] uppercase tracking-widest text-emerald-600 mb-1">Imported</div>
+                                                <div className="text-lg font-bold text-emerald-900">{lastImportResult.triple_count}</div>
+                                            </div>
+                                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                                <div className="text-[10px] uppercase tracking-widest text-amber-600 mb-1">Deduplicated</div>
+                                                <div className="text-lg font-bold text-amber-900">{lastImportResult.deduplicated_count}</div>
+                                            </div>
+                                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                                                <div className="text-[10px] uppercase tracking-widest text-blue-600 mb-1">Total triples</div>
+                                                <div className="text-lg font-bold text-blue-900">{lastImportResult.total_triples}</div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {exportedPack && (
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Exported triples</div>
+                                                <div className="text-lg font-bold text-slate-900">{exportedPack.metadata?.triple_count ?? exportedPack['@graph']?.length ?? 0}</div>
+                                            </div>
+                                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Entities</div>
+                                                <div className="text-lg font-bold text-slate-900">{exportedPack.metadata?.entity_count ?? 'n/a'}</div>
+                                            </div>
+                                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Version</div>
+                                                <div className="text-sm font-semibold text-slate-700 break-all">{exportedPack.metadata?.version ?? 'unknown'}</div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                            <div className="text-[10px] uppercase tracking-widest text-slate-400">Pack payload</div>
+                                            <div className="text-[10px] text-slate-400">JSON-LD graph payload routed to backend import</div>
+                                        </div>
+                                        <textarea
+                                            value={packDraft}
+                                            onChange={(e) => setPackDraft(e.target.value)}
+                                            placeholder="Export a pack or paste a SAMG JSON-LD graph here"
+                                            className="min-h-48 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs text-slate-700 focus:border-blue-300 focus:outline-none focus:ring-4 focus:ring-blue-100"
+                                        />
+                                    </div>
+                                </div>
+
                                 <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
                                     <div className="flex items-center justify-between gap-3 flex-wrap">
                                         <div>

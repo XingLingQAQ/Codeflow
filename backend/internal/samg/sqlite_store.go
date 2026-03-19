@@ -627,6 +627,7 @@ func (s *SQLiteTripleStore) GetEntity(ctx context.Context, id string) (*Entity, 
 	if aliases.Valid {
 		json.Unmarshal([]byte(aliases.String), &entity.Aliases)
 	}
+	entity.Pointers = extractPointersFromProperties(entity.Properties)
 
 	return &entity, nil
 }
@@ -754,11 +755,27 @@ func (s *SQLiteTripleStore) ExportGraph(ctx context.Context) (*JsonLdGraph, erro
 }
 
 // ImportGraph 导入图谱
-func (s *SQLiteTripleStore) ImportGraph(ctx context.Context, graph *JsonLdGraph) error {
-	if err := s.Clear(ctx); err != nil {
-		return err
+func (s *SQLiteTripleStore) ImportGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error) {
+	if graph == nil {
+		return nil, fmt.Errorf("graph is nil")
 	}
-	return s.Add(ctx, graph.Graph)
+	if err := s.Add(ctx, graph.Graph); err != nil {
+		return nil, err
+	}
+	deduplicated, err := s.Deduplicate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := s.GetStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ImportGraphResult{
+		Message:           "graph imported",
+		TripleCount:       len(graph.Graph),
+		DeduplicatedCount: deduplicated,
+		TotalTriples:      stats.TripleCount,
+	}, nil
 }
 
 // GetStats 获取统计信息

@@ -38,7 +38,7 @@ type ISAMGService interface {
 
 	// 图谱操作
 	ExportGraph(ctx context.Context) (*JsonLdGraph, error)
-	ImportGraph(ctx context.Context, graph *JsonLdGraph) error
+	ImportGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error)
 	GetStats(ctx context.Context) (*SAMGStats, error)
 
 	// 指针操作
@@ -252,7 +252,7 @@ func (s *SAMGService) ExportGraph(ctx context.Context) (*JsonLdGraph, error) {
 }
 
 // ImportGraph 导入图谱
-func (s *SAMGService) ImportGraph(ctx context.Context, graph *JsonLdGraph) error {
+func (s *SAMGService) ImportGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error) {
 	return s.store.ImportGraph(ctx, graph)
 }
 
@@ -460,7 +460,11 @@ func (s *SAMGService) QueryMemory(ctx context.Context, req QueryMemoryRequest) (
 		// 获取 label
 		entity, _ := s.store.GetEntity(ctx, na.ID)
 		if entity != nil {
+			node.Type = append([]string(nil), entity.Type...)
 			node.Label = entity.Label
+			node.Description = entity.Description
+			node.Properties = entity.Properties
+			node.Aliases = append([]string(nil), entity.Aliases...)
 		}
 
 		// Step 4: 指针解析

@@ -1,6 +1,15 @@
 import { get, post, del } from '../api';
 import { API_ENDPOINTS } from '../api';
-import type { SAMGTriple, SAMGEntity, SAMGPointer, QueryMemoryResponse, SAMGStats } from '../types';
+import type {
+  SAMGTriple,
+  SAMGEntity,
+  SAMGPointer,
+  QueryMemoryResponse,
+  SAMGStats,
+  SAMGPathResponse,
+  SAMGGraph,
+  SAMGGraphImportResult,
+} from '../types';
 
 const getBase = () => API_ENDPOINTS.samg;
 
@@ -90,3 +99,19 @@ export function extractWithPointers(
 ) {
   return post<{ triples: SAMGTriple[]; count: number }>(`${getBase()}/extract-with-pointers`, req, signal);
 }
+
+export function findPaths(
+  req: { source_id: string; target_id: string; max_hops?: number },
+  signal?: AbortSignal,
+) {
+  return post<SAMGPathResponse>(`${getBase()}/paths`, req, signal);
+}
+
+export function exportGraph(signal?: AbortSignal) {
+  return get<SAMGGraph>(`${getBase()}/graph/export`, undefined, signal);
+}
+
+export function importGraph(graph: SAMGGraph, signal?: AbortSignal) {
+  return post<SAMGGraphImportResult>(`${getBase()}/graph/import`, graph, signal);
+}
+

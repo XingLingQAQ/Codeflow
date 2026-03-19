@@ -165,7 +165,7 @@ type ITripleStore interface {
 
 	// 图谱操作
 	ExportGraph(ctx context.Context) (*JsonLdGraph, error)
-	ImportGraph(ctx context.Context, graph *JsonLdGraph) error
+	ImportGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error)
 	GetStats(ctx context.Context) (*GraphMetadata, error)
 
 	// 去重
@@ -348,13 +348,17 @@ type QueryMemoryRequest struct {
 	MinBLA          float64 `json:"min_bla,omitempty"`
 }
 
-// QueryMemoryNode 查询结果中的激活节点（含指针）。
+// QueryMemoryNode 查询结果中的激活节点（含实体详情与指针）。
 type QueryMemoryNode struct {
-	ID         string            `json:"id"`
-	Label      string            `json:"label"`
-	Activation float64           `json:"activation"`
-	Hop        int               `json:"hop"`
-	Pointers   []ResolvedPointer `json:"pointers,omitempty"`
+	ID          string                 `json:"id"`
+	Type        []string               `json:"@type,omitempty"`
+	Label       string                 `json:"label"`
+	Description string                 `json:"description,omitempty"`
+	Properties  map[string]interface{} `json:"properties,omitempty"`
+	Aliases     []string               `json:"aliases,omitempty"`
+	Activation  float64                `json:"activation"`
+	Hop         int                    `json:"hop"`
+	Pointers    []ResolvedPointer      `json:"pointers,omitempty"`
 }
 
 // ResolvedPointer 已解析的指针（可能包含原始内容）。
@@ -367,4 +371,12 @@ type ResolvedPointer struct {
 type QueryMemoryResponse struct {
 	ActivatedNodes []QueryMemoryNode `json:"activated_nodes"`
 	ContextBlock   string            `json:"context_block"`
+}
+
+// ImportGraphResult 图谱导入结果。
+type ImportGraphResult struct {
+	Message           string `json:"message"`
+	TripleCount       int    `json:"triple_count"`
+	DeduplicatedCount int    `json:"deduplicated_count"`
+	TotalTriples      int    `json:"total_triples"`
 }

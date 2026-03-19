@@ -375,11 +375,27 @@ func (s *InMemoryTripleStore) ExportGraph(ctx context.Context) (*JsonLdGraph, er
 }
 
 // ImportGraph 导入图谱
-func (s *InMemoryTripleStore) ImportGraph(ctx context.Context, graph *JsonLdGraph) error {
-	if err := s.Clear(ctx); err != nil {
-		return err
+func (s *InMemoryTripleStore) ImportGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error) {
+	if graph == nil {
+		return nil, errors.New("graph is nil")
 	}
-	return s.Add(ctx, graph.Graph)
+	if err := s.Add(ctx, graph.Graph); err != nil {
+		return nil, err
+	}
+	deduplicated, err := s.Deduplicate(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := s.GetStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ImportGraphResult{
+		Message:           "graph imported",
+		TripleCount:       len(graph.Graph),
+		DeduplicatedCount: deduplicated,
+		TotalTriples:      stats.TripleCount,
+	}, nil
 }
 
 // GetStats 获取统计信息

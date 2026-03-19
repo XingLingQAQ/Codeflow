@@ -34,11 +34,15 @@ type MemoryAgentResolvedPointer struct {
 
 // MemoryAgentNode 表示统一检索中的图谱节点结果。
 type MemoryAgentNode struct {
-	ID         string                       `json:"id"`
-	Label      string                       `json:"label"`
-	Activation float64                      `json:"activation"`
-	Hop        int                          `json:"hop"`
-	Pointers   []MemoryAgentResolvedPointer `json:"pointers,omitempty"`
+	ID          string                       `json:"id"`
+	Type        []string                     `json:"@type,omitempty"`
+	Label       string                       `json:"label"`
+	Description string                       `json:"description,omitempty"`
+	Properties  map[string]interface{}       `json:"properties,omitempty"`
+	Aliases     []string                     `json:"aliases,omitempty"`
+	Activation  float64                      `json:"activation"`
+	Hop         int                          `json:"hop"`
+	Pointers    []MemoryAgentResolvedPointer `json:"pointers,omitempty"`
 }
 
 // MemoryAgentSource 表示统一检索中的可追溯来源。

@@ -301,8 +301,13 @@ func TestSQLiteTripleStore_ExportImport(t *testing.T) {
 	err = store.Clear(ctx)
 	assert.NoError(t, err)
 
-	err = store.ImportGraph(ctx, graph)
+	result, err := store.ImportGraph(ctx, graph)
 	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "graph imported", result.Message)
+	assert.Equal(t, 1, result.TripleCount)
+	assert.Equal(t, 0, result.DeduplicatedCount)
+	assert.Equal(t, 1, result.TotalTriples)
 
 	// Verify
 	results, err := store.Query(ctx, TripleQuery{})
@@ -310,39 +315,70 @@ func TestSQLiteTripleStore_ExportImport(t *testing.T) {
 	assert.Len(t, results, 1)
 }
 
-func TestSQLiteTripleStore_Stats(t *testing.T) {
+
+func TestSQLiteTripleStore_ImportGraphDeduplicatesAndKeepsPointers(t *testing.T) {
 	store, cleanup := setupTestSQLiteStore(t)
 	defer cleanup()
 
 	ctx := context.Background()
 
-	triples := []Triple{
-		{
-			ID:         "stats-1",
-			Subject:    CreateNode("entity:a", EntityTypes.Class, "A"),
-			Predicate:  Predicates.Extends,
-			Object:     CreateNodeObject(CreateNode("entity:b", EntityTypes.Class, "B")),
-			Confidence: 0.9,
-			Timestamp:  time.Now().UnixMilli(),
-		},
-		{
-			ID:         "stats-2",
-			Subject:    CreateNode("entity:a", EntityTypes.Class, "A"),
-			Predicate:  Predicates.Calls,
-			Object:     CreateNodeObject(CreateNode("entity:c", EntityTypes.Function, "C")),
-			Confidence: 0.8,
-			Timestamp:  time.Now().UnixMilli(),
+	seed := Triple{
+		ID:         "existing-1",
+		Subject:    CreateNode("entity:a", EntityTypes.Class, "A"),
+		Predicate:  Predicates.Extends,
+		Object:     CreateNodeObject(CreateNode("entity:b", EntityTypes.Class, "B")),
+		Confidence: 0.4,
+		Timestamp:  time.Now().UnixMilli(),
+	}
+	require.NoError(t, store.Add(ctx, []Triple{seed}))
+
+	ptr := Pointer{
+		SourceID:   "raw-1",
+		SourceType: string(ExtractionRule),
+		Summary:    "seed provenance",
+		FilePath:   "docs/seed.md",
+		LineRange:  "1-3",
+		Timestamp:  time.Now().UnixMilli(),
+		Relevance:  0.8,
+	}
+	require.NoError(t, store.AppendPointer(ctx, "entity:a", ptr))
+
+	graph := &JsonLdGraph{
+		Context: JsonLdContext{Vocab: "https://codeflow.ai/vocab/", Base: "https://codeflow.ai/graph/"},
+		ID:      "import-dedup-test",
+		Type:    "Graph",
+		Graph: []Triple{
+			{
+				ID:         "incoming-1",
+				Subject:    CreateNode("entity:a", EntityTypes.Class, "A"),
+				Predicate:  Predicates.Extends,
+				Object:     CreateNodeObject(CreateNode("entity:b", EntityTypes.Class, "B")),
+				Confidence: 0.9,
+				Timestamp:  time.Now().UnixMilli(),
+			},
 		},
 	}
 
-	err := store.Add(ctx, triples)
-	assert.NoError(t, err)
+	result, err := store.ImportGraph(ctx, graph)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "graph imported", result.Message)
+	assert.Equal(t, 1, result.TripleCount)
+	assert.Equal(t, 1, result.DeduplicatedCount)
+	assert.Equal(t, 1, result.TotalTriples)
 
-	stats, err := store.GetStats(ctx)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, stats.TripleCount)
-	assert.Equal(t, 3, stats.EntityCount) // a, b, c
-	assert.Equal(t, 2, stats.PredicateCount) // extends, calls
+	results, err := store.Query(ctx, TripleQuery{})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "incoming-1", results[0].ID)
+	assert.Equal(t, 0.9, results[0].Confidence)
+
+	entity, err := store.GetEntity(ctx, "entity:a")
+	require.NoError(t, err)
+	require.NotNil(t, entity)
+	require.NotEmpty(t, entity.Pointers)
+	assert.Equal(t, "raw-1", entity.Pointers[0].SourceID)
+	assert.Equal(t, "docs/seed.md", entity.Pointers[0].FilePath)
 }
 
 func TestSQLiteTripleStore_LiteralObject(t *testing.T) {

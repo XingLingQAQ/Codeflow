@@ -449,9 +449,11 @@ func TestImportGraph(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	response := decodeSAMGResponseData[map[string]interface{}](t, w.Body.Bytes())
-	assert.Equal(t, "graph imported", response["message"])
-	assert.Equal(t, float64(1), response["triple_count"])
+	response := decodeSAMGResponseData[samg.ImportGraphResult](t, w.Body.Bytes())
+	assert.Equal(t, "graph imported", response.Message)
+	assert.Equal(t, 1, response.TripleCount)
+	assert.Equal(t, 0, response.DeduplicatedCount)
+	assert.Equal(t, 1, response.TotalTriples)
 }
 
 func TestGetSAMGStats(t *testing.T) {

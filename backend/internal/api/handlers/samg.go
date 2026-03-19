@@ -532,13 +532,13 @@ func ImportGraph(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	err := svc.ImportGraph(ctx, &graph)
+	result, err := svc.ImportGraph(ctx, &graph)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	respondOK(c, gin.H{"message": "graph imported", "triple_count": len(graph.Graph)})
+	respondOK(c, result)
 }
 
 // GetSAMGStats 获取SAMG统计信息

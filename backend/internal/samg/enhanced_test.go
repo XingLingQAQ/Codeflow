@@ -360,8 +360,13 @@ func TestSAMGService_ExportImportGraph(t *testing.T) {
 
 	// 创建新服务并导入
 	svc2 := NewSAMGService(nil)
-	err = svc2.ImportGraph(ctx, graph)
+	result, err := svc2.ImportGraph(ctx, graph)
 	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, "graph imported", result.Message)
+	assert.Equal(t, 1, result.TripleCount)
+	assert.Equal(t, 0, result.DeduplicatedCount)
+	assert.Equal(t, 1, result.TotalTriples)
 
 	// 验证导入
 	stats, _ := svc2.GetStats(ctx)
@@ -449,9 +454,14 @@ func TestSAMGService_ConfigUpdate(t *testing.T) {
 }
 
 func TestGlobalSAMGService(t *testing.T) {
-	// 初始应该为nil
+	SetSAMGService(nil)
+	t.Cleanup(func() {
+		SetSAMGService(nil)
+	})
+
+	// 初始获取应触发懒初始化
 	svc := GetSAMGService()
-	assert.Nil(t, svc)
+	assert.NotNil(t, svc)
 
 	// 设置全局服务
 	newSvc := NewSAMGService(nil)
@@ -461,7 +471,4 @@ func TestGlobalSAMGService(t *testing.T) {
 	svc = GetSAMGService()
 	assert.NotNil(t, svc)
 	assert.Equal(t, newSvc, svc)
-
-	// 清理
-	SetSAMGService(nil)
 }

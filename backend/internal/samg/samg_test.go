@@ -301,9 +301,24 @@ func TestInMemoryTripleStoreExportImport(t *testing.T) {
 
 	// 创建新存储并导入
 	newStore := NewInMemoryTripleStore(nil)
-	err = newStore.ImportGraph(ctx, graph)
+	result, err := newStore.ImportGraph(ctx, graph)
 	if err != nil {
 		t.Fatalf("import: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected import result")
+	}
+	if result.Message != "graph imported" {
+		t.Errorf("expected message graph imported, got %s", result.Message)
+	}
+	if result.TripleCount != 2 {
+		t.Errorf("expected triple_count 2, got %d", result.TripleCount)
+	}
+	if result.DeduplicatedCount != 0 {
+		t.Errorf("expected deduplicated_count 0, got %d", result.DeduplicatedCount)
+	}
+	if result.TotalTriples != 2 {
+		t.Errorf("expected total_triples 2, got %d", result.TotalTriples)
 	}
 
 	stats, _ := newStore.GetStats(ctx)

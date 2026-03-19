@@ -402,11 +402,15 @@ func resolveSAMGQuery(ctx context.Context, archiveSvc IRawArchive, queryResult *
 		}
 
 		nodes = append(nodes, MemoryAgentNode{
-			ID:         node.ID,
-			Label:      node.Label,
-			Activation: node.Activation,
-			Hop:        node.Hop,
-			Pointers:   resolvedPointers,
+			ID:          node.ID,
+			Type:        append([]string(nil), node.Type...),
+			Label:       node.Label,
+			Description: node.Description,
+			Properties:  node.Properties,
+			Aliases:     append([]string(nil), node.Aliases...),
+			Activation:  node.Activation,
+			Hop:         node.Hop,
+			Pointers:    resolvedPointers,
 		})
 	}
 
