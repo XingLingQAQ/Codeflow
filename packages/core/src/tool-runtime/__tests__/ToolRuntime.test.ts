@@ -54,6 +54,32 @@ describe('headless tool runtime', () => {
     undo: async () => undefined,
   });
 
+  const createFailingEditor = (message = 'primary editor failed'): ICodeEditor => ({
+    name: 'failing-editor',
+    edit: async (file: string): Promise<EditResult> => ({
+      success: false,
+      file,
+      diff: {
+        file,
+        hunks: [],
+        additions: 0,
+        deletions: 0,
+      },
+      message,
+    }),
+    editMultiple: async (files: string[]): Promise<EditResult[]> =>
+      Promise.all(files.map((file) => createFailingEditor(message).edit(file, ''))),
+    preview: async (file: string): Promise<Diff> => ({
+      file,
+      hunks: [],
+      additions: 0,
+      deletions: 0,
+    }),
+    applyDiff: async () => undefined,
+    undo: async () => undefined,
+  });
+
+
   it('routes AgentRuntime file edits through shared ToolRegistry and ToolExecutor', async () => {
     const auditManager = new AuditManager(new InMemoryAuditStorage());
     const runtime = new AgentRuntime({ auditManager });
@@ -388,6 +414,269 @@ describe('headless tool runtime', () => {
       'skill.summarize',
       'mock-search.query',
     ]);
+  });
+
+  it('returns redacted runtime snapshots for isolated policy executions', async () => {
+    const auditManager = new AuditManager(new InMemoryAuditStorage());
+    const runtime = new AgentRuntime({ auditManager });
+    const editor = createEditor();
+
+    runtime.registerExecutor(
+      'claude',
+      editor,
+      {
+        name: 'claude',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: {
+          streaming: false,
+          multiFile: true,
+          contextAware: true,
+          codeReview: false,
+        },
+      },
+      'claude-opus-4.6'
+    );
+
+    const result = await runtime.executeTask(
+      {
+        id: 'task-governed-isolation',
+        type: 'code-edit',
+        executor: 'claude',
+        input: {
+          files: ['demo.ts'],
+          instruction: 'guard runtime',
+        },
+        runtime: {
+          actor: {
+            id: 'user-1',
+            type: 'user',
+            name: 'tester',
+            sessionId: 'sess-1',
+          },
+          policy: {
+            profileId: 'gov-profile',
+            env: {
+              CF_TOKEN: 'secret-value',
+              SAFE_MODE: 'true',
+            },
+            metadata: {
+              apiToken: 'secret-123',
+              wikiUrl: 'https://wiki.local/runtime',
+              nested: { source: 'kb-1' },
+              steps: ['one', 'two', 'three', 'four'],
+            },
+            boundaries: [{ type: 'command', value: 'claude', risk: 'low' }],
+            requestedBoundaries: [{ type: 'network', value: 'knowledge://graph', risk: 'low' }],
+          },
+        },
+        status: 'pending',
+        createdAt: Date.now(),
+      },
+      { cwd: '/workspace/c170' }
+    );
+
+    expect(result.status).toBe('completed');
+    expect(result.output?.runtime).toMatchObject({
+      decision: 'allow_with_isolation',
+      isolated: true,
+      processId: 'isolated:task-governed-isolation',
+      snapshot: {
+        command: 'claude',
+        cwd: '/workspace/c170',
+        envKeys: ['CF_TOKEN', 'SAFE_MODE'],
+        boundarySummary: {
+          matched: 1,
+          missing: 2,
+          required: 0,
+        },
+        metadataPreview: {
+          apiToken: '[REDACTED]',
+          wikiUrl: 'https://wiki.local/runtime',
+          nested: '[OBJECT]',
+          steps: ['one', 'two', 'three'],
+        },
+      },
+    });
+
+    const auditEntries = await auditManager.getLatestEntries(20);
+    const runtimeAuditEntry = auditEntries.find(
+      (entry) =>
+        entry.resource.type === 'tool-runtime' &&
+        entry.action === 'policy_execute' &&
+        entry.resource.id === 'isolated:task-governed-isolation'
+    );
+    expect(runtimeAuditEntry).toBeDefined();
+    expect(runtimeAuditEntry?.details?.metadata).toBeUndefined();
+    expect(runtimeAuditEntry?.details?.metadataPreview).toEqual({
+      apiToken: '[REDACTED]',
+      wikiUrl: 'https://wiki.local/runtime',
+      nested: '[OBJECT]',
+      steps: ['one', 'two', 'three'],
+      taskId: 'task-governed-isolation',
+      executor: 'claude',
+    });
+  });
+
+  it('blocks high-risk runtime boundary violations before file edits', async () => {
+    const runtime = new AgentRuntime();
+    const editor = createEditor();
+
+    runtime.registerExecutor(
+      'claude',
+      editor,
+      {
+        name: 'claude',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: {
+          streaming: false,
+          multiFile: true,
+          contextAware: true,
+          codeReview: false,
+        },
+      },
+      'claude-opus-4.6'
+    );
+
+    const result = await runtime.executeTask({
+      id: 'task-policy-denied',
+      type: 'code-edit',
+      executor: 'claude',
+      input: {
+        files: ['danger.ts'],
+        instruction: 'perform risky sync',
+      },
+      runtime: {
+        actor: {
+          id: 'user-2',
+          type: 'user',
+        },
+        policy: {
+          profileId: 'strict-profile',
+          metadata: {
+            apiSecret: 'top-secret',
+          },
+          boundaries: [{ type: 'command', value: 'claude', risk: 'low' }],
+          requestedBoundaries: [{ type: 'network', value: 'https://market.example', risk: 'high' }],
+        },
+      },
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toBe('Execution blocked by runtime policy');
+    expect(result.output?.diffs).toEqual([]);
+    expect(result.output?.runtime).toMatchObject({
+      decision: 'deny',
+      risk: 'high',
+      isolated: false,
+      snapshot: {
+        command: 'claude',
+        boundarySummary: {
+          matched: 1,
+          missing: 1,
+          required: 0,
+        },
+        metadataPreview: {
+          apiSecret: '[REDACTED]',
+        },
+      },
+      fallback: {
+        attempted: false,
+        fromExecutor: 'claude',
+        recovered: false,
+      },
+    });
+    expect(runtime.getToolTraces()).toHaveLength(0);
+  });
+
+  it('falls back to a healthy executor after retryable failures', async () => {
+    const runtime = new AgentRuntime();
+
+    runtime.registerExecutor(
+      'claude',
+      createFailingEditor(),
+      {
+        name: 'claude',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: {
+          streaming: false,
+          multiFile: true,
+          contextAware: true,
+          codeReview: false,
+        },
+      },
+      'claude-opus-4.6'
+    );
+    runtime.registerExecutor(
+      'haiku',
+      createEditor(),
+      {
+        name: 'haiku',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: {
+          streaming: false,
+          multiFile: true,
+          contextAware: true,
+          codeReview: false,
+        },
+      },
+      'claude-haiku-4.5'
+    );
+
+    const result = await runtime.executeTask({
+      id: 'task-fallback-recovery',
+      type: 'code-edit',
+      executor: 'claude',
+      input: {
+        files: ['demo.ts'],
+        instruction: 'recover runtime',
+      },
+      runtime: {
+        actor: {
+          id: 'agent-1',
+          type: 'agent',
+        },
+        policy: {
+          command: 'governed-edit',
+          metadata: {
+            traceToken: 'fallback-secret',
+          },
+          boundaries: [{ type: 'command', value: 'governed-edit', risk: 'low' }],
+        },
+      },
+      status: 'pending',
+      createdAt: Date.now(),
+    });
+
+    expect(result.status).toBe('completed');
+    expect(result.executor).toBe('haiku');
+    expect(result.output?.runtime).toMatchObject({
+      decision: 'allow',
+      risk: 'low',
+      snapshot: {
+        command: 'governed-edit',
+        metadataPreview: {
+          traceToken: '[REDACTED]',
+        },
+      },
+      fallback: {
+        attempted: true,
+        fromExecutor: 'claude',
+        toExecutor: 'haiku',
+        reason: 'primary editor failed',
+        recovered: true,
+      },
+    });
+    expect(result.diffs?.[0]?.file).toBe('demo.ts');
   });
 
   it('registers MCP tools inside gateway and executes through ToolExecutor traces', async () => {

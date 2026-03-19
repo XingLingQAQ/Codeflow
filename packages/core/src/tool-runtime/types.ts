@@ -197,6 +197,69 @@ export interface MCPServerInfo {
   toolIds: string[];
 }
 
+export type ToolRuntimeRiskLevel = ToolRiskLevel;
+export type ToolRuntimeDecision = 'allow' | 'allow_with_isolation' | 'require_approval' | 'deny';
+
+export interface ToolRuntimeBoundary {
+  type: 'command' | 'path' | 'network' | 'resource';
+  value: string;
+  risk: ToolRuntimeRiskLevel;
+  required?: boolean;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PermissionProfile {
+  id: string;
+  name: string;
+  defaultDecision: ToolRuntimeDecision;
+  boundaries: ToolRuntimeBoundary[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface RuntimeToolExecutionRequest {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  actor: AuditActor;
+  boundaries: ToolRuntimeBoundary[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface PolicyDecisionResult {
+  decision: ToolRuntimeDecision;
+  risk: ToolRuntimeRiskLevel;
+  matchedBoundaries: ToolRuntimeBoundary[];
+  missingBoundaries: ToolRuntimeBoundary[];
+  notes: string[];
+}
+
+export interface ToolRuntimeExecutionSnapshot {
+  decision: ToolRuntimeDecision;
+  risk: ToolRuntimeRiskLevel;
+  isolated: boolean;
+  processId?: string;
+  command: string;
+  args: string[];
+  cwd?: string;
+  envKeys: string[];
+  boundarySummary: {
+    matched: number;
+    missing: number;
+    required: number;
+  };
+  metadataPreview?: Record<string, unknown>;
+  notes: string[];
+}
+
+export interface ExecutionSandboxResult {
+  processId?: string;
+  decision: PolicyDecisionResult;
+  isolated: boolean;
+  snapshot: ToolRuntimeExecutionSnapshot;
+}
+
 export interface ToolExecutorOptions {
   policyGuard?: ToolPolicyGuard;
   auditManager?: {
