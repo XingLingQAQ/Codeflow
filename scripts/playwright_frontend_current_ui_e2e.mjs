@@ -57,7 +57,15 @@ await mark('home_to_plan', async () => {
 
 await mark('plan_execute_modal', async () => {
   await page.getByRole('button', { name: 'Execute Plan' }).first().click();
-  await waitAnyText(page, ['Coder', 'Live Stream'], 10000);
+  await waitAnyText(page, ['Workflow replay', 'Replay stream', 'No replay events captured yet'], 10000);
+
+  const legacyTexts = ['Coder', 'Task: Create types/checkout.ts', 'Receiving context from Director...'];
+  for (const legacyText of legacyTexts) {
+    if (await page.getByText(legacyText).count()) {
+      throw new Error(`Legacy mock replay text is still visible: ${legacyText}`);
+    }
+  }
+
   await page.screenshot({ path: path.join(artifactsDir, 'ui-e2e-plan-modal.png'), fullPage: true });
   const closeBtn = page.getByRole('button', { name: 'Close' }).first();
   if (await closeBtn.count()) {
