@@ -41,6 +41,7 @@
 - CI 继续使用根目录 `pnpm install --frozen-lockfile` 管理 monorepo 依赖，同时在 `codeflow_template` 内执行 `npm ci`，并显式构建 `@codeflow/core` dist 后再跑 E2E。
 - 嵌入式构建脚本会把 `codeflow_template/dist` 同步到 `backend/internal/web/dist`，与 `backend/internal/web/embed.go` 的嵌入路径保持一致。
 - 默认 Go 打包链采用 `CGO_ENABLED=1`，与 `backend/README.md` 中 `go-sqlite3` 需要 CGO 的要求保持一致；Tauri/sidecar 继续沿用同一 CGO 决策。
+- Windows 下的 `scripts/build-tauri.ps1` 会在执行 `npm run tauri:build` 前自动探测并导入 Visual Studio MSVC 构建环境，避免普通 PowerShell 因缺失 `cl.exe` 与 VC 环境而复现 `vswhom-sys` / `LNK1143` 链接失败。
 
 ## 当前证据
 
@@ -53,3 +54,4 @@
 - `backend/internal/web/embed.go:6`
 - `backend/README.md:30`
 - `codeflow_template/src-tauri/tauri.conf.json:7`
+- `scripts/build-tauri.ps1:131`
