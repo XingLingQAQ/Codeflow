@@ -59,7 +59,7 @@ const toStringArray = (value: unknown): string[] => Array.isArray(value)
 const normalizeWorkflowApproval = (value: unknown): WorkflowApproval[] => {
   if (!Array.isArray(value)) return [];
   return value
-    .map((item, index) => {
+    .map((item, index): WorkflowApproval | null => {
       if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
       return {
@@ -68,15 +68,15 @@ const normalizeWorkflowApproval = (value: unknown): WorkflowApproval[] => {
         owner: toStringValue(record.owner),
         note: toStringValue(record.note),
         updated_at: toNumber(record.updated_at),
-      } satisfies WorkflowApproval;
+      };
     })
-    .filter((item): item is WorkflowApproval => Boolean(item));
+    .filter((item): item is WorkflowApproval => item !== null);
 };
 
 const normalizeWorkflowDecisions = (value: unknown): WorkflowDecision[] => {
   if (!Array.isArray(value)) return [];
   return value
-    .map((item, index) => {
+    .map((item, index): WorkflowDecision | null => {
       if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
       return {
@@ -85,15 +85,15 @@ const normalizeWorkflowDecisions = (value: unknown): WorkflowDecision[] => {
         owner: toStringValue(record.owner),
         reason: toStringValue(record.reason),
         timestamp: toNumber(record.timestamp),
-      } satisfies WorkflowDecision;
+      };
     })
-    .filter((item): item is WorkflowDecision => Boolean(item));
+    .filter((item): item is WorkflowDecision => item !== null);
 };
 
 const normalizeTimelineItems = (value: unknown): WorkflowReplayItem[] => {
   if (!Array.isArray(value)) return [];
   return value
-    .map((item, index) => {
+    .map((item, index): WorkflowReplayItem | null => {
       if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
       return {
@@ -106,9 +106,9 @@ const normalizeTimelineItems = (value: unknown): WorkflowReplayItem[] => {
         actor: toStringValue(record.actor),
         evidence: toStringValue(record.evidence),
         sourceId: toStringValue(record.sourceId) ?? toStringValue(record.source_id),
-      } satisfies WorkflowReplayItem;
+      };
     })
-    .filter((item): item is WorkflowReplayItem => Boolean(item));
+    .filter((item): item is WorkflowReplayItem => item !== null);
 };
 
 const extractWorkflowMetadata = (metadata?: Record<string, unknown> | null): WorkflowMetadata => ({

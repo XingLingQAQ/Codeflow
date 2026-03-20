@@ -1,9 +1,11 @@
 import React from 'react';
 import { X, Copy, Maximize2, Minus, Zap, Terminal, Activity, Code, Eye, RefreshCw } from 'lucide-react';
+import type { WorkflowReplayData } from '../types';
 
 interface LogModalProps {
   isOpen: boolean;
   onClose: () => void;
+  replay?: WorkflowReplayData | null;
 }
 
 export const LogModal: React.FC<LogModalProps> = ({ isOpen, onClose }) => {
