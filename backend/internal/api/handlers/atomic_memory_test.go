@@ -15,12 +15,16 @@ import (
 )
 
 type atomicMemoryServiceMock struct {
-	addFn          func(ctx context.Context, mem *memory.AtomicMemory) error
-	searchFn       func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
-	getBySessionFn func(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
-	getByIDFn      func(ctx context.Context, id string) (*memory.AtomicMemory, error)
-	updateFn       func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
-	deleteFn       func(ctx context.Context, id string) error
+	addFn              func(ctx context.Context, mem *memory.AtomicMemory) error
+	searchFn           func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
+	getBySessionFn     func(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
+	getByIDFn          func(ctx context.Context, id string) (*memory.AtomicMemory, error)
+	updateFn           func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
+	deleteFn           func(ctx context.Context, id string) error
+	applyHeatDecayFn   func(ctx context.Context) (int, error)
+	recomputeTiersFn   func(ctx context.Context) (int, error)
+	boostHeatFn        func(ctx context.Context, id string, boost float64) error
+	searchByTierFn     func(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error)
 }
 
 func (m *atomicMemoryServiceMock) Add(ctx context.Context, mem *memory.AtomicMemory) error {
@@ -63,6 +67,34 @@ func (m *atomicMemoryServiceMock) Delete(ctx context.Context, id string) error {
 		return m.deleteFn(ctx, id)
 	}
 	return nil
+}
+
+func (m *atomicMemoryServiceMock) ApplyHeatDecay(ctx context.Context) (int, error) {
+	if m.applyHeatDecayFn != nil {
+		return m.applyHeatDecayFn(ctx)
+	}
+	return 0, nil
+}
+
+func (m *atomicMemoryServiceMock) RecomputeTiers(ctx context.Context) (int, error) {
+	if m.recomputeTiersFn != nil {
+		return m.recomputeTiersFn(ctx)
+	}
+	return 0, nil
+}
+
+func (m *atomicMemoryServiceMock) BoostHeat(ctx context.Context, id string, boost float64) error {
+	if m.boostHeatFn != nil {
+		return m.boostHeatFn(ctx, id, boost)
+	}
+	return nil
+}
+
+func (m *atomicMemoryServiceMock) SearchByTier(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error) {
+	if m.searchByTierFn != nil {
+		return m.searchByTierFn(ctx, tier, limit)
+	}
+	return nil, nil
 }
 
 func setupAtomicMemoryHandlerTest(t *testing.T) *gin.Engine {
