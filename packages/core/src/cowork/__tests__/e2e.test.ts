@@ -4,7 +4,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { AuditManager } from '../../audit/index.js';
 import { CoworkOrchestrator } from '../CoworkOrchestrator.js';
+import { AgentRuntime } from '../runtime.js';
 import { AiderAdapter } from '../adapters/AiderAdapter.js';
 import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
 import {
@@ -581,6 +583,171 @@ describe('Cowork E2E Tests', () => {
       expect(duration).toBeLessThan(10000);
       // 并行应该比顺序快 2 倍以上
       expect(duration).toBeLessThan(600); // 3 * 200ms = 600ms if sequential
+    });
+  });
+
+  describe('Runtime governance E2E', () => {
+    it('should surface redacted metadata and fallback recovery through orchestrator execution', async () => {
+      const auditManager = new AuditManager();
+      const runtime = new AgentRuntime({ auditManager });
+      const primaryEditor = {
+        name: 'primary-editor',
+        edit: vi.fn().mockResolvedValue({
+          success: false,
+          file: 'runtime.ts',
+          diff: { file: 'runtime.ts', hunks: [], additions: 0, deletions: 0 },
+          message: 'primary editor failed',
+        }),
+        editMultiple: vi.fn(),
+        preview: vi.fn(),
+        applyDiff: vi.fn(),
+        undo: vi.fn(),
+      };
+      const fallbackEditor = {
+        name: 'fallback-editor',
+        edit: vi.fn().mockResolvedValue({
+          success: true,
+          file: 'runtime.ts',
+          diff: { file: 'runtime.ts', hunks: [], additions: 1, deletions: 0 },
+        }),
+        editMultiple: vi.fn(),
+        preview: vi.fn(),
+        applyDiff: vi.fn(),
+        undo: vi.fn(),
+      };
+
+      runtime.registerExecutor('primary', primaryEditor, {
+        name: 'primary',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: { streaming: false, multiFile: false, contextAware: true, codeReview: false },
+      });
+      runtime.registerExecutor('backup', fallbackEditor, {
+        name: 'backup',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: { streaming: false, multiFile: false, contextAware: true, codeReview: false },
+      });
+
+      const governedOrchestrator = new CoworkOrchestrator(undefined, undefined, runtime);
+      const task: CoworkTask = {
+        id: 'runtime-e2e-governed',
+        type: 'code-edit',
+        executor: 'primary',
+        input: {
+          files: ['runtime.ts'],
+          instruction: 'Apply governed runtime change',
+        },
+        runtime: {
+          actor: {
+            id: 'agent-1',
+            type: 'agent',
+            sessionId: 'sess-runtime-e2e',
+          },
+          policy: {
+            command: 'governed-edit',
+            metadata: {
+              apiToken: 'secret-runtime-token',
+              wikiUrl: 'https://wiki.local/runtime',
+            },
+            boundaries: [{ type: 'command', value: 'governed-edit', risk: 'low' }],
+          },
+        },
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+
+      const result = await governedOrchestrator.execute(task);
+      const auditEntries = await auditManager.query({ resourceType: 'tool-runtime' });
+
+      expect(result.status).toBe('completed');
+      expect(result.executor).toBe('backup');
+      expect(task.output?.runtime).toMatchObject({
+        decision: 'allow',
+        fallback: {
+          attempted: true,
+          fromExecutor: 'primary',
+          toExecutor: 'backup',
+          recovered: true,
+        },
+        snapshot: {
+          command: 'governed-edit',
+          metadataPreview: {
+            apiToken: '[REDACTED]',
+            wikiUrl: 'https://wiki.local/runtime',
+          },
+        },
+      });
+      expect(primaryEditor.edit).toHaveBeenCalledTimes(1);
+      expect(fallbackEditor.edit).toHaveBeenCalledTimes(1);
+      expect(auditEntries.entries[0]?.details?.metadataPreview).toMatchObject({
+        apiToken: '[REDACTED]',
+        wikiUrl: 'https://wiki.local/runtime',
+      });
+
+      await governedOrchestrator.cleanup();
+    });
+
+    it('should block high-risk runtime requests before editor invocation', async () => {
+      const auditManager = new AuditManager();
+      const runtime = new AgentRuntime({ auditManager });
+      const editor = {
+        name: 'deny-editor',
+        edit: vi.fn(),
+        editMultiple: vi.fn(),
+        preview: vi.fn(),
+        applyDiff: vi.fn(),
+        undo: vi.fn(),
+      };
+
+      runtime.registerExecutor('guarded', editor, {
+        name: 'guarded',
+        supportedTypes: ['code-edit'],
+        maxConcurrency: 1,
+        estimatedSpeed: 'fast',
+        features: { streaming: false, multiFile: false, contextAware: true, codeReview: false },
+      });
+
+      const governedOrchestrator = new CoworkOrchestrator(undefined, undefined, runtime);
+      const task = createTask('runtime-e2e-deny', 'guarded', ['danger.ts'], 'Attempt risky sync') as CoworkTask;
+      task.runtime = {
+        actor: {
+          id: 'user-1',
+          type: 'user',
+        },
+        policy: {
+          metadata: {
+            accessToken: 'deny-secret',
+          },
+          boundaries: [{ type: 'command', value: 'guarded', risk: 'low' }],
+          requestedBoundaries: [{ type: 'network', value: 'https://market.example', risk: 'high' }],
+        },
+      };
+
+      const result = await governedOrchestrator.execute(task);
+      const auditEntries = await auditManager.query({ resourceType: 'tool-runtime', outcome: 'failure' });
+
+      expect(result.status).toBe('failed');
+      expect(result.output?.error).toBe('Execution blocked by runtime policy');
+      expect(task.output?.runtime).toMatchObject({
+        decision: 'deny',
+        risk: 'high',
+        fallback: {
+          attempted: false,
+          recovered: false,
+        },
+        snapshot: {
+          metadataPreview: {
+            accessToken: '[REDACTED]',
+          },
+        },
+      });
+      expect(editor.edit).not.toHaveBeenCalled();
+      expect(auditEntries.entries[0]?.details?.decision).toBe('deny');
+
+      await governedOrchestrator.cleanup();
     });
   });
 });
