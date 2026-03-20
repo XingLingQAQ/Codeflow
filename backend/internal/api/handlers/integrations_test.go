@@ -60,16 +60,19 @@ func setupIntegrationDependencies(t *testing.T) {
 	hooks.SetHookManager(hookMgr)
 }
 
-func integrationRegisterRequest(distribution integration.DistributionMode, allowThirdParty bool) map[string]interface{} {
+func integrationRegisterRequestForType(integrationType integration.IntegrationType, distribution integration.DistributionMode, allowThirdParty bool) map[string]interface{} {
 	return map[string]interface{}{
 		"manifest": map[string]interface{}{
-			"name":         "test-webhook",
+			"name":         "test-" + string(integrationType),
 			"version":      "1.0.0",
-			"description":  "governed webhook integration",
-			"type":         string(integration.IntegrationTypeWebhook),
+			"description":  "governed " + string(integrationType) + " integration",
+			"type":         string(integrationType),
 			"hook_name":    "test-hook",
 			"distribution": string(distribution),
 			"capabilities": []string{"invoke", "replay"},
+			"metadata": map[string]interface{}{
+				"entry": string(integrationType),
+			},
 		},
 		"signature": map[string]interface{}{
 			"algorithm": "ed25519",
@@ -87,6 +90,81 @@ func integrationRegisterRequest(distribution integration.DistributionMode, allow
 			"name": "Test Agent",
 		},
 	}
+}
+
+func integrationRegisterRequest(distribution integration.DistributionMode, allowThirdParty bool) map[string]interface{} {
+	return integrationRegisterRequestForType(integration.IntegrationTypeWebhook, distribution, allowThirdParty)
+}
+
+func TestRegisterIntegrationSupportsPluginVCSAndMarketplaceAPI(t *testing.T) {
+	router := setupIntegrationRouter()
+	setupIntegrationDependencies(t)
+
+	tests := []struct {
+		name            string
+		integrationType integration.IntegrationType
+		distribution    integration.DistributionMode
+		allowThirdParty bool
+	}{
+		{name: "plugin internal", integrationType: integration.IntegrationTypePlugin, distribution: integration.DistributionInternal},
+		{name: "vcs internal", integrationType: integration.IntegrationTypeVCS, distribution: integration.DistributionInternal},
+		{name: "marketplace third party allowed", integrationType: integration.IntegrationTypeMarketplace, distribution: integration.DistributionThirdParty, allowThirdParty: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, _ := json.Marshal(integrationRegisterRequestForType(tt.integrationType, tt.distribution, tt.allowThirdParty))
+			req, _ := http.NewRequest("POST", "/api/v1/integrations", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusCreated, w.Code)
+
+			var resp integration.Integration
+			err := json.Unmarshal(w.Body.Bytes(), &resp)
+			require.NoError(t, err)
+			assert.Equal(t, tt.integrationType, resp.Manifest.Type)
+			assert.Equal(t, tt.distribution, resp.Manifest.Distribution)
+		})
+	}
+}
+
+func TestRegisterIntegrationRejectsUnknownTypeAPI(t *testing.T) {
+	router := setupIntegrationRouter()
+	setupIntegrationDependencies(t)
+
+	payload := integrationRegisterRequestForType(integration.IntegrationTypePlugin, integration.DistributionInternal, false)
+	manifest := payload["manifest"].(map[string]interface{})
+	manifest["type"] = "sidecar"
+
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/api/v1/integrations", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestRegisterIntegrationRejectsUnknownDistributionAPI(t *testing.T) {
+	router := setupIntegrationRouter()
+	setupIntegrationDependencies(t)
+
+	payload := integrationRegisterRequestForType(integration.IntegrationTypePlugin, integration.DistributionInternal, false)
+	manifest := payload["manifest"].(map[string]interface{})
+	manifest["distribution"] = "partner"
+
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "/api/v1/integrations", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestRegisterIntegrationAPI(t *testing.T) {

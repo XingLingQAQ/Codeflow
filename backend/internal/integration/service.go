@@ -248,6 +248,12 @@ func validateRegistration(req *RegisterIntegrationRequest) error {
 	if req.Manifest.Name == "" || req.Manifest.Version == "" || req.Manifest.Type == "" || req.Manifest.HookName == "" {
 		return ErrInvalidManifest
 	}
+	if !isSupportedIntegrationType(req.Manifest.Type) {
+		return ErrInvalidManifest
+	}
+	if !isSupportedDistributionMode(req.Manifest.Distribution) {
+		return ErrInvalidManifest
+	}
 	if req.Signature.Algorithm == "" || req.Signature.Value == "" || !req.Signature.Verified {
 		return ErrInvalidManifest
 	}
@@ -267,6 +273,24 @@ func validateRegistration(req *RegisterIntegrationRequest) error {
 		return err
 	}
 	return nil
+}
+
+func isSupportedIntegrationType(integrationType IntegrationType) bool {
+	switch integrationType {
+	case IntegrationTypeWebhook, IntegrationTypePlugin, IntegrationTypeVCS, IntegrationTypeMarketplace:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedDistributionMode(distribution DistributionMode) bool {
+	switch distribution {
+	case DistributionInternal, DistributionThirdParty:
+		return true
+	default:
+		return false
+	}
 }
 
 func authorize(policy Policy, actor audit.AuditActor) error {

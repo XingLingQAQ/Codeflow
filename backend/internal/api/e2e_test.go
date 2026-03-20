@@ -399,6 +399,136 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 	resp.Body.Close()
 }
 
+// TestE2E_IntegrationWorkflowCoversGovernedOpenSurfaces validates plugin/vcs/marketplace registration and audit chain reuse.
+func TestE2E_IntegrationWorkflowCoversGovernedOpenSurfaces(t *testing.T) {
+	ts := setupE2EServer(t)
+	defer ts.Close()
+
+	client := ts.Client()
+	tests := []struct {
+		name            string
+		integrationType string
+		distribution    string
+		allowThirdParty bool
+	}{
+		{name: "plugin", integrationType: "plugin", distribution: "internal"},
+		{name: "vcs", integrationType: "vcs", distribution: "third_party", allowThirdParty: true},
+		{name: "marketplace", integrationType: "marketplace", distribution: "internal"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registerReq := map[string]interface{}{
+				"manifest": map[string]interface{}{
+					"name":         "test-" + tt.integrationType,
+					"version":      "1.0.0",
+					"description":  "governed " + tt.integrationType + " integration",
+					"type":         tt.integrationType,
+					"hook_name":    "test-hook",
+					"distribution": tt.distribution,
+					"capabilities": []string{"invoke", "replay"},
+				},
+				"signature": map[string]interface{}{
+					"algorithm": "ed25519",
+					"value":     "signed-manifest",
+					"verified":  true,
+				},
+				"policy": map[string]interface{}{
+					"allowed_actor_types":            []string{"agent"},
+					"require_audit":                  true,
+					"allow_third_party_distribution": tt.allowThirdParty,
+				},
+				"actor": map[string]interface{}{
+					"id":   "agent-1",
+					"type": "agent",
+					"name": "Integration Agent",
+				},
+			}
+			body, _ := json.Marshal(registerReq)
+			resp, err := client.Post(ts.URL+"/api/v1/integrations", "application/json", bytes.NewBuffer(body))
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+			var created map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&created)
+			resp.Body.Close()
+			integrationID := created["id"].(string)
+			assert.Equal(t, tt.integrationType, created["manifest"].(map[string]interface{})["type"])
+
+			invokeReq := map[string]interface{}{
+				"actor": map[string]interface{}{
+					"id":   "agent-1",
+					"type": "agent",
+					"name": "Integration Agent",
+				},
+				"payload": map[string]interface{}{
+					"message": tt.integrationType,
+				},
+				"session_id":  "session-" + tt.integrationType,
+				"description": "invoke governed " + tt.integrationType,
+				"tags":        []string{"e2e", tt.integrationType},
+			}
+			body, _ = json.Marshal(invokeReq)
+			resp, err = client.Post(ts.URL+"/api/v1/integrations/"+integrationID+"/invoke", "application/json", bytes.NewBuffer(body))
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var invokeResp map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&invokeResp)
+			resp.Body.Close()
+			assert.NotEmpty(t, invokeResp["invocation_id"])
+
+			resp, err = client.Get(ts.URL + "/api/v1/audit/logs?resource_type=integration&resource_id=" + integrationID + "&limit=10")
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var auditResp map[string]interface{}
+			json.NewDecoder(resp.Body).Decode(&auditResp)
+			resp.Body.Close()
+			assert.GreaterOrEqual(t, int(auditResp["total"].(float64)), 2)
+		})
+	}
+}
+
+// TestE2E_IntegrationWorkflowRejectsUnknownGovernedType validates invalid open-surface manifests fail fast.
+func TestE2E_IntegrationWorkflowRejectsUnknownGovernedType(t *testing.T) {
+	ts := setupE2EServer(t)
+	defer ts.Close()
+
+	client := ts.Client()
+	registerReq := map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"name":         "test-sidecar",
+			"version":      "1.0.0",
+			"description":  "invalid integration",
+			"type":         "sidecar",
+			"hook_name":    "test-hook",
+			"distribution": "internal",
+			"capabilities": []string{"invoke"},
+		},
+		"signature": map[string]interface{}{
+			"algorithm": "ed25519",
+			"value":     "signed-manifest",
+			"verified":  true,
+		},
+		"policy": map[string]interface{}{
+			"allowed_actor_types":            []string{"agent"},
+			"require_audit":                  true,
+			"allow_third_party_distribution": false,
+		},
+		"actor": map[string]interface{}{
+			"id":   "agent-1",
+			"type": "agent",
+			"name": "Integration Agent",
+		},
+	}
+	body, _ := json.Marshal(registerReq)
+	resp, err := client.Post(ts.URL+"/api/v1/integrations", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
 // TestE2E_IntegrationWorkflow tests the governed integration workflow.
 func TestE2E_IntegrationWorkflow(t *testing.T) {
 	ts := setupE2EServer(t)

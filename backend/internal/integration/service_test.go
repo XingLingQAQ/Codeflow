@@ -34,16 +34,19 @@ func setupIntegrationTestDependencies(t *testing.T) {
 	hooks.SetHookManager(hookMgr)
 }
 
-func validRegisterRequest(distribution DistributionMode, allowThirdParty bool) *RegisterIntegrationRequest {
+func validRegisterRequestForType(integrationType IntegrationType, distribution DistributionMode, allowThirdParty bool) *RegisterIntegrationRequest {
 	return &RegisterIntegrationRequest{
 		Manifest: Manifest{
-			Name:         "test-webhook",
+			Name:         "test-" + string(integrationType),
 			Version:      "1.0.0",
-			Description:  "governed webhook integration",
-			Type:         IntegrationTypeWebhook,
+			Description:  "governed " + string(integrationType) + " integration",
+			Type:         integrationType,
 			HookName:     "test-hook",
 			Distribution: distribution,
 			Capabilities: []string{"invoke", "replay"},
+			Metadata: map[string]interface{}{
+				"entry": string(integrationType),
+			},
 		},
 		Signature: Signature{
 			Algorithm: "ed25519",
@@ -61,6 +64,10 @@ func validRegisterRequest(distribution DistributionMode, allowThirdParty bool) *
 			Name: "Integration Agent",
 		},
 	}
+}
+
+func validRegisterRequest(distribution DistributionMode, allowThirdParty bool) *RegisterIntegrationRequest {
+	return validRegisterRequestForType(IntegrationTypeWebhook, distribution, allowThirdParty)
 }
 
 func TestInMemoryIntegrationService_RegisterInvokeReplay(t *testing.T) {
@@ -101,6 +108,81 @@ func TestInMemoryIntegrationService_RegisterInvokeReplay(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, auditResult.Total, 3)
+}
+
+func TestInMemoryIntegrationService_SupportsGovernedPluginVCSAndMarketplace(t *testing.T) {
+	setupIntegrationTestDependencies(t)
+	svc := NewInMemoryIntegrationService()
+
+	tests := []struct {
+		name            string
+		integrationType IntegrationType
+		distribution    DistributionMode
+		allowThirdParty bool
+	}{
+		{name: "plugin internal", integrationType: IntegrationTypePlugin, distribution: DistributionInternal},
+		{name: "vcs third party allowed", integrationType: IntegrationTypeVCS, distribution: DistributionThirdParty, allowThirdParty: true},
+		{name: "marketplace internal", integrationType: IntegrationTypeMarketplace, distribution: DistributionInternal},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			created, err := svc.Register(context.Background(), validRegisterRequestForType(tt.integrationType, tt.distribution, tt.allowThirdParty))
+			require.NoError(t, err)
+			assert.Equal(t, tt.integrationType, created.Manifest.Type)
+			assert.Equal(t, tt.distribution, created.Manifest.Distribution)
+			assert.Equal(t, "test-hook", created.Manifest.HookName)
+
+			invoked, err := svc.Invoke(context.Background(), created.ID, &InvokeIntegrationRequest{
+				Actor: audit.AuditActor{ID: "agent-1", Type: "agent", Name: "Invoker"},
+				Payload: map[string]interface{}{
+					"message": string(tt.integrationType),
+				},
+				SessionID:   "session-" + string(tt.integrationType),
+				Description: "invoke " + string(tt.integrationType),
+				Tags:        []string{"service-test", string(tt.integrationType)},
+			})
+			require.NoError(t, err)
+			assert.NotEmpty(t, invoked.InvocationID)
+			assert.NotEmpty(t, invoked.AuditEntryID)
+
+			replayed, err := svc.Replay(context.Background(), created.ID, &ReplayIntegrationRequest{
+				Actor:        audit.AuditActor{ID: "agent-1", Type: "agent", Name: "Invoker"},
+				InvocationID: invoked.InvocationID,
+			})
+			require.NoError(t, err)
+			assert.True(t, replayed.Invocation.Replayed)
+			assert.Equal(t, invoked.InvocationID, replayed.Invocation.ReplayOf)
+
+			auditResult, err := audit.GetAuditService().Query(context.Background(), &audit.AuditQuery{
+				ResourceType: "integration",
+				ResourceID:   created.ID,
+				Limit:        10,
+			})
+			require.NoError(t, err)
+			assert.GreaterOrEqual(t, auditResult.Total, 3)
+		})
+	}
+}
+
+func TestInMemoryIntegrationService_RejectsUnknownIntegrationType(t *testing.T) {
+	setupIntegrationTestDependencies(t)
+	svc := NewInMemoryIntegrationService()
+
+	req := validRegisterRequestForType(IntegrationType("sidecar"), DistributionInternal, false)
+	_, err := svc.Register(context.Background(), req)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidManifest)
+}
+
+func TestInMemoryIntegrationService_RejectsUnknownDistributionMode(t *testing.T) {
+	setupIntegrationTestDependencies(t)
+	svc := NewInMemoryIntegrationService()
+
+	req := validRegisterRequestForType(IntegrationTypePlugin, DistributionMode("partner"), true)
+	_, err := svc.Register(context.Background(), req)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidManifest)
 }
 
 func TestInMemoryIntegrationService_RejectsUngovernedThirdParty(t *testing.T) {
