@@ -89,6 +89,25 @@ export interface ToolRuntimeExecutionOutcome {
   isolated: boolean;
   processId?: string;
   notes: string[];
+  snapshot?: {
+    command: string;
+    args: string[];
+    cwd?: string;
+    envKeys: string[];
+    boundarySummary: {
+      matched: number;
+      missing: number;
+      required: number;
+    };
+    metadataPreview?: Record<string, unknown>;
+  };
+  fallback?: {
+    attempted: boolean;
+    fromExecutor?: string;
+    toExecutor?: string;
+    reason?: string;
+    recovered: boolean;
+  };
 }
 
 export interface ExecutorRuntimePolicy {
@@ -228,6 +247,9 @@ export interface RuntimeExecutionOptions {
 export interface ModelPool {
   registerExecutor(executor: ExecutorRegistration): void;
   getModelId(executorName: string): string | undefined;
+  markExecutorHealthy(executorName: string): void;
+  markExecutorUnhealthy(executorName: string, reason?: string): void;
+  getFallbackExecutor(task: CoworkTask, currentExecutor: string): ExecutorRegistration | undefined;
 }
 
 export interface ContextAssembler {

@@ -34,13 +34,42 @@ import type {
 
 class InMemoryModelPool implements ModelPool {
   private readonly models = new Map<string, string | undefined>();
+  private readonly executors = new Map<string, ExecutorRegistration>();
+  private readonly health = new Map<string, { healthy: boolean; reason?: string }>();
 
   registerExecutor(executor: ExecutorRegistration): void {
     this.models.set(executor.name, executor.modelId);
+    this.executors.set(executor.name, executor);
+    this.markExecutorHealthy(executor.name);
   }
 
   getModelId(executorName: string): string | undefined {
     return this.models.get(executorName);
+  }
+
+  markExecutorHealthy(executorName: string): void {
+    this.health.set(executorName, { healthy: true });
+  }
+
+  markExecutorUnhealthy(executorName: string, reason?: string): void {
+    this.health.set(executorName, { healthy: false, reason });
+  }
+
+  getFallbackExecutor(task: CoworkTask, currentExecutor: string): ExecutorRegistration | undefined {
+    for (const executor of this.executors.values()) {
+      if (executor.name === currentExecutor) {
+        continue;
+      }
+      if (!executor.capabilities.supportedTypes.includes(task.type)) {
+        continue;
+      }
+      const status = this.health.get(executor.name);
+      if (status?.healthy === false) {
+        continue;
+      }
+      return executor;
+    }
+    return undefined;
   }
 }
 
@@ -192,6 +221,53 @@ class RuntimePolicyEngine {
   }
 }
 
+function sanitizeRuntimeMetadataValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length > 120) {
+      return `${value.slice(0, 117)}...`;
+    }
+    if (/token|secret|password/i.test(value)) {
+      return '[REDACTED]';
+    }
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 3).map((item) => sanitizeRuntimeMetadataValue(item));
+  }
+  if (typeof value === 'object') {
+    return '[OBJECT]';
+  }
+  return String(value);
+}
+
+function sanitizeRuntimeMetadataPreview(metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!metadata) {
+    return undefined;
+  }
+
+  const preview = Object.entries(metadata).reduce<Record<string, unknown>>((acc, [key, value]) => {
+    if (value === undefined) {
+      return acc;
+    }
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey.includes('token') || normalizedKey.includes('secret') || normalizedKey.includes('password')) {
+      acc[key] = '[REDACTED]';
+      return acc;
+    }
+    if (Array.isArray(value)) {
+      acc[key] = value.slice(0, 3).map((item) => sanitizeRuntimeMetadataValue(item));
+      return acc;
+    }
+    acc[key] = sanitizeRuntimeMetadataValue(value);
+    return acc;
+  }, {});
+
+  return Object.keys(preview).length > 0 ? preview : undefined;
+}
+
 class RuntimeAuditTrail {
   constructor(private readonly auditManager: IAuditManager) {}
 
@@ -226,7 +302,7 @@ class RuntimeAuditTrail {
       details: {
         command: request.command,
         args: request.args ?? [],
-        metadata: request.metadata,
+        metadataPreview: sanitizeRuntimeMetadataPreview(request.metadata),
         decision: result.decision,
         risk: result.risk,
         notes: result.notes,
@@ -236,6 +312,17 @@ class RuntimeAuditTrail {
       },
     });
   }
+}
+
+type TaskDiffs = NonNullable<NonNullable<CoworkTask['output']>['diffs']>;
+type RuntimeOutcome = NonNullable<NonNullable<CoworkTask['output']>['runtime']>;
+type RuntimeFallback = NonNullable<RuntimeOutcome['fallback']>;
+
+interface ExecutionAttemptResult {
+  diffs: TaskDiffs;
+  runtimeResult?: ExecutionSandboxResult;
+  error?: string;
+  retryable: boolean;
 }
 
 function normalizeExecutionResult(
@@ -463,111 +550,175 @@ export class AgentRuntime implements AgentRuntimeLike {
     }
 
     const sandboxed = await this.sandbox.prepare(task, executor, options);
-    const activeExecutor = options.executorOverride ?? sandboxed.executor ?? executor;
+    const initialExecutor = options.executorOverride ?? sandboxed.executor ?? executor;
 
     try {
-      const runtimeResult = await this.evaluateRuntimePolicy(sandboxed.task, activeExecutor, options);
-      if (runtimeResult && !this.canProceed(runtimeResult)) {
+      const primaryAttempt = await this.runTaskAttempt(sandboxed.task, initialExecutor, options);
+      if (!primaryAttempt.error) {
+        this.modelPool.markExecutorHealthy(initialExecutor.name);
         return normalizeExecutionResult(
           task,
-          activeExecutor,
+          initialExecutor,
           startTime,
-          [],
-          this.getRuntimeErrorMessage(runtimeResult),
-          this.toRuntimeOutcome(runtimeResult),
+          primaryAttempt.diffs,
+          undefined,
+          primaryAttempt.runtimeResult ? this.toRuntimeOutcome(primaryAttempt.runtimeResult) : undefined,
         );
       }
 
-      const diffs: NonNullable<CoworkTask['output']>['diffs'] = [];
-      const sandboxedTask = sandboxed.task;
-      if (sandboxedTask.input.files.length === 1) {
-        const editResult = await this.executeTool(
-          'file.edit',
-          {
-            file: sandboxedTask.input.files[0],
-            instruction: sandboxedTask.input.instruction,
-          },
-          sandboxedTask,
-          activeExecutor,
-          options,
+      this.modelPool.markExecutorUnhealthy(initialExecutor.name, primaryAttempt.error);
+      const fallback = this.modelPool.getFallbackExecutor(sandboxed.task, initialExecutor.name);
+      if (!primaryAttempt.retryable || !fallback) {
+        return normalizeExecutionResult(
+          task,
+          initialExecutor,
+          startTime,
+          primaryAttempt.diffs,
+          primaryAttempt.error,
+          primaryAttempt.runtimeResult
+            ? this.toRuntimeOutcome(primaryAttempt.runtimeResult, {
+                attempted: Boolean(fallback),
+                fromExecutor: initialExecutor.name,
+                toExecutor: fallback?.name,
+                reason: primaryAttempt.error,
+                recovered: false,
+              })
+            : undefined,
         );
-        if (!editResult.ok) {
-          return normalizeExecutionResult(
-            task,
-            activeExecutor,
-            startTime,
-            diffs,
-            editResult.error?.message,
-            runtimeResult ? this.toRuntimeOutcome(runtimeResult) : undefined,
-          );
-        }
-        const result = editResult.output as EditResult | undefined;
-        if (result?.success) {
-          diffs.push(result.diff);
-        } else if (result?.message) {
-          return normalizeExecutionResult(
-            task,
-            activeExecutor,
-            startTime,
-            diffs,
-            result.message,
-            runtimeResult ? this.toRuntimeOutcome(runtimeResult) : undefined,
-          );
-        }
-      } else if (sandboxedTask.input.files.length > 1) {
-        const batchResult = await this.executeTool(
-          'file.edit_multiple',
-          {
-            files: sandboxedTask.input.files,
-            instruction: sandboxedTask.input.instruction,
-          },
-          sandboxedTask,
-          activeExecutor,
-          options,
-        );
-        if (!batchResult.ok) {
-          return normalizeExecutionResult(
-            task,
-            activeExecutor,
-            startTime,
-            diffs,
-            batchResult.error?.message,
-            runtimeResult ? this.toRuntimeOutcome(runtimeResult) : undefined,
-          );
-        }
-        const results = (batchResult.output ?? []) as EditResult[];
-        const failed = results.find((result: EditResult) => !result.success);
-        for (const result of results) {
-          if (result.success) {
-            diffs.push(result.diff);
-          }
-        }
-        if (failed?.message) {
-          return normalizeExecutionResult(
-            task,
-            activeExecutor,
-            startTime,
-            diffs,
-            failed.message,
-            runtimeResult ? this.toRuntimeOutcome(runtimeResult) : undefined,
-          );
-        }
       }
 
+      const fallbackAttempt = await this.runTaskAttempt(sandboxed.task, fallback, {
+        ...options,
+        executorOverride: fallback,
+      });
+      const fallbackMeta: RuntimeFallback = {
+        attempted: true,
+        fromExecutor: initialExecutor.name,
+        toExecutor: fallback.name,
+        reason: primaryAttempt.error,
+        recovered: !fallbackAttempt.error,
+      };
+
+      if (!fallbackAttempt.error) {
+        this.modelPool.markExecutorHealthy(fallback.name);
+        return normalizeExecutionResult(
+          task,
+          fallback,
+          startTime,
+          fallbackAttempt.diffs,
+          undefined,
+          fallbackAttempt.runtimeResult
+            ? this.toRuntimeOutcome(fallbackAttempt.runtimeResult, fallbackMeta)
+            : undefined,
+        );
+      }
+
+      this.modelPool.markExecutorUnhealthy(fallback.name, fallbackAttempt.error);
       return normalizeExecutionResult(
         task,
-        activeExecutor,
+        fallback,
         startTime,
-        diffs,
-        undefined,
-        runtimeResult ? this.toRuntimeOutcome(runtimeResult) : undefined,
+        fallbackAttempt.diffs,
+        fallbackAttempt.error,
+        fallbackAttempt.runtimeResult
+          ? this.toRuntimeOutcome(fallbackAttempt.runtimeResult, fallbackMeta)
+          : undefined,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      return normalizeExecutionResult(task, activeExecutor, startTime, [], message);
+      this.modelPool.markExecutorUnhealthy(initialExecutor.name, message);
+      return normalizeExecutionResult(task, initialExecutor, startTime, [], message);
     } finally {
       await sandboxed.release?.();
     }
+  }
+
+  private async runTaskAttempt(
+    task: CoworkTask,
+    executor: ExecutorRegistration,
+    options: RuntimeExecutionOptions,
+  ): Promise<ExecutionAttemptResult> {
+    const runtimeResult = await this.evaluateRuntimePolicy(task, executor, options);
+    if (runtimeResult && !this.canProceed(runtimeResult)) {
+      return {
+        diffs: [],
+        runtimeResult,
+        error: this.getRuntimeErrorMessage(runtimeResult),
+        retryable: false,
+      };
+    }
+
+    const diffs: TaskDiffs = [];
+    if (task.input.files.length === 1) {
+      const editResult = await this.executeTool(
+        'file.edit',
+        {
+          file: task.input.files[0],
+          instruction: task.input.instruction,
+        },
+        task,
+        executor,
+        options,
+      );
+      if (!editResult.ok) {
+        return {
+          diffs,
+          runtimeResult,
+          error: editResult.error?.message,
+          retryable: true,
+        };
+      }
+      const result = editResult.output as EditResult | undefined;
+      if (result?.success) {
+        diffs.push(result.diff);
+      } else if (result?.message) {
+        return {
+          diffs,
+          runtimeResult,
+          error: result.message,
+          retryable: true,
+        };
+      }
+      return { diffs, runtimeResult, retryable: false };
+    }
+
+    if (task.input.files.length > 1) {
+      const batchResult = await this.executeTool(
+        'file.edit_multiple',
+        {
+          files: task.input.files,
+          instruction: task.input.instruction,
+        },
+        task,
+        executor,
+        options,
+      );
+      if (!batchResult.ok) {
+        return {
+          diffs,
+          runtimeResult,
+          error: batchResult.error?.message,
+          retryable: true,
+        };
+      }
+      const results = (batchResult.output ?? []) as EditResult[];
+      const failed = results.find((result: EditResult) => !result.success);
+      for (const result of results) {
+        if (result.success) {
+          diffs.push(result.diff);
+        }
+      }
+      if (failed?.message) {
+        return {
+          diffs,
+          runtimeResult,
+          error: failed.message,
+          retryable: true,
+        };
+      }
+    }
+
+    return { diffs, runtimeResult, retryable: false };
   }
 
   private async executeTool(
@@ -672,6 +823,14 @@ export class AgentRuntime implements AgentRuntimeLike {
     };
   }
 
+  private sanitizeMetadataPreview(metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
+    return sanitizeRuntimeMetadataPreview(metadata);
+  }
+
+  private sanitizeMetadataValue(value: unknown): unknown {
+    return sanitizeRuntimeMetadataValue(value);
+  }
+
   private createRuntimeSnapshot(
     request: RuntimeToolExecutionRequest,
     decision: PolicyDecisionResult,
@@ -692,6 +851,7 @@ export class AgentRuntime implements AgentRuntimeLike {
         missing: decision.missingBoundaries.length,
         required: request.boundaries.filter((boundary) => boundary.required).length,
       },
+      metadataPreview: this.sanitizeMetadataPreview(request.metadata),
       notes: [...decision.notes],
     };
   }
@@ -710,18 +870,27 @@ export class AgentRuntime implements AgentRuntimeLike {
     return 'Execution denied';
   }
 
-  private toRuntimeOutcome(result: ExecutionSandboxResult): CoworkTask['output'] extends infer T
-    ? T extends { runtime?: infer R }
-      ? R
-      : never
-    : never {
+  private toRuntimeOutcome(result: ExecutionSandboxResult, fallback?: RuntimeFallback): RuntimeOutcome {
     return {
       decision: result.decision.decision,
       risk: result.decision.risk,
       isolated: result.isolated,
       processId: result.processId,
       notes: [...result.snapshot.notes],
-    } as any;
+      snapshot: {
+        command: result.snapshot.command,
+        args: [...result.snapshot.args],
+        cwd: result.snapshot.cwd,
+        envKeys: [...result.snapshot.envKeys],
+        boundarySummary: {
+          matched: result.snapshot.boundarySummary.matched,
+          missing: result.snapshot.boundarySummary.missing,
+          required: result.snapshot.boundarySummary.required,
+        },
+        metadataPreview: result.snapshot.metadataPreview,
+      },
+      fallback,
+    };
   }
 }
 
