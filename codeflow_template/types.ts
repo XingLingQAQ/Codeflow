@@ -204,6 +204,12 @@ export interface Plan {
   metadata?: Record<string, unknown>;
 }
 
+export interface PlanListResponse {
+  plans: Plan[];
+  total: number;
+  has_more: boolean;
+}
+
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'blocked';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -225,6 +231,11 @@ export interface PlanTask {
   created_at: number;
   updated_at: number;
   metadata?: Record<string, unknown>;
+}
+
+export interface PlanTaskListResponse {
+  tasks: PlanTask[];
+  total: number;
 }
 
 // --- Agent ---

@@ -11,7 +11,7 @@ import {
   LogOut, CreditCard, Key, Smartphone,
   Flame, Snowflake, Archive, ExternalLink, RefreshCw
 } from 'lucide-react';
-import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanListResponse, PlanTask, PlanTaskListResponse, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -1850,26 +1850,32 @@ const PlanView = ({
     const graphJumpRef = useRef<HTMLDivElement | null>(null);
     const knowledgePackRef = useRef<HTMLDivElement | null>(null);
 
-    const { data: plans, loading: plansLoading, error: plansError, refetch: refetchPlans } = useApi<Plan[]>(
-        (signal) => workflowProject ? Promise.resolve(workflowOverview?.plans ?? []) : listPlans(signal),
+    const { data: plansResponse, loading: plansLoading, error: plansError, refetch: refetchPlans } = useApi<PlanListResponse>(
+        (signal) => workflowProject
+            ? Promise.resolve({ plans: workflowOverview?.plans ?? [], total: workflowOverview?.plans?.length ?? 0, has_more: false })
+            : listPlans(signal),
         [workflowProject?.id, workflowOverview?.plans?.length ?? 0],
     );
+    const plans = plansResponse?.plans ?? [];
 
-    const { data: tasks, loading: tasksLoading, refetch: refetchTasks } = useApi<PlanTask[]>(
+    const { data: tasksResponse, loading: tasksLoading, refetch: refetchTasks } = useApi<PlanTaskListResponse>(
         (signal) => {
             if (workflowProject) {
-                if (!selectedPlanId) return Promise.resolve(workflowOverview?.tasks ?? []);
-                return Promise.resolve((workflowOverview?.tasks ?? []).filter(task => task.plan_id === selectedPlanId));
+                const workflowTasks = !selectedPlanId
+                    ? (workflowOverview?.tasks ?? [])
+                    : (workflowOverview?.tasks ?? []).filter(task => task.plan_id === selectedPlanId);
+                return Promise.resolve({ tasks: workflowTasks, total: workflowTasks.length });
             }
-            return selectedPlanId ? getPlanTasks(selectedPlanId, signal) : Promise.resolve([]);
+            return selectedPlanId ? getPlanTasks(selectedPlanId, signal) : Promise.resolve({ tasks: [], total: 0 });
         },
         [workflowProject?.id, selectedPlanId, workflowOverview?.tasks?.length ?? 0],
         { enabled: workflowProject ? Boolean(workflowOverview) : !!selectedPlanId },
     );
+    const tasks = tasksResponse?.tasks ?? [];
 
     const selectedPlan = workflowProject
         ? (workflowOverview?.plans.find(p => p.id === selectedPlanId) ?? workflowOverview?.plans?.[0] ?? null)
-        : (plans?.find(p => p.id === selectedPlanId) ?? plans?.[0] ?? null);
+        : (plans.find(p => p.id === selectedPlanId) ?? plans[0] ?? null);
 
     useEffect(() => {
         if (workflowOverview?.plans?.length) {
@@ -1878,7 +1884,7 @@ const PlanView = ({
     }, [workflowOverview]);
 
     useEffect(() => {
-        if (!workflowProject && plans && plans.length > 0 && !selectedPlanId) {
+        if (!workflowProject && plans.length > 0 && !selectedPlanId) {
             setSelectedPlanId(plans[0].id);
         }
     }, [workflowProject, plans, selectedPlanId]);
@@ -2326,7 +2332,7 @@ const PlanView = ({
                          <LayoutGrid size={18} />
                     </div>
                     <h1 className="font-bold text-slate-800 text-lg hidden sm:block">CodeFlow Plan</h1>
-                    {plans && plans.length > 1 && (
+                    {plans.length > 1 && (
                         <select
                             value={selectedPlanId ?? ''}
                             onChange={e => setSelectedPlanId(e.target.value)}

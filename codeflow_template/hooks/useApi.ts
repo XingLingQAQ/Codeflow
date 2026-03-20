@@ -100,6 +100,7 @@ export function useMutation<TInput, TOutput>(
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -111,15 +112,16 @@ export function useMutation<TInput, TOutput>(
       setLoading(true);
       setError(null);
       try {
-        const result = await mutationFn(input, controller.signal);
-        if (mountedRef.current) setLoading(false);
-        return result;
+        return await mutationFn(input, controller.signal);
       } catch (err) {
         if (mountedRef.current) {
-          setLoading(false);
           setError(err instanceof Error ? err : new Error(String(err)));
         }
         throw err;
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
     },
     [mutationFn],

@@ -1,11 +1,11 @@
 import { get, post, patch, del } from '../api';
 import { API_ENDPOINTS } from '../api';
-import type { Plan, PlanTask } from '../types';
+import type { Plan, PlanListResponse, PlanTask, PlanTaskListResponse } from '../types';
 
 const BASE = API_ENDPOINTS.plans;
 
 export function listPlans(signal?: AbortSignal) {
-  return get<Plan[]>(BASE, undefined, signal);
+  return get<PlanListResponse>(BASE, undefined, signal);
 }
 
 export function createPlan(input: { title: string; description?: string }, signal?: AbortSignal) {
@@ -13,7 +13,7 @@ export function createPlan(input: { title: string; description?: string }, signa
 }
 
 export function getPlanTasks(planId: string, signal?: AbortSignal) {
-  return get<PlanTask[]>(`${BASE}/${planId}/tasks`, undefined, signal);
+  return get<PlanTaskListResponse>(`${BASE}/${planId}/tasks`, undefined, signal);
 }
 
 export function createPlanTask(planId: string, input: { title: string; description?: string; priority?: string }, signal?: AbortSignal) {
