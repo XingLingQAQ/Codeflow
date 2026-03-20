@@ -11,7 +11,7 @@ import {
   LogOut, CreditCard, Key, Smartphone,
   Flame, Snowflake, Archive, ExternalLink, RefreshCw
 } from 'lucide-react';
-import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse, QueryMemoryResponse, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanTask, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -30,7 +30,7 @@ import { retrieveMemoryAgent, buildMemoryAgentContext } from './services/memory_
 import { getGlobalConfig, updateGlobalConfig } from './services/config';
 import { healthCheck } from './services/health';
 import { listHooks } from './services/hooks';
-import { queryMemory, findPaths, exportGraph, importGraph } from './services/samg';
+import { findPaths, exportGraph, importGraph } from './services/samg';
 import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
@@ -2022,7 +2022,7 @@ const PlanView = ({
 
     const mergeGraphNodes = (
         primary: NonNullable<MemoryAgentRetrieveResult['samg_nodes']> = [],
-        secondary: QueryMemoryResponse['activated_nodes'] = [],
+        secondary: QueryMemoryNode[] = [],
     ) => {
         const merged = [...primary];
         const seen = new Set(primary.map((node) => node.id));
@@ -2064,7 +2064,7 @@ const PlanView = ({
     };
     const formatNodeTypes = (types?: string[]) => types?.filter(Boolean).join(' · ') || 'Unclassified node';
     const formatNodeProperties = (properties?: Record<string, unknown>) => Object.entries(properties ?? {}).filter(([, value]) => value !== undefined && value !== null);
-    const buildNodeSummary = (node: QueryMemoryResponse['activated_nodes'][number] | null) => {
+    const buildNodeSummary = (node: QueryMemoryNode | null) => {
         if (!node) return 'No node selected';
         return node.description || formatNodeTypes(node['@type']) || node.id;
     };
@@ -2186,22 +2186,9 @@ const PlanView = ({
         { enabled: Boolean(knowledgeSessionId) },
     );
 
-    const { data: graphRecall, loading: graphRecallLoading, error: graphRecallError, refetch: refetchGraphRecall } = useApi<QueryMemoryResponse>(
-        (signal) => queryMemory(
-            {
-                topic: knowledgeQuery,
-                max_results: 6,
-                resolve_pointers: true,
-            },
-            signal,
-        ),
-        [knowledgeQuery],
-        { enabled: knowledgeQuery.length > 0 },
-    );
-
     const knowledgeNodes = mergeGraphNodes(
-        mergeGraphNodes(memoryRetrieve?.samg_nodes ?? [], memoryContext?.samg_nodes ?? []),
-        graphRecall?.activated_nodes ?? [],
+        memoryRetrieve?.samg_nodes ?? [],
+        memoryContext?.samg_nodes ?? [],
     );
     const pointerSources = knowledgeNodes.flatMap((node) =>
         (node.pointers ?? []).map((pointer, index) => ({
@@ -2227,7 +2214,6 @@ const PlanView = ({
     );
     const selectedSource = knowledgeSources.find((source) => buildSourceKey(source) === selectedSourceKey) ?? null;
     const knowledgeContextBlock = memoryContext?.context_block?.trim()
-        || graphRecall?.context_block?.trim()
         || [
             `Scenario: ${activeScenario.label}`,
             `Focus task: ${activeTask?.title ?? selectedPlan?.title ?? 'No active task'}`,
@@ -2282,7 +2268,6 @@ const PlanView = ({
         if (knowledgeSessionId) {
             refetchMemoryContext();
         }
-        refetchGraphRecall();
         if (shouldLoadPath) {
             refetchGraphPath();
         }
@@ -2317,8 +2302,8 @@ const PlanView = ({
 
     const graphSourceNode = knowledgeNodes.find((node) => node.id === graphSourceNodeId) ?? null;
     const selectedGraphNode = knowledgeNodes.find((node) => node.id === selectedGraphNodeId) ?? null;
-    const knowledgeLoading = memoryRetrieveLoading || memoryContextLoading || graphRecallLoading || graphPathLoading;
-    const knowledgeError = memoryRetrieveError ?? memoryContextError ?? graphRecallError ?? graphPathError;
+    const knowledgeLoading = memoryRetrieveLoading || memoryContextLoading || graphPathLoading;
+    const knowledgeError = memoryRetrieveError ?? memoryContextError ?? graphPathError;
     const graphPaths = graphPath?.paths ?? [];
     const packRules = [
         'Pack boundary is SAMG graph export/import, not a parallel knowledge store.',
