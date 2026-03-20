@@ -870,6 +870,11 @@ func GetProjectService() IProjectService {
 	return defaultProjectService
 }
 
+// HasProjectService reports whether the global project service has been configured.
+func HasProjectService() bool {
+	return defaultProjectService != nil
+}
+
 // SetProjectService 设置项目管理器实例（用于测试）
 func SetProjectService(svc IProjectService) {
 	defaultProjectService = svc

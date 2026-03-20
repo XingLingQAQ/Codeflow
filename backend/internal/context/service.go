@@ -980,6 +980,11 @@ func GetContextService() IContextService {
 	return defaultContextService
 }
 
+// HasContextService reports whether the global context service has been configured.
+func HasContextService() bool {
+	return defaultContextService != nil
+}
+
 // SetContextService 设置上下文服务实例
 func SetContextService(svc IContextService) {
 	defaultContextService = svc

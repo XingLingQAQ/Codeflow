@@ -233,6 +233,16 @@ func (s *Server) setupRoutes() {
 			hooksGroup.DELETE("/events", handlers.ClearHookEvents)
 		}
 
+		// Integration routes
+		integrations := v1.Group("/integrations")
+		{
+			integrations.POST("", handlers.RegisterIntegration)
+			integrations.GET("", handlers.ListIntegrations)
+			integrations.GET("/:id", handlers.GetIntegration)
+			integrations.POST("/:id/invoke", handlers.InvokeIntegration)
+			integrations.POST("/:id/replay", handlers.ReplayIntegration)
+		}
+
 		// Debate routes
 		debates := v1.Group("/debates")
 		{

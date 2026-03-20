@@ -14,6 +14,7 @@ import (
 	"github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/integration"
 	"github.com/codeflow/backend/internal/isolation"
 	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
@@ -72,6 +73,7 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 		return map[string]interface{}{"processed": true, "payload": payload}, nil
 	})
 	hooks.SetHookManager(hookMgr)
+	integration.SetIntegrationService(integration.NewInMemoryIntegrationService())
 
 	preflightSvc := memory.NewMemoryPreflightService()
 	memory.SetPreflightService(preflightSvc)
@@ -395,6 +397,113 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
+}
+
+// TestE2E_IntegrationWorkflow tests the governed integration workflow.
+func TestE2E_IntegrationWorkflow(t *testing.T) {
+	ts := setupE2EServer(t)
+	defer ts.Close()
+
+	client := ts.Client()
+
+	registerReq := map[string]interface{}{
+		"manifest": map[string]interface{}{
+			"name":         "test-webhook",
+			"version":      "1.0.0",
+			"description":  "governed external webhook",
+			"type":         "webhook",
+			"hook_name":    "test-hook",
+			"distribution": "internal",
+			"capabilities": []string{"invoke", "replay"},
+		},
+		"signature": map[string]interface{}{
+			"algorithm": "ed25519",
+			"value":     "signed-manifest",
+			"verified":  true,
+		},
+		"policy": map[string]interface{}{
+			"allowed_actor_types":            []string{"agent"},
+			"require_audit":                  true,
+			"allow_third_party_distribution": false,
+		},
+		"actor": map[string]interface{}{
+			"id":   "agent-1",
+			"type": "agent",
+			"name": "Integration Agent",
+		},
+	}
+	body, _ := json.Marshal(registerReq)
+	resp, err := client.Post(ts.URL+"/api/v1/integrations", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var created map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&created)
+	resp.Body.Close()
+	integrationID := created["id"].(string)
+	assert.NotEmpty(t, integrationID)
+
+	resp, err = client.Get(ts.URL + "/api/v1/integrations")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var listResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&listResp)
+	resp.Body.Close()
+	assert.Equal(t, float64(1), listResp["total"])
+
+	invokeReq := map[string]interface{}{
+		"actor": map[string]interface{}{
+			"id":   "agent-1",
+			"type": "agent",
+			"name": "Integration Agent",
+		},
+		"payload": map[string]interface{}{
+			"message": "test message",
+			"data":    123,
+		},
+		"session_id":  "session-e2e",
+		"description": "invoke governed integration",
+		"tags":        []string{"e2e", "integration"},
+	}
+	body, _ = json.Marshal(invokeReq)
+	resp, err = client.Post(ts.URL+"/api/v1/integrations/"+integrationID+"/invoke", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var invokeResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&invokeResp)
+	resp.Body.Close()
+	assert.NotEmpty(t, invokeResp["invocation_id"])
+	assert.NotEmpty(t, invokeResp["snapshot_id"])
+	assert.NotEmpty(t, invokeResp["audit_entry_id"])
+
+	replayReq := map[string]interface{}{
+		"actor": map[string]interface{}{
+			"id":   "agent-1",
+			"type": "agent",
+			"name": "Integration Agent",
+		},
+		"invocation_id": invokeResp["invocation_id"],
+	}
+	body, _ = json.Marshal(replayReq)
+	resp, err = client.Post(ts.URL+"/api/v1/integrations/"+integrationID+"/replay", "application/json", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var replayResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&replayResp)
+	resp.Body.Close()
+	assert.Equal(t, invokeResp["snapshot_id"], replayResp["restored_snapshot_id"])
+
+	resp, err = client.Get(ts.URL + "/api/v1/audit/logs?resource_type=integration&resource_id=" + integrationID + "&limit=10")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var auditResp map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&auditResp)
+	resp.Body.Close()
+	assert.GreaterOrEqual(t, int(auditResp["total"].(float64)), 3)
 }
 
 // TestE2E_MemoryPreflightWorkflow tests the memory preflight workflow

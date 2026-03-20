@@ -20,8 +20,8 @@ const (
 	HookOnMessageComplete HookType = "hook_on_message_complete"
 
 	// State management hooks
-	HookAfterExec     HookType = "hook_after_exec"
-	HookRestoreState  HookType = "hook_restore_state"
+	HookAfterExec    HookType = "hook_after_exec"
+	HookRestoreState HookType = "hook_restore_state"
 
 	// Memory retrieval hooks
 	HookOnUserInputSubmitted HookType = "hook_on_user_input_submitted"
@@ -32,27 +32,27 @@ type HookFunc func(ctx context.Context, payload interface{}) (interface{}, error
 
 // HookConfig represents the configuration for a hook.
 type HookConfig struct {
-	Name        string                 `json:"name"`
-	Type        HookType               `json:"type"`
-	Enabled     bool                   `json:"enabled"`
-	Priority    int                    `json:"priority"` // Lower number = higher priority
-	Timeout     time.Duration          `json:"timeout"`
-	RetryCount  int                    `json:"retry_count"`
-	Metadata    map[string]interface{} `json:"metadata"`
+	Name       string                 `json:"name"`
+	Type       HookType               `json:"type"`
+	Enabled    bool                   `json:"enabled"`
+	Priority   int                    `json:"priority"` // Lower number = higher priority
+	Timeout    time.Duration          `json:"timeout"`
+	RetryCount int                    `json:"retry_count"`
+	Metadata   map[string]interface{} `json:"metadata"`
 }
 
 // HookEvent represents a hook execution event.
 type HookEvent struct {
-	ID          string                 `json:"id"`
-	HookName    string                 `json:"hook_name"`
-	HookType    HookType               `json:"hook_type"`
-	Timestamp   time.Time              `json:"timestamp"`
-	Duration    time.Duration          `json:"duration"`
-	Success     bool                   `json:"success"`
-	Error       string                 `json:"error,omitempty"`
-	InputSize   int                    `json:"input_size"`
-	OutputSize  int                    `json:"output_size"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID         string                 `json:"id"`
+	HookName   string                 `json:"hook_name"`
+	HookType   HookType               `json:"hook_type"`
+	Timestamp  time.Time              `json:"timestamp"`
+	Duration   time.Duration          `json:"duration"`
+	Success    bool                   `json:"success"`
+	Error      string                 `json:"error,omitempty"`
+	InputSize  int                    `json:"input_size"`
+	OutputSize int                    `json:"output_size"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Hook represents a registered hook.
@@ -77,6 +77,9 @@ type IHookManager interface {
 
 	// Trigger triggers all hooks of a specific type.
 	Trigger(ctx context.Context, hookType HookType, payload interface{}) (interface{}, error)
+
+	// TriggerHook triggers a specific hook by name.
+	TriggerHook(ctx context.Context, name string, payload interface{}) (interface{}, error)
 
 	// TriggerAsync triggers hooks asynchronously.
 	TriggerAsync(ctx context.Context, hookType HookType, payload interface{}) error

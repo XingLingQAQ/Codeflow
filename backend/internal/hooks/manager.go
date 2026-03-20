@@ -157,6 +157,51 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload in
 	return result, nil
 }
 
+// TriggerHook triggers a specific hook by name.
+func (m *HookManager) TriggerHook(ctx context.Context, name string, payload interface{}) (interface{}, error) {
+	m.mu.RLock()
+	hook, exists := m.hooks[name]
+	m.mu.RUnlock()
+
+	if !exists {
+		return nil, fmt.Errorf("hook %s not found", name)
+	}
+	if !hook.Config.Enabled {
+		return payload, nil
+	}
+
+	event := &HookEvent{
+		ID:        uuid.New().String(),
+		HookName:  hook.Config.Name,
+		HookType:  hook.Config.Type,
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"priority":    hook.Config.Priority,
+			"retry_count": hook.Config.RetryCount,
+		},
+	}
+
+	hookCtx, cancel := context.WithTimeout(ctx, hook.Config.Timeout)
+	defer cancel()
+
+	start := time.Now()
+	output, err := m.executeWithRetry(hookCtx, hook, payload)
+	event.Duration = time.Since(start)
+
+	if err != nil {
+		event.Success = false
+		event.Error = err.Error()
+		m.recordAuditEvent(hookCtx, event, hook.Config, false)
+		m.recordEvent(event)
+		return payload, fmt.Errorf("hook %s failed: %w", hook.Config.Name, err)
+	}
+
+	event.Success = true
+	m.recordAuditEvent(hookCtx, event, hook.Config, true)
+	m.recordEvent(event)
+	return output, nil
+}
+
 func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, config HookConfig, success bool) {
 	if event == nil {
 		return

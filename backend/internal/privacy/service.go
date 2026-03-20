@@ -44,6 +44,13 @@ func SetPrivacyService(svc *PrivacyService) {
 	globalPrivacyService = svc
 }
 
+// HasPrivacyService reports whether the global privacy service has been configured.
+func HasPrivacyService() bool {
+	globalServiceMu.RLock()
+	defer globalServiceMu.RUnlock()
+	return globalPrivacyService != nil
+}
+
 // GetPrivacyService returns the global privacy service instance
 func GetPrivacyService() *PrivacyService {
 	globalServiceMu.RLock()

@@ -70,6 +70,10 @@ type CallTrace struct {
 	StartTime int64                  `json:"start_time"`
 	EndTime   int64                  `json:"end_time,omitempty"`
 	Duration  int64                  `json:"duration_ms,omitempty"`
+	ProjectID string                 `json:"project_id,omitempty"`
+	PlanID    string                 `json:"plan_id,omitempty"`
+	TaskID    string                 `json:"task_id,omitempty"`
+	SessionID string                 `json:"session_id,omitempty"`
 	Children  []*CallTrace           `json:"children,omitempty"`
 }
 
