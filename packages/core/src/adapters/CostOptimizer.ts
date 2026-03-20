@@ -271,7 +271,7 @@ export class TaskTypeRouter extends EventEmitter {
 
     // 找到可用的首选模型
     let selectedModel: string | undefined;
-    let reason: string;
+    let reason = 'Default model (no preferred/fallback available)';
 
     for (const modelId of rule.preferredModels) {
       if (!availableModels || availableModels.includes(modelId)) {

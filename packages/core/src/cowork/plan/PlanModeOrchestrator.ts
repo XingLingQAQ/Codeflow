@@ -4,8 +4,9 @@
  */
 
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import {
-  PlanPhase,
+  CoworkPlanPhase,
   PlanStatus,
   PlanSession,
   PlanConfig,
@@ -67,7 +68,7 @@ export class PlanModeOrchestrator extends EventEmitter {
     await this.artifactManager.initialize();
 
     const session: PlanSession = {
-      id: `plan-${Date.now()}`,
+      id: `plan-${randomUUID()}`,
       name,
       status: 'running',
       currentPhase: 'vision',

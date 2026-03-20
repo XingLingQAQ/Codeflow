@@ -462,7 +462,7 @@ export class AtomicSnapshotManager implements IAtomicSnapshotManager {
       // 过滤出需要删除的 chunks（时间戳晚于目标状态）
       const toDelete: string[] = [];
       for (const chunk of allChunks) {
-        const chunkTimestamp = chunk.metadata?.timestamp || chunk.metadata?.createdAt || 0;
+        const chunkTimestamp = chunk.metadata?.timestamp || 0;
         if (chunkTimestamp > targetState.timestamp) {
           toDelete.push(chunk.id);
         }

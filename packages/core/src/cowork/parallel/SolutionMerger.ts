@@ -19,14 +19,14 @@ export type MergeStrategy = 'merge' | 'rebase' | 'squash' | 'cherry-pick';
 /**
  * 冲突类型
  */
-export type ConflictType = 'content' | 'rename' | 'delete' | 'mode';
+export type MergeConflictType = 'content' | 'rename' | 'delete' | 'mode';
 
 /**
  * 冲突信息
  */
 export interface MergeConflict {
   file: string;
-  type: ConflictType;
+  type: MergeConflictType;
   ours: string;
   theirs: string;
   base?: string;
