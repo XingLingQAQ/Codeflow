@@ -7,3 +7,18 @@ artifacts/
 archive/
 *.log
 *.err
+
+# local worktrees and tool state
+.claude/worktrees/
+.cunzhi-memory/
+.pnpm-home/
+plan/
+
+# backend local outputs
+backend/.claude/
+backend/coverage
+backend/nul
+
+# local build outputs
+packages/cli/dist/
+packages/cli/tsconfig.tsbuildinfo

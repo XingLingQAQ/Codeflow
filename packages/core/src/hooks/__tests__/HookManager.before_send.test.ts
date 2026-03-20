@@ -1,0 +1,69 @@
+import { describe, it, expect } from 'vitest';
+import { HookManager } from '../HookManager.js';
+import { HookEvent, RequestPayload } from '../types.js';
+
+describe('HookManager before_send chaining', () => {
+  it('chains multiple BEFORE_SEND handlers in registration order', async () => {
+    const manager = new HookManager();
+    let secondSawSystemMessage = false;
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => {
+      return {
+        ...payload,
+        messages: [
+          { role: 'system', content: 'first-hook', timestamp: Date.now() },
+          ...payload.messages,
+        ],
+      };
+    });
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => {
+      secondSawSystemMessage =
+        Array.isArray(payload.messages) &&
+        payload.messages.some((m) => m.role === 'system' && m.content === 'first-hook');
+      return {
+        ...payload,
+        model: 'mutated-by-second',
+      };
+    });
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => {
+      return {
+        ...payload,
+        messages: [
+          ...payload.messages,
+          { role: 'system', content: 'third-hook', timestamp: Date.now() },
+        ],
+      };
+    });
+
+    const output = await manager.hook_before_send({
+      messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
+    });
+
+    expect(secondSawSystemMessage).toBe(true);
+    expect(output.model).toBe('mutated-by-second');
+    expect(output.messages.some((m) => m.content === 'first-hook')).toBe(true);
+    expect(output.messages.some((m) => m.content === 'third-hook')).toBe(true);
+  });
+
+  it('keeps previous payload when a handler returns undefined', async () => {
+    const manager = new HookManager();
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => ({
+      ...payload,
+      model: 'first',
+    }));
+    manager.register(HookEvent.BEFORE_SEND, async () => undefined);
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => ({
+      ...payload,
+      model: `${payload.model}-third`,
+    }));
+
+    const output = await manager.hook_before_send({
+      messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
+    });
+
+    expect(output.model).toBe('first-third');
+  });
+});
