@@ -1,0 +1,40 @@
+{
+  "run_id": "2026-03-30-ui-dedup-runtime",
+  "stage": "deep_interview",
+  "goal": "在不改变业务行为的前提下，继续对 codeflow_template/App.tsx 及新拆分展示组件周边做低风险 UI 去重与组件化收口，延续当前 Sessions/Plan 主线。",
+  "deliverable": "新增小型共享展示组件、更新 App.tsx 调用、保留现有交互语义、提供 vite build 验证与 cleanup receipt。",
+  "constraints": [
+    "仅做低风险展示层收口",
+    "不暂停向用户反复确认",
+    "不引入新架构或改动后端行为",
+    "保持当前视觉样式与交互语义基本一致",
+    "继续沿用 codeflow_template/App.tsx 的小步串行收口节奏"
+  ],
+  "acceptance_criteria": [
+    "本轮只处理一个可明确命名的重复展示块",
+    "App.tsx 对应内联 JSX 继续减少且编译通过",
+    "不引入新的 TypeScript 或 Vite 构建错误"
+  ],
+  "product_acceptance_criteria": [
+    "Sessions 视图头部操作按钮视觉与行为保持一致",
+    "提取后的共享组件边界清晰，可继续支持后续小步收口"
+  ],
+  "manual_spot_checks": [
+    "检查 Sessions 头部 Replay/Stop/Retry 的颜色与圆角样式",
+    "检查 selectedSessionId 缺失时点击行为未恶化",
+    "检查聊天内容区和输入区未受影响"
+  ],
+  "completion_language_policy": "只有在 vite build 通过且 phase receipt 与 cleanup receipt 写入后，才允许声称本轮改造完成；不得声称整个项目已闭环交付。",
+  "delivery_truth_contract": "只对本轮实际修改并经构建验证的收口项作完成声明；不对未提交 git 的事项声称已提交。",
+  "non_goals": [
+    "不处理后端 plugin 功能",
+    "不做浏览器级人工验证结论",
+    "不做 git push 或 PR"
+  ],
+  "autonomy_mode": "interactive_governed inferred-no-interrupt execution",
+  "open_questions": [],
+  "inference_notes": [
+    "用户以 继续 /vibe 明确要求在 governed runtime 下不中断推进",
+    "当前最合理的单步目标是收口 Sessions header 的操作按钮组"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "run_id": "2026-03-29-ui-dedup-runtime",
+  "stage": "plan_execute",
+  "executed_units": [
+    {
+      "unit": "freeze requirement and plan artifacts",
+      "status": "completed"
+    },
+    {
+      "unit": "extract CTA button shell",
+      "status": "completed",
+      "evidence": [
+        "codeflow_template/components/ActionButton.tsx",
+        "codeflow_template/App.tsx"
+      ]
+    },
+    {
+      "unit": "extract Knowledge rail stat card shell",
+      "status": "completed",
+      "evidence": [
+        "codeflow_template/components/KnowledgeRailCard.tsx",
+        "codeflow_template/App.tsx"
+      ]
+    },
+    {
+      "unit": "extend ActionButton with accent tone and reuse refresh action",
+      "status": "completed"
+    },
+    {
+      "unit": "vite build verification",
+      "status": "completed",
+      "command": "cd \"D:/project/CodeFlow/codeflow_template\" && pnpm exec vite build",
+      "result": "passed"
+    }
+  ],
+  "completion_truth": "authoritative_for_this_round_only",
+  "timestamp": "2026-03-29"
+}

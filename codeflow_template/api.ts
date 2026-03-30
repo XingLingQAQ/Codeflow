@@ -131,6 +131,7 @@ export const API_ENDPOINTS = {
   get blackboard() { return `${_apiBase}/api/v1/blackboard`; },
   get debates() { return `${_apiBase}/api/v1/debates`; },
   get plans() { return `${_apiBase}/api/v1/plans`; },
+  get plugins() { return `${_apiBase}/api/v1/plugins`; },
   get config() { return `${_apiBase}/api/v1/config`; },
   get summarize() { return `${_apiBase}/api/v1/summarize`; },
   get audit() { return `${_apiBase}/api/v1/audit`; },

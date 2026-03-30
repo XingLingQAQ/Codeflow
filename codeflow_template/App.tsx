@@ -9,9 +9,9 @@ import {
   Folder, Calendar, Clock, MoreVertical, GitBranch,
   Github, Globe, Moon, Sun, Laptop, ToggleLeft, ToggleRight,
   LogOut, CreditCard, Key, Smartphone,
-  Flame, Snowflake, Archive, ExternalLink, RefreshCw
+  Flame, Snowflake, Archive, ExternalLink, RefreshCw, Puzzle
 } from 'lucide-react';
-import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanListResponse, PlanTask, PlanTaskListResponse, Agent, CallTrace, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowApproval, WorkflowDecision, WorkflowReplayItem, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, WorkflowTimelineEvent, WorkflowReplayEvent, RawEntry, RawArchiveListResponse, AuditLogEntry, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanListResponse, PlanTask, PlanTaskListResponse, Agent, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, RawArchiveListResponse, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -19,7 +19,38 @@ import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { ErrorState } from './components/ErrorState';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConnectionStatus } from './components/ConnectionStatus';
-import { listProjects, createProject } from './services/projects';
+import { PluginsView } from './components/PluginsView';
+import { MemorySourceList } from './components/MemorySourceList';
+import { MemorySourceDetail } from './components/MemorySourceDetail';
+import { StatCard } from './components/StatCard';
+import { SectionCard } from './components/SectionCard';
+import { SubsectionCard } from './components/SubsectionCard';
+import { TaskStatusCard } from './components/TaskStatusCard';
+import { SidebarPanelHeader } from './components/SidebarPanelHeader';
+import { SidebarPanel } from './components/SidebarPanel';
+import { KnowledgeNodeCard } from './components/KnowledgeNodeCard';
+import { KnowledgeNodeSelect } from './components/KnowledgeNodeSelect';
+import { SimpleInfoPanel } from './components/SimpleInfoPanel';
+import { LabeledTextItem } from './components/LabeledTextItem';
+import { HeaderStatusBadge } from './components/HeaderStatusBadge';
+import { ProgressSummaryCard } from './components/ProgressSummaryCard';
+import { ActionButton } from './components/ActionButton';
+import { KnowledgeRailCard } from './components/KnowledgeRailCard';
+import { ScenarioToggle } from './components/ScenarioToggle';
+import { HeaderStepIndicator } from './components/HeaderStepIndicator';
+import { IconButton } from './components/IconButton';
+import { MobileTabButton } from './components/MobileTabButton';
+import { PlanStatusBadge } from './components/PlanStatusBadge';
+import { SimpleEmptyHint } from './components/SimpleEmptyHint';
+import { InlineAlert } from './components/InlineAlert';
+import { EmbeddedWikiCard } from './components/EmbeddedWikiCard';
+import { SessionSummaryField } from './components/SessionSummaryField';
+import { SessionSummaryGrid } from './components/SessionSummaryGrid';
+import { WorkflowTimelineItem } from './components/WorkflowTimelineItem';
+import { SessionsComposer } from './components/SessionsComposer';
+import { SessionTraceList } from './components/SessionTraceList';
+import { SessionHeaderActions } from './components/SessionHeaderActions';
+
 import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
 import { listAgents } from './services/agents';
 import { getConversationTrace, stopConversation, retryConversation } from './services/conversations';
@@ -31,6 +62,34 @@ import { getGlobalConfig, updateGlobalConfig } from './services/config';
 import { healthCheck } from './services/health';
 import { listHooks } from './services/hooks';
 import { findPaths, exportGraph, importGraph } from './services/samg';
+import {
+  extractProjectWorkflowMetadata,
+  toProjectViewModel,
+} from './adapters/projects';
+import {
+  toAgentViewModel,
+  toAgentViewModels,
+} from './adapters/agents';
+import {
+  toSessionViewModels,
+} from './adapters/sessions';
+import {
+  mergeQueryMemoryNodes,
+  mergeRecordsById,
+} from './adapters/memory';
+import {
+  buildPlanEmbeddedWikiEntries,
+  buildPlanKnowledgeContextBlock,
+} from './adapters/knowledge';
+import {
+  buildFallbackWorkflowMetadata,
+  buildWorkflowReplayData,
+  extractWorkflowMetadata,
+  mergeWorkflowTimeline,
+  sortReplayItems,
+  workflowReplayEventToItem,
+  workflowTimelineEventToItem,
+} from './adapters/workflows';
 import type { ProjectCreateInput } from './services/projects';
 
 // --- Types & Constants ---
@@ -55,220 +114,6 @@ const toStringValue = (value: unknown): string | undefined =>
 const toStringArray = (value: unknown): string[] => Array.isArray(value)
   ? value.map((item) => toStringValue(item)).filter((item): item is string => Boolean(item))
   : [];
-
-const normalizeWorkflowApproval = (value: unknown): WorkflowApproval[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index): WorkflowApproval | null => {
-      if (!item || typeof item !== 'object') return null;
-      const record = item as Record<string, unknown>;
-      return {
-        stage: toStringValue(record.stage) ?? `Stage ${index + 1}`,
-        status: toStringValue(record.status) ?? 'pending',
-        owner: toStringValue(record.owner),
-        note: toStringValue(record.note),
-        updated_at: toNumber(record.updated_at),
-      };
-    })
-    .filter((item): item is WorkflowApproval => item !== null);
-};
-
-const normalizeWorkflowDecisions = (value: unknown): WorkflowDecision[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index): WorkflowDecision | null => {
-      if (!item || typeof item !== 'object') return null;
-      const record = item as Record<string, unknown>;
-      return {
-        id: toStringValue(record.id) ?? `decision-${index + 1}`,
-        summary: toStringValue(record.summary) ?? toStringValue(record.title) ?? 'Decision recorded',
-        owner: toStringValue(record.owner),
-        reason: toStringValue(record.reason),
-        timestamp: toNumber(record.timestamp),
-      };
-    })
-    .filter((item): item is WorkflowDecision => item !== null);
-};
-
-const normalizeTimelineItems = (value: unknown): WorkflowReplayItem[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item, index): WorkflowReplayItem | null => {
-      if (!item || typeof item !== 'object') return null;
-      const record = item as Record<string, unknown>;
-      return {
-        id: toStringValue(record.id) ?? `timeline-${index + 1}`,
-        lane: (toStringValue(record.lane) as WorkflowReplayItem['lane']) ?? 'plan',
-        title: toStringValue(record.title) ?? 'Workflow event',
-        message: toStringValue(record.message) ?? toStringValue(record.summary) ?? 'No details provided',
-        timestamp: toNumber(record.timestamp),
-        status: toStringValue(record.status),
-        actor: toStringValue(record.actor),
-        evidence: toStringValue(record.evidence),
-        sourceId: toStringValue(record.sourceId) ?? toStringValue(record.source_id),
-      };
-    })
-    .filter((item): item is WorkflowReplayItem => item !== null);
-};
-
-const extractWorkflowMetadata = (metadata?: Record<string, unknown> | null): WorkflowMetadata => ({
-  workflow_id: toStringValue(metadata?.workflow_id),
-  workflow_title: toStringValue(metadata?.workflow_title),
-  blueprint: toStringValue(metadata?.blueprint),
-  template: toStringValue(metadata?.template),
-  replay_session_id: toStringValue(metadata?.replay_session_id),
-  approval: normalizeWorkflowApproval(metadata?.approval),
-  decisions: normalizeWorkflowDecisions(metadata?.decisions),
-  timeline: normalizeTimelineItems(metadata?.timeline),
-});
-
-const buildFallbackWorkflowMetadata = (project?: Project | null, plan?: Plan | null, tasks: PlanTask[] = []): WorkflowMetadata => {
-  const baseTime = project?.updated_at ?? plan?.updated_at ?? Math.floor(Date.now() / 1000);
-  const taskItems = tasks.slice(0, 4).map((task, index) => ({
-    id: `task-${task.id}`,
-    lane: 'task' as const,
-    title: task.title,
-    message: task.description || 'Task synchronized into workflow lane.',
-    timestamp: task.updated_at || baseTime + index,
-    status: task.status,
-    actor: task.assignee || task.model,
-    evidence: task.dependencies?.length ? `depends on ${task.dependencies.join(', ')}` : undefined,
-    sourceId: task.id,
-  }));
-
-  return {
-    workflow_id: project?.id ?? plan?.id,
-    workflow_title: plan?.title ?? project?.title,
-    blueprint: toStringValue(project?.metadata?.blueprint) ?? toStringValue(project?.metadata?.template),
-    template: toStringValue(project?.metadata?.template),
-    replay_session_id: toStringValue(project?.metadata?.replay_session_id),
-    approval: [
-      {
-        stage: 'Intent review',
-        status: plan?.status === 'completed' ? 'approved' : 'in_review',
-        owner: 'Plan reviewer',
-        note: 'Minimal approval surface derived from plan status.',
-        updated_at: plan?.updated_at,
-      },
-    ],
-    decisions: plan ? [{
-      id: `decision-${plan.id}`,
-      summary: 'Reuse existing Project / Plan / Task objects as workflow anchors.',
-      owner: 'Planner',
-      reason: 'Keep MVP on current entities without introducing a separate DSL.',
-      timestamp: plan.updated_at,
-    }] : [],
-    timeline: [
-      ...(project ? [{
-        id: `project-${project.id}`,
-        lane: 'project' as const,
-        title: project.title,
-        message: `Project opened${toStringValue(project.metadata?.blueprint) ? ` from ${toStringValue(project.metadata?.blueprint)}` : ''}.`,
-        timestamp: project.updated_at || project.created_at,
-        status: project.status,
-        actor: 'Project lead',
-        evidence: toStringArray(project.tags).join(' · ') || undefined,
-        sourceId: project.id,
-      }] : []),
-      ...(plan ? [{
-        id: `plan-${plan.id}`,
-        lane: 'plan' as const,
-        title: plan.title,
-        message: plan.description || 'Plan orchestrates approval, dependencies, and delivery checkpoints.',
-        timestamp: plan.updated_at || plan.created_at,
-        status: plan.status,
-        actor: 'Planner',
-        evidence: `${plan.completed_count}/${plan.task_count} tasks completed`,
-        sourceId: plan.id,
-      }] : []),
-      ...taskItems,
-    ],
-  };
-};
-
-const sortReplayItems = (items: WorkflowReplayItem[]) => [...items].sort((a, b) => {
-  const aTime = a.timestamp ?? 0;
-  const bTime = b.timestamp ?? 0;
-  return aTime - bTime;
-});
-
-const mergeWorkflowTimeline = (
-  metadataItems: WorkflowReplayItem[] = [],
-  trace?: CallTrace,
-  rawArchive: RawEntry[] = [],
-  auditEntries: AuditLogEntry[] = [],
-): WorkflowReplayItem[] => {
-  const traceItems = (trace?.children ?? []).map((child, index) => ({
-    id: `trace-${child.id || index}`,
-    lane: 'trace' as const,
-    title: child.tool_name || 'Trace event',
-    message: child.output || 'Trace completed without textual output.',
-    timestamp: child.end_time ?? child.start_time,
-    status: child.status,
-    actor: child.agent_role,
-    evidence: child.duration_ms ? `${child.duration_ms}ms` : undefined,
-    sourceId: child.id,
-  }));
-
-  const archiveItems = rawArchive.map((entry, index) => ({
-    id: `archive-${entry.id || index}`,
-    lane: 'archive' as const,
-    title: toStringValue(entry.metadata?.title) ?? `${entry.type} archive`,
-    message: entry.content,
-    timestamp: entry.timestamp,
-    status: entry.type,
-    actor: toStringValue(entry.metadata?.actor) ?? 'raw archive',
-    evidence: toStringValue(entry.metadata?.summary),
-    sourceId: entry.id,
-  }));
-
-  const auditItems = auditEntries.map((entry) => ({
-    id: `audit-${entry.id}`,
-    lane: 'audit' as const,
-    title: entry.action || entry.event_type,
-    message: toStringValue(entry.details?.message) ?? `${entry.resource.type}:${entry.resource.id}`,
-    timestamp: entry.timestamp,
-    status: entry.outcome,
-    actor: entry.actor.name || entry.actor.id,
-    evidence: entry.trace?.path || entry.resource.path,
-    sourceId: entry.id,
-  }));
-
-  const merged = [...metadataItems, ...traceItems, ...archiveItems, ...auditItems];
-  const seen = new Set<string>();
-  return sortReplayItems(
-    merged.filter((item) => {
-      if (seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    }),
-  );
-};
-
-const buildWorkflowReplayData = (
-  title: string,
-  metadata: WorkflowMetadata,
-  timeline: WorkflowReplayItem[],
-): WorkflowReplayData => {
-  const approvals = metadata.approval ?? [];
-  const status = approvals.length === 0
-    ? 'In flight'
-    : approvals.some((item) => item.status === 'rejected')
-      ? 'Blocked'
-      : approvals.every((item) => item.status === 'approved')
-        ? 'Approved'
-        : 'In flight';
-
-  return {
-    title: metadata.workflow_title || title,
-    subtitle: [metadata.blueprint, metadata.template].filter(Boolean).join(' • ') || 'Template → Plan → Task → Trace → Archive → Audit',
-    status,
-    summary: 'Workflow replay aggregates project template metadata, plan orchestration, task dependencies, conversation trace, raw archive, and audit evidence in one minimal timeline.',
-    items: timeline,
-  };
-};
-
-// --- Shared Components ---
 
 const ToastContainer = ({ toasts }: { toasts: ToastMsg[] }) => (
   <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none">
@@ -295,6 +140,7 @@ const Sidebar = ({
     { id: ViewMode.PROJECTS, label: 'Projects', icon: <Folder size={20} /> },
     { id: ViewMode.SESSIONS, label: 'Sessions', icon: <MessageSquare size={20} /> },
     { id: ViewMode.PLAN, label: 'Plan', icon: <LayoutGrid size={20} /> },
+    { id: ViewMode.PLUGINS, label: 'Plugins', icon: <Puzzle size={20} /> },
     { id: ViewMode.AGENTS, label: 'Agents', icon: <Users size={20} /> },
     { id: ViewMode.MEMORY, label: 'Memory', icon: <Database size={20} /> },
   ];
@@ -362,6 +208,7 @@ const MobileNav = ({ activeMode, setMode }: { activeMode: ViewMode, setMode: (m:
     { id: ViewMode.HOME, label: 'Home', icon: <Home size={20} /> },
     { id: ViewMode.PROJECTS, label: 'Projects', icon: <Folder size={20} /> },
     { id: ViewMode.PLAN, label: 'Plan', icon: <LayoutGrid size={20} /> },
+    { id: ViewMode.PLUGINS, label: 'Plugins', icon: <Puzzle size={20} /> },
     { id: ViewMode.AGENTS, label: 'Agents', icon: <Users size={20} /> },
     { id: ViewMode.SETTINGS, label: 'Settings', icon: <Settings size={20} /> },
   ];
@@ -502,7 +349,6 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
         replaySessionId: '',
     });
 
-    // Debounce search
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
         return () => clearTimeout(timer);
@@ -547,31 +393,17 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
     };
 
     const handleProjectClick = (project: Project) => {
-        const workflow = extractWorkflowMetadata(project.metadata);
+        const workflow = extractProjectWorkflowMetadata(project.metadata);
         onProjectContext(project);
         showToast(`Opening ${workflow.blueprint || workflow.template || project.title}...`);
         setTimeout(() => onNavigate(ViewMode.PLAN), 600);
     };
 
-    const getStatusColor = (status: string) => {
-        switch(status) {
-            case 'active': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-            case 'completed': return 'bg-blue-100 text-blue-700 border-blue-200';
-            case 'paused': return 'bg-amber-100 text-amber-700 border-amber-200';
-            default: return 'bg-slate-100 text-slate-600 border-slate-200';
-        }
-    };
-
-    const formatTime = (ts: number) => {
-        if (!ts) return 'Unknown';
-        const diff = Math.floor((Date.now() / 1000) - ts);
-        if (diff < 60) return 'Just now';
-        if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-        if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-        return `${Math.floor(diff / 86400)}d ago`;
-    };
-
     const projects = data?.projects ?? [];
+    const projectCardEntries = projects.map((project) => ({
+        rawProject: project,
+        projectCard: toProjectViewModel(project),
+    }));
 
     return (
         <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
@@ -668,7 +500,7 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
                     <LoadingSkeleton variant="card" count={6} />
                 ) : error ? (
                     <ErrorState message={error.message} onRetry={refetch} />
-                ) : projects.length === 0 ? (
+                ) : projectCardEntries.length === 0 ? (
                     <EmptyState
                         icon={<Folder size={48} />}
                         title="No projects yet"
@@ -677,67 +509,66 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
                     />
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                        {projects.map((project) => {
-                            const workflow = extractWorkflowMetadata(project.metadata);
+                        {projectCardEntries.map(({ rawProject, projectCard }) => {
                             return (
                                 <div
-                                    key={project.id}
-                                    onClick={() => handleProjectClick(project)}
+                                    key={projectCard.id}
+                                    onClick={() => handleProjectClick(rawProject)}
                                     className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden"
                                 >
                                     <div className="flex justify-between items-start mb-4">
-                                        <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(project.status)}`}>
-                                            {project.status}
+                                        <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${projectCard.statusTone}`}>
+                                            {projectCard.status}
                                         </div>
                                         <button className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
                                             <MoreVertical size={16} />
                                         </button>
                                     </div>
 
-                                    <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{project.title}</h3>
-                                    <p className="text-sm text-slate-500 mb-4 line-clamp-2 h-10">{project.description || 'No description provided'}</p>
+                                    <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{projectCard.title}</h3>
+                                    <p className="text-sm text-slate-500 mb-4 line-clamp-2 h-10">{projectCard.descriptionText}</p>
 
-                                    {(workflow.blueprint || workflow.template || workflow.workflow_title) && (
+                                    {projectCard.workflowSummaryText && (
                                         <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-2">
                                             <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-indigo-600">
                                                 <GitBranch size={12} /> Workflow seed
                                             </div>
-                                            {workflow.workflow_title && <p className="text-sm font-semibold text-slate-700">{workflow.workflow_title}</p>}
+                                            {projectCard.workflow.workflow_title && <p className="text-sm font-semibold text-slate-700">{projectCard.workflow.workflow_title}</p>}
                                             <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-                                                {workflow.blueprint && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Blueprint: {workflow.blueprint}</span>}
-                                                {workflow.template && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Template: {workflow.template}</span>}
+                                                {projectCard.workflow.blueprint && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Blueprint: {projectCard.workflow.blueprint}</span>}
+                                                {projectCard.workflow.template && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Template: {projectCard.workflow.template}</span>}
                                             </div>
                                         </div>
                                     )}
 
                                     <div className="mb-6">
                                         <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1.5">
-                                            <span>{project.progress === 0 ? 'Not started' : project.progress === 100 ? 'Completed' : 'Progress'}</span>
-                                            <span>{project.progress}%</span>
+                                            <span>{projectCard.progressLabel}</span>
+                                            <span>{projectCard.progress}%</span>
                                         </div>
                                         <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                                             <div
-                                                className={`h-full rounded-full transition-all duration-1000 ${project.progress === 0 ? 'bg-slate-200' : project.progress === 100 ? 'bg-emerald-500' : 'bg-gradient-to-r from-blue-500 to-indigo-500'}`}
-                                                style={{ width: `${Math.max(project.progress, project.progress === 0 ? 0 : 2)}%` }}
+                                                className={`h-full rounded-full transition-all duration-1000 ${projectCard.progressTone}`}
+                                                style={{ width: `${Math.max(projectCard.progress, projectCard.progress === 0 ? 0 : 2)}%` }}
                                             ></div>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center justify-between pt-4 border-t border-slate-50">
                                         <div className="flex gap-2 flex-wrap">
-                                            {(project.tags ?? []).map(tag => (
+                                            {projectCard.tags.map(tag => (
                                                 <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{tag}</span>
                                             ))}
-                                            {workflow.replay_session_id && (
+                                            {projectCard.hasReplayLink && (
                                                 <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold border border-amber-200">Replay linked</span>
                                             )}
-                                            {(!project.tags || project.tags.length === 0) && !workflow.replay_session_id && (
+                                            {projectCard.tags.length === 0 && !projectCard.hasReplayLink && (
                                                 <span className="text-[10px] text-slate-300">No tags</span>
                                             )}
                                         </div>
                                         <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
                                             <Clock size={12} />
-                                            {formatTime(project.last_active)}
+                                            {projectCard.lastActiveText}
                                         </div>
                                     </div>
                                 </div>
@@ -769,47 +600,6 @@ type AppWorkflowContext = {
   timeline: WorkflowTimelineResponse | null;
   replay: WorkflowReplayResponse | null;
 };
-
-const toTimelineLane = (lane?: string): WorkflowReplayItem['lane'] => {
-  switch ((lane || '').toLowerCase()) {
-    case 'project':
-      return 'project';
-    case 'plan':
-      return 'plan';
-    case 'task':
-      return 'task';
-    case 'audit':
-      return 'audit';
-    case 'trace':
-    case 'agent':
-    default:
-      return 'trace';
-  }
-};
-
-const workflowTimelineEventToItem = (event: WorkflowTimelineEvent): WorkflowReplayItem => ({
-  id: event.id,
-  lane: toTimelineLane(event.lane),
-  title: event.title,
-  message: event.detail || event.title,
-  timestamp: event.timestamp,
-  status: event.status,
-  actor: event.source,
-  evidence: [event.session_id, event.agent_id].filter(Boolean).join(' · ') || undefined,
-  sourceId: event.trace_id || event.audit_id || event.task_id || event.plan_id || event.project_id,
-});
-
-const workflowReplayEventToItem = (event: WorkflowReplayEvent): WorkflowReplayItem => ({
-  id: event.id,
-  lane: toTimelineLane(event.lane),
-  title: event.speaker || event.type,
-  message: event.message,
-  timestamp: event.timestamp,
-  status: event.status,
-  actor: event.speaker,
-  evidence: event.evidence,
-  sourceId: event.trace_id || event.audit_id || event.task_id || event.plan_id || event.project_id,
-});
 
 type SettingsProfile = {
   name: string;
@@ -1148,18 +938,20 @@ const SessionsView = ({ onOpenReplay, onReplayData }: { onOpenReplay: () => void
     { enabled: !!selectedSessionId },
   );
 
-  const handleSelectAgent = (agent: Agent) => {
-    setSelectedAgentId(agent.id);
-    setSelectedSessionId(agent.session_id || agent.id);
+  const handleSelectSession = (sessionId: string, agentId: string) => {
+    setSelectedAgentId(agentId);
+    setSelectedSessionId(sessionId);
     setMobileView('chat');
   };
 
   const selectedAgent = agents?.find(a => a.id === selectedAgentId);
   const trace = traceData?.trace;
   const agentList = agents ?? [];
+  const sessionCards = toSessionViewModels(agentList);
+  const selectedSessionCard = sessionCards.find((item) => item.sessionId === selectedSessionId) ?? sessionCards.find((item) => item.agentId === selectedAgentId) ?? null;
   const workflowTimeline = mergeWorkflowTimeline([], trace, rawArchiveData?.entries ?? [], (auditData?.entries ?? []).filter(entry => !selectedSessionId || entry.trace?.session_id === selectedSessionId || entry.actor.session_id === selectedSessionId));
-  const replayData = buildWorkflowReplayData(selectedAgent?.name || 'Session workflow', {
-    workflow_title: selectedAgent?.name,
+  const replayData = buildWorkflowReplayData(selectedSessionCard?.replayTitle || selectedAgent?.name || 'Session workflow', {
+    workflow_title: selectedSessionCard?.title || selectedAgent?.name,
     replay_session_id: selectedSessionId || undefined,
     approval: [],
     decisions: [],
@@ -1179,20 +971,21 @@ const SessionsView = ({ onOpenReplay, onReplayData }: { onOpenReplay: () => void
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {loading ? <LoadingSkeleton variant="list" count={4} /> :
          error ? <ErrorState message={error.message} onRetry={refetch} /> :
-         agentList.length === 0 ? <div className="text-center py-8 text-sm text-slate-400">No active sessions</div> :
-         agentList.map(agent => (
+         sessionCards.length === 0 ? <div className="text-center py-8 text-sm text-slate-400">No active sessions</div> :
+         sessionCards.map((session) => (
           <div
-            key={agent.id}
-            onClick={() => handleSelectAgent(agent)}
-            className={`p-3 border rounded-xl cursor-pointer transition-all ${selectedAgentId === agent.id ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-slate-200 hover:border-blue-200'}`}
+            key={session.id}
+            onClick={() => handleSelectSession(session.sessionId, session.agentId)}
+            className={`p-3 border rounded-xl cursor-pointer transition-all ${selectedSessionId === session.sessionId ? 'bg-blue-50/50 border-blue-100' : 'bg-white border-slate-200 hover:border-blue-200'}`}
           >
-            <div className="flex justify-between items-center mb-1">
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${agent.status === 'running' ? 'text-blue-600 bg-blue-50' : 'text-slate-500 bg-slate-100'}`}>{agent.role}</span>
-              <span className="text-[10px] text-slate-400">{agent.status}</span>
+            <div className="flex justify-between items-center mb-1 gap-2">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${session.roleTone}`}>{session.roleText}</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${session.statusTone}`}>{session.statusText}</span>
             </div>
-            <h4 className="text-sm font-bold text-slate-800 mb-1">{agent.name}</h4>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-500">{agent.model} • {agent.task_count} tasks</span>
+            <h4 className="text-sm font-bold text-slate-800 mb-1">{session.title}</h4>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] text-slate-500">{session.subtitleText}</span>
+              <span className="text-[10px] text-slate-400">{session.sessionText}</span>
             </div>
           </div>
         ))}
@@ -1215,74 +1008,50 @@ const SessionsView = ({ onOpenReplay, onReplayData }: { onOpenReplay: () => void
               <ChevronLeft size={20} />
             </button>
             <div>
-              <h2 className="font-bold text-slate-800 text-sm md:text-base">{selectedAgent?.name || 'Select a session'}</h2>
-              {selectedAgent && <span className="text-[11px] text-slate-400">{selectedAgent.model} • {selectedAgent.status}</span>}
+              <h2 className="font-bold text-slate-800 text-sm md:text-base">{selectedSessionCard?.title || 'Select a session'}</h2>
+              {selectedSessionCard && <span className="text-[11px] text-slate-400">{selectedSessionCard.subtitleText} • {selectedSessionCard.statusText}</span>}
             </div>
           </div>
           {selectedAgent && (
-            <div className="flex items-center gap-2">
-              <button onClick={handleOpenReplay} className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg">Replay</button>
-              <button onClick={() => selectedSessionId && stopConversation(selectedSessionId)} className="px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 rounded-lg">Stop</button>
-              <button onClick={() => selectedSessionId && retryConversation(selectedSessionId)} className="px-3 py-1.5 text-xs font-medium text-blue-500 hover:bg-blue-50 rounded-lg">Retry</button>
-            </div>
+            <SessionHeaderActions
+              onReplay={handleOpenReplay}
+              onStop={() => selectedSessionId && stopConversation(selectedSessionId)}
+              onRetry={() => selectedSessionId && retryConversation(selectedSessionId)}
+            />
           )}
         </header>
         <main className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 bg-slate-50/30 pb-24 md:pb-8">
           {!selectedAgent ? (
             <EmptyState icon={<MessageSquare size={48} />} title="No session selected" description="Select a session from the sidebar to view conversation" />
           ) : !trace ? (
-            <div className="text-center py-8 text-sm text-slate-400">No conversation trace available</div>
+            <SimpleEmptyHint message="No conversation trace available" />
           ) : (
             <>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-800">Workflow timeline</h3>
-                    <p className="text-xs text-slate-500">Trace, raw archive, and audit evidence are merged into one replay surface.</p>
-                  </div>
-                  <button onClick={handleOpenReplay} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold">Open replay</button>
-                </div>
+              <SessionSummaryGrid
+                sessionText={selectedSessionCard?.sessionText}
+                statusText={selectedSessionCard?.statusText}
+                statusTone={selectedSessionCard?.statusTone}
+                taskCountText={selectedSessionCard?.taskCountText}
+                lastActiveText={selectedSessionCard?.lastActiveText}
+              />
+              <SectionCard
+                title="Workflow timeline"
+                subtitle="Trace, raw archive, and audit evidence are merged into one replay surface."
+                action={<ActionButton onClick={handleOpenReplay}>Open replay</ActionButton>}
+                contentClassName="p-4 space-y-3"
+              >
                 <div className="space-y-3">
                   {workflowTimeline.slice(0, 6).map((item) => (
-                    <div key={item.id} className="flex gap-3 text-sm">
-                      <div className="w-20 shrink-0 text-[10px] uppercase tracking-widest text-slate-400">{item.lane}</div>
-                      <div className="flex-1 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-semibold text-slate-700">{item.title}</span>
-                          {item.status && <span className="text-[10px] text-slate-400 uppercase">{item.status}</span>}
-                        </div>
-                        <p className="text-xs text-slate-500 mt-1">{item.message}</p>
-                      </div>
-                    </div>
+                    <WorkflowTimelineItem key={item.id} item={item} />
                   ))}
                 </div>
-              </div>
-              <div className="space-y-4">
-                {trace.children?.map((child, i) => (
-                  <div key={child.id || i} className={`flex ${child.agent_role === 'orchestrator' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`rounded-2xl px-4 py-3 max-w-[90%] md:max-w-2xl shadow-sm ${child.agent_role === 'orchestrator' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 rounded-tl-sm'}`}>
-                      <p className="text-xs font-bold mb-1 opacity-70">{child.agent_role} • {child.tool_name}</p>
-                      <p className="text-sm leading-relaxed">{child.output || 'Processing...'}</p>
-                    </div>
-                  </div>
-                )) ?? <div className="text-center py-4 text-sm text-slate-400">Empty trace</div>}
-              </div>
+              </SectionCard>
+              <SessionTraceList traces={trace.children} />
             </>
           )}
         </main>
         <div className="p-4 md:p-6 bg-white border-t border-slate-100 absolute bottom-0 md:static w-full">
-          <div className="relative bg-slate-50 border border-slate-200 rounded-2xl p-2 focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-            <textarea className="w-full bg-transparent border-none text-sm resize-none focus:ring-0 px-3 py-2 h-12" placeholder="Reply to CodeFlow..."></textarea>
-            <div className="flex justify-between items-center px-2 pb-1">
-              <div className="flex gap-2 text-slate-400">
-                <Paperclip size={18} className="hover:text-blue-500 cursor-pointer" />
-                <Terminal size={18} className="hover:text-blue-500 cursor-pointer" />
-              </div>
-              <button className="bg-blue-600 text-white rounded-full p-2 hover:bg-blue-700 transition-colors">
-                <ArrowUp size={16} />
-              </button>
-            </div>
-          </div>
+          <SessionsComposer />
         </div>
       </div>
     </div>
@@ -1353,71 +1122,15 @@ const MemoryView = () => {
     { enabled: shouldContext },
   );
 
-  const buildSourceKey = (source: MemoryAgentSource) => [
-    source.kind,
-    source.id,
-    source.node_id ?? '',
-    source.source_id ?? '',
-  ].join(':');
-
-  const mergeAtomicMemories = (
-    primary: MemoryAgentRetrieveResult['atomic_memories'] = [],
-    secondary: NonNullable<MemoryAgentContextResult['atomic_memories']> = [],
-  ) => {
-    const merged = [...primary];
-    const seen = new Set(primary.map((memory) => memory.id));
-    for (const memory of secondary) {
-      if (seen.has(memory.id)) {
-        continue;
-      }
-      merged.push(memory);
-      seen.add(memory.id);
-    }
-    return merged;
-  };
-
-  const mergeSamgNodes = (
-    primary: NonNullable<MemoryAgentRetrieveResult['samg_nodes']> = [],
-    secondary: NonNullable<MemoryAgentContextResult['samg_nodes']> = [],
-  ) => {
-    const merged = [...primary];
-    const seen = new Set(primary.map((node) => node.id));
-    for (const node of secondary) {
-      if (seen.has(node.id)) {
-        continue;
-      }
-      merged.push(node);
-      seen.add(node.id);
-    }
-    return merged;
-  };
-
-  const mergeSources = (
-    primary: NonNullable<MemoryAgentRetrieveResult['sources']> = [],
-    secondary: NonNullable<MemoryAgentContextResult['sources']> = [],
-  ) => {
-    const merged = [...primary];
-    const seen = new Set(primary.map((source) => buildSourceKey(source)));
-    for (const source of secondary) {
-      const key = buildSourceKey(source);
-      if (seen.has(key)) {
-        continue;
-      }
-      merged.push(source);
-      seen.add(key);
-    }
-    return merged;
-  };
-
-  const atomicMemories = mergeAtomicMemories(
+  const atomicMemories = mergeRecordsById(
     retrieveData?.atomic_memories ?? [],
     contextData?.atomic_memories ?? [],
   );
-  const samgNodes = mergeSamgNodes(
+  const samgNodes = mergeQueryMemoryNodes(
     retrieveData?.samg_nodes ?? [],
     contextData?.samg_nodes ?? [],
   );
-  const sources = mergeSources(
+  const sources = mergeMemorySources(
     retrieveData?.sources ?? [],
     contextData?.sources ?? [],
   );
@@ -1427,12 +1140,12 @@ const MemoryView = () => {
       setSelectedSourceKey(null);
       return;
     }
-    if (!selectedSourceKey || !sources.some((source) => buildSourceKey(source) === selectedSourceKey)) {
-      setSelectedSourceKey(buildSourceKey(sources[0]));
+    if (!selectedSourceKey || !sources.some((source) => buildMemorySourceKey(source) === selectedSourceKey)) {
+      setSelectedSourceKey(buildMemorySourceKey(sources[0]));
     }
   }, [selectedSourceKey, sources]);
 
-  const selectedSource = sources.find((source) => buildSourceKey(source) === selectedSourceKey) ?? null;
+  const selectedSource = sources.find((source) => buildMemorySourceKey(source) === selectedSourceKey) ?? null;
   const loading = (shouldRetrieve && retrieveLoading) || (shouldContext && contextLoading);
   const error = retrieveError ?? contextError;
   const totalFound = retrieveData?.total_found ?? atomicMemories.length + samgNodes.length;
@@ -1446,38 +1159,6 @@ const MemoryView = () => {
     if (shouldContext) {
       refetchContext();
     }
-  };
-
-  const getSourceKindMeta = (kind: MemoryAgentSource['kind']) => {
-    switch (kind) {
-      case 'atomic_memory':
-        return {
-          label: 'Atomic Memory',
-          icon: <Layers size={14} />,
-          badge: 'bg-red-50 text-red-600 border-red-200',
-        };
-      case 'samg_pointer':
-        return {
-          label: 'SAMG Pointer',
-          icon: <Activity size={14} />,
-          badge: 'bg-violet-50 text-violet-600 border-violet-200',
-        };
-      default:
-        return {
-          label: 'Raw Archive',
-          icon: <Archive size={14} />,
-          badge: 'bg-slate-100 text-slate-600 border-slate-200',
-        };
-    }
-  };
-
-  const getSourceTitle = (source: MemoryAgentSource) => {
-    return source.title || source.node_label || source.summary || source.source_id || source.id;
-  };
-
-  const getSourcePreview = (source: MemoryAgentSource) => {
-    const preview = source.summary || source.content || source.source_id || source.id;
-    return preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
   };
 
   return (
@@ -1521,22 +1202,10 @@ const MemoryView = () => {
           </div>
 
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Retrieve hits</div>
-              <div className="mt-2 text-2xl font-bold text-slate-800">{totalFound}</div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Context sources</div>
-              <div className="mt-2 text-2xl font-bold text-slate-800">{sourceCount}</div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">Atomic memories</div>
-              <div className="mt-2 text-2xl font-bold text-slate-800">{atomicMemories.length}</div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">SAMG nodes</div>
-              <div className="mt-2 text-2xl font-bold text-slate-800">{samgNodes.length}</div>
-            </div>
+            <StatCard label="Retrieve hits" value={totalFound} size="lg" />
+            <StatCard label="Context sources" value={sourceCount} size="lg" />
+            <StatCard label="Atomic memories" value={atomicMemories.length} size="lg" />
+            <StatCard label="SAMG nodes" value={samgNodes.length} size="lg" />
           </div>
 
           <p className="text-xs text-slate-400">填 query 会同时走 retrieve 和 context。只填 session_id 时，会优先展示 context 里的 recent hot memory 与来源。</p>
@@ -1559,29 +1228,23 @@ const MemoryView = () => {
         ) : (
           <div className="h-full grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)] overflow-hidden">
             <div className="overflow-y-auto p-4 md:p-6 space-y-4">
-              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-900">Context block</h2>
-                    <p className="text-xs text-slate-400">来自 /api/v1/memory/agent/context 的统一上下文。</p>
-                  </div>
-                  <span className="text-xs text-slate-400">{contextBlock ? `${contextBlock.length} chars` : 'empty'}</span>
-                </div>
+              <SectionCard
+                title="Context block"
+                subtitle="来自 /api/v1/memory/agent/context 的统一上下文。"
+                action={<span className="text-xs text-slate-400">{contextBlock ? `${contextBlock.length} chars` : 'empty'}</span>}
+              >
                 {contextBlock ? (
                   <pre className="whitespace-pre-wrap break-words text-xs leading-6 text-slate-600 bg-slate-50 rounded-2xl p-4 overflow-x-auto">{contextBlock}</pre>
                 ) : (
                   <EmptyState icon={<FileText size={32} />} title="暂无上下文块" description="当前输入还没有组装出 memory_context。" />
                 )}
-              </section>
+              </SectionCard>
 
-              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-900">Atomic memories</h2>
-                    <p className="text-xs text-slate-400">统一入口返回的原子记忆结果。</p>
-                  </div>
-                  <span className="text-xs text-slate-400">{atomicMemories.length} items</span>
-                </div>
+              <SectionCard
+                title="Atomic memories"
+                subtitle="统一入口返回的原子记忆结果。"
+                action={<span className="text-xs text-slate-400">{atomicMemories.length} items</span>}
+              >
                 {atomicMemories.length === 0 ? (
                   <EmptyState icon={<Layers size={32} />} title="没有 atomic 命中" description="当前 query 没有命中原子记忆。" />
                 ) : (
@@ -1610,16 +1273,13 @@ const MemoryView = () => {
                     })}
                   </div>
                 )}
-              </section>
+              </SectionCard>
 
-              <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-900">SAMG nodes</h2>
-                    <p className="text-xs text-slate-400">统一入口解析出的图谱节点与 pointer。</p>
-                  </div>
-                  <span className="text-xs text-slate-400">{samgNodes.length} nodes</span>
-                </div>
+              <SectionCard
+                title="SAMG nodes"
+                subtitle="统一入口解析出的图谱节点与 pointer。"
+                action={<span className="text-xs text-slate-400">{samgNodes.length} nodes</span>}
+              >
                 {samgNodes.length === 0 ? (
                   <EmptyState icon={<Activity size={32} />} title="没有 SAMG 命中" description="当前 query 没有返回图谱节点。" />
                 ) : (
@@ -1628,8 +1288,8 @@ const MemoryView = () => {
                       <div key={node.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                         <div className="flex flex-wrap items-center gap-2 mb-3">
                           <span className="text-sm font-semibold text-slate-800">{node.label}</span>
-                          <span className="px-2 py-0.5 rounded-full border border-violet-200 bg-violet-50 text-[10px] font-medium text-violet-600">hop {node.hop}</span>
-                          <span className="px-2 py-0.5 rounded-full border border-slate-200 bg-white text-[10px] font-medium text-slate-500">activation {node.activation.toFixed(2)}</span>
+                          <InfoChip label={`hop ${node.hop}`} tone="violet" />
+                          <InfoChip label={`activation ${node.activation.toFixed(2)}`} />
                         </div>
                         {node.pointers && node.pointers.length > 0 ? (
                           <div className="space-y-2">
@@ -1655,7 +1315,7 @@ const MemoryView = () => {
                     ))}
                   </div>
                 )}
-              </section>
+              </SectionCard>
             </div>
 
             <aside className="border-t xl:border-t-0 xl:border-l border-slate-200 bg-white/70 backdrop-blur-sm overflow-hidden flex flex-col">
@@ -1666,86 +1326,38 @@ const MemoryView = () => {
 
               {sources.length === 0 ? (
                 <div className="flex-1 overflow-y-auto">
-                  <EmptyState icon={<Archive size={32} />} title="没有来源卡片" description="当前输入还没有返回可追溯来源。" />
+                  <MemorySourceList
+                    sources={sources}
+                    selectedSourceKey={selectedSourceKey}
+                    onSelect={setSelectedSourceKey}
+                    emptyState={{
+                      title: '没有来源卡片',
+                      description: '当前输入还没有返回可追溯来源。',
+                      iconSize: 32,
+                    }}
+                  />
                 </div>
               ) : (
                 <>
-                  <div className="max-h-[40%] overflow-y-auto p-3 space-y-2 border-b border-slate-200 shrink-0">
-                    {sources.map((source) => {
-                      const meta = getSourceKindMeta(source.kind);
-                      const sourceKey = buildSourceKey(source);
-                      const active = sourceKey === selectedSourceKey;
-                      return (
-                        <button
-                          key={sourceKey}
-                          onClick={() => setSelectedSourceKey(sourceKey)}
-                          className={`w-full text-left rounded-2xl border p-3 transition-colors ${
-                            active ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
-                              {meta.icon}
-                              {meta.label}
-                            </span>
-                          </div>
-                          <div className="text-sm font-medium text-slate-800 truncate">{getSourceTitle(source)}</div>
-                          <div className="text-xs text-slate-400 mt-1 line-clamp-2">{getSourcePreview(source)}</div>
-                        </button>
-                      );
-                    })}
+                  <div className="max-h-[40%] overflow-y-auto p-3 border-b border-slate-200 shrink-0">
+                    <MemorySourceList
+                      sources={sources}
+                      selectedSourceKey={selectedSourceKey}
+                      onSelect={setSelectedSourceKey}
+                    />
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4">
-                    {selectedSource ? (
-                      <div className="space-y-4">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2 mb-3">
-                            {(() => {
-                              const meta = getSourceKindMeta(selectedSource.kind);
-                              return (
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
-                                  {meta.icon}
-                                  {meta.label}
-                                </span>
-                              );
-                            })()}
-                          </div>
-                          <h3 className="text-lg font-semibold text-slate-900 break-words">{getSourceTitle(selectedSource)}</h3>
-                          <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] text-slate-400">
-                            <span>{selectedSource.id}</span>
-                            {selectedSource.session_id && <span>session {selectedSource.session_id}</span>}
-                            {selectedSource.timestamp && <span>{new Date(selectedSource.timestamp * 1000).toLocaleString()}</span>}
-                            {typeof selectedSource.relevance === 'number' && <span>relevance {selectedSource.relevance.toFixed(2)}</span>}
-                          </div>
-                        </div>
-
-                        {(selectedSource.file_path || selectedSource.line_range || selectedSource.source_type) && (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm text-slate-600">
-                            {selectedSource.source_type && <div><span className="text-slate-400">source_type</span> {selectedSource.source_type}</div>}
-                            {selectedSource.file_path && <div><span className="text-slate-400">file</span> {selectedSource.file_path}</div>}
-                            {selectedSource.line_range && <div><span className="text-slate-400">line</span> {selectedSource.line_range}</div>}
-                            {selectedSource.node_label && <div><span className="text-slate-400">node</span> {selectedSource.node_label}</div>}
-                          </div>
-                        )}
-
-                        {selectedSource.summary && (
-                          <div>
-                            <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Summary</div>
-                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words">{selectedSource.summary}</div>
-                          </div>
-                        )}
-
-                        <div>
-                          <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Content</div>
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words min-h-32">
-                            {selectedSource.content || selectedSource.summary || '这个来源暂时没有展开内容。'}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <EmptyState icon={<ExternalLink size={32} />} title="选择来源卡片" description="右侧会展示来源详情和可追溯内容。" />
-                    )}
+                    <MemorySourceDetail
+                      source={selectedSource}
+                      showTimestamp
+                      contentMinHeightClass="min-h-32"
+                      emptyState={{
+                        title: '选择来源卡片',
+                        description: '右侧会展示来源详情和可追溯内容。',
+                        iconSize: 32,
+                      }}
+                    />
                   </div>
                 </>
               )}
@@ -1762,22 +1374,7 @@ const AgentsView = ({ showToast, onNavigate }: { showToast: (msg: string) => voi
         (signal) => listAgents(signal), [],
     );
 
-    const agentList = agents ?? [];
-
-    const getRoleColor = (role: string) => {
-        const hash = role.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-        const colors = ['blue', 'emerald', 'amber', 'pink', 'violet', 'indigo'];
-        return colors[hash % colors.length];
-    };
-
-    const getStatusBadge = (status: string) => {
-        switch (status) {
-            case 'running': return 'text-blue-600 bg-blue-50 border-blue-100';
-            case 'idle': return 'text-slate-500 bg-slate-50 border-slate-100';
-            case 'error': return 'text-red-600 bg-red-50 border-red-100';
-            default: return 'text-slate-400 bg-slate-50 border-slate-100';
-        }
-    };
+    const agentCards = toAgentViewModels(agents ?? []);
 
     return (
         <div className="flex-1 p-6 md:p-12 overflow-y-auto bg-slate-50 relative pb-24 md:pb-12">
@@ -1789,32 +1386,34 @@ const AgentsView = ({ showToast, onNavigate }: { showToast: (msg: string) => voi
                 </div>
                 {loading ? <LoadingSkeleton variant="card" count={4} /> :
                  error ? <ErrorState message={error.message} onRetry={refetch} /> :
-                 agentList.length === 0 ? (
+                 agentCards.length === 0 ? (
                     <EmptyState icon={<Users size={48} />} title="No agents" description="No agents are currently active" />
                  ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
-                    {agentList.map(agent => {
-                        const color = getRoleColor(agent.role);
-                        return (
-                            <div key={agent.id} className="bg-white/70 backdrop-blur-md border border-white p-6 md:p-8 rounded-[32px] shadow-xl shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 group relative overflow-hidden">
-                                <div className="flex justify-between items-start mb-6">
-                                    <div className={`size-10 rounded-full bg-${color}-200 flex items-center justify-center text-${color}-700 font-bold text-sm`}>
-                                        {agent.name.charAt(0).toUpperCase()}
-                                    </div>
-                                    <span className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full border ${getStatusBadge(agent.status)}`}>
-                                        {agent.status}
-                                    </span>
+                    {agentCards.map(agent => (
+                        <div key={agent.id} className="bg-white/70 backdrop-blur-md border border-white p-6 md:p-8 rounded-[32px] shadow-xl shadow-slate-200/50 hover:-translate-y-2 transition-all duration-300 group relative overflow-hidden">
+                            <div className="flex justify-between items-start mb-6">
+                                <div className={`size-10 rounded-full flex items-center justify-center font-bold text-sm ${agent.avatarTone}`}>
+                                    {agent.initial}
                                 </div>
-                                <h3 className="text-xl font-bold text-slate-800 mb-2">{agent.name}</h3>
-                                <p className="text-sm text-slate-500 mb-4">{agent.model} • {agent.role}</p>
-                                <div className="flex gap-4 text-xs text-slate-400">
-                                    <span>{agent.task_count} tasks</span>
-                                    <span>{agent.tokens_used.toLocaleString()} tokens</span>
-                                    {agent.error_count > 0 && <span className="text-red-400">{agent.error_count} errors</span>}
-                                </div>
+                                <span className={`px-3 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full border ${agent.statusTone}`}>
+                                    {agent.statusText}
+                                </span>
                             </div>
-                        );
-                    })}
+                            <h3 className="text-xl font-bold text-slate-800 mb-2">{agent.name}</h3>
+                            <p className="text-sm text-slate-500 mb-4">{agent.summaryText}</p>
+                            <div className="flex flex-wrap gap-2 mb-4 text-[10px] font-bold uppercase tracking-wide">
+                                <span className={`px-2.5 py-1 rounded-full ${agent.roleTone}`}>{agent.roleText}</span>
+                                {agent.sessionText && <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">{agent.sessionText}</span>}
+                            </div>
+                            <div className="flex gap-4 flex-wrap text-xs text-slate-400">
+                                <span>{agent.taskCountText}</span>
+                                <span>{agent.tokenCountText}</span>
+                                {agent.errorCountText && <span className="text-red-400">{agent.errorCountText}</span>}
+                                <span>Active {agent.lastActiveText}</span>
+                            </div>
+                        </div>
+                    ))}
                 </div>
                  )}
             </div>
@@ -2004,83 +1603,13 @@ const PlanView = ({
     const activeScenario = scenarioMeta[knowledgeScenario];
     const knowledgeQuery = activeScenario.query.trim();
 
-    const buildSourceKey = (source: MemoryAgentSource) => [
-        source.kind,
-        source.id,
-        source.node_id ?? '',
-        source.source_id ?? '',
-    ].join(':');
-
-    const mergeSources = (
-        primary: MemoryAgentSource[] = [],
-        secondary: MemoryAgentSource[] = [],
-    ) => {
-        const merged = [...primary];
-        const seen = new Set(primary.map((source) => buildSourceKey(source)));
-        for (const source of secondary) {
-            const key = buildSourceKey(source);
-            if (seen.has(key)) continue;
-            merged.push(source);
-            seen.add(key);
-        }
-        return merged;
-    };
-
-    const mergeGraphNodes = (
-        primary: NonNullable<MemoryAgentRetrieveResult['samg_nodes']> = [],
-        secondary: QueryMemoryNode[] = [],
-    ) => {
-        const merged = [...primary];
-        const seen = new Set(primary.map((node) => node.id));
-        for (const node of secondary) {
-            if (seen.has(node.id)) continue;
-            merged.push(node);
-            seen.add(node.id);
-        }
-        return merged;
-    };
-
-    const getSourceKindMeta = (kind: MemoryAgentSource['kind']) => {
-        switch (kind) {
-            case 'atomic_memory':
-                return {
-                    label: 'Atomic Memory',
-                    icon: <Layers size={14} />,
-                    badge: 'bg-red-50 text-red-600 border-red-200',
-                };
-            case 'samg_pointer':
-                return {
-                    label: 'SAMG Pointer',
-                    icon: <Activity size={14} />,
-                    badge: 'bg-violet-50 text-violet-600 border-violet-200',
-                };
-            default:
-                return {
-                    label: 'Raw Archive',
-                    icon: <Archive size={14} />,
-                    badge: 'bg-slate-100 text-slate-600 border-slate-200',
-                };
-        }
-    };
-
-    const getSourceTitle = (source: MemoryAgentSource) => source.title || source.node_label || source.summary || source.source_id || source.id;
-    const getSourcePreview = (source: MemoryAgentSource) => {
-        const preview = source.summary || source.content || source.source_id || source.id;
-        return preview.length > 120 ? `${preview.slice(0, 120)}...` : preview;
-    };
-    const formatNodeTypes = (types?: string[]) => types?.filter(Boolean).join(' · ') || 'Unclassified node';
-    const formatNodeProperties = (properties?: Record<string, unknown>) => Object.entries(properties ?? {}).filter(([, value]) => value !== undefined && value !== null);
-    const buildNodeSummary = (node: QueryMemoryNode | null) => {
-        if (!node) return 'No node selected';
-        return node.description || formatNodeTypes(node['@type']) || node.id;
-    };
     const jumpToSection = (ref: React.RefObject<HTMLDivElement | null>) => {
         ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
     const openSourceFromNode = (nodeId: string) => {
         const firstSource = knowledgeSources.find((source) => source.node_id === nodeId);
         if (!firstSource) return;
-        setSelectedSourceKey(buildSourceKey(firstSource));
+        setSelectedSourceKey(buildMemorySourceKey(firstSource));
         jumpToSection(sourceCardsRef);
     };
     const focusGraphNode = (nodeId: string) => {
@@ -2094,76 +1623,33 @@ const PlanView = ({
         });
         jumpToSection(graphJumpRef);
     };
-    const parseEmbeddedWiki = (contextBlock: string) => {
-        const lines = contextBlock
-            .split('\n')
-            .map((line) => line.trim())
-            .filter(Boolean);
-        return lines.map((line, index) => {
-            const lower = line.toLowerCase();
-            if (lower.startsWith('pack rule:')) {
-                return {
-                    id: `wiki-pack-${index}`,
-                    label: 'Pack rule',
-                    content: line.slice('pack rule:'.length).trim(),
-                    actionLabel: '查看 pack',
-                    onClick: () => jumpToSection(knowledgePackRef),
-                };
-            }
-            if (lower.startsWith('latest evidence:')) {
-                return {
-                    id: `wiki-evidence-${index}`,
-                    label: 'Latest evidence',
-                    content: line.slice('latest evidence:'.length).trim(),
-                    actionLabel: selectedSource ? '打开来源' : '查看来源',
-                    onClick: () => jumpToSection(sourceCardsRef),
-                };
-            }
-            if (lower.startsWith('dependencies:')) {
-                return {
-                    id: `wiki-graph-${index}`,
-                    label: 'Dependencies',
-                    content: line.slice('dependencies:'.length).trim(),
-                    actionLabel: '查看 graph',
-                    onClick: () => jumpToSection(graphJumpRef),
-                };
-            }
-            if (line.startsWith('[atomic|') || line.startsWith('[samg|') || line.startsWith('[raw_archive|')) {
-                const sourceIndex = knowledgeSources.findIndex((source) => {
-                    const preview = source.content || source.summary || '';
-                    return preview && line.includes(preview.slice(0, Math.min(preview.length, 24)));
-                });
-                return {
-                    id: `wiki-source-${index}`,
-                    label: line.startsWith('[samg|') ? 'Graph memory' : line.startsWith('[atomic|') ? 'Atomic memory' : 'Raw archive',
-                    content: line.replace(/^\[[^\]]+\]\s*/, ''),
-                    actionLabel: '打开来源',
-                    onClick: () => {
-                        if (sourceIndex >= 0) {
-                            setSelectedSourceKey(buildSourceKey(knowledgeSources[sourceIndex]));
-                        }
-                        jumpToSection(sourceCardsRef);
-                    },
-                };
-            }
-            const matchedNode = knowledgeNodes.find((node) => line.includes(node.label) || line.includes(node.id));
-            if (matchedNode) {
-                return {
-                    id: `wiki-node-${matchedNode.id}-${index}`,
-                    label: matchedNode.label,
-                    content: line,
-                    actionLabel: '跳到 graph',
-                    onClick: () => focusGraphNode(matchedNode.id),
-                };
-            }
-            return {
-                id: `wiki-line-${index}`,
-                label: 'Context',
-                content: line,
-                actionLabel: '',
-                onClick: undefined,
-            };
-        });
+    const handleEmbeddedWikiAction = (entry: { action?: { type: string; sourceIndex?: number; nodeId?: string } }) => {
+        const action = entry.action;
+        if (!action) return;
+        switch (action.type) {
+            case 'open_pack':
+                jumpToSection(knowledgePackRef);
+                return;
+            case 'open_sources':
+                jumpToSection(sourceCardsRef);
+                return;
+            case 'open_graph':
+                jumpToSection(graphJumpRef);
+                return;
+            case 'select_source':
+                if (typeof action.sourceIndex === 'number' && knowledgeSources[action.sourceIndex]) {
+                    setSelectedSourceKey(buildMemorySourceKey(knowledgeSources[action.sourceIndex]));
+                }
+                jumpToSection(sourceCardsRef);
+                return;
+            case 'focus_graph_node':
+                if (action.nodeId) {
+                    focusGraphNode(action.nodeId);
+                }
+                return;
+            default:
+                return;
+        }
     };
 
     const { data: memoryRetrieve, loading: memoryRetrieveLoading, error: memoryRetrieveError, refetch: refetchMemoryRetrieve } = useApi<MemoryAgentRetrieveResult>(
@@ -2192,7 +1678,7 @@ const PlanView = ({
         { enabled: Boolean(knowledgeSessionId) },
     );
 
-    const knowledgeNodes = mergeGraphNodes(
+    const knowledgeNodes = mergeQueryMemoryNodes(
         memoryRetrieve?.samg_nodes ?? [],
         memoryContext?.samg_nodes ?? [],
     );
@@ -2214,28 +1700,33 @@ const PlanView = ({
             relevance: pointer.relevance,
         })),
     );
-    const knowledgeSources = mergeSources(
-        mergeSources(memoryRetrieve?.sources ?? [], memoryContext?.sources ?? []),
+    const knowledgeSources = mergeMemorySources(
+        mergeMemorySources(memoryRetrieve?.sources ?? [], memoryContext?.sources ?? []),
         pointerSources,
     );
-    const selectedSource = knowledgeSources.find((source) => buildSourceKey(source) === selectedSourceKey) ?? null;
+    const selectedSource = knowledgeSources.find((source) => buildMemorySourceKey(source) === selectedSourceKey) ?? null;
     const knowledgeContextBlock = memoryContext?.context_block?.trim()
-        || [
-            `Scenario: ${activeScenario.label}`,
-            `Focus task: ${activeTask?.title ?? selectedPlan?.title ?? 'No active task'}`,
-            `Dependencies: ${dependencyRows.length}`,
-            `Latest evidence: ${latestTimelineItem?.title ?? 'No timeline evidence yet'}`,
-            `Pack rule: export/import works on SAMG graph; pointer-level details stay on source cards.`,
-        ].join('\n');
-    const embeddedWikiEntries = parseEmbeddedWiki(knowledgeContextBlock);
+        || buildPlanKnowledgeContextBlock({
+            scenarioLabel: activeScenario.label,
+            activeTaskTitle: activeTask?.title,
+            selectedPlanTitle: selectedPlan?.title,
+            dependencyCount: dependencyRows.length,
+            latestEvidenceTitle: latestTimelineItem?.title,
+        });
+    const embeddedWikiEntries = buildPlanEmbeddedWikiEntries({
+        contextBlock: knowledgeContextBlock,
+        knowledgeSources,
+        knowledgeNodes,
+        hasSelectedSource: Boolean(selectedSource),
+    });
 
     useEffect(() => {
         if (knowledgeSources.length === 0) {
             setSelectedSourceKey(null);
             return;
         }
-        if (!selectedSourceKey || !knowledgeSources.some((source) => buildSourceKey(source) === selectedSourceKey)) {
-            setSelectedSourceKey(buildSourceKey(knowledgeSources[0]));
+        if (!selectedSourceKey || !knowledgeSources.some((source) => buildMemorySourceKey(source) === selectedSourceKey)) {
+            setSelectedSourceKey(buildMemorySourceKey(knowledgeSources[0]));
         }
     }, [knowledgeSources, selectedSourceKey]);
 
@@ -2344,32 +1835,16 @@ const PlanView = ({
                 </div>
 
                 <div className="flex items-center">
-                   <div className="flex flex-col items-center group cursor-pointer">
-                        <div className="size-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mb-1 shadow-sm">
-                            <Lightbulb size={16} />
-                        </div>
-                        <span className="text-[10px] font-bold text-blue-600 uppercase">Intent</span>
-                   </div>
-                   <div className="w-8 md:w-16 h-0.5 bg-blue-200 mx-2 mb-4"></div>
-                   <div className="flex flex-col items-center group cursor-pointer">
-                        <div className="size-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center mb-1 shadow-lg shadow-blue-500/30 scale-110">
-                            <Zap size={20} />
-                        </div>
-                        <span className="text-[10px] font-bold text-indigo-600 uppercase">Plan</span>
-                   </div>
-                   <div className="w-8 md:w-16 h-0.5 bg-slate-200 mx-2 mb-4"></div>
-                   <div className="flex flex-col items-center opacity-40">
-                        <div className="size-8 rounded-full bg-white border border-slate-200 text-slate-400 flex items-center justify-center mb-1">
-                            <Code size={16} />
-                        </div>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Exec</span>
-                   </div>
+                    <HeaderStepIndicator icon={<Lightbulb size={16} />} label="Intent" completed />
+                    <div className="w-8 md:w-16 h-0.5 bg-blue-200 mx-2 mb-4"></div>
+                    <HeaderStepIndicator icon={<Zap size={20} />} label="Plan" active />
+                    <div className="w-8 md:w-16 h-0.5 bg-slate-200 mx-2 mb-4"></div>
+                    <HeaderStepIndicator icon={<Code size={16} />} label="Exec" />
                 </div>
 
+
                 <div className="flex items-center gap-3">
-                     <button className="size-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500">
-                        <Bell size={18} />
-                     </button>
+                     <IconButton icon={<Bell size={18} />} />
                      <div className="hidden sm:block h-8 w-px bg-slate-200"></div>
                      <div className="size-9 rounded-full bg-slate-200 overflow-hidden hidden sm:block">
                          <div className="w-full h-full bg-gradient-to-br from-slate-400 to-slate-500"></div>
@@ -2378,18 +1853,8 @@ const PlanView = ({
             </header>
 
             <div className="md:hidden flex border-b border-slate-200 bg-white">
-                <button
-                    className={`flex-1 py-3 text-sm font-bold ${mobileTab === 'editor' ? 'text-blue-600 border-b-2 border-blue-500' : 'text-slate-500'}`}
-                    onClick={() => setMobileTab('editor')}
-                >
-                    Editor
-                </button>
-                <button
-                    className={`flex-1 py-3 text-sm font-bold ${mobileTab === 'status' ? 'text-blue-600 border-b-2 border-blue-500' : 'text-slate-500'}`}
-                    onClick={() => setMobileTab('status')}
-                >
-                    Runtime & Status
-                </button>
+                <MobileTabButton label="Editor" active={mobileTab === 'editor'} onClick={() => setMobileTab('editor')} />
+                <MobileTabButton label="Runtime & Status" active={mobileTab === 'status'} onClick={() => setMobileTab('status')} />
             </div>
 
             <div className="flex-1 flex overflow-hidden relative">
@@ -2412,22 +1877,15 @@ const PlanView = ({
                                 <h2 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight mb-2">{selectedPlan.title}</h2>
                                 <p className="text-sm md:text-base text-slate-500">{selectedPlan.description || 'No description provided'}</p>
                             </div>
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 ${
-                                selectedPlan.status === 'active' ? 'bg-green-50 text-green-700 border border-green-200' :
-                                selectedPlan.status === 'completed' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                                'bg-slate-50 text-slate-600 border border-slate-200'
-                            }`}>
-                                {selectedPlan.status === 'active' && <span className="size-2 bg-green-500 rounded-full animate-pulse"></span>}
-                                {selectedPlan.status}
-                            </span>
+                            <PlanStatusBadge status={selectedPlan.status} />
                          </div>
 
                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden min-h-[320px] flex flex-col group focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
                                  <div className="bg-slate-50 border-b border-slate-100 p-2 flex gap-1">
-                                    <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Edit3 size={16} /></button>
+                                    <IconButton icon={<Edit3 size={16} />} tone="toolbar" size="sm" />
                                     <div className="w-px h-4 bg-slate-200 my-auto mx-1"></div>
-                                    <button className="p-1.5 hover:bg-white rounded text-slate-400 hover:text-slate-700 transition-colors"><Grid size={16} /></button>
+                                    <IconButton icon={<Grid size={16} />} tone="toolbar" size="sm" />
                                  </div>
                                  <textarea
                                     className="flex-1 w-full p-6 md:p-8 resize-none border-none focus:ring-0 text-slate-700 leading-relaxed font-mono text-xs md:text-sm"
@@ -2444,51 +1902,39 @@ const PlanView = ({
                                             <h3 className="text-sm font-bold text-slate-800">{activeScenario.label}</h3>
                                             <p className="text-xs text-slate-500 mt-1">{activeScenario.caption}</p>
                                         </div>
-                                        <button
+                                        <ActionButton
                                             onClick={refetchKnowledgeRail}
                                             disabled={knowledgeLoading}
-                                            className="px-3 py-1.5 rounded-lg border border-blue-200 bg-white text-xs font-bold text-blue-600 disabled:opacity-50"
+                                            tone="accent"
+                                            size="sm"
                                         >
                                             {knowledgeLoading ? 'Loading...' : 'Refresh'}
-                                        </button>
+                                        </ActionButton>
                                     </div>
 
                                     <div className="flex flex-wrap gap-2">
                                         {(Object.entries(scenarioMeta) as Array<[keyof typeof scenarioMeta, typeof activeScenario]>).map(([key, meta]) => {
                                             const active = key === knowledgeScenario;
                                             return (
-                                                <button
+                                                <ScenarioToggle
                                                     key={key}
+                                                    label={meta.label}
+                                                    active={active}
                                                     onClick={() => setKnowledgeScenario(key)}
-                                                    className={`px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${
-                                                        active
-                                                            ? 'border-blue-200 bg-blue-600 text-white'
-                                                            : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                                                    }`}
-                                                >
-                                                    {meta.label}
-                                                </button>
+                                                />
                                             );
                                         })}
                                     </div>
 
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Sources</div>
-                                            <div className="text-lg font-bold text-slate-800">{knowledgeSources.length}</div>
-                                        </div>
-                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Graph nodes</div>
-                                            <div className="text-lg font-bold text-slate-800">{knowledgeNodes.length}</div>
-                                        </div>
-                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Blocked</div>
-                                            <div className="text-lg font-bold text-slate-800">{blockedTasks.length}</div>
-                                        </div>
-                                        <div className="rounded-xl border border-blue-100 bg-white/80 p-3">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Replay session</div>
-                                            <div className="text-xs font-semibold text-slate-700 break-all">{knowledgeSessionId || 'Unavailable'}</div>
-                                        </div>
+                                        <KnowledgeRailCard label="Sources" value={knowledgeSources.length} />
+                                        <KnowledgeRailCard label="Graph nodes" value={knowledgeNodes.length} />
+                                        <KnowledgeRailCard label="Blocked" value={blockedTasks.length} />
+                                        <KnowledgeRailCard
+                                            label="Replay session"
+                                            value={knowledgeSessionId || 'Unavailable'}
+                                            valueClassName="text-xs font-semibold text-slate-700 break-all"
+                                        />
                                     </div>
 
                                     <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
@@ -2497,232 +1943,102 @@ const PlanView = ({
                                                 <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Embedded wiki</div>
                                                 <div className="text-sm font-semibold text-slate-800">Task-start context block</div>
                                             </div>
-                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">{activeTask?.title ?? selectedPlan.title}</span>
+                                            <InfoChip label={activeTask?.title ?? selectedPlan.title} className="bg-slate-100 text-slate-500 border-slate-200" />
                                         </div>
                                         <div className="grid gap-3">
                                             {embeddedWikiEntries.map((entry) => (
-                                                <div key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                                                    <div className="flex items-start justify-between gap-3">
-                                                        <div className="min-w-0">
-                                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">{entry.label}</div>
-                                                            <div className="leading-6 whitespace-pre-wrap break-words">{entry.content}</div>
-                                                        </div>
-                                                        {entry.onClick && entry.actionLabel ? (
-                                                            <button
-                                                                type="button"
-                                                                onClick={entry.onClick}
-                                                                className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-blue-600 hover:bg-blue-50"
-                                                            >
-                                                                {entry.actionLabel}
-                                                                <ExternalLink size={12} />
-                                                            </button>
-                                                        ) : null}
-                                                    </div>
-                                                </div>
+                                                <EmbeddedWikiCard
+                                                    key={entry.id}
+                                                    entry={entry}
+                                                    onAction={handleEmbeddedWikiAction}
+                                                />
                                             ))}
                                         </div>
                                         {knowledgeError && (
-                                            <div className="text-xs text-red-600 rounded-xl border border-red-200 bg-red-50 p-3">
-                                                {knowledgeError.message}
-                                            </div>
+                                            <InlineAlert message={knowledgeError.message} />
                                         )}
                                     </div>
                                 </div>
 
-                                <div ref={sourceCardsRef} className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                                    <div className="p-4 border-b border-slate-200">
-                                        <h3 className="text-sm font-bold text-slate-800">Sources</h3>
-                                        <p className="text-xs text-slate-500 mt-1">统一来源卡片，保留到原始材料的追溯入口。</p>
-                                    </div>
+                                <SectionCard
+                                    title="Sources"
+                                    subtitle="统一来源卡片，保留到原始材料的追溯入口。"
+                                    className="overflow-hidden"
+                                    contentClassName="p-0"
+                                >
                                     {knowledgeSources.length === 0 ? (
                                         <div className="p-6">
-                                            <EmptyState icon={<Archive size={28} />} title="没有来源卡片" description="当前场景还没有返回可追溯来源。" />
+                                            <MemorySourceList
+                                                sources={knowledgeSources}
+                                                selectedSourceKey={selectedSourceKey}
+                                                onSelect={setSelectedSourceKey}
+                                                emptyState={{
+                                                    title: '没有来源卡片',
+                                                    description: '当前场景还没有返回可追溯来源。',
+                                                    iconSize: 28,
+                                                }}
+                                            />
                                         </div>
                                     ) : (
                                         <>
-                                            <div className="max-h-56 overflow-y-auto p-3 space-y-2 border-b border-slate-200">
-                                                {knowledgeSources.map((source) => {
-                                                    const meta = getSourceKindMeta(source.kind);
-                                                    const sourceKey = buildSourceKey(source);
-                                                    const active = sourceKey === selectedSourceKey;
-                                                    return (
-                                                        <button
-                                                            key={sourceKey}
-                                                            onClick={() => setSelectedSourceKey(sourceKey)}
-                                                            className={`w-full text-left rounded-2xl border p-3 transition-colors ${
-                                                                active ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
-                                                            }`}
-                                                        >
-                                                            <div className="flex items-center gap-2 mb-2">
-                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
-                                                                    {meta.icon}
-                                                                    {meta.label}
-                                                                </span>
-                                                            </div>
-                                                            <div className="text-sm font-medium text-slate-800 truncate">{getSourceTitle(source)}</div>
-                                                            <div className="text-xs text-slate-400 mt-1 line-clamp-2">{getSourcePreview(source)}</div>
-                                                        </button>
-                                                    );
-                                                })}
+                                            <div className="max-h-56 overflow-y-auto p-3 border-b border-slate-200">
+                                                <MemorySourceList
+                                                    sources={knowledgeSources}
+                                                    selectedSourceKey={selectedSourceKey}
+                                                    onSelect={setSelectedSourceKey}
+                                                />
                                             </div>
 
                                             <div className="p-4">
-                                                {selectedSource ? (
-                                                    <div className="space-y-4">
-                                                        <div>
-                                                            <div className="flex flex-wrap items-center gap-2 mb-3">
-                                                                {(() => {
-                                                                    const meta = getSourceKindMeta(selectedSource.kind);
-                                                                    return (
-                                                                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium ${meta.badge}`}>
-                                                                            {meta.icon}
-                                                                            {meta.label}
-                                                                        </span>
-                                                                    );
-                                                                })()}
-                                                            </div>
-                                                            <h3 className="text-lg font-semibold text-slate-900 break-words">{getSourceTitle(selectedSource)}</h3>
-                                                            <div className="flex flex-wrap items-center gap-2 mt-3 text-[11px] text-slate-400">
-                                                                <span>{selectedSource.id}</span>
-                                                                {selectedSource.session_id && <span>session {selectedSource.session_id}</span>}
-                                                                {typeof selectedSource.relevance === 'number' && <span>relevance {selectedSource.relevance.toFixed(2)}</span>}
-                                                            </div>
-                                                        </div>
-
-                                                        {(selectedSource.file_path || selectedSource.line_range || selectedSource.source_type) && (
-                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-2 text-sm text-slate-600">
-                                                                {selectedSource.source_type && <div><span className="text-slate-400">source_type</span> {selectedSource.source_type}</div>}
-                                                                {selectedSource.file_path && <div><span className="text-slate-400">file</span> {selectedSource.file_path}</div>}
-                                                                {selectedSource.line_range && <div><span className="text-slate-400">line</span> {selectedSource.line_range}</div>}
-                                                                {selectedSource.node_label && <div><span className="text-slate-400">node</span> {selectedSource.node_label}</div>}
-                                                            </div>
-                                                        )}
-
-                                                        {selectedSource.summary && (
-                                                            <div>
-                                                                <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Summary</div>
-                                                                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words">{selectedSource.summary}</div>
-                                                            </div>
-                                                        )}
-
-                                                        <div>
-                                                            <div className="text-xs font-medium uppercase tracking-wider text-slate-400 mb-2">Content</div>
-                                                            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600 whitespace-pre-wrap break-words min-h-24">
-                                                                {selectedSource.content || selectedSource.summary || '这个来源暂时没有展开内容。'}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <EmptyState icon={<ExternalLink size={28} />} title="选择来源卡片" description="下方展示会保留 source type / file / line 等追溯信息。" />
-                                                )}
+                                                <MemorySourceDetail
+                                                    source={selectedSource}
+                                                    emptyState={{
+                                                        title: '选择来源卡片',
+                                                        description: '下方展示会保留 source type / file / line 等追溯信息。',
+                                                        iconSize: 28,
+                                                    }}
+                                                />
                                             </div>
                                         </>
                                     )}
-                                </div>
+                                </SectionCard>
 
-                                <div ref={graphJumpRef} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-                                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-800">Graph jumps</h3>
-                                            <p className="text-xs text-slate-500">任务启动时可直接在 SAMG 节点之间跳转并查看 path。</p>
-                                        </div>
-                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-600 border border-violet-200">{graphPaths.length} paths</span>
-                                    </div>
+
+                                <SectionCard
+                                    title="Graph jumps"
+                                    subtitle="任务启动时可直接在 SAMG 节点之间跳转并查看 path。"
+                                    action={<InfoChip label={`${graphPaths.length} paths`} tone="violet" />}
+                                    className="overflow-hidden"
+                                    contentClassName="p-5 space-y-4"
+                                >
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <label className="text-xs text-slate-500 space-y-2">
-                                            <span className="block uppercase tracking-widest">Source node</span>
-                                            <select
-                                                value={graphSourceNodeId ?? ''}
-                                                onChange={(e) => setGraphSourceNodeId(e.target.value || null)}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                                            >
-                                                {knowledgeNodes.map((node) => (
-                                                    <option key={node.id} value={node.id}>{node.label} · hop {node.hop}</option>
-                                                ))}
-                                            </select>
-                                        </label>
-                                        <label className="text-xs text-slate-500 space-y-2">
-                                            <span className="block uppercase tracking-widest">Target node</span>
-                                            <select
-                                                value={selectedGraphNodeId ?? ''}
-                                                onChange={(e) => setSelectedGraphNodeId(e.target.value || null)}
-                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                                            >
-                                                {knowledgeNodes.map((node) => (
-                                                    <option key={node.id} value={node.id}>{node.label} · hop {node.hop}</option>
-                                                ))}
-                                            </select>
-                                        </label>
+                                        <KnowledgeNodeSelect
+                                            label="Source node"
+                                            value={graphSourceNodeId ?? ''}
+                                            nodes={knowledgeNodes}
+                                            onChange={setGraphSourceNodeId}
+                                        />
+                                        <KnowledgeNodeSelect
+                                            label="Target node"
+                                            value={selectedGraphNodeId ?? ''}
+                                            nodes={knowledgeNodes}
+                                            onChange={setSelectedGraphNodeId}
+                                        />
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                        {[{ title: 'From', node: graphSourceNode }, { title: 'To', node: selectedGraphNode }].map(({ title, node }) => {
-                                            const propertyEntries = formatNodeProperties(node?.properties);
-                                            return (
-                                                <div key={title} className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-3">
-                                                    <div>
-                                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">{title}</div>
-                                                        <div className="font-semibold text-slate-800 break-words">{node?.label || 'No node selected'}</div>
-                                                        {node && <div className="text-xs text-slate-400 mt-1 break-all">{node.id}</div>}
-                                                    </div>
-                                                    {node ? (
-                                                        <>
-                                                            <div className="text-xs text-slate-500">{buildNodeSummary(node)}</div>
-                                                            <div className="flex flex-wrap gap-2 text-[11px]">
-                                                                <span className="px-2 py-1 rounded-full border border-slate-200 bg-white text-slate-600">hop {node.hop}</span>
-                                                                <span className="px-2 py-1 rounded-full border border-slate-200 bg-white text-slate-600">activation {node.activation.toFixed(2)}</span>
-                                                                <span className="px-2 py-1 rounded-full border border-slate-200 bg-white text-slate-600">{formatNodeTypes(node['@type'])}</span>
-                                                            </div>
-                                                            {node.aliases && node.aliases.length > 0 && (
-                                                                <div>
-                                                                    <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Aliases</div>
-                                                                    <div className="flex flex-wrap gap-2">
-                                                                        {node.aliases.map((alias) => (
-                                                                            <span key={alias} className="px-2 py-1 rounded-full border border-violet-200 bg-white text-[11px] text-violet-600">{alias}</span>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            {propertyEntries.length > 0 && (
-                                                                <div>
-                                                                    <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Properties</div>
-                                                                    <div className="space-y-2">
-                                                                        {propertyEntries.slice(0, 4).map(([key, value]) => (
-                                                                            <div key={key} className="rounded-lg border border-white bg-white px-3 py-2 text-xs text-slate-600 break-words">
-                                                                                <span className="text-slate-400">{key}</span> {typeof value === 'string' ? value : JSON.stringify(value)}
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            {node.pointers && node.pointers.length > 0 && (
-                                                                <div>
-                                                                    <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Pointers</div>
-                                                                    <div className="space-y-2">
-                                                                        {node.pointers.slice(0, 2).map((pointer, index) => (
-                                                                            <button
-                                                                                key={`${pointer.source_id}-${index}`}
-                                                                                type="button"
-                                                                                onClick={() => openSourceFromNode(node.id)}
-                                                                                className="w-full rounded-lg border border-white bg-white px-3 py-2 text-left text-xs text-slate-600 hover:border-blue-200 hover:bg-blue-50"
-                                                                            >
-                                                                                <div className="font-medium text-slate-700">{pointer.summary || pointer.source_id}</div>
-                                                                                <div className="text-slate-400 mt-1">{pointer.file_path || pointer.source_type || 'source'} {pointer.line_range ? `· ${pointer.line_range}` : ''}</div>
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                        </>
-                                                    ) : null}
-                                                </div>
-                                            );
-                                        })}
+                                        {[{ title: 'From', node: graphSourceNode }, { title: 'To', node: selectedGraphNode }].map(({ title, node }) => (
+                                            <KnowledgeNodeCard
+                                                key={title}
+                                                title={title}
+                                                node={node ?? null}
+                                                onOpenSource={openSourceFromNode}
+                                            />
+                                        ))}
                                     </div>
 
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
-                                        <div className="text-[10px] uppercase tracking-widest text-slate-400">Paths</div>
+                                    <SimpleInfoPanel title="Paths" contentClassName="mt-2 space-y-2">
                                         {graphSourceNodeId && selectedGraphNodeId && graphSourceNodeId === selectedGraphNodeId ? (
                                             <p className="text-sm text-slate-500">选择两个不同节点即可查看图谱跳转。</p>
                                         ) : graphPathLoading ? (
@@ -2738,158 +2054,134 @@ const PlanView = ({
                                                 ))}
                                             </div>
                                         )}
-                                    </div>
-                                </div>
+                                    </SimpleInfoPanel>
+                                </SectionCard>
 
-                                <div ref={knowledgePackRef} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-                                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-800">Knowledge pack</h3>
-                                            <p className="text-xs text-slate-500">跨项目复用通过现有 SAMG graph export/import 实现，不引入并行知识系统。</p>
-                                        </div>
+                                <SectionCard
+                                    title="Knowledge pack"
+                                    subtitle="跨项目复用通过现有 SAMG graph export/import 实现，不引入并行知识系统。"
+                                    action={(
                                         <div className="flex items-center gap-2">
-                                            <button
+                                            <ActionButton
                                                 onClick={handleExportPack}
                                                 disabled={exportPackMutation.loading}
-                                                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 disabled:opacity-50"
+                                                tone="secondary"
+                                                size="sm"
                                             >
                                                 {exportPackMutation.loading ? 'Exporting...' : 'Export'}
-                                            </button>
-                                            <button
+                                            </ActionButton>
+                                            <ActionButton
                                                 onClick={handleImportPack}
                                                 disabled={importPackMutation.loading || !packDraft.trim()}
-                                                className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold disabled:opacity-50"
+                                                tone="primary"
+                                                size="sm"
                                             >
                                                 {importPackMutation.loading ? 'Importing...' : 'Import'}
-                                            </button>
+                                            </ActionButton>
                                         </div>
-                                    </div>
+                                    )}
+                                    className="space-y-4"
+                                    contentClassName="p-5 space-y-4"
+                                >
 
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-3">Pack rules</div>
-                                        <div className="space-y-2">
-                                            {packRules.map((rule) => (
-                                                <div key={rule} className="flex gap-2 text-sm text-slate-600">
-                                                    <span className="mt-1 size-1.5 rounded-full bg-slate-300 shrink-0"></span>
-                                                    <span>{rule}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
+                                    <SimpleInfoPanel title="Pack rules" padding="lg" contentClassName="mt-3 space-y-2">
+                                        {packRules.map((rule) => (
+                                            <div key={rule} className="flex gap-2 text-sm text-slate-600">
+                                                <span className="mt-1 size-1.5 rounded-full bg-slate-300 shrink-0"></span>
+                                                <span>{rule}</span>
+                                            </div>
+                                        ))}
+                                    </SimpleInfoPanel>
 
                                     {lastImportResult && (
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-emerald-600 mb-1">Imported</div>
-                                                <div className="text-lg font-bold text-emerald-900">{lastImportResult.triple_count}</div>
-                                            </div>
-                                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-amber-600 mb-1">Deduplicated</div>
-                                                <div className="text-lg font-bold text-amber-900">{lastImportResult.deduplicated_count}</div>
-                                            </div>
-                                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-blue-600 mb-1">Total triples</div>
-                                                <div className="text-lg font-bold text-blue-900">{lastImportResult.total_triples}</div>
-                                            </div>
+                                            <StatCard label="Imported" value={lastImportResult.triple_count} tone="emerald" />
+                                            <StatCard label="Deduplicated" value={lastImportResult.deduplicated_count} tone="amber" />
+                                            <StatCard label="Total triples" value={lastImportResult.total_triples} tone="blue" />
                                         </div>
                                     )}
 
                                     {exportedPack && (
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Exported triples</div>
-                                                <div className="text-lg font-bold text-slate-900">{exportedPack.metadata?.triple_count ?? exportedPack['@graph']?.length ?? 0}</div>
-                                            </div>
-                                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Entities</div>
-                                                <div className="text-lg font-bold text-slate-900">{exportedPack.metadata?.entity_count ?? 'n/a'}</div>
-                                            </div>
-                                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                                                <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-1">Version</div>
-                                                <div className="text-sm font-semibold text-slate-700 break-all">{exportedPack.metadata?.version ?? 'unknown'}</div>
-                                            </div>
+                                            <StatCard label="Exported triples" value={exportedPack.metadata?.triple_count ?? exportedPack['@graph']?.length ?? 0} />
+                                            <StatCard label="Entities" value={exportedPack.metadata?.entity_count ?? 'n/a'} />
+                                            <StatCard label="Version" value={exportedPack.metadata?.version ?? 'unknown'} valueClassName="text-sm font-semibold text-slate-700 break-all" />
                                         </div>
                                     )}
 
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400">Pack payload</div>
-                                            <div className="text-[10px] text-slate-400">JSON-LD graph payload routed to backend import</div>
-                                        </div>
+                                    <SimpleInfoPanel
+                                        title="Pack payload"
+                                        description="JSON-LD graph payload routed to backend import"
+                                        contentClassName="mt-2"
+                                    >
                                         <textarea
                                             value={packDraft}
                                             onChange={(e) => setPackDraft(e.target.value)}
                                             placeholder="Export a pack or paste a SAMG JSON-LD graph here"
                                             className="min-h-48 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs text-slate-700 focus:border-blue-300 focus:outline-none focus:ring-4 focus:ring-blue-100"
                                         />
-                                    </div>
-                                </div>
+                                    </SimpleInfoPanel>
+                                    </SectionCard>
 
-                                <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-                                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                                        <div>
-                                            <h3 className="text-sm font-bold text-slate-800">Workflow details</h3>
-                                            <p className="text-xs text-slate-500">Minimal approval, dependency, decision, and timeline surface attached to Plan / Task.</p>
-                                        </div>
-                                        <button onClick={handleOpenReplay} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-bold">Replay</button>
-                                    </div>
+                                <SectionCard
+                                    title="Workflow details"
+                                    subtitle="Minimal approval, dependency, decision, and timeline surface attached to Plan / Task."
+                                    action={<ActionButton onClick={handleOpenReplay} tone="primary" size="sm">Replay</ActionButton>}
+                                    className="space-y-4"
+                                    contentClassName="p-5 space-y-4"
+                                >
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Approvals</div>
+                                        <SubsectionCard title="Approvals">
                                             <div className="space-y-2">
                                                 {(mergedWorkflow.approval ?? []).map((item, index) => (
                                                     <div key={`${item.stage}-${index}`} className="flex items-start justify-between gap-2">
-                                                        <div>
-                                                            <p className="font-semibold text-slate-700">{item.stage}</p>
-                                                            {item.owner && <p className="text-xs text-slate-400">{item.owner}</p>}
-                                                        </div>
+                                                        <LabeledTextItem title={item.stage} description={item.owner} />
                                                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">{item.status}</span>
                                                     </div>
                                                 ))}
                                             </div>
-                                        </div>
-                                        <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                                            <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Decisions</div>
+                                        </SubsectionCard>
+                                        <SubsectionCard title="Decisions">
                                             <div className="space-y-2">
                                                 {(mergedWorkflow.decisions ?? []).map((item) => (
-                                                    <div key={item.id}>
-                                                        <p className="font-semibold text-slate-700">{item.summary}</p>
-                                                        {item.reason && <p className="text-xs text-slate-400 mt-1">{item.reason}</p>}
-                                                    </div>
+                                                    <LabeledTextItem key={item.id} title={item.summary} description={item.reason} />
                                                 ))}
                                             </div>
-                                        </div>
+                                        </SubsectionCard>
                                     </div>
-                                    <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Dependencies</div>
+                                    <SubsectionCard title="Dependencies">
                                         {dependencyRows.length === 0 ? (
                                             <p className="text-xs text-slate-400">No explicit task dependencies</p>
                                         ) : (
                                             <div className="space-y-2">
                                                 {dependencyRows.map((task) => (
-                                                    <div key={task.id} className="text-sm text-slate-600">
-                                                        <span className="font-semibold text-slate-700">{task.title}</span>
-                                                        <span className="text-slate-400"> ← {task.dependencies?.join(', ')}</span>
-                                                    </div>
+                                                    <LabeledTextItem
+                                                        key={task.id}
+                                                        title={task.title}
+                                                        description={`← ${task.dependencies?.join(', ')}`}
+                                                        className="text-sm"
+                                                        descriptionClassName="text-sm text-slate-400"
+                                                    />
                                                 ))}
                                             </div>
                                         )}
-                                    </div>
-                                    <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                                        <div className="text-[10px] uppercase tracking-widest text-slate-400 mb-2">Timeline</div>
+                                    </SubsectionCard>
+                                    <SubsectionCard title="Timeline">
                                         <div className="space-y-2">
                                             {timeline.slice(0, 4).map((item) => (
                                                 <div key={item.id} className="flex gap-3 text-xs">
                                                     <span className="w-16 shrink-0 uppercase tracking-widest text-slate-400">{item.lane}</span>
-                                                    <div>
-                                                        <p className="font-semibold text-slate-700">{item.title}</p>
-                                                        <p className="text-slate-500">{item.message}</p>
-                                                    </div>
+                                                    <LabeledTextItem
+                                                        title={item.title}
+                                                        description={item.message}
+                                                        className="text-xs"
+                                                        descriptionClassName="text-slate-500"
+                                                    />
                                                 </div>
                                             ))}
                                         </div>
-                                    </div>
-                                </div>
+                                    </SubsectionCard>
+                                </SectionCard>
                             </div>
                          </div>
                     </div>
@@ -2897,83 +2189,80 @@ const PlanView = ({
                 </div>
 
                 <aside className={`w-full md:w-96 bg-white/60 backdrop-blur-md border-l border-slate-200 flex flex-col z-10 shadow-[-5px_0_30px_rgba(0,0,0,0.02)] absolute inset-0 md:static transition-transform duration-300 ${mobileTab === 'status' ? 'translate-x-0 bg-white' : 'translate-x-full md:translate-x-0'}`}>
-                    <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white/50">
-                        <h3 className="font-bold text-slate-700 flex items-center gap-2 text-sm">
-                            <Monitor size={16} className="text-blue-500" />
-                            Tasks ({completedCount}/{taskList.length})
-                        </h3>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                            taskList.length > 0 && completedCount === taskList.length
-                                ? 'text-green-600 bg-green-50 border-green-100'
-                                : taskList.some(t => t.status === 'in_progress')
-                                    ? 'text-blue-600 bg-blue-50 border-blue-100'
-                                    : 'text-slate-400 bg-slate-50 border-slate-100'
-                        }`}>{taskList.length > 0 && completedCount === taskList.length ? 'Complete' : taskList.some(t => t.status === 'in_progress') ? 'Active' : 'Idle'}</span>
+                    <div className="p-5 border-b border-slate-100 bg-white/50">
+                        <SidebarPanelHeader
+                            icon={<Monitor size={16} className="text-blue-500" />}
+                            title={`Tasks (${completedCount}/${taskList.length})`}
+                            status={(
+                                <HeaderStatusBadge
+                                    label={taskList.length > 0 && completedCount === taskList.length ? 'Complete' : taskList.some(t => t.status === 'in_progress') ? 'Active' : 'Idle'}
+                                    className={taskList.length > 0 && completedCount === taskList.length
+                                        ? 'text-green-600 bg-green-50 border-green-100'
+                                        : taskList.some(t => t.status === 'in_progress')
+                                            ? 'text-blue-600 bg-blue-50 border-blue-100'
+                                            : 'text-slate-400 bg-slate-50 border-slate-100'}
+                                />
+                            )}
+                        />
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-4 space-y-3">
                          {tasksLoading ? (
                              <LoadingSkeleton variant="list" count={3} />
                          ) : taskList.length === 0 ? (
-                             <div className="text-center py-8 text-sm text-slate-400">No tasks yet</div>
+                             <SimpleEmptyHint message="No tasks yet" />
                          ) : (
                              taskList.map(task => {
                                  const style = getTaskStatusStyle(task.status);
                                  return (
-                                     <div
+                                     <TaskStatusCard
                                          key={task.id}
                                          onClick={() => handleTaskStatusToggle(task)}
-                                         className={`p-4 ${style.bg} rounded-xl border ${style.border} shadow-sm cursor-pointer hover:shadow-md transition-all`}
-                                     >
-                                         <div className="flex justify-between items-center mb-2">
-                                             <div className="flex items-center gap-2">
-                                                 {style.icon}
-                                                 <span className="text-sm font-bold text-slate-800">{task.title}</span>
-                                             </div>
-                                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${style.badge}`}>{style.label}</span>
-                                         </div>
-                                         {task.description && (
-                                             <p className="text-xs text-slate-500 pl-6 border-l-2 border-slate-100 ml-1.5 line-clamp-2">{task.description}</p>
+                                         toneClassName={style.bg}
+                                         borderClassName={style.border}
+                                         icon={style.icon}
+                                         title={task.title}
+                                         badgeLabel={style.label}
+                                         badgeClassName={style.badge}
+                                         description={task.description}
+                                         meta={(
+                                             <>
+                                                 {task.assignee && <span>{task.assignee}</span>}
+                                                 {task.dependencies && task.dependencies.length > 0 && <span>depends on {task.dependencies.join(', ')}</span>}
+                                             </>
                                          )}
-                                         <div className="flex flex-wrap gap-2 mt-2 pl-6 ml-1.5 text-[10px] text-slate-400">
-                                             {task.assignee && <span>{task.assignee}</span>}
-                                             {task.dependencies && task.dependencies.length > 0 && <span>depends on {task.dependencies.join(', ')}</span>}
-                                         </div>
-                                     </div>
+                                     />
                                  );
                              })
                          )}
                     </div>
 
-                    <div className="h-1/3 bg-slate-50 border-t border-slate-200 flex flex-col">
-                        <div className="p-4 border-b border-slate-200 flex justify-between items-center">
-                            <h3 className="font-bold text-slate-700 text-sm flex items-center gap-2">
-                                <FileText size={16} className="text-blue-500" /> Progress
-                            </h3>
-                            <span className="text-[9px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-                                {taskList.length > 0 ? `${Math.round((completedCount / taskList.length) * 100)}%` : '0%'}
-                            </span>
+                    <SidebarPanel className="h-1/3 bg-slate-50 border-t border-slate-200">
+                        <div className="p-4 border-b border-slate-200">
+                            <SidebarPanelHeader
+                                icon={<FileText size={16} className="text-blue-500" />}
+                                title="Progress"
+                                status={(
+                                <HeaderStatusBadge
+                                    label={taskList.length > 0 ? `${Math.round((completedCount / taskList.length) * 100)}%` : '0%'}
+                                    size="xs"
+                                    className="text-slate-400 bg-white border-slate-200"
+                                />
+                            )}
+                            />
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
                             {taskList.length > 0 && (
-                                <div className="space-y-2">
-                                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-500"
-                                            style={{ width: `${taskList.length > 0 ? (completedCount / taskList.length) * 100 : 0}%` }}
-                                        />
-                                    </div>
-                                    <p className="text-xs text-slate-400">{completedCount} of {taskList.length} tasks completed</p>
-                                </div>
+                                <ProgressSummaryCard completedCount={completedCount} totalCount={taskList.length} />
                             )}
                         </div>
-                    </div>
+                    </SidebarPanel>
 
-                    <div className="p-4 bg-white border-t border-slate-200">
-                         <button onClick={handleOpenReplay} className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95">
+                    <SidebarPanel className="p-4 bg-white border-t border-slate-200">
+                         <ActionButton onClick={handleOpenReplay} size="lg" className="w-full shadow-lg flex items-center justify-center gap-2 active:scale-95">
                             <Zap size={18} /> Execute Plan
-                         </button>
-                    </div>
+                         </ActionButton>
+                    </SidebarPanel>
                 </aside>
             </div>
         </div>
@@ -3078,6 +2367,8 @@ const App = () => {
             onReplayData={setReplayData}
           />
         );
+      case ViewMode.PLUGINS:
+        return <PluginsView showToast={showToast} onNavigate={setActiveMode} />;
       case ViewMode.SETTINGS:
         return <SettingsView showToast={showToast} profile={profile} onProfileChange={setProfile} />;
       default:

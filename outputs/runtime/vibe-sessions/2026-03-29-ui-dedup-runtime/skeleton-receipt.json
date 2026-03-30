@@ -1,0 +1,18 @@
+{
+  "run_id": "2026-03-29-ui-dedup-runtime",
+  "stage": "skeleton_check",
+  "mode": "interactive_governed",
+  "repo": "D:/project/CodeFlow",
+  "branch": "master",
+  "existing_requirements": [],
+  "existing_plans": [],
+  "existing_runtime_outputs": [],
+  "dirty_state": true,
+  "dirty_scope_summary": [
+    "codeflow_template/App.tsx ongoing UI dedup work",
+    "multiple existing frontend/backend unrelated modifications already present",
+    "new component files are untracked"
+  ],
+  "conflict_assessment": "proceed_with_localized_changes_only",
+  "timestamp": "2026-03-29"
+}

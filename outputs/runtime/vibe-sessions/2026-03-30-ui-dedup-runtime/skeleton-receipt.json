@@ -1,0 +1,27 @@
+{
+  "run_id": "2026-03-30-ui-dedup-runtime",
+  "stage": "skeleton_check",
+  "mode": "interactive_governed",
+  "repo": "D:/project/CodeFlow",
+  "branch": "master",
+  "existing_requirements": [
+    "docs/requirements/2026-03-29-plan-ui-dedup.md"
+  ],
+  "existing_plans": [
+    "docs/plans/2026-03-29-plan-ui-dedup-execution-plan.md"
+  ],
+  "existing_runtime_outputs": [
+    "outputs/runtime/vibe-sessions/2026-03-29-ui-dedup-runtime/skeleton-receipt.json",
+    "outputs/runtime/vibe-sessions/2026-03-29-ui-dedup-runtime/intent-contract.json",
+    "outputs/runtime/vibe-sessions/2026-03-29-ui-dedup-runtime/phase-plan-execute.json",
+    "outputs/runtime/vibe-sessions/2026-03-29-ui-dedup-runtime/cleanup-receipt.json"
+  ],
+  "dirty_state": true,
+  "dirty_scope_summary": [
+    "codeflow_template/App.tsx ongoing UI dedup work",
+    "multiple unrelated frontend/backend modifications already present",
+    "new component files remain untracked in codeflow_template/components"
+  ],
+  "conflict_assessment": "proceed_with_localized_changes_only",
+  "timestamp": "2026-03-30"
+}

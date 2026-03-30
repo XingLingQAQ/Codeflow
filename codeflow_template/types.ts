@@ -9,6 +9,7 @@ export enum ViewMode {
   MEMORY = 'memory',
   AGENTS = 'agents',
   PLAN = 'plan',
+  PLUGINS = 'plugins',
   SETTINGS = 'settings',
 }
 
@@ -255,6 +256,92 @@ export interface Agent {
   tokens_used: number;
   task_count: number;
   error_count: number;
+}
+
+export type PluginHealth = 'healthy' | 'degraded' | 'disabled' | 'unknown';
+export type PluginScope = 'workspace' | 'session' | 'project' | 'global' | string;
+export type PluginSource = 'installed' | 'marketplace' | 'builtin' | string;
+
+export interface PluginPermission {
+  id: string;
+  name: string;
+  description?: string;
+  level?: 'read' | 'write' | 'admin' | string;
+  granted?: boolean;
+  required?: boolean;
+}
+
+export interface PluginConfigField {
+  key: string;
+  label?: string;
+  type?: string;
+  value?: unknown;
+  required?: boolean;
+  masked?: boolean;
+  description?: string;
+}
+
+export interface PluginMetrics {
+  installs?: number;
+  downloads?: number;
+  active_sessions?: number;
+  error_rate?: number;
+  latency_ms?: number;
+}
+
+export interface PluginManifest {
+  id: string;
+  name: string;
+  display_name?: string;
+  summary?: string;
+  description?: string;
+  version?: string;
+  author?: string;
+  vendor?: string;
+  category?: string;
+  tags?: string[];
+  source?: PluginSource;
+  scope?: PluginScope;
+  enabled?: boolean;
+  installed?: boolean;
+  featured?: boolean;
+  verified?: boolean;
+  health?: PluginHealth;
+  homepage?: string;
+  repository?: string;
+  icon?: string;
+  updated_at?: number;
+  installed_at?: number;
+  permissions?: PluginPermission[];
+  config?: PluginConfigField[];
+  metrics?: PluginMetrics;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PluginOverview {
+  total: number;
+  installed: number;
+  enabled: number;
+  marketplace: number;
+  unhealthy: number;
+  categories?: Record<string, number>;
+}
+
+export interface PluginListResponse {
+  plugins: PluginManifest[];
+  total: number;
+  has_more?: boolean;
+  summary?: PluginOverview;
+}
+
+export interface PluginCatalogResponse {
+  plugins: PluginManifest[];
+  total: number;
+  featured?: PluginManifest[];
+}
+
+export interface PluginDetailResponse {
+  plugin: PluginManifest;
 }
 
 // --- Conversation ---

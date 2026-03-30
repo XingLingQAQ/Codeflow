@@ -1,0 +1,40 @@
+{
+  "run_id": "2026-03-29-ui-dedup-runtime",
+  "stage": "deep_interview",
+  "goal": "在不改变业务行为的前提下，继续对 codeflow_template/App.tsx 周边的 Plan 视图做低风险 UI 去重与组件化收口。",
+  "deliverable": "新增可复用展示组件、更新 App.tsx 引用、保留现有交互、提供构建验证与 cleanup receipt。",
+  "constraints": [
+    "仅做低风险展示层收口",
+    "不暂停向用户反复确认",
+    "不引入新架构或改动后端行为",
+    "保持现有样式与交互语义基本一致",
+    "优先继续当前 Plan 视图与右栏收口主线"
+  ],
+  "acceptance_criteria": [
+    "新增组件可替换明确重复 JSX 块",
+    "App.tsx 复杂度继续下降且编译通过",
+    "不引入新的 TypeScript 或 Vite 构建错误"
+  ],
+  "product_acceptance_criteria": [
+    "Plan 视图视觉行为与既有版本一致",
+    "按钮、badge、信息卡、文本项等共享壳继续收敛"
+  ],
+  "manual_spot_checks": [
+    "打开 Plan 视图检查 Knowledge pack 按钮和 Workflow details 头部 CTA",
+    "检查右栏 Tasks/Progress badge 与进度条视觉样式",
+    "检查 Graph jumps 选择器、节点卡、路径面板是否正常显示"
+  ],
+  "completion_language_policy": "只有在构建验证通过且本轮阶段 receipt 与 cleanup receipt 写入后，才允许声称本轮改造完成；不得声称整个项目收口完成。",
+  "delivery_truth_contract": "只对已实际修改并经 vite build 验证的收口项作完成声明；不对未提交 git 的事项声称已闭环提交。",
+  "non_goals": [
+    "不处理后端 plugin 功能开发",
+    "不处理非 Plan 视图的大规模重构",
+    "不做 git push 或 PR"
+  ],
+  "autonomy_mode": "interactive_governed inferred-no-interrupt execution",
+  "open_questions": [],
+  "inference_notes": [
+    "用户连续使用 继续/continue/继续 /vibe，表明希望直接推进而非问答式澄清",
+    "当前最合适的 governed 运行方式是轻量化执行固定 6 阶段，并冻结单一 requirement/plan 产物"
+  ]
+}
