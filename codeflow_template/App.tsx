@@ -1633,7 +1633,9 @@ const PlanView = ({
     const workflowOverview = workflowContext?.overview ?? null;
     const workflowTimelineResponse = workflowContext?.timeline ?? null;
     const workflowReplayResponse = workflowContext?.replay ?? null;
-    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(workflowOverview?.plans?.[0]?.id ?? null);
+    const workflowPlans = workflowOverview?.plans ?? [];
+    const workflowTasks = workflowOverview?.tasks ?? [];
+    const [selectedPlanId, setSelectedPlanId] = useState<string | null>(workflowPlans[0]?.id ?? null);
     const [knowledgeScenario, setKnowledgeScenario] = useState<'startup' | 'debug' | 'reuse'>('startup');
     const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
     const [graphSourceNodeId, setGraphSourceNodeId] = useState<string | null>(null);
@@ -1647,36 +1649,36 @@ const PlanView = ({
 
     const { data: plansResponse, loading: plansLoading, error: plansError, refetch: refetchPlans } = useApi<PlanListResponse>(
         (signal) => workflowProject
-            ? Promise.resolve({ plans: workflowOverview?.plans ?? [], total: workflowOverview?.plans?.length ?? 0, has_more: false })
+            ? Promise.resolve({ plans: workflowPlans, total: workflowPlans.length, has_more: false })
             : listPlans(signal),
-        [workflowProject?.id, workflowOverview?.plans?.length ?? 0],
+        [workflowProject?.id, workflowPlans.length],
     );
     const plans = plansResponse?.plans ?? [];
 
     const { data: tasksResponse, loading: tasksLoading, refetch: refetchTasks } = useApi<PlanTaskListResponse>(
         (signal) => {
             if (workflowProject) {
-                const workflowTasks = !selectedPlanId
-                    ? (workflowOverview?.tasks ?? [])
-                    : (workflowOverview?.tasks ?? []).filter(task => task.plan_id === selectedPlanId);
-                return Promise.resolve({ tasks: workflowTasks, total: workflowTasks.length });
+                const scopedWorkflowTasks = !selectedPlanId
+                    ? workflowTasks
+                    : workflowTasks.filter(task => task.plan_id === selectedPlanId);
+                return Promise.resolve({ tasks: scopedWorkflowTasks, total: scopedWorkflowTasks.length });
             }
             return selectedPlanId ? getPlanTasks(selectedPlanId, signal) : Promise.resolve({ tasks: [], total: 0 });
         },
-        [workflowProject?.id, selectedPlanId, workflowOverview?.tasks?.length ?? 0],
+        [workflowProject?.id, selectedPlanId, workflowTasks.length],
         { enabled: workflowProject ? Boolean(workflowOverview) : !!selectedPlanId },
     );
     const tasks = tasksResponse?.tasks ?? [];
 
     const selectedPlan = workflowProject
-        ? (workflowOverview?.plans.find(p => p.id === selectedPlanId) ?? workflowOverview?.plans?.[0] ?? null)
+        ? (workflowPlans.find(p => p.id === selectedPlanId) ?? workflowPlans[0] ?? null)
         : (plans.find(p => p.id === selectedPlanId) ?? plans[0] ?? null);
 
     useEffect(() => {
-        if (workflowOverview?.plans?.length) {
-            setSelectedPlanId(prev => prev ?? workflowOverview.plans[0].id);
+        if (workflowPlans.length) {
+            setSelectedPlanId(prev => prev ?? workflowPlans[0].id);
         }
-    }, [workflowOverview]);
+    }, [workflowPlans]);
 
     useEffect(() => {
         if (!workflowProject && plans.length > 0 && !selectedPlanId) {
@@ -1720,7 +1722,7 @@ const PlanView = ({
     const completedCount = taskList.filter(t => t.status === 'completed').length;
     const workflow = selectedPlan ? extractWorkflowMetadata(selectedPlan.metadata) : { approval: [], decisions: [], timeline: [] } as WorkflowMetadata;
     const backendProjectWorkflow = extractWorkflowMetadata(workflowProject?.metadata);
-    const overviewDecisions = workflowOverview?.plans.map((plan, index) => ({
+    const overviewDecisions = workflowPlans.map((plan, index) => ({
         id: `overview-plan-${plan.id}`,
         summary: `Plan ${index + 1}: ${plan.title}`,
         owner: 'Workflow overview',
