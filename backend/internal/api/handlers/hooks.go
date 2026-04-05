@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -29,25 +28,25 @@ func GetHooks(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"hooks": response})
+	respondOK(c, gin.H{"hooks": response})
 }
 
 // GetHook returns a specific hook by name.
 func GetHook(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "hook name is required"})
+		respondError(c, 400, "hook name is required")
 		return
 	}
 
 	mgr := hooks.GetHookManager()
 	hook, err := mgr.GetHook(name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, 404, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	respondOK(c, gin.H{
 		"name":        hook.Config.Name,
 		"type":        hook.Config.Type,
 		"enabled":     hook.Config.Enabled,
@@ -62,64 +61,64 @@ func GetHook(c *gin.Context) {
 func UpdateHookConfig(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "hook name is required"})
+		respondError(c, 400, "hook name is required")
 		return
 	}
 
 	var req hooks.HookConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, 400, err.Error())
 		return
 	}
 
 	mgr := hooks.GetHookManager()
 	if err := mgr.UpdateConfig(name, req); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "hook config updated successfully"})
+	respondOK(c, gin.H{"message": "hook config updated successfully"})
 }
 
 // EnableHook enables a hook.
 func EnableHook(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "hook name is required"})
+		respondError(c, 400, "hook name is required")
 		return
 	}
 
 	mgr := hooks.GetHookManager()
 	if err := mgr.Enable(name); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, 404, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "hook enabled successfully"})
+	respondOK(c, gin.H{"message": "hook enabled successfully"})
 }
 
 // DisableHook disables a hook.
 func DisableHook(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "hook name is required"})
+		respondError(c, 400, "hook name is required")
 		return
 	}
 
 	mgr := hooks.GetHookManager()
 	if err := mgr.Disable(name); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, 404, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "hook disabled successfully"})
+	respondOK(c, gin.H{"message": "hook disabled successfully"})
 }
 
 // TriggerHook manually triggers a hook.
 func TriggerHook(c *gin.Context) {
 	name := c.Param("name")
 	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "hook name is required"})
+		respondError(c, 400, "hook name is required")
 		return
 	}
 
@@ -127,23 +126,23 @@ func TriggerHook(c *gin.Context) {
 		Payload interface{} `json:"payload"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, 400, err.Error())
 		return
 	}
 
 	mgr := hooks.GetHookManager()
 	if _, err := mgr.GetHook(name); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, 404, err.Error())
 		return
 	}
 
 	result, err := mgr.TriggerHook(c.Request.Context(), name, req.Payload)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"result": result})
+	respondOK(c, gin.H{"result": result})
 }
 
 // GetHookEvents returns hook execution events.
@@ -174,7 +173,7 @@ func GetHookEvents(c *gin.Context) {
 		events = mgr.GetEvents(limit, offset)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	respondOK(c, gin.H{
 		"events": events,
 		"limit":  limit,
 		"offset": offset,
@@ -186,9 +185,9 @@ func GetHookEvents(c *gin.Context) {
 func ClearHookEvents(c *gin.Context) {
 	mgr := hooks.GetHookManager()
 	if err := mgr.ClearEvents(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondError(c, 500, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "hook events cleared successfully"})
+	respondOK(c, gin.H{"message": "hook events cleared successfully"})
 }

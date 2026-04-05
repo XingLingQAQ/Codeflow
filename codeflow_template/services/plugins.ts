@@ -2,7 +2,7 @@ import { get, post, patch } from '../api';
 import { API_ENDPOINTS } from '../api';
 import type { PluginCatalogResponse, PluginDetailResponse, PluginListResponse } from '../types';
 
-const BASE = API_ENDPOINTS.plugins;
+const getBase = () => API_ENDPOINTS.plugins;
 
 export interface PluginListParams {
   scope?: string;
@@ -13,21 +13,21 @@ export interface PluginListParams {
 }
 
 export function listPlugins(params?: PluginListParams, signal?: AbortSignal) {
-  return get<PluginListResponse>(BASE, params as Record<string, string | number | undefined>, signal);
+  return get<PluginListResponse>(getBase(), params as Record<string, string | number | undefined>, signal);
 }
 
 export function getPlugin(pluginId: string, signal?: AbortSignal) {
-  return get<PluginDetailResponse>(`${BASE}/${pluginId}`, undefined, signal);
+  return get<PluginDetailResponse>(`${getBase()}/${pluginId}`, undefined, signal);
 }
 
 export function listMarketplacePlugins(params?: Pick<PluginListParams, 'search' | 'limit' | 'offset'>, signal?: AbortSignal) {
-  return get<PluginCatalogResponse>(`${BASE}/marketplace`, params as Record<string, string | number | undefined>, signal);
+  return get<PluginCatalogResponse>(`${getBase()}/marketplace`, params as Record<string, string | number | undefined>, signal);
 }
 
 export function installPlugin(pluginId: string, signal?: AbortSignal) {
-  return post<PluginDetailResponse>(`${BASE}/${pluginId}/install`, undefined, signal);
+  return post<PluginDetailResponse>(`${getBase()}/${pluginId}/install`, undefined, signal);
 }
 
 export function togglePlugin(pluginId: string, enabled: boolean, signal?: AbortSignal) {
-  return patch<PluginDetailResponse>(`${BASE}/${pluginId}`, { enabled }, signal);
+  return patch<PluginDetailResponse>(`${getBase()}/${pluginId}`, { enabled }, signal);
 }

@@ -29,7 +29,12 @@ function setApiBases(base: string): void {
 
 function getBrowserCandidates(): string[] {
   const envBase = (import.meta as unknown as { env?: { VITE_API_BASE?: string } }).env?.VITE_API_BASE;
+  const sameOrigin =
+    typeof window !== 'undefined' && /^https?:\/\//.test(window.location.origin)
+      ? normalizeBase(window.location.origin)
+      : '';
   const candidates = [
+    sameOrigin,
     envBase ? normalizeBase(envBase) : '',
     `http://localhost:${DEFAULT_PORT}`,
     `http://127.0.0.1:${DEFAULT_PORT}`,

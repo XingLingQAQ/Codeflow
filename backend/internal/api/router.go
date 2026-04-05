@@ -233,6 +233,16 @@ func (s *Server) setupRoutes() {
 			hooksGroup.DELETE("/events", handlers.ClearHookEvents)
 		}
 
+		// Plugin routes
+		plugins := v1.Group("/plugins")
+		{
+			plugins.GET("", handlers.ListPlugins)
+			plugins.GET("/marketplace", handlers.ListMarketplacePlugins)
+			plugins.GET("/:id", handlers.GetPlugin)
+			plugins.POST("/:id/install", handlers.InstallPlugin)
+			plugins.PATCH("/:id", handlers.TogglePlugin)
+		}
+
 		// Integration routes
 		integrations := v1.Group("/integrations")
 		{

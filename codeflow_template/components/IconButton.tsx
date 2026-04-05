@@ -2,10 +2,12 @@ import React from 'react';
 
 export interface IconButtonProps {
   icon: React.ReactNode;
-  onClick?: () => void;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   tone?: 'subtle' | 'toolbar' | 'primary';
   size?: 'sm' | 'md';
   className?: string;
+  ariaLabel?: string;
+  title?: string;
 }
 
 const toneClassMap: Record<NonNullable<IconButtonProps['tone']>, string> = {
@@ -25,10 +27,14 @@ export const IconButton: React.FC<IconButtonProps> = ({
   tone = 'subtle',
   size = 'md',
   className,
+  ariaLabel,
+  title,
 }) => (
   <button
     type="button"
     onClick={onClick}
+    aria-label={ariaLabel}
+    title={title}
     className={`flex items-center justify-center ${toneClassMap[tone]} ${sizeClassMap[size]} ${className ?? ''}`.trim()}
   >
     {icon}

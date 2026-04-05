@@ -24,6 +24,7 @@ import { MemorySourceList } from './components/MemorySourceList';
 import { MemorySourceDetail } from './components/MemorySourceDetail';
 import { StatCard } from './components/StatCard';
 import { SectionCard } from './components/SectionCard';
+import { SettingsSectionCard } from './components/SettingsSectionCard';
 import { SubsectionCard } from './components/SubsectionCard';
 import { TaskStatusCard } from './components/TaskStatusCard';
 import { SidebarPanelHeader } from './components/SidebarPanelHeader';
@@ -44,14 +45,19 @@ import { PlanStatusBadge } from './components/PlanStatusBadge';
 import { SimpleEmptyHint } from './components/SimpleEmptyHint';
 import { InlineAlert } from './components/InlineAlert';
 import { EmbeddedWikiCard } from './components/EmbeddedWikiCard';
-import { SessionSummaryField } from './components/SessionSummaryField';
 import { SessionSummaryGrid } from './components/SessionSummaryGrid';
 import { WorkflowTimelineItem } from './components/WorkflowTimelineItem';
 import { SessionsComposer } from './components/SessionsComposer';
 import { SessionTraceList } from './components/SessionTraceList';
 import { SessionHeaderActions } from './components/SessionHeaderActions';
+import { TextLinkButton } from './components/TextLinkButton';
+import { ModelPillButton } from './components/ModelPillButton';
+import { InfoChip } from './components/InfoChip';
+import { TagBadge } from './components/TagBadge';
+import { CreateEntryCard } from './components/CreateEntryCard';
 
 import { listPlans, getPlanTasks, createPlan, updatePlanTask } from './services/plans';
+import { listProjects, createProject } from './services/projects';
 import { listAgents } from './services/agents';
 import { getConversationTrace, stopConversation, retryConversation } from './services/conversations';
 import { listRawArchive } from './services/raw_archive';
@@ -74,6 +80,8 @@ import {
   toSessionViewModels,
 } from './adapters/sessions';
 import {
+  buildMemorySourceKey,
+  mergeMemorySources,
   mergeQueryMemoryNodes,
   mergeRecordsById,
 } from './adapters/memory';
@@ -264,20 +272,7 @@ const HomeView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => v
 
         <div className="flex flex-wrap items-center justify-center gap-3 mb-8 w-full">
             {['Codex', 'Claude', 'Gemini', 'Cowork'].map((name, i) => (
-            <button key={name} className={`
-                group flex items-center gap-2.5 px-5 py-2.5 md:px-6 md:py-3 rounded-full border transition-all duration-300 transform hover:-translate-y-0.5
-                ${i === 0 
-                ? 'bg-white border-indigo-100 text-indigo-600 shadow-[0_0_20px_rgba(99,102,241,0.15)] ring-1 ring-indigo-500/20' 
-                : 'bg-white/60 border-slate-200/60 text-slate-500 hover:bg-white hover:border-indigo-100 hover:text-indigo-600 hover:shadow-lg hover:shadow-indigo-500/5'}
-            `}>
-                {i === 0 && (
-                <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                </span>
-                )}
-                <span className="text-sm font-bold tracking-wide">{name}</span>
-            </button>
+            <ModelPillButton key={name} label={name} active={i === 0} />
             ))}
         </div>
 
@@ -299,15 +294,9 @@ const HomeView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => v
             ></textarea>
             <div className="flex items-center justify-between px-3 pb-2">
                 <div className="flex items-center gap-1">
-                <button className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                    <Paperclip size={20} />
-                </button>
-                <button className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                    <Database size={20} />
-                </button>
-                <button className="p-2 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                    <Mic size={20} />
-                </button>
+                <IconButton icon={<Paperclip size={20} />} tone="subtle" size="sm" className="hover:text-blue-600 hover:bg-blue-50 transition-colors" />
+                <IconButton icon={<Database size={20} />} tone="subtle" size="sm" className="hover:text-blue-600 hover:bg-blue-50 transition-colors" />
+                <IconButton icon={<Mic size={20} />} tone="subtle" size="sm" className="hover:text-blue-600 hover:bg-blue-50 transition-colors" />
                 </div>
                 <button 
                     onClick={handleSubmit}
@@ -320,9 +309,9 @@ const HomeView = ({ onNavigate, showToast }: { onNavigate: (mode: ViewMode) => v
 
         {/* Quick Links for Project - Optional Discovery */}
         <div className="mt-12 flex gap-4 text-sm text-slate-400">
-             <button onClick={() => onNavigate(ViewMode.PROJECTS)} className="hover:text-blue-600 transition-colors">View All Projects</button>
+             <TextLinkButton onClick={() => onNavigate(ViewMode.PROJECTS)}>View All Projects</TextLinkButton>
              <span>•</span>
-             <button onClick={() => onNavigate(ViewMode.AGENTS)} className="hover:text-blue-600 transition-colors">Team Presets</button>
+             <TextLinkButton onClick={() => onNavigate(ViewMode.AGENTS)}>Team Presets</TextLinkButton>
         </div>
         </div>
     </main>
@@ -342,6 +331,8 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
     const [showCreateForm, setShowCreateForm] = useState(false);
     const [newTitle, setNewTitle] = useState('');
     const [newDesc, setNewDesc] = useState('');
+    const [createError, setCreateError] = useState<string | null>(null);
+    const createTitleInputRef = useRef<HTMLInputElement | null>(null);
     const [workflowDraft, setWorkflowDraft] = useState<ProjectWorkflowDraft>({
         blueprint: 'Governed Delivery Blueprint',
         template: 'workflow-template-v1',
@@ -363,11 +354,27 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
         (input, signal) => createProject(input, signal),
     );
 
+    const openCreateForm = () => {
+        setCreateError(null);
+        setShowCreateForm(true);
+    };
+
+    const closeCreateForm = () => {
+        setCreateError(null);
+        setShowCreateForm(false);
+    };
+
     const handleCreate = async () => {
-        if (!newTitle.trim()) return;
+        const trimmedTitle = newTitle.trim();
+        if (!trimmedTitle) {
+            setCreateError('Project title is required.');
+            createTitleInputRef.current?.focus();
+            return;
+        }
+        setCreateError(null);
         try {
             await createMutation.execute({
-                title: newTitle.trim(),
+                title: trimmedTitle,
                 description: newDesc.trim() || undefined,
                 metadata: {
                     blueprint: workflowDraft.blueprint.trim() || undefined,
@@ -378,6 +385,7 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
             });
             setNewTitle('');
             setNewDesc('');
+            setCreateError(null);
             setWorkflowDraft({
                 blueprint: 'Governed Delivery Blueprint',
                 template: 'workflow-template-v1',
@@ -388,7 +396,15 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
             showToast('Project created');
             refetch();
         } catch {
+            setCreateError('Could not create project. Check your inputs and try again.');
             showToast('Failed to create project');
+        }
+    };
+
+    const handleCreateKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && !createMutation.loading) {
+            event.preventDefault();
+            void handleCreate();
         }
     };
 
@@ -399,49 +415,160 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
         setTimeout(() => onNavigate(ViewMode.PLAN), 600);
     };
 
+    const handleProjectCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>, project: Project) => {
+        if (event.target !== event.currentTarget) {
+            return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleProjectClick(project);
+        }
+    };
+
     const projects = data?.projects ?? [];
     const projectCardEntries = projects.map((project) => ({
         rawProject: project,
         projectCard: toProjectViewModel(project),
     }));
+    const hasSearchQuery = searchQuery.trim().length > 0;
+    const hasDebouncedSearch = debouncedSearch.trim().length > 0;
+    const activeFilterLabel = debouncedSearch.trim() || searchQuery.trim();
+    const isSearchPending = searchQuery.trim() !== debouncedSearch.trim();
+    const hasProjects = projectCardEntries.length > 0;
+
+    const clearSearch = () => {
+        setSearchQuery('');
+        setDebouncedSearch('');
+    };
 
     return (
         <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
             <div className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur shrink-0 px-6 md:px-10 flex items-center justify-between z-20">
-                <div className="flex flex-col">
+                <div className="flex flex-col gap-1">
+                    <div className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                        Workspace hub
+                    </div>
                     <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Projects</h1>
-                    <span className="text-xs text-slate-500 font-medium">Manage your active workspaces</span>
+                    <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                        <span>Manage your active workspaces</span>
+                        <span className="hidden lg:inline text-slate-300">•</span>
+                        <span className="hidden lg:inline">Search, review progress, and create a new project from one place.</span>
+                    </div>
                 </div>
                 <div className="flex items-center gap-3">
                     <div className="hidden md:flex relative group">
-                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                        <div className="absolute inset-0 rounded-xl border border-slate-200 bg-white/80 shadow-sm shadow-slate-200/30 opacity-0 transition-all group-focus-within:opacity-100 group-focus-within:border-blue-200 group-focus-within:shadow-blue-100/50"></div>
+                        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors z-10" />
                         <input
                             type="text"
                             placeholder="Search projects..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-9 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-blue-200 focus:ring-2 focus:ring-blue-500/10 rounded-xl text-sm w-64 transition-all"
+                            className="relative z-10 pl-9 pr-16 py-2 bg-slate-100/90 border border-transparent focus:bg-transparent focus:border-transparent focus:ring-2 focus:ring-blue-500/10 rounded-xl text-sm w-72 transition-all"
                         />
+                        {hasSearchQuery && (
+                            <button
+                                type="button"
+                                onClick={clearSearch}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 z-10 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-500 hover:border-blue-100 hover:text-blue-600 transition-colors"
+                            >
+                                Clear
+                            </button>
+                        )}
                     </div>
                     <button
-                        onClick={() => setShowCreateForm(true)}
-                        className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-lg shadow-slate-900/10 transition-transform active:scale-95"
+                        onClick={openCreateForm}
+                        className="group relative overflow-hidden flex items-center gap-2.5 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-slate-900/10 transition-all hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-xl hover:shadow-slate-900/15 active:scale-95"
                     >
-                        <Plus size={18} />
-                        <span className="hidden sm:inline">New Project</span>
+                        <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 opacity-0 transition-opacity group-hover:opacity-100"></span>
+                        <Plus size={18} className="relative z-10 transition-transform group-hover:rotate-90" />
+                        <span className="relative z-10 hidden sm:inline">New Project</span>
+                        <span className="relative z-10 hidden lg:inline text-[11px] font-semibold text-white/70">Start from scratch</span>
                     </button>
                 </div>
             </div>
 
-            {showCreateForm && (
-                <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowCreateForm(false)}>
-                    <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <h2 className="text-lg font-bold text-slate-800 mb-4">New Project</h2>
+            <div className="md:hidden border-b border-slate-200 bg-white px-5 py-2.5">
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Quick start</p>
+                            <p className="text-[10px] text-slate-400">Start a new project from here.</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={openCreateForm}
+                            className="shrink-0 inline-flex items-center gap-1.5 rounded-full border border-slate-100 bg-white/95 px-3 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm shadow-slate-200/15 transition-colors hover:border-blue-100 hover:bg-blue-50 hover:text-blue-600"
+                        >
+                            <Plus size={14} />
+                            <span>New Project</span>
+                        </button>
+                    </div>
+                    <div className="relative group rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm shadow-slate-200/20 transition-colors focus-within:border-blue-200 focus-within:shadow-blue-100/40">
+                        <Search size={16} className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
                         <input
+                            type="text"
+                            placeholder="Search projects..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full rounded-lg bg-transparent pl-9 pr-16 py-2 text-sm text-slate-700 outline-none transition-all placeholder:text-slate-400"
+                        />
+                        {hasSearchQuery && (
+                            <button
+                                type="button"
+                                onClick={clearSearch}
+                                className="absolute right-5 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-[11px] font-medium text-slate-400 hover:bg-slate-50 hover:text-slate-600 transition-colors"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+                    {(hasSearchQuery || hasDebouncedSearch) && (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                                <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 font-semibold text-blue-600">
+                                    {isSearchPending ? `Searching “${activeFilterLabel}”...` : `Filtering “${activeFilterLabel}”`}
+                                </span>
+                                {hasProjects ? (
+                                    <span className="rounded-full bg-white px-2.5 py-1 font-medium text-slate-500 border border-slate-200">
+                                        {projectCardEntries.length} match{projectCardEntries.length === 1 ? '' : 'es'}
+                                    </span>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={clearSearch}
+                                    className="ml-auto rounded-full bg-white px-2.5 py-1 font-semibold text-blue-600 border border-slate-200 transition-colors hover:border-blue-100 hover:bg-blue-50 hover:text-blue-700"
+                                >
+                                    Clear search
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {showCreateForm && (
+                <div className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={closeCreateForm}>
+                    <div
+                        className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl"
+                        onClick={e => e.stopPropagation()}
+                        onKeyDown={handleCreateKeyDown}
+                    >
+                        <div className="mb-4 space-y-1">
+                            <h2 className="text-lg font-bold text-slate-800">New Project</h2>
+                            <p className="text-sm text-slate-500">Create a workspace first, then optionally seed it with blueprint, template, or replay metadata.</p>
+                        </div>
+                        <input
+                            ref={createTitleInputRef}
                             type="text"
                             placeholder="Project title *"
                             value={newTitle}
-                            onChange={e => setNewTitle(e.target.value)}
+                            onChange={e => {
+                                setNewTitle(e.target.value);
+                                if (createError) {
+                                    setCreateError(null);
+                                }
+                            }}
                             className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm mb-3 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none"
                             autoFocus
                         />
@@ -451,6 +578,9 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
                             onChange={e => setNewDesc(e.target.value)}
                             className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm mb-3 focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none resize-none h-20"
                         />
+                        <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                            Blueprint, template, and replay metadata are optional helpers for downstream workflow context.
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                             <input
                                 type="text"
@@ -481,31 +611,72 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
                                 className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-500/10 outline-none md:col-span-2"
                             />
                         </div>
-                        <div className="flex justify-end gap-2">
-                            <button onClick={() => setShowCreateForm(false)} className="px-4 py-2 text-sm text-slate-500 hover:bg-slate-100 rounded-lg">Cancel</button>
-                            <button
-                                onClick={handleCreate}
-                                disabled={!newTitle.trim() || createMutation.loading}
-                                className="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
-                            >
-                                {createMutation.loading ? 'Creating...' : 'Create'}
-                            </button>
+                        {createError && <InlineAlert message={createError} tone="error" />}
+                        <div className="mt-4 flex items-center justify-between gap-3">
+                            <span className="text-xs text-slate-400">Press Ctrl/Cmd + Enter to create quickly.</span>
+                            <div className="flex justify-end gap-2">
+                                <ActionButton
+                                    onClick={closeCreateForm}
+                                    tone="secondary"
+                                    size="sm"
+                                    className="hover:bg-slate-100"
+                                >
+                                    Cancel
+                                </ActionButton>
+                                <ActionButton
+                                    onClick={() => void handleCreate()}
+                                    disabled={!newTitle.trim() || createMutation.loading}
+                                    tone="accent"
+                                    size="sm"
+                                    className="min-w-[112px] justify-center"
+                                >
+                                    {createMutation.loading ? 'Creating project...' : 'Create project'}
+                                </ActionButton>
+                            </div>
                         </div>
                     </div>
                 </div>
             )}
 
             <div className="flex-1 overflow-y-auto p-6 md:p-10">
+                {(hasSearchQuery || hasDebouncedSearch) && (
+                    <div className="mb-5 rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 shadow-sm shadow-slate-200/40">
+                        <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-500">
+                            <span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 font-semibold text-blue-600">
+                                {isSearchPending ? `Searching for “${activeFilterLabel}”...` : `Filtering by “${activeFilterLabel}”`}
+                            </span>
+                            {hasProjects ? (
+                                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-500">
+                                    {projectCardEntries.length} matching project{projectCardEntries.length === 1 ? '' : 's'}
+                                </span>
+                            ) : null}
+                            <button
+                                type="button"
+                                onClick={clearSearch}
+                                className="ml-auto rounded-full px-3 py-1 font-semibold text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                            >
+                                Clear search
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {loading ? (
                     <LoadingSkeleton variant="card" count={6} />
                 ) : error ? (
                     <ErrorState message={error.message} onRetry={refetch} />
-                ) : projectCardEntries.length === 0 ? (
+                ) : !hasProjects && hasDebouncedSearch ? (
+                    <EmptyState
+                        icon={<Search size={48} />}
+                        title="No matching projects"
+                        description={`No project matched “${activeFilterLabel}”. Try a different keyword or clear the current filter.`}
+                        action={{ label: 'Clear Search', onClick: clearSearch }}
+                    />
+                ) : !hasProjects ? (
                     <EmptyState
                         icon={<Folder size={48} />}
                         title="No projects yet"
                         description="Create your first project to get started"
-                        action={{ label: 'New Project', onClick: () => setShowCreateForm(true) }}
+                        action={{ label: 'New Project', onClick: openCreateForm }}
                     />
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
@@ -513,80 +684,122 @@ const ProjectsView = ({ onNavigate, showToast, onProjectContext }: { onNavigate:
                             return (
                                 <div
                                     key={projectCard.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`Open project ${projectCard.title}`}
                                     onClick={() => handleProjectClick(rawProject)}
-                                    className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden"
+                                    onKeyDown={(event) => handleProjectCardKeyDown(event, rawProject)}
+                                    className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl hover:shadow-blue-500/5 transition-all duration-300 group cursor-pointer relative overflow-hidden focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:ring-offset-2 focus:ring-offset-slate-50"
                                 >
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${projectCard.statusTone}`}>
-                                            {projectCard.status}
+                                    <div className="mb-4 space-y-3">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <HeaderStatusBadge label={projectCard.status} size="xs" className={`${projectCard.statusTone} shadow-sm`} />
+                                            <IconButton
+                                                icon={<MoreVertical size={16} />}
+                                                tone="subtle"
+                                                size="sm"
+                                                ariaLabel={`More actions for ${projectCard.title}`}
+                                                title={`More actions for ${projectCard.title}`}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    showToast(`Quick actions for ${projectCard.title} are coming soon.`);
+                                                }}
+                                                className="text-slate-400 hover:text-slate-600"
+                                            />
                                         </div>
-                                        <button className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors">
-                                            <MoreVertical size={16} />
-                                        </button>
+                                        <div className="space-y-2 pr-2">
+                                            <h3 className="text-lg font-bold leading-7 text-slate-800 group-hover:text-blue-600 transition-colors">{projectCard.title}</h3>
+                                            <p className="min-h-[3rem] text-sm leading-6 text-slate-500 line-clamp-2">{projectCard.descriptionText}</p>
+                                        </div>
                                     </div>
 
-                                    <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-blue-600 transition-colors">{projectCard.title}</h3>
-                                    <p className="text-sm text-slate-500 mb-4 line-clamp-2 h-10">{projectCard.descriptionText}</p>
-
                                     {projectCard.workflowSummaryText && (
-                                        <div className="mb-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-2">
-                                            <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest font-bold text-indigo-600">
-                                                <GitBranch size={12} /> Workflow seed
+                                        <div className="mb-4 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-indigo-50/70 p-4 space-y-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="space-y-1 min-w-0">
+                                                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.22em] font-bold text-indigo-500">
+                                                        <GitBranch size={12} /> Workflow seed
+                                                    </div>
+                                                    <p className="text-xs text-slate-500">Blueprint and template context carried into this workspace.</p>
+                                                </div>
+                                                <div className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-indigo-600 border border-indigo-100 shrink-0">
+                                                    Ready to reuse
+                                                </div>
                                             </div>
-                                            {projectCard.workflow.workflow_title && <p className="text-sm font-semibold text-slate-700">{projectCard.workflow.workflow_title}</p>}
+                                            {projectCard.workflow.workflow_title ? (
+                                                <p className="text-sm font-semibold leading-6 text-slate-700">{projectCard.workflow.workflow_title}</p>
+                                            ) : (
+                                                <p className="text-sm font-medium leading-6 text-slate-600">Workflow context is attached through the seed metadata below.</p>
+                                            )}
                                             <div className="flex flex-wrap gap-2 text-[11px] text-slate-500">
-                                                {projectCard.workflow.blueprint && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Blueprint: {projectCard.workflow.blueprint}</span>}
-                                                {projectCard.workflow.template && <span className="px-2 py-1 rounded-full bg-white border border-indigo-100">Template: {projectCard.workflow.template}</span>}
+                                                {projectCard.workflow.blueprint && <InfoChip label={`Blueprint: ${projectCard.workflow.blueprint}`} tone="violet" className="px-2 py-1 bg-white border-indigo-100 text-indigo-600" />}
+                                                {projectCard.workflow.template && <InfoChip label={`Template: ${projectCard.workflow.template}`} tone="violet" className="px-2 py-1 bg-white border-indigo-100 text-indigo-600" />}
                                             </div>
                                         </div>
                                     )}
 
-                                    <div className="mb-6">
-                                        <div className="flex justify-between text-[11px] font-bold text-slate-400 mb-1.5">
-                                            <span>{projectCard.progressLabel}</span>
-                                            <span>{projectCard.progress}%</span>
+                                    <div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 space-y-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="space-y-1 min-w-0">
+                                                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Progress</p>
+                                                <p className="text-sm font-semibold text-slate-700">{projectCard.progressLabel}</p>
+                                            </div>
+                                            <div className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-bold text-slate-700 border border-slate-200">
+                                                {projectCard.progress}%
+                                            </div>
                                         </div>
-                                        <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                                            <div
-                                                className={`h-full rounded-full transition-all duration-1000 ${projectCard.progressTone}`}
-                                                style={{ width: `${Math.max(projectCard.progress, projectCard.progress === 0 ? 0 : 2)}%` }}
-                                            ></div>
+                                        <div className="space-y-2">
+                                            <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-slate-100">
+                                                <div
+                                                    className={`h-full rounded-full transition-all duration-1000 ${projectCard.progressTone}`}
+                                                    style={{ width: `${Math.max(projectCard.progress, projectCard.progress === 0 ? 0 : 2)}%` }}
+                                                ></div>
+                                            </div>
+                                            <p className="text-[11px] text-slate-400">Current delivery completion for this project card.</p>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center justify-between pt-4 border-t border-slate-50">
-                                        <div className="flex gap-2 flex-wrap">
-                                            {projectCard.tags.map(tag => (
-                                                <span key={tag} className="px-2 py-1 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{tag}</span>
-                                            ))}
-                                            {projectCard.hasReplayLink && (
-                                                <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-md text-[10px] font-bold border border-amber-200">Replay linked</span>
-                                            )}
-                                            {projectCard.tags.length === 0 && !projectCard.hasReplayLink && (
-                                                <span className="text-[10px] text-slate-300">No tags</span>
-                                            )}
+                                    <div className="pt-4 border-t border-slate-100 space-y-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0 space-y-1">
+                                                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Last active</p>
+                                                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                                                    <Clock size={12} className="text-slate-400" />
+                                                    <span>{projectCard.lastActiveText}</span>
+                                                </div>
+                                            </div>
+                                            <div className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600 transition-colors group-hover:bg-blue-100 group-focus-within:bg-blue-100">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span>Open project</span>
+                                                    <ChevronRight size={14} className="transition-transform group-hover:translate-x-0.5 group-focus-within:translate-x-0.5" />
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
-                                            <Clock size={12} />
-                                            {projectCard.lastActiveText}
+                                        <div className="space-y-2">
+                                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Tags</p>
+                                            <div className="flex gap-2 flex-wrap">
+                                                {projectCard.tags.map(tag => (
+                                                    <TagBadge key={tag} label={tag} />
+                                                ))}
+                                                {projectCard.hasReplayLink && (
+                                                    <TagBadge label="Replay linked" tone="amber" />
+                                                )}
+                                                {projectCard.tags.length === 0 && !projectCard.hasReplayLink && (
+                                                    <span className="text-[11px] text-slate-300">No tags yet</span>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             );
                         })}
 
-                        <button
-                            onClick={() => setShowCreateForm(true)}
-                            className="border-2 border-dashed border-slate-200 rounded-2xl p-6 flex flex-col items-center justify-center gap-4 hover:border-blue-300 hover:bg-blue-50/50 transition-all group min-h-[260px]"
-                        >
-                            <div className="size-14 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 group-hover:scale-110 group-hover:border-blue-200 group-hover:text-blue-500 transition-all">
-                                <Plus size={24} />
-                            </div>
-                            <div className="text-center">
-                                <h3 className="font-bold text-slate-700 group-hover:text-blue-600 transition-colors">Create New Project</h3>
-                                <p className="text-sm text-slate-400 mt-1">Start from scratch or seed from blueprint/template</p>
-                            </div>
-                        </button>
+                        <CreateEntryCard
+                            title="Create New Project"
+                            description="Start from scratch or seed from blueprint/template"
+                            icon={<Plus size={24} />}
+                            onClick={openCreateForm}
+                        />
                     </div>
                 )}
             </div>
@@ -704,17 +917,13 @@ const SettingsView = ({
           <div className="max-w-4xl mx-auto space-y-8">
              
              {/* Profile Section */}
-             <section className="bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-sm">
-                <div className="flex items-start gap-4 mb-8">
-                    <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                        <User size={24} />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-900">Profile & Account</h2>
-                        <p className="text-sm text-slate-500">Manage your personal information and role.</p>
-                    </div>
-                </div>
-                
+             <SettingsSectionCard
+                icon={<User size={24} />}
+                iconClassName="bg-blue-50 text-blue-600"
+                title="Profile & Account"
+                description="Manage your personal information and role."
+                headerClassName="mb-8"
+             >
                 <div className="flex flex-col md:flex-row gap-8 items-start">
                     <div className="flex flex-col items-center gap-3">
                          <div className="size-24 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 ring-4 ring-slate-50 shadow-inner flex items-center justify-center text-white text-2xl font-bold">
@@ -752,20 +961,16 @@ const SettingsView = ({
                         </div>
                     </div>
                 </div>
-             </section>
+             </SettingsSectionCard>
 
              {/* Intelligence / AI */}
-             <section className="bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-sm">
-                <div className="flex items-start gap-4 mb-8">
-                    <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
-                        <Zap size={24} />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-900">Intelligence</h2>
-                        <p className="text-sm text-slate-500">Configure default LLM parameters and model selection.</p>
-                    </div>
-                </div>
-
+             <SettingsSectionCard
+                icon={<Zap size={24} />}
+                iconClassName="bg-purple-50 text-purple-600"
+                title="Intelligence"
+                description="Configure default LLM parameters and model selection."
+                headerClassName="mb-8"
+             >
                 <div className="space-y-6">
                     {configError && (
                         <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
@@ -792,14 +997,14 @@ const SettingsView = ({
                            </div>
                          )}
                     </div>
-                    
+
                     <div className="space-y-3">
                          <div className="flex justify-between">
                             <label className="text-xs font-bold text-slate-700 uppercase">Temperature (Creativity): {temp}</label>
                          </div>
-                         <input 
-                            type="range" 
-                            min="0" max="1" step="0.1" 
+                         <input
+                            type="range"
+                            min="0" max="1" step="0.1"
                             value={temp}
                             onChange={(e) => setTemp(parseFloat(e.target.value))}
                             className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
@@ -811,20 +1016,15 @@ const SettingsView = ({
                          </div>
                     </div>
                 </div>
-             </section>
+             </SettingsSectionCard>
 
              {/* Connections */}
-             <section className="bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-sm">
-                 <div className="flex items-start gap-4 mb-6">
-                    <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
-                        <Globe size={24} />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-900">Connections</h2>
-                        <p className="text-sm text-slate-500">Manage third-party integrations and API keys.</p>
-                    </div>
-                 </div>
-
+             <SettingsSectionCard
+                 icon={<Globe size={24} />}
+                 iconClassName="bg-emerald-50 text-emerald-600"
+                 title="Connections"
+                 description="Manage third-party integrations and API keys."
+             >
                  <div className="space-y-3">
                      <div className={`flex items-center justify-between p-4 border rounded-xl ${backendConnected ? 'border-emerald-100 bg-emerald-50/40' : 'border-amber-100 bg-amber-50/40'}`}>
                         <div className="flex items-center gap-3">
@@ -874,20 +1074,16 @@ const SettingsView = ({
                        })
                      )}
                  </div>
-             </section>
+             </SettingsSectionCard>
 
              {/* Interface */}
-             <section className="bg-white rounded-2xl p-6 md:p-8 border border-slate-200 shadow-sm mb-12">
-                 <div className="flex items-start gap-4 mb-6">
-                    <div className="p-2 bg-slate-100 text-slate-600 rounded-xl">
-                        <Monitor size={24} />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-900">Interface</h2>
-                        <p className="text-sm text-slate-500">Customize your workspace appearance.</p>
-                    </div>
-                 </div>
-
+             <SettingsSectionCard
+                 icon={<Monitor size={24} />}
+                 iconClassName="bg-slate-100 text-slate-600"
+                 title="Interface"
+                 description="Customize your workspace appearance."
+                 className="mb-12"
+             >
                  <div className="flex items-center justify-between">
                      <div className="flex items-center gap-3">
                          <div className="p-2 bg-slate-50 rounded-lg text-slate-600"><Moon size={18} /></div>
@@ -897,7 +1093,7 @@ const SettingsView = ({
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${darkMode ? 'translate-x-6' : 'translate-x-1'}`} />
                      </button>
                  </div>
-             </section>
+             </SettingsSectionCard>
 
           </div>
        </div>
@@ -971,7 +1167,7 @@ const SessionsView = ({ onOpenReplay, onReplayData }: { onOpenReplay: () => void
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {loading ? <LoadingSkeleton variant="list" count={4} /> :
          error ? <ErrorState message={error.message} onRetry={refetch} /> :
-         sessionCards.length === 0 ? <div className="text-center py-8 text-sm text-slate-400">No active sessions</div> :
+         sessionCards.length === 0 ? <SimpleEmptyHint message="No active sessions" /> :
          sessionCards.map((session) => (
           <div
             key={session.id}

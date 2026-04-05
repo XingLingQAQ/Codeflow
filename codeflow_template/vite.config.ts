@@ -1,6 +1,7 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -31,7 +32,7 @@ export default defineConfig(({ mode }) => {
         sourcemap: !!process.env.TAURI_DEBUG,
       },
       envPrefix: ['VITE_', 'TAURI_'],
-      plugins: [react()],
+      plugins: [react(), tailwindcss()],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)

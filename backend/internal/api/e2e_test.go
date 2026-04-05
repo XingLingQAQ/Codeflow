@@ -311,7 +311,9 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 	var listResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&listResp)
 	resp.Body.Close()
-	hooksList := listResp["hooks"].([]interface{})
+	assert.Equal(t, true, listResp["success"])
+	listData := listResp["data"].(map[string]interface{})
+	hooksList := listData["hooks"].([]interface{})
 	assert.GreaterOrEqual(t, len(hooksList), 1)
 
 	// 2. Get specific hook
@@ -322,8 +324,10 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 	var hookResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&hookResp)
 	resp.Body.Close()
-	assert.Equal(t, "test-hook", hookResp["name"])
-	assert.Equal(t, true, hookResp["enabled"])
+	assert.Equal(t, true, hookResp["success"])
+	hookData := hookResp["data"].(map[string]interface{})
+	assert.Equal(t, "test-hook", hookData["name"])
+	assert.Equal(t, true, hookData["enabled"])
 
 	// 3. Disable hook
 	resp, err = client.Post(ts.URL+"/api/v1/hooks/test-hook/disable", "application/json", nil)
@@ -337,7 +341,9 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	json.NewDecoder(resp.Body).Decode(&hookResp)
 	resp.Body.Close()
-	assert.Equal(t, false, hookResp["enabled"])
+	assert.Equal(t, true, hookResp["success"])
+	hookData = hookResp["data"].(map[string]interface{})
+	assert.Equal(t, false, hookData["enabled"])
 
 	// 5. Enable hook
 	resp, err = client.Post(ts.URL+"/api/v1/hooks/test-hook/enable", "application/json", nil)
@@ -360,7 +366,9 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 	var triggerResp map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&triggerResp)
 	resp.Body.Close()
-	assert.NotNil(t, triggerResp["result"])
+	assert.Equal(t, true, triggerResp["success"])
+	triggerData := triggerResp["data"].(map[string]interface{})
+	assert.NotNil(t, triggerData["result"])
 
 	// 7. Get hook events
 	resp, err = client.Get(ts.URL + "/api/v1/hooks/events")

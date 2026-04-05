@@ -2,22 +2,22 @@ import { get, post } from '../api';
 import { API_ENDPOINTS } from '../api';
 import type { RawEntry, RawEntryType } from '../types';
 
-const BASE = API_ENDPOINTS.memory;
+const getBase = () => API_ENDPOINTS.memory;
 
 export function storeRawEntry(
   entry: { type?: RawEntryType; content: string; metadata?: Record<string, unknown>; session_id?: string },
   signal?: AbortSignal,
 ) {
-  return post<{ id: string }>(`${BASE}/archive`, entry, signal);
+  return post<{ id: string }>(`${getBase()}/archive`, entry, signal);
 }
 
 export function getRawEntry(id: string, signal?: AbortSignal) {
-  return get<RawEntry>(`${BASE}/archive/${id}`, undefined, signal);
+  return get<RawEntry>(`${getBase()}/archive/${id}`, undefined, signal);
 }
 
 export async function searchRawArchive(q: string, limit = 20, signal?: AbortSignal) {
   const res = await get<{ entries: RawEntry[]; count: number }>(
-    `${BASE}/archive/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    `${getBase()}/archive/search?q=${encodeURIComponent(q)}&limit=${limit}`,
     undefined,
     signal,
   );
@@ -36,7 +36,7 @@ export async function listRawArchive(
 
   const qs = params.toString();
   const res = await get<{ entries: RawEntry[]; count: number; total: number }>(
-    `${BASE}/archive${qs ? '?' + qs : ''}`,
+    `${getBase()}/archive${qs ? '?' + qs : ''}`,
     undefined,
     signal,
   );
@@ -44,5 +44,5 @@ export async function listRawArchive(
 }
 
 export function getRawArchiveStats(signal?: AbortSignal) {
-  return get<{ total_entries: number }>(`${BASE}/archive/stats`, undefined, signal);
+  return get<{ total_entries: number }>(`${getBase()}/archive/stats`, undefined, signal);
 }

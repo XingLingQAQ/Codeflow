@@ -2,16 +2,16 @@ import { get, post } from '../api';
 import { API_ENDPOINTS } from '../api';
 import type { Conversation, CallTrace } from '../types';
 
-const BASE = API_ENDPOINTS.conversations;
+const getBase = () => API_ENDPOINTS.conversations;
 
 export function getConversationTrace(sessionId: string, signal?: AbortSignal) {
-  return get<CallTrace>(`${BASE}/${sessionId}/trace`, undefined, signal);
+  return get<CallTrace>(`${getBase()}/${sessionId}/trace`, undefined, signal);
 }
 
 export function stopConversation(sessionId: string, signal?: AbortSignal) {
-  return post<{ stopped: boolean }>(`${BASE}/${sessionId}/stop`, undefined, signal);
+  return post<{ stopped: boolean }>(`${getBase()}/${sessionId}/stop`, undefined, signal);
 }
 
 export function retryConversation(sessionId: string, signal?: AbortSignal) {
-  return post<Conversation>(`${BASE}/${sessionId}/retry`, undefined, signal);
+  return post<Conversation>(`${getBase()}/${sessionId}/retry`, undefined, signal);
 }

@@ -1,11 +1,50 @@
 package web
 
-import "github.com/gin-gonic/gin"
+import (
+	"embed"
+	"io/fs"
+	"net/http"
+	"strings"
 
-// SetupStaticRoutes wires frontend static assets when available.
-//
-// 当前 worktree 未包含可嵌入的前端资源，因此这里保持空实现，
-// 让 API 路由与测试链路可以独立编译运行；Gin 默认会对未命中路径返回 404。
+	"github.com/gin-gonic/gin"
+)
+
+//go:embed all:dist
+var embeddedDist embed.FS
+
+// SetupStaticRoutes wires embedded frontend static assets.
 func SetupStaticRoutes(router *gin.Engine) {
-	_ = router
+	distFS, err := fs.Sub(embeddedDist, "dist")
+	if err != nil {
+		panic("embedded frontend dist unavailable: " + err.Error())
+	}
+
+	staticServer := http.FileServer(http.FS(distFS))
+	serveIndex := func(c *gin.Context) {
+		c.FileFromFS("index.html", http.FS(distFS))
+	}
+
+	router.GET("/", gin.WrapH(staticServer))
+	router.HEAD("/", gin.WrapH(staticServer))
+	router.GET("/index.html", gin.WrapH(staticServer))
+	router.HEAD("/index.html", gin.WrapH(staticServer))
+	router.GET("/assets/*filepath", gin.WrapH(staticServer))
+	router.HEAD("/assets/*filepath", gin.WrapH(staticServer))
+
+	router.NoRoute(func(c *gin.Context) {
+		if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") ||
+			c.Request.URL.Path == "/health" ||
+			c.Request.URL.Path == "/ready" ||
+			c.Request.URL.Path == "/metrics" {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+
+		serveIndex(c)
+	})
 }

@@ -2,12 +2,14 @@ import { get } from '../api';
 import { API_ENDPOINTS } from '../api';
 import type { Agent } from '../types';
 
-const BASE = API_ENDPOINTS.agents;
+const getBase = () => API_ENDPOINTS.agents;
 
-export function listAgents(signal?: AbortSignal) {
-  return get<Agent[]>(BASE, undefined, signal);
+export async function listAgents(signal?: AbortSignal) {
+  const response = await get<{ agents: Agent[]; total: number }>(getBase(), undefined, signal);
+  return response.agents ?? [];
 }
 
-export function getAgentLogs(agentId: string, signal?: AbortSignal) {
-  return get<unknown[]>(`${BASE}/${agentId}/logs`, undefined, signal);
+export async function getAgentLogs(agentId: string, signal?: AbortSignal) {
+  const response = await get<{ logs: unknown[]; total: number; has_more?: boolean }>(`${getBase()}/${agentId}/logs`, undefined, signal);
+  return response.logs ?? [];
 }

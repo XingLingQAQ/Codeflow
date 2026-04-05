@@ -29,36 +29,36 @@ export interface ProjectListParams {
   offset?: number;
 }
 
-const BASE = API_ENDPOINTS.projects;
+const getBase = () => API_ENDPOINTS.projects;
 
 export function listProjects(params?: ProjectListParams, signal?: AbortSignal) {
-  return get<ProjectListResponse>(BASE, params as Record<string, string | number | undefined>, signal);
+  return get<ProjectListResponse>(getBase(), params as Record<string, string | number | undefined>, signal);
 }
 
 export function createProject(input: ProjectCreateInput, signal?: AbortSignal) {
-  return post<Project>(BASE, input, signal);
+  return post<Project>(getBase(), input, signal);
 }
 
 export function getProject(id: string, signal?: AbortSignal) {
-  return get<Project>(`${BASE}/${id}`, undefined, signal);
+  return get<Project>(`${getBase()}/${id}`, undefined, signal);
 }
 
 export function updateProject(id: string, input: ProjectUpdateInput, signal?: AbortSignal) {
-  return put<Project>(`${BASE}/${id}`, input, signal);
+  return put<Project>(`${getBase()}/${id}`, input, signal);
 }
 
 export function deleteProject(id: string, signal?: AbortSignal) {
-  return del<{ deleted: boolean; id: string }>(`${BASE}/${id}`, signal);
+  return del<{ deleted: boolean; id: string }>(`${getBase()}/${id}`, signal);
 }
 
 export function getProjectPlans(id: string, signal?: AbortSignal) {
-  return get<{ plans: unknown[]; total: number }>(`${BASE}/${id}/plans`, undefined, signal);
+  return get<{ plans: unknown[]; total: number }>(`${getBase()}/${id}/plans`, undefined, signal);
 }
 
 export function addPlanToProject(id: string, planId: string, signal?: AbortSignal) {
-  return post<{ project_id: string; plan_id: string; associated: boolean }>(`${BASE}/${id}/plans`, { plan_id: planId }, signal);
+  return post<{ project_id: string; plan_id: string; associated: boolean }>(`${getBase()}/${id}/plans`, { plan_id: planId }, signal);
 }
 
 export function removePlanFromProject(id: string, planId: string, signal?: AbortSignal) {
-  return del<{ project_id: string; plan_id: string; removed: boolean }>(`${BASE}/${id}/plans/${planId}`, signal);
+  return del<{ project_id: string; plan_id: string; removed: boolean }>(`${getBase()}/${id}/plans/${planId}`, signal);
 }
