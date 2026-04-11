@@ -175,6 +175,244 @@ func TestSQLiteProjectServiceListProjectsStableOrder(t *testing.T) {
 	}
 }
 
+func TestInMemoryProjectPlanningLifecycle(t *testing.T) {
+	svc := NewInMemoryProjectService()
+	created, err := svc.CreateProject(stdcontext.Background(), &ProjectCreateRequest{Title: "planning lifecycle"})
+	if err != nil {
+		t.Fatalf("CreateProject failed: %v", err)
+	}
+
+	generated, err := svc.GeneratePlanDocument(stdcontext.Background(), created.ID, &PlanGenerateRequest{
+		Title:   "Initial plan",
+		Prompt:  "Project-first planning workflow",
+		Summary: "Ship planning stage",
+		Goal:    "Project-first planning",
+		Steps:   []PlanStep{{ID: "s1", Title: "Model workflow"}},
+		Metadata: map[string]interface{}{
+			"session_id": "sess-plan",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlanDocument failed: %v", err)
+	}
+	if generated.Status != PlanDocumentStatusReady || generated.Revision != 1 {
+		t.Fatalf("unexpected generated document: %+v", generated)
+	}
+	if generated.Metadata["planning_mode"] != "tool-first" {
+		t.Fatalf("expected planning_mode tool-first, got %+v", generated.Metadata)
+	}
+	if _, ok := generated.Metadata["planning_trace"]; !ok {
+		t.Fatalf("expected planning_trace metadata, got %+v", generated.Metadata)
+	}
+	if len(generated.Tasks) == 0 {
+		t.Fatalf("expected generated tasks, got %+v", generated)
+	}
+	if generated.Review == nil || len(generated.Review.ReviewFocus) == 0 {
+		t.Fatalf("expected generated review, got %+v", generated)
+	}
+	if generated.DecisionRationale == nil {
+		t.Fatalf("expected decision rationale, got %+v", generated)
+	}
+	if generated.PlanOverview == nil || len(generated.PlanOverview.CriticalPathTaskIDs) == 0 {
+		t.Fatalf("expected generated plan overview, got %+v", generated)
+	}
+	if generated.Summary != "Ship planning stage" {
+		t.Fatalf("expected request summary override, got %+v", generated)
+	}
+	if generated.Goal != "Project-first planning" {
+		t.Fatalf("expected request goal override, got %+v", generated)
+	}
+	if len(generated.Steps) != 1 || generated.Steps[0].ID != "s1" {
+		t.Fatalf("expected request steps override, got %+v", generated.Steps)
+	}
+	if generated.Metadata["prompt"] != "Project-first planning workflow" {
+		t.Fatalf("expected prompt metadata, got %+v", generated.Metadata)
+	}
+	if created.Status != StatusPlanning {
+		t.Fatalf("expected project status planning, got %s", created.Status)
+	}
+
+	manual, err := svc.GeneratePlanDocument(stdcontext.Background(), created.ID, &PlanGenerateRequest{
+		Title:   "Manual title",
+		Summary: "Manual summary",
+		Tasks: []PlanTask{{
+			TaskID:         "custom",
+			Title:          "Custom task",
+			Parallelizable: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlanDocument manual override failed: %v", err)
+	}
+	if manual.Title != "Manual title" || manual.Summary != "Manual summary" {
+		t.Fatalf("expected manual overrides, got %+v", manual)
+	}
+	if len(manual.Tasks) != 1 || manual.Tasks[0].TaskID != "custom" {
+		t.Fatalf("expected custom task override, got %+v", manual.Tasks)
+	}
+	if manual.Metadata["planning_mode"] != "tool-first" {
+		t.Fatalf("expected planning mode on manual override, got %+v", manual.Metadata)
+	}
+	if created.Status != StatusPlanning {
+		t.Fatalf("expected project status planning, got %s", created.Status)
+	}
+
+	// keep revised/approved lifecycle on latest stored document
+	generated = manual
+	if generated.Status != PlanDocumentStatusReady || generated.Revision != 1 {
+		t.Fatalf("unexpected generated document: %+v", generated)
+	}
+	if created.Status != StatusPlanning {
+		t.Fatalf("expected project status planning, got %s", created.Status)
+	}
+
+	goal := "Project planning with revision"
+	revised, err := svc.RevisePlanDocument(stdcontext.Background(), created.ID, &PlanReviseRequest{
+		Goal: &goal,
+		ChangeRequest: &PlanChangeRequestInput{
+			Summary:     "Add approval guard",
+			RequestedBy: "reviewer",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RevisePlanDocument failed: %v", err)
+	}
+	if revised.Status != PlanDocumentStatusNeedsRevision || revised.Revision != 2 {
+		t.Fatalf("unexpected revised document: %+v", revised)
+	}
+	if len(revised.ChangeRequests) != 1 || len(revised.Revisions) != 2 {
+		t.Fatalf("expected one change request and two revisions, got %+v", revised)
+	}
+	if revised.ChangeRequests[0].AppliedInRevision != 2 {
+		t.Fatalf("expected change request applied in revision 2, got %+v", revised.ChangeRequests[0])
+	}
+
+	approved, err := svc.ApprovePlanDocument(stdcontext.Background(), created.ID, &PlanApproveRequest{ApprovedBy: "lead"})
+	if err != nil {
+		t.Fatalf("ApprovePlanDocument failed: %v", err)
+	}
+	if approved.Status != PlanDocumentStatusApproved || approved.ApprovedBy != "lead" {
+		t.Fatalf("unexpected approved document: %+v", approved)
+	}
+	projectAfterApprove, err := svc.GetProject(stdcontext.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetProject after approve failed: %v", err)
+	}
+	if projectAfterApprove.Status != StatusActive {
+		t.Fatalf("expected project status active after approval, got %s", projectAfterApprove.Status)
+	}
+}
+
+func TestInMemoryProjectPlanningFeedbackResolutionLifecycle(t *testing.T) {
+	svc := NewInMemoryProjectService()
+	created, err := svc.CreateProject(stdcontext.Background(), &ProjectCreateRequest{Title: "feedback lifecycle"})
+	if err != nil {
+		t.Fatalf("CreateProject failed: %v", err)
+	}
+
+	generated, err := svc.GeneratePlanDocument(stdcontext.Background(), created.ID, &PlanGenerateRequest{
+		Prompt: "Feedback resolution planning",
+	})
+	if err != nil {
+		t.Fatalf("GeneratePlanDocument failed: %v", err)
+	}
+	if generated.Revision != 1 {
+		t.Fatalf("expected initial revision 1, got %+v", generated)
+	}
+
+	feedbackText := "Need rollback and approval notes"
+	revised, err := svc.RevisePlanDocument(stdcontext.Background(), created.ID, &PlanReviseRequest{
+		Feedback: feedbackText,
+	})
+	if err != nil {
+		t.Fatalf("RevisePlanDocument feedback failed: %v", err)
+	}
+	if revised.Status != PlanDocumentStatusNeedsRevision || revised.Revision != 2 {
+		t.Fatalf("unexpected revised document after feedback: %+v", revised)
+	}
+	if len(revised.ChangeRequests) != 1 {
+		t.Fatalf("expected one synthesized change request, got %+v", revised.ChangeRequests)
+	}
+	if len(revised.Feedback) != 1 || revised.Feedback[0].Message != feedbackText {
+		t.Fatalf("expected feedback item recorded, got %+v", revised.Feedback)
+	}
+	if revised.ChangeRequests[0].Status != "applied" {
+		t.Fatalf("expected new change request applied in current revision, got %+v", revised.ChangeRequests[0])
+	}
+	if revised.ChangeRequests[0].AppliedInRevision != 2 {
+		t.Fatalf("expected applied_in_revision 2, got %+v", revised.ChangeRequests[0])
+	}
+	if revised.BasedOnRevision != 1 {
+		t.Fatalf("expected based_on_revision 1, got %+v", revised)
+	}
+
+	resolved, err := svc.RevisePlanDocument(stdcontext.Background(), created.ID, &PlanReviseRequest{
+		FeedbackResolution: []PlanFeedbackResolution{{
+			ChangeRequestID: revised.ChangeRequests[0].ID,
+			Decision:        "resolved",
+			Reason:          "Covered in revision plan",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("RevisePlanDocument resolution failed: %v", err)
+	}
+	if resolved.Revision != 3 {
+		t.Fatalf("expected revision 3 after resolution, got %+v", resolved)
+	}
+	if len(resolved.FeedbackLoop.FeedbackResolution) != 1 {
+		t.Fatalf("expected one feedback resolution, got %+v", resolved.FeedbackLoop)
+	}
+	if resolved.FeedbackLoop.FeedbackResolution[0].Decision != "resolved" {
+		t.Fatalf("expected resolution decision recorded, got %+v", resolved.FeedbackLoop.FeedbackResolution[0])
+	}
+	if resolved.ChangeRequests[0].Status != "resolved" {
+		t.Fatalf("expected change request resolved, got %+v", resolved.ChangeRequests[0])
+	}
+	if resolved.ChangeRequests[0].AppliedInRevision != 3 {
+		t.Fatalf("expected applied_in_revision 3, got %+v", resolved.ChangeRequests[0])
+	}
+	if resolved.BasedOnRevision != 2 {
+		t.Fatalf("expected based_on_revision 2, got %+v", resolved)
+	}
+}
+
+func TestInMemoryProjectPlanningGeneratorInjection(t *testing.T) {
+	svc := NewInMemoryProjectService()
+	created, err := svc.CreateProject(stdcontext.Background(), &ProjectCreateRequest{Title: "planning injection"})
+	if err != nil {
+		t.Fatalf("CreateProject failed: %v", err)
+	}
+
+	svc.SetPlanningGenerator(planningGeneratorFunc(func(ctx stdcontext.Context, input PlanningGenerationInput) (*PlanGenerateRequest, *PlanningTrace, error) {
+		return &PlanGenerateRequest{
+			Title:   "Injected title",
+			Summary: "Injected summary",
+			Tasks: []PlanTask{{
+				TaskID:         "inject",
+				Title:          "Injected task",
+				Parallelizable: true,
+			}},
+		}, &PlanningTrace{Mode: "native-tool-call", StartedAt: 1, FinishedAt: 2}, nil
+	}))
+
+	generated, err := svc.GeneratePlanDocument(stdcontext.Background(), created.ID, &PlanGenerateRequest{Prompt: "Use injected generator"})
+	if err != nil {
+		t.Fatalf("GeneratePlanDocument failed: %v", err)
+	}
+	if generated.Title != "Injected title" || generated.Summary != "Injected summary" {
+		t.Fatalf("expected injected generator result, got %+v", generated)
+	}
+	if generated.Metadata["planning_mode"] != "tool-first" {
+		t.Fatalf("expected compatibility planning_mode, got %+v", generated.Metadata)
+	}
+	if generated.Metadata["planning_executor"] != "native-tool-call" {
+		t.Fatalf("expected planning_executor native-tool-call, got %+v", generated.Metadata)
+	}
+	if _, ok := generated.Metadata["planning_trace"]; !ok {
+		t.Fatalf("expected planning_trace metadata, got %+v", generated.Metadata)
+	}
+}
+
 func TestGetProjectServiceFallsBackToInMemory(t *testing.T) {
 	original := defaultProjectService
 	defer SetProjectService(original)
@@ -185,3 +423,10 @@ func TestGetProjectServiceFallsBackToInMemory(t *testing.T) {
 		t.Fatalf("expected default in-memory project service, got %T", svc)
 	}
 }
+
+type planningGeneratorFunc func(ctx stdcontext.Context, input PlanningGenerationInput) (*PlanGenerateRequest, *PlanningTrace, error)
+
+func (f planningGeneratorFunc) Generate(ctx stdcontext.Context, input PlanningGenerationInput) (*PlanGenerateRequest, *PlanningTrace, error) {
+	return f(ctx, input)
+}
+
