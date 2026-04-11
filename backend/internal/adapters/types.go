@@ -2,6 +2,9 @@ package adapters
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -14,11 +17,24 @@ const (
 	RoleSystem    Role = "system"
 )
 
+// ContentBlock 结构化消息块
+type ContentBlock struct {
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Result    string         `json:"result,omitempty"`
+	IsError   bool           `json:"is_error,omitempty"`
+}
+
 // Message 消息
 type Message struct {
-	Role      Role      `json:"role"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	Role      Role           `json:"role"`
+	Content   string         `json:"content"`
+	Blocks    []ContentBlock `json:"blocks,omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
 }
 
 // Usage 使用统计
@@ -30,10 +46,11 @@ type Usage struct {
 
 // AIResponse AI响应
 type AIResponse struct {
-	Content      string `json:"content"`
-	Model        string `json:"model"`
-	Usage        Usage  `json:"usage"`
-	FinishReason string `json:"finish_reason,omitempty"`
+	Content      string         `json:"content"`
+	Blocks       []ContentBlock `json:"blocks,omitempty"`
+	Model        string         `json:"model"`
+	Usage        Usage          `json:"usage"`
+	FinishReason string         `json:"finish_reason,omitempty"`
 }
 
 // StreamChunk 流式响应块
@@ -53,7 +70,53 @@ type SendOptions struct {
 	Extra       map[string]any `json:"extra,omitempty"`
 }
 
-// AdapterConfig 适配器配置
+// ToolDefinition 工具定义
+type ToolDefinition struct {
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Parameters  ToolDefinitionParams `json:"parameters"`
+}
+
+// ToolDefinitionParams 工具参数 schema
+type ToolDefinitionParams struct {
+	Type       string                        `json:"type"`
+	Properties map[string]ToolPropertySchema `json:"properties"`
+	Required   []string                      `json:"required"`
+}
+
+// ToolPropertySchema 工具参数属性 schema
+type ToolPropertySchema struct {
+	Type        string            `json:"type"`
+	Description string            `json:"description"`
+	Enum        []string          `json:"enum,omitempty"`
+	Items       *ToolPropertyItem `json:"items,omitempty"`
+}
+
+// ToolPropertyItem 数组项 schema
+type ToolPropertyItem struct {
+	Type string `json:"type"`
+}
+
+// ToolTurnRequest 原生工具回合请求
+type ToolTurnRequest struct {
+	Messages    []Message        `json:"messages,omitempty"`
+	Tools       []ToolDefinition `json:"tools,omitempty"`
+	System      string           `json:"system,omitempty"`
+	Model       string           `json:"model,omitempty"`
+	Temperature *float64         `json:"temperature,omitempty"`
+	MaxTokens   int              `json:"max_tokens,omitempty"`
+}
+
+// ToolTurnResponse 原生工具回合响应
+type ToolTurnResponse struct {
+	Message      Message        `json:"message"`
+	Content      string         `json:"content"`
+	Blocks       []ContentBlock `json:"blocks,omitempty"`
+	Model        string         `json:"model"`
+	Usage        Usage          `json:"usage"`
+	FinishReason string         `json:"finish_reason,omitempty"`
+}
+
 type AdapterConfig struct {
 	APIKey      string        `json:"api_key,omitempty"`
 	BaseURL     string        `json:"base_url,omitempty"`
@@ -86,6 +149,11 @@ type ICliAdapter interface {
 
 	// 关闭
 	Close() error
+}
+
+// ToolCallableAdapter 支持原生 tools/tool_use/tool_result 的适配器接口
+type ToolCallableAdapter interface {
+	SendToolTurn(ctx context.Context, req *ToolTurnRequest) (*ToolTurnResponse, error)
 }
 
 // Provider LLM提供商
@@ -132,6 +200,46 @@ func (e *TimeoutError) Error() string {
 	return e.Message
 }
 
+// ApproxMessageChars 估算消息字符数，优先使用结构化块。
+func ApproxMessageChars(msg Message) int {
+	if len(msg.Blocks) == 0 {
+		return len(msg.Content)
+	}
+
+	total := 0
+	for _, block := range msg.Blocks {
+		total += approxContentBlockChars(block)
+	}
+	if total == 0 {
+		return len(msg.Content)
+	}
+	return total
+}
+
+func approxContentBlockChars(block ContentBlock) int {
+	switch block.Type {
+	case "text":
+		return len(block.Text)
+	case "tool_use":
+		total := len(block.ID) + len(block.Name)
+		if len(block.Input) > 0 {
+			payload, err := json.Marshal(block.Input)
+			if err == nil {
+				total += len(payload)
+			}
+		}
+		return total
+	case "tool_result":
+		return len(block.ToolUseID) + len(block.Result)
+	default:
+		payload, err := json.Marshal(block)
+		if err != nil {
+			return len(block.Text) + len(block.Name) + len(block.Result)
+		}
+		return len(payload)
+	}
+}
+
 // DefaultAdapterConfig 默认配置
 var DefaultAdapterConfig = AdapterConfig{
 	Model:       "claude-3-5-sonnet-20241022",
@@ -140,4 +248,65 @@ var DefaultAdapterConfig = AdapterConfig{
 	Timeout:     60 * time.Second,
 	MaxRetries:  3,
 	RetryDelay:  time.Second,
+}
+
+var providerAliases = map[string]Provider{
+	"":           ProviderClaude,
+	"claude":     ProviderClaude,
+	"anthropic":  ProviderClaude,
+	"custom":     ProviderClaude,
+	"openai":     ProviderOpenAI,
+	"gemini":     ProviderGemini,
+	"google":     ProviderGemini,
+	"codex":      ProviderCodex,
+}
+
+// ProviderFromString 规范化外部 provider 名称到 adapters.Provider。
+func ProviderFromString(value string) (Provider, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(ProviderClaude), "anthropic", "custom":
+		return ProviderClaude, nil
+	case string(ProviderOpenAI):
+		return ProviderOpenAI, nil
+	case string(ProviderGemini), "google":
+		return ProviderGemini, nil
+	case string(ProviderCodex):
+		return ProviderCodex, nil
+	default:
+		return "", fmt.Errorf("unsupported adapter provider %q", value)
+	}
+}
+
+// NormalizeProvider 兼容旧调用方，委托到 ProviderFromString。
+func NormalizeProvider(raw string) (Provider, error) {
+	return ProviderFromString(raw)
+}
+
+// NewAdapter 通过统一 provider 入口创建适配器。
+func NewAdapter(provider Provider, config *AdapterConfig) (ICliAdapter, error) {
+	normalized, err := ProviderFromString(string(provider))
+	if err != nil {
+		return nil, err
+	}
+
+	switch normalized {
+	case ProviderClaude:
+		return NewClaudeAdapter(config), nil
+	case ProviderOpenAI, ProviderGemini, ProviderCodex:
+		return nil, fmt.Errorf("adapter provider %q is not implemented", normalized)
+	default:
+		return nil, fmt.Errorf("unsupported adapter provider %q", normalized)
+	}
+}
+
+// AsToolCallableAdapter 将通用 adapter 断言为支持原生 tools 的能力接口。
+func AsToolCallableAdapter(adapter ICliAdapter) (ToolCallableAdapter, error) {
+	if adapter == nil {
+		return nil, fmt.Errorf("adapter is nil")
+	}
+	toolAdapter, ok := adapter.(ToolCallableAdapter)
+	if !ok {
+		return nil, fmt.Errorf("adapter %T does not support tool calls", adapter)
+	}
+	return toolAdapter, nil
 }

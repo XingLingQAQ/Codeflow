@@ -9,6 +9,77 @@ import (
 	"time"
 )
 
+func TestNewAdapterFactoryClaude(t *testing.T) {
+	adapter, err := NewAdapter(ProviderClaude, &AdapterConfig{Model: "claude-3-5-sonnet"})
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+
+	claudeAdapter, ok := adapter.(*ClaudeAdapter)
+	if !ok {
+		t.Fatalf("expected *ClaudeAdapter, got %T", adapter)
+	}
+
+	cfg := claudeAdapter.GetConfig()
+	if cfg.BaseURL != "https://api.anthropic.com" {
+		t.Fatalf("expected default Claude baseURL, got %s", cfg.BaseURL)
+	}
+}
+
+func TestNewAdapterFactoryDefaultsEmptyProviderToClaude(t *testing.T) {
+	adapter, err := NewAdapter("", &AdapterConfig{Model: "claude-3-5-sonnet"})
+	if err != nil {
+		t.Fatalf("NewAdapter: %v", err)
+	}
+	if _, ok := adapter.(*ClaudeAdapter); !ok {
+		t.Fatalf("expected *ClaudeAdapter, got %T", adapter)
+	}
+}
+
+func TestNewAdapterFactoryUnsupportedProvider(t *testing.T) {
+	adapter, err := NewAdapter(ProviderGemini, &AdapterConfig{Model: "gemini-pro"})
+	if err == nil {
+		t.Fatal("expected error for unimplemented provider")
+	}
+	if adapter != nil {
+		t.Fatalf("expected nil adapter on error, got %T", adapter)
+	}
+}
+
+func TestNormalizeProviderAliases(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    Provider
+		wantErr bool
+	}{
+		{name: "empty defaults to claude", raw: "", want: ProviderClaude},
+		{name: "anthropic maps to claude", raw: "anthropic", want: ProviderClaude},
+		{name: "custom maps to claude", raw: "custom", want: ProviderClaude},
+		{name: "google maps to gemini", raw: "google", want: ProviderGemini},
+		{name: "openai preserved", raw: "openai", want: ProviderOpenAI},
+		{name: "unsupported rejected", raw: "unknown", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeProvider(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeProvider: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestBaseAdapterHistory(t *testing.T) {
 	adapter := NewBaseAdapter(nil)
 
@@ -142,10 +213,7 @@ func TestClaudeAdapterSend(t *testing.T) {
 			ID:   "msg_001",
 			Type: "message",
 			Role: "assistant",
-			Content: []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}{
+			Content: []claudeContentBlock{
 				{Type: "text", Text: "Hello! How can I help you?"},
 			},
 			Model:      "claude-3-5-sonnet",
@@ -213,10 +281,7 @@ func TestClaudeAdapterRetry(t *testing.T) {
 			ID:   "msg_001",
 			Type: "message",
 			Role: "assistant",
-			Content: []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}{
+			Content: []claudeContentBlock{
 				{Type: "text", Text: "Success after retry"},
 			},
 			Model: "claude-3-5-sonnet",
