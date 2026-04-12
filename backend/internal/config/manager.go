@@ -98,11 +98,39 @@ func (m *ConfigManager) SaveSessionConfig(config *SessionConfig) error {
 	}
 
 	m.mu.Lock()
-	m.sessionConfigs[config.SessionID] = config
+	merged := mergeSessionConfig(m.sessionConfigs[config.SessionID], config)
+	m.sessionConfigs[config.SessionID] = merged
 	m.mu.Unlock()
 
 	m.notifyChange()
 	return nil
+}
+
+func mergeSessionConfig(current, updates *SessionConfig) *SessionConfig {
+	if updates == nil {
+		return nil
+	}
+
+	merged := *updates
+	if current != nil {
+		if merged.SessionID == "" {
+			merged.SessionID = current.SessionID
+		}
+		if merged.Mode == "" {
+			merged.Mode = current.Mode
+		}
+		if merged.OverrideModel == "" {
+			merged.OverrideModel = current.OverrideModel
+		}
+		if merged.Temperature == nil {
+			merged.Temperature = current.Temperature
+		}
+		if merged.MaxTokens == nil {
+			merged.MaxTokens = current.MaxTokens
+		}
+	}
+
+	return &merged
 }
 
 // SaveRoleConfig 保存角色配置

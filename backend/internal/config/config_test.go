@@ -54,6 +54,47 @@ func TestConfigManagerSessionConfig(t *testing.T) {
 	}
 }
 
+func TestConfigManagerSaveSessionConfigPreservesExistingFieldsOnPartialUpdate(t *testing.T) {
+	manager := NewConfigManager(nil)
+
+	temp := 0.8
+	maxTokens := 2048
+	if err := manager.SaveSessionConfig(&SessionConfig{
+		SessionID:     "session-001",
+		Mode:          ModeDevelopment,
+		OverrideModel: "claude-3-opus",
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+	}); err != nil {
+		t.Fatalf("seed session config: %v", err)
+	}
+
+	updatedTemp := 0.3
+	if err := manager.SaveSessionConfig(&SessionConfig{
+		SessionID:   "session-001",
+		Temperature: &updatedTemp,
+	}); err != nil {
+		t.Fatalf("partial update session config: %v", err)
+	}
+
+	loaded := manager.LoadSessionConfig("session-001")
+	if loaded == nil {
+		t.Fatal("expected session config")
+	}
+	if loaded.Mode != ModeDevelopment {
+		t.Errorf("expected development mode, got %s", loaded.Mode)
+	}
+	if loaded.OverrideModel != "claude-3-opus" {
+		t.Errorf("expected override model preserved, got %s", loaded.OverrideModel)
+	}
+	if loaded.Temperature == nil || *loaded.Temperature != 0.3 {
+		t.Fatalf("expected updated temperature 0.3, got %v", loaded.Temperature)
+	}
+	if loaded.MaxTokens == nil || *loaded.MaxTokens != 2048 {
+		t.Fatalf("expected max tokens preserved as 2048, got %v", loaded.MaxTokens)
+	}
+}
+
 func TestConfigManagerRoleConfig(t *testing.T) {
 	manager := NewConfigManager(nil)
 

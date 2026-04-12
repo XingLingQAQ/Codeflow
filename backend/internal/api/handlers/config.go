@@ -103,7 +103,13 @@ func UpdateSessionConfig(c *gin.Context) {
 		return
 	}
 
-	respondOK(c, req)
+	updated := svc.LoadSessionConfig(sessionID)
+	if updated == nil {
+		respondError(c, 500, "session config not found after save")
+		return
+	}
+
+	respondOK(c, updated)
 }
 
 // GetRoleConfig returns the role configuration.

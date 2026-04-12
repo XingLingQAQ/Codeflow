@@ -194,6 +194,55 @@ func TestUpdateSessionConfigAPI(t *testing.T) {
 	assert.Equal(t, "session-model", resp.OverrideModel)
 }
 
+func TestUpdateSessionConfigPartialPreservesExistingFieldsAPI(t *testing.T) {
+	router := setupConfigRouter()
+	svc := config.NewConfigManager(nil)
+	config.SetConfigService(svc)
+
+	temp := 0.8
+	maxTokens := 2048
+	err := svc.SaveSessionConfig(&config.SessionConfig{
+		SessionID:     "test-session",
+		Mode:          config.ModeDevelopment,
+		OverrideModel: "seed-model",
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+	})
+	assert.NoError(t, err)
+
+	updatedTemp := 0.3
+	body := []byte(`{"temperature":0.3}`)
+	req, _ := http.NewRequest("PUT", "/api/v1/config/sessions/test-session", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := decodeConfigResponseData[config.SessionConfig](t, w.Body.Bytes())
+	assert.Equal(t, "test-session", resp.SessionID)
+	assert.Equal(t, config.ModeDevelopment, resp.Mode)
+	assert.Equal(t, "seed-model", resp.OverrideModel)
+	if assert.NotNil(t, resp.Temperature) {
+		assert.Equal(t, updatedTemp, *resp.Temperature)
+	}
+	if assert.NotNil(t, resp.MaxTokens) {
+		assert.Equal(t, 2048, *resp.MaxTokens)
+	}
+
+	stored := svc.LoadSessionConfig("test-session")
+	if assert.NotNil(t, stored) {
+		assert.Equal(t, config.ModeDevelopment, stored.Mode)
+		assert.Equal(t, "seed-model", stored.OverrideModel)
+		if assert.NotNil(t, stored.Temperature) {
+			assert.Equal(t, updatedTemp, *stored.Temperature)
+		}
+		if assert.NotNil(t, stored.MaxTokens) {
+			assert.Equal(t, 2048, *stored.MaxTokens)
+		}
+	}
+}
+
 func TestGetRoleConfigAPI(t *testing.T) {
 	router := setupConfigRouter()
 	svc := config.NewConfigManager(nil)
