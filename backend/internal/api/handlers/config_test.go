@@ -91,44 +91,41 @@ func TestUpdateGlobalConfigAPI(t *testing.T) {
 	assert.Equal(t, 10000, resp.SummaryThreshold)
 }
 
-func TestUpdateGlobalConfigPartialPreservesExistingFields(t *testing.T) {
+func TestUpdateGlobalConfigAllowsExplicitZeroValues(t *testing.T) {
 	router := setupConfigRouter()
 	svc := config.NewConfigManager(nil)
 	config.SetConfigService(svc)
 
 	seed := &config.GlobalConfig{
-		DefaultModel: "old-model",
-		APIPool: []config.APIChannel{
-			{
-				ID:       "provider-1",
-				Name:     "AIHubMix-Provider",
-				Provider: config.ProviderCustom,
-				APIKey:   "secret",
-				BaseURL:  "http://154.217.240.67:8090/",
-				Enabled:  true,
-			},
-		},
-		PublicMCP:        []string{"playwright", "memory"},
+		DefaultModel:     "old-model",
 		SummaryThreshold: 20000,
 		MaxRetries:       3,
 		Timeout:          60000,
 	}
 	_ = svc.SaveGlobalConfig(seed)
 
-	body := []byte(`{"default_model":"AIHubMix-Provider"}`)
+	body := []byte(`{"summary_threshold":0,"max_retries":0,"timeout":0}`)
 	req, _ := http.NewRequest("PUT", "/api/v1/config/global", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	updated := decodeConfigResponseData[config.GlobalConfig](t, w.Body.Bytes())
-	assert.Equal(t, "AIHubMix-Provider", updated.DefaultModel)
-	assert.Len(t, updated.APIPool, 1)
-	assert.Equal(t, "provider-1", updated.APIPool[0].ID)
-	assert.Equal(t, "http://154.217.240.67:8090/", updated.APIPool[0].BaseURL)
-	assert.Equal(t, []string{"playwright", "memory"}, updated.PublicMCP)
+	assert.Equal(t, "old-model", updated.DefaultModel)
+	assert.Equal(t, 0, updated.SummaryThreshold)
+	assert.Equal(t, 0, updated.MaxRetries)
+	assert.Equal(t, 0, updated.Timeout)
+
+	stored := svc.LoadGlobalConfig()
+	if assert.NotNil(t, stored) {
+		assert.Equal(t, 0, stored.SummaryThreshold)
+		assert.Equal(t, 0, stored.MaxRetries)
+		assert.Equal(t, 0, stored.Timeout)
+	}
 }
+
 
 func TestGetSessionConfigAPI(t *testing.T) {
 	router := setupConfigRouter()

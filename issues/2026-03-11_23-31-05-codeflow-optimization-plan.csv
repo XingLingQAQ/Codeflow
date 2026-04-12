@@ -73,3 +73,7 @@ CFO-180,P1,14.5,both,收敛运行时配置更新语义与 Settings 会话边界,
 
 
 
+CFO-190,P1,14.6,backend,收敛 global config 更新的 PATCH 语义,修正 PUT /config/global 直接绑定 GlobalConfig 导致 0 值与“未传”不可区分的问题；继续复用既有 GlobalConfig 与 Config API 真相源，不新增平行 service 或配置模型。,PUT /config/global 能显式把 summary_threshold/max_retries/timeout 更新为 0；未传字段继续保留既有值；API 响应返回 merged 后的 global config；相关 handler 测试补齐并通过。,AUTOSERVER,先确认修复仅落在 Config handler 输入语义，不修改 GlobalConfig 真相结构，也不把 CFO-180 再次打开；Review 时核对 0 值更新与未传保留两类场景都成立。,回归 global config 全量更新、局部更新保留既有字段、显式写入 0 值三类场景；确认 Settings 当前只保存 default_model 的行为不受影响。,已完成,已完成,已完成,已提交,team-lead,backend/internal/api/handlers/config.go:10;backend/internal/api/handlers/config_test.go:94,picked_reason:reviewer 已确认 CFO-180 可过，但指出 UpdateGlobalConfig 仍依赖零值判断；该遗留语义坑应在同一 CSV 内独立建条闭环，避免后续继续踩坑。 review:确认修复仅引入 handler patch DTO，不修改 GlobalConfig 真相结构，也未新增平行配置模型；0 值显式写入与未传保留场景均成立。 evidence:cd backend && go test ./internal/api/handlers 通过；PUT /config/global 已改为基于 pointer patch 区分未传与显式 0。 risk:low 当前改动仅限 config handler 输入语义与测试，Settings 仅保存 default_model 的现有行为不受影响。 done_at:2026-04-12
+
+
+
