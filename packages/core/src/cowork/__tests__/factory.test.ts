@@ -1,7 +1,3 @@
-/**
- * Factory 函数单元测试
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   registerAiderExecutor,
@@ -14,6 +10,27 @@ import {
 } from '../factory.js';
 import { CoworkOrchestrator } from '../CoworkOrchestrator.js';
 import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
+import { HookEvent } from '../../hooks/types.js';
+
+function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
+  let hookManager: any;
+  return {
+    send: vi.fn(),
+    stream: vi.fn(),
+    receive: vi.fn(),
+    getHistory: vi.fn().mockReturnValue([]),
+    setHistory: vi.fn(),
+    rewind: vi.fn(),
+    compact: vi.fn(),
+    configure: vi.fn(),
+    getConfig: vi.fn(),
+    setHookManager: vi.fn((manager) => {
+      hookManager = manager;
+    }),
+    getHookManager: vi.fn(() => hookManager),
+    ...overrides,
+  };
+}
 
 describe('Factory Functions', () => {
   let orchestrator: CoworkOrchestrator;
@@ -131,37 +148,35 @@ describe('Factory Functions', () => {
 
   describe('registerClaudeExecutor', () => {
     it('should register Claude executor', () => {
-      // Mock adapter
-      const mockAdapter = {
-        send: vi.fn(),
-        stream: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockAdapter = createHookAwareAdapter();
 
       const editor = registerClaudeExecutor(orchestrator, mockAdapter as any);
 
       expect(editor.name).toBe('claude-editor');
       expect(orchestrator.getExecutor('claude')).toBeDefined();
     });
+
+    it('injects shared hook manager when provided', async () => {
+      const mockAdapter = createHookAwareAdapter();
+      const sharedHookManager = {
+        hook_before_send: vi.fn(async (payload) => ({
+          ...payload,
+          model: 'hooked-model',
+        })),
+      };
+
+      registerClaudeExecutor(orchestrator, mockAdapter as any, undefined, undefined, sharedHookManager as any);
+
+      expect(mockAdapter.setHookManager).toHaveBeenCalledWith(sharedHookManager);
+      const assigned = mockAdapter.setHookManager.mock.calls[0][0];
+      const output = await assigned.hook_before_send({ messages: [] });
+      expect(output.model).toBe('hooked-model');
+    });
   });
 
   describe('registerGeminiExecutor', () => {
     it('should register Gemini executor', () => {
-      const mockAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockAdapter = createHookAwareAdapter();
 
       const editor = registerGeminiExecutor(orchestrator, mockAdapter as any);
 
@@ -172,16 +187,7 @@ describe('Factory Functions', () => {
 
   describe('registerCodexExecutor', () => {
     it('should register Codex executor', () => {
-      const mockAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockAdapter = createHookAwareAdapter();
 
       const editor = registerCodexExecutor(orchestrator, mockAdapter as any);
 
@@ -192,38 +198,9 @@ describe('Factory Functions', () => {
 
   describe('createOrchestratorWithAllEditors', () => {
     it('should create orchestrator with all editors registered', () => {
-      const mockClaudeAdapter = {
-        send: vi.fn(),
-        stream: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
-
-      const mockGeminiAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
-
-      const mockCodexAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockClaudeAdapter = createHookAwareAdapter();
+      const mockGeminiAdapter = createHookAwareAdapter();
+      const mockCodexAdapter = createHookAwareAdapter();
 
       const result = createOrchestratorWithAllEditors({
         claudeAdapter: mockClaudeAdapter as any,
@@ -239,5 +216,48 @@ describe('Factory Functions', () => {
 
       result.orchestrator.cleanup();
     });
+
+    it('shares one hook manager across adapters and applies hook controls', async () => {
+      const mockClaudeAdapter = createHookAwareAdapter();
+      const mockGeminiAdapter = createHookAwareAdapter();
+      const mockCodexAdapter = createHookAwareAdapter();
+
+      createOrchestratorWithAllEditors({
+        claudeAdapter: mockClaudeAdapter as any,
+        geminiAdapter: mockGeminiAdapter as any,
+        codexAdapter: mockCodexAdapter as any,
+        hookControls: {
+          enabled: true,
+          allowedHooks: [HookEvent.POST_RESPONSE],
+        },
+      });
+
+      const claudeHookManager = mockClaudeAdapter.setHookManager.mock.calls[0][0];
+      const geminiHookManager = mockGeminiAdapter.setHookManager.mock.calls[0][0];
+      const codexHookManager = mockCodexAdapter.setHookManager.mock.calls[0][0];
+
+      const runtimeHookManager = result.orchestrator.getHookManager();
+
+      expect(claudeHookManager).toBe(geminiHookManager);
+      expect(geminiHookManager).toBe(codexHookManager);
+      expect(runtimeHookManager).toBe(claudeHookManager);
+
+      let blocked = false;
+      let allowed = false;
+      claudeHookManager.register(HookEvent.BEFORE_SEND, async (payload: any) => {
+        blocked = true;
+        return payload;
+      });
+      claudeHookManager.register(HookEvent.POST_RESPONSE, async () => {
+        allowed = true;
+      });
+
+      await claudeHookManager.hook_before_send({ messages: [], model: 'base' });
+      await claudeHookManager.hook_post_response({ content: 'ok', model: 'base' });
+
+      expect(blocked).toBe(false);
+      expect(allowed).toBe(true);
+    });
   });
 });
+

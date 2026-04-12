@@ -1,3 +1,6 @@
+import { HookManager } from '../hooks/HookManager.js';
+import type { HookRuntimeControls } from '../hooks/types.js';
+import { AgentRuntime } from './runtime.js';
 /**
  * Cowork Factory
  * 工厂函数用于创建和注册执行器到 Orchestrator
@@ -13,6 +16,21 @@ import { ClaudeAdapter } from '../adapters/ClaudeAdapter.js';
 import { GeminiAdapter } from '../adapters/GeminiAdapter.js';
 import { CodexAdapter } from '../adapters/CodexAdapter.js';
 import { ExecutorCapabilities } from './types.js';
+
+interface HookAwareAdapter {
+  setHookManager(hookManager?: HookManager): void;
+  getHookManager?(): HookManager | undefined;
+}
+
+function attachHookManager<TAdapter extends HookAwareAdapter>(
+  adapter: TAdapter,
+  hookManager?: HookManager,
+): TAdapter {
+  if (hookManager) {
+    adapter.setHookManager(hookManager);
+  }
+  return adapter;
+}
 
 /**
  * Aider 执行器配置
@@ -162,9 +180,10 @@ export function registerClaudeExecutor(
   orchestrator: CoworkOrchestrator,
   adapter: ClaudeAdapter,
   config?: ClaudeEditorConfig,
-  capabilities?: Partial<ExecutorCapabilities>
+  capabilities?: Partial<ExecutorCapabilities>,
+  hookManager?: HookManager
 ): ClaudeCodeEditor {
-  const editor = new ClaudeCodeEditor(adapter, config);
+  const editor = new ClaudeCodeEditor(attachHookManager(adapter, hookManager), config);
 
   const caps: ExecutorCapabilities = {
     ...DEFAULT_CLAUDE_CAPABILITIES,
@@ -183,9 +202,10 @@ export function registerGeminiExecutor(
   orchestrator: CoworkOrchestrator,
   adapter: GeminiAdapter,
   config?: GeminiEditorConfig,
-  capabilities?: Partial<ExecutorCapabilities>
+  capabilities?: Partial<ExecutorCapabilities>,
+  hookManager?: HookManager
 ): GeminiCodeEditor {
-  const editor = new GeminiCodeEditor(adapter, config);
+  const editor = new GeminiCodeEditor(attachHookManager(adapter, hookManager), config);
 
   const caps: ExecutorCapabilities = {
     ...DEFAULT_GEMINI_CAPABILITIES,
@@ -204,9 +224,10 @@ export function registerCodexExecutor(
   orchestrator: CoworkOrchestrator,
   adapter: CodexAdapter,
   config?: CodexEditorConfig,
-  capabilities?: Partial<ExecutorCapabilities>
+  capabilities?: Partial<ExecutorCapabilities>,
+  hookManager?: HookManager
 ): CodexCodeEditor {
-  const editor = new CodexCodeEditor(adapter, config);
+  const editor = new CodexCodeEditor(attachHookManager(adapter, hookManager), config);
 
   const caps: ExecutorCapabilities = {
     ...DEFAULT_CODEX_CAPABILITIES,
@@ -229,6 +250,8 @@ export interface AllEditorsConfig {
   geminiConfig?: GeminiEditorConfig;
   codexAdapter?: CodexAdapter;
   codexConfig?: CodexEditorConfig;
+  hookManager?: HookManager;
+  hookControls?: HookRuntimeControls;
 }
 
 export function createOrchestratorWithAllEditors(config: AllEditorsConfig = {}): {
@@ -238,7 +261,15 @@ export function createOrchestratorWithAllEditors(config: AllEditorsConfig = {}):
   geminiEditor?: GeminiCodeEditor;
   codexEditor?: CodexCodeEditor;
 } {
-  const orchestrator = new CoworkOrchestrator();
+  const sharedHookManager = config.hookManager ?? new HookManager(undefined, config.hookControls);
+  if (config.hookControls) {
+    sharedHookManager.setControls(config.hookControls);
+  }
+  const runtime = new AgentRuntime({
+    hookManager: sharedHookManager,
+    hookControls: config.hookControls,
+  });
+  const orchestrator = new CoworkOrchestrator(undefined, undefined, runtime);
   const aiderEditor = registerAiderExecutor(orchestrator, config.aiderConfig);
 
   let claudeEditor: ClaudeCodeEditor | undefined;
@@ -246,15 +277,33 @@ export function createOrchestratorWithAllEditors(config: AllEditorsConfig = {}):
   let codexEditor: CodexCodeEditor | undefined;
 
   if (config.claudeAdapter) {
-    claudeEditor = registerClaudeExecutor(orchestrator, config.claudeAdapter, config.claudeConfig);
+    claudeEditor = registerClaudeExecutor(
+      orchestrator,
+      config.claudeAdapter,
+      config.claudeConfig,
+      undefined,
+      sharedHookManager
+    );
   }
 
   if (config.geminiAdapter) {
-    geminiEditor = registerGeminiExecutor(orchestrator, config.geminiAdapter, config.geminiConfig);
+    geminiEditor = registerGeminiExecutor(
+      orchestrator,
+      config.geminiAdapter,
+      config.geminiConfig,
+      undefined,
+      sharedHookManager
+    );
   }
 
   if (config.codexAdapter) {
-    codexEditor = registerCodexExecutor(orchestrator, config.codexAdapter, config.codexConfig);
+    codexEditor = registerCodexExecutor(
+      orchestrator,
+      config.codexAdapter,
+      config.codexConfig,
+      undefined,
+      sharedHookManager
+    );
   }
 
   return {

@@ -20,6 +20,14 @@ import {
 import { Message } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
+interface HookAwareAdapter {
+  setHookManager(hookManager?: HookManager): void;
+}
+
+function isHookAwareAdapter(adapter: AgentConfig['adapter']): adapter is AgentConfig['adapter'] & HookAwareAdapter {
+  return typeof (adapter as Partial<HookAwareAdapter>).setHookManager === 'function';
+}
+
 export class Commander implements ICommander {
   private agents: Map<AgentRole, AgentConfig> = new Map();
   private callStack: CallTrace[] = [];
@@ -34,6 +42,9 @@ export class Commander implements ICommander {
   }
 
   registerAgent(config: AgentConfig): void {
+    if (this.hookManager && isHookAwareAdapter(config.adapter)) {
+      config.adapter.setHookManager(this.hookManager);
+    }
     this.agents.set(config.role, config);
     this.emit(CommanderEvent.AGENT_REGISTERED, { role: config.role });
   }

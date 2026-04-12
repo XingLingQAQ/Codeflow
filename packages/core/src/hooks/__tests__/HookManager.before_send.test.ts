@@ -66,4 +66,80 @@ describe('HookManager before_send chaining', () => {
 
     expect(output.model).toBe('first-third');
   });
+
+  it('blocks hooks when disabled', async () => {
+    const manager = new HookManager(undefined, { enabled: false });
+    let called = false;
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => {
+      called = true;
+      return {
+        ...payload,
+        model: 'blocked',
+      };
+    });
+
+    const input = {
+      messages: [{ role: 'user' as const, content: 'hello', timestamp: Date.now() }],
+      model: 'base-model',
+    };
+    const output = await manager.hook_before_send(input);
+
+    expect(called).toBe(false);
+    expect(output).toEqual(input);
+  });
+
+  it('treats empty allowlist as deny-all when explicitly provided', async () => {
+    const manager = new HookManager(undefined, { allowedHooks: [] });
+    let called = false;
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => {
+      called = true;
+      return {
+        ...payload,
+        model: 'blocked',
+      };
+    });
+
+    const input = {
+      messages: [{ role: 'user' as const, content: 'hello', timestamp: Date.now() }],
+      model: 'base-model',
+    };
+    const output = await manager.hook_before_send(input);
+
+    expect(called).toBe(false);
+    expect(output).toEqual(input);
+  });
+
+  it('allows only explicitly listed hooks', async () => {
+    const manager = new HookManager(undefined, { allowedHooks: [HookEvent.POST_RESPONSE] });
+    let beforeSendCalled = false;
+    let postResponseCalled = false;
+
+    manager.register(HookEvent.BEFORE_SEND, async (payload: RequestPayload) => {
+      beforeSendCalled = true;
+      return {
+        ...payload,
+        model: 'mutated',
+      };
+    });
+
+    manager.register(HookEvent.POST_RESPONSE, async () => {
+      postResponseCalled = true;
+    });
+
+    const output = await manager.hook_before_send({
+      messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
+      model: 'base-model',
+    });
+    await manager.hook_post_response({
+      content: 'done',
+      model: 'base-model',
+    });
+
+    expect(beforeSendCalled).toBe(false);
+    expect(postResponseCalled).toBe(true);
+    expect(output.model).toBe('base-model');
+  });
 });
+

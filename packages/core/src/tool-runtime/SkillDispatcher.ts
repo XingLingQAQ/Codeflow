@@ -15,6 +15,34 @@ import type {
 import { SkillRegistry } from './SkillRegistry.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const SKILL_CONTROLS_METADATA_KEY = 'skillControls';
+
+interface SkillRuntimeControls {
+  enabled?: boolean;
+  allowedSkills?: string[];
+}
+
+function normalizeSkillControls(metadata: Record<string, unknown> | undefined): SkillRuntimeControls | undefined {
+  const candidate = metadata?.[SKILL_CONTROLS_METADATA_KEY];
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  const raw = candidate as Record<string, unknown>;
+  const controls: SkillRuntimeControls = {};
+
+  if (typeof raw.enabled === 'boolean') {
+    controls.enabled = raw.enabled;
+  }
+
+  if (Array.isArray(raw.allowedSkills)) {
+    controls.allowedSkills = raw.allowedSkills.filter(
+      (skillId): skillId is string => typeof skillId === 'string' && skillId.trim().length > 0,
+    );
+  }
+
+  return controls.enabled === undefined && controls.allowedSkills === undefined ? undefined : controls;
+}
 
 function summarizeValue(value: unknown): string {
   if (value === undefined) return 'undefined';
@@ -48,6 +76,37 @@ class AllowAllSkillAuthorizer implements SkillAuthorizer {
   }
 }
 
+class MetadataSkillAuthorizer implements SkillAuthorizer {
+  constructor(private readonly fallback: SkillAuthorizer = new AllowAllSkillAuthorizer()) {}
+
+  async authorize(
+    skill: SkillManifest,
+    request: SkillExecutionRequest,
+  ): Promise<SkillAuthorizationDecision> {
+    const controls = normalizeSkillControls(request.context.metadata);
+    if (controls?.enabled === false) {
+      return {
+        allowed: false,
+        reason: 'Skill execution disabled by runtime controls',
+        approvalState: 'rejected',
+      };
+    }
+
+    if (controls?.allowedSkills && controls.allowedSkills.length > 0) {
+      const allowed = new Set(controls.allowedSkills);
+      if (!allowed.has(skill.skillId)) {
+        return {
+          allowed: false,
+          reason: `Skill execution denied by runtime controls: ${skill.skillId}`,
+          approvalState: 'rejected',
+        };
+      }
+    }
+
+    return await this.fallback.authorize(skill, request);
+  }
+}
+
 export interface SkillDispatcherOptions {
   authorizer?: SkillAuthorizer;
   auditManager?: IAuditManager;
@@ -64,7 +123,7 @@ export class SkillDispatcher {
     private readonly runtime: SkillRuntimeFacade,
     private readonly options: SkillDispatcherOptions = {}
   ) {
-    this.authorizer = options.authorizer ?? new AllowAllSkillAuthorizer();
+    this.authorizer = new MetadataSkillAuthorizer(options.authorizer);
     this.recordLimit = options.recordLimit ?? 200;
   }
 

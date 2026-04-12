@@ -40,6 +40,14 @@ export class CodexAdapter implements ICliAdapter {
     this.hookManager = hookManager;
   }
 
+  setHookManager(hookManager?: HookManager): void {
+    this.hookManager = hookManager;
+  }
+
+  getHookManager(): HookManager | undefined {
+    return this.hookManager;
+  }
+
   async send(prompt: string, options?: SendOptions): Promise<AIResponse> {
     const mergedOptions = { ...this.config, ...options };
 
@@ -53,7 +61,7 @@ export class CodexAdapter implements ICliAdapter {
     this.history.push(userMessage);
 
     // Hook: before_send
-    const payload = {
+    let payload = {
       messages: [...this.history],
       model: mergedOptions.model!,
       temperature: mergedOptions.temperature,
@@ -61,11 +69,17 @@ export class CodexAdapter implements ICliAdapter {
     };
 
     if (this.hookManager) {
-      await this.hookManager.hook_before_send(payload);
+      const processedPayload = await this.hookManager.hook_before_send(payload);
+      payload = {
+        messages: [...processedPayload.messages],
+        model: processedPayload.model || payload.model,
+        temperature: processedPayload.temperature ?? payload.temperature,
+        maxTokens: processedPayload.maxTokens || payload.maxTokens,
+      };
     }
 
     // 转换为 OpenAI 格式
-    const messages = this.history.map((msg) => ({
+    const messages = payload.messages.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
@@ -73,14 +87,19 @@ export class CodexAdapter implements ICliAdapter {
     try {
       if (mergedOptions.stream) {
         // 流式响应
-        return await this.handleStream(messages, mergedOptions);
+        return await this.handleStream(messages, {
+          ...mergedOptions,
+          model: payload.model,
+          temperature: payload.temperature,
+          maxTokens: payload.maxTokens,
+        });
       } else {
         // 非流式响应
         const completion = await this.client.chat.completions.create({
-          model: mergedOptions.model!,
+          model: payload.model,
           messages: messages as OpenAI.ChatCompletionMessageParam[],
-          temperature: mergedOptions.temperature,
-          max_tokens: mergedOptions.maxTokens,
+          temperature: payload.temperature,
+          max_tokens: payload.maxTokens,
         });
 
         const response: AIResponse = {

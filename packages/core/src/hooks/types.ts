@@ -130,6 +130,11 @@ export interface IHookManager {
   hook_on_task_complete(result: TaskExecutionResult): Promise<void>;
 }
 
+export interface HookRuntimeControls {
+  enabled?: boolean;
+  allowedHooks?: string[];
+}
+
 /**
  * Hook 处理函数类型
  */

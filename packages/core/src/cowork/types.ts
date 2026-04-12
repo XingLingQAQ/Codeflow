@@ -301,8 +301,10 @@ export interface AgentRuntimeLike {
       sessionId?: string;
       agentId?: string;
       triggerReason?: string;
+      metadata?: Record<string, unknown>;
     },
   ): Promise<TOutput>;
+  getHookManager?(): unknown;
 }
 
 /**

@@ -41,10 +41,17 @@ export class GeminiAdapter implements ICliAdapter {
     this.hookManager = hookManager;
   }
 
+  setHookManager(hookManager?: HookManager): void {
+    this.hookManager = hookManager;
+  }
+
+  getHookManager(): HookManager | undefined {
+    return this.hookManager;
+  }
+
   async send(prompt: string | MultimodalInput, options?: SendOptions): Promise<AIResponse> {
     const mergedOptions = { ...this.config, ...options };
 
-    // 构建消息
     const userMessage: Message = {
       role: 'user',
       content: typeof prompt === 'string' ? prompt : prompt.text || '',
@@ -53,8 +60,7 @@ export class GeminiAdapter implements ICliAdapter {
 
     this.history.push(userMessage);
 
-    // Hook: before_send
-    const payload = {
+    let payload = {
       messages: [...this.history],
       model: mergedOptions.model!,
       temperature: mergedOptions.temperature,
@@ -62,21 +68,35 @@ export class GeminiAdapter implements ICliAdapter {
     };
 
     if (this.hookManager) {
-      await this.hookManager.hook_before_send(payload);
+      const processedPayload = await this.hookManager.hook_before_send(payload);
+      payload = {
+        messages: [...processedPayload.messages],
+        model: processedPayload.model || payload.model,
+        temperature: processedPayload.temperature ?? payload.temperature,
+        maxTokens: processedPayload.maxTokens || payload.maxTokens,
+      };
     }
 
-    // 转换为 Gemini 格式
-    const contents = this.convertToGeminiFormat(prompt);
+    const effectivePrompt = this.resolvePromptFromPayload(prompt, payload.messages);
+    const contents = this.convertToGeminiFormat(effectivePrompt);
 
-    // 发送请求（带重试）
+    if (payload.model && payload.model !== this.config.model) {
+      this.model = this.client.getGenerativeModel({ model: payload.model });
+    }
+
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < (mergedOptions.maxRetries || 3); attempt++) {
       try {
-        const result = await this.sendWithTimeout(contents, mergedOptions);
+        const result = await this.sendWithTimeout(contents, {
+          ...mergedOptions,
+          model: payload.model,
+          temperature: payload.temperature,
+          maxTokens: payload.maxTokens,
+        });
 
         const response: AIResponse = {
           content: result.response.text(),
-          model: mergedOptions.model!,
+          model: payload.model,
           usage: {
             promptTokens: result.response.usageMetadata?.promptTokenCount || 0,
             completionTokens: result.response.usageMetadata?.candidatesTokenCount || 0,
@@ -85,7 +105,6 @@ export class GeminiAdapter implements ICliAdapter {
           finishReason: result.response.candidates?.[0]?.finishReason || 'stop',
         };
 
-        // 保存助手消息
         const assistantMessage: Message = {
           role: 'assistant',
           content: response.content,
@@ -93,7 +112,6 @@ export class GeminiAdapter implements ICliAdapter {
         };
         this.history.push(assistantMessage);
 
-        // Hook: post_response
         if (this.hookManager) {
           await this.hookManager.hook_post_response(response);
         }
@@ -140,7 +158,6 @@ export class GeminiAdapter implements ICliAdapter {
   }
 
   async compact(): Promise<void> {
-    // 保留最近 10 条消息
     if (this.history.length > 10) {
       this.history = this.history.slice(-10);
     }
@@ -156,6 +173,23 @@ export class GeminiAdapter implements ICliAdapter {
 
   getConfig(): AdapterConfig {
     return { ...this.config };
+  }
+
+  private resolvePromptFromPayload(
+    originalPrompt: string | MultimodalInput,
+    messages: Message[],
+  ): string | MultimodalInput {
+    const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+    const text = latestUserMessage?.content ?? (typeof originalPrompt === 'string' ? originalPrompt : originalPrompt.text || '');
+
+    if (typeof originalPrompt === 'string') {
+      return text;
+    }
+
+    return {
+      ...originalPrompt,
+      text,
+    };
   }
 
   // ==================== 私有方法 ====================

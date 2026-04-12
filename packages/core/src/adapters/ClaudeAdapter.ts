@@ -34,6 +34,14 @@ export class ClaudeAdapter implements ICliAdapter {
     this.hookManager = hookManager;
   }
 
+  setHookManager(hookManager?: HookManager): void {
+    this.hookManager = hookManager;
+  }
+
+  getHookManager(): HookManager | undefined {
+    return this.hookManager;
+  }
+
   /**
    * 发送消息并获取响应
    */

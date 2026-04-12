@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CodexAdapter } from '../CodexAdapter.js';
 import { AdapterConfig, APIError } from '../types.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { HookEvent } from '../../hooks/types.js';
 
 // Mock OpenAI SDK
 vi.mock('openai', () => {
@@ -100,6 +101,44 @@ describe('CodexAdapter', () => {
       expect(response.usage.completionTokens).toBe(5);
       expect(response.usage.totalTokens).toBe(15);
       expect(response.finishReason).toBe('stop');
+    });
+
+    it('applies before_send payload mutations to provider request', async () => {
+      const manager = new HookManager();
+      manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
+        ...payload,
+        model: 'hook-model',
+        temperature: 0.1,
+        maxTokens: 12,
+        messages: [
+          { role: 'system', content: 'hooked-system', timestamp: Date.now() },
+          ...payload.messages,
+        ],
+      }));
+      adapter = new CodexAdapter(mockConfig, manager);
+
+      const mockResponse = {
+        choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
+        model: 'hook-model',
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      };
+
+      const mockClient = (adapter as any).client;
+      mockClient.chat.completions.create.mockResolvedValue(mockResponse);
+
+      await adapter.send('Hello');
+
+      expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'hook-model',
+          temperature: 0.1,
+          max_tokens: 12,
+          messages: expect.arrayContaining([
+            expect.objectContaining({ role: 'system', content: 'hooked-system' }),
+            expect.objectContaining({ role: 'user', content: 'Hello' }),
+          ]),
+        })
+      );
     });
 
     it('should add messages to history', async () => {
@@ -252,7 +291,6 @@ describe('CodexAdapter', () => {
       const mockClient = (adapter as any).client;
       mockClient.chat.completions.create.mockResolvedValue(mockResponse);
 
-      // Add many messages
       for (let i = 0; i < 15; i++) {
         await adapter.send(`Message ${i}`);
       }
@@ -349,3 +387,4 @@ describe('CodexAdapter', () => {
     });
   });
 });
+

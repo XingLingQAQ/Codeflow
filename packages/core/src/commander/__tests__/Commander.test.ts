@@ -4,9 +4,14 @@ import { AgentConfig, AgentRole, CommanderEvent, CallCoderAgentParams, ConsultSu
 import { ICliAdapter } from '../../adapters/types.js';
 import { HookManager } from '../../hooks/HookManager.js';
 
+interface MockAdapterOptions {
+  hookAware?: boolean;
+  history?: any[];
+}
+
 // Mock adapter factory
-function createMockAdapter(history: any[] = []): ICliAdapter {
-  return {
+function createMockAdapter(options: MockAdapterOptions = {}): ICliAdapter {
+  const adapter = {
     send: vi.fn().mockResolvedValue({
       content: 'Mock response',
       model: 'test-model',
@@ -14,13 +19,19 @@ function createMockAdapter(history: any[] = []): ICliAdapter {
       finishReason: 'stop',
     }),
     receive: vi.fn(),
-    getHistory: vi.fn().mockReturnValue(history),
+    getHistory: vi.fn().mockReturnValue(options.history ?? []),
     setHistory: vi.fn(),
     rewind: vi.fn(),
     compact: vi.fn(),
     configure: vi.fn(),
     getConfig: vi.fn().mockReturnValue({ model: 'test-model' }),
-  } as unknown as ICliAdapter;
+  } as Record<string, unknown>;
+
+  if (options.hookAware) {
+    adapter.setHookManager = vi.fn();
+  }
+
+  return adapter as unknown as ICliAdapter;
 }
 
 describe('Commander', () => {
@@ -70,6 +81,19 @@ describe('Commander', () => {
       expect(agent).toBeDefined();
       expect(agent?.role).toBe('main');
       expect(agent?.systemPrompt).toBe('You are the main AI');
+    });
+
+    it('should inject hook manager into hook-aware adapters', () => {
+      const hookAwareAdapter = createMockAdapter({ hookAware: true }) as ICliAdapter & {
+        setHookManager: ReturnType<typeof vi.fn>;
+      };
+
+      commander.registerAgent({
+        role: 'main',
+        adapter: hookAwareAdapter,
+      });
+
+      expect(hookAwareAdapter.setHookManager).toHaveBeenCalledWith(mockHookManager);
     });
 
     it('should register coder agent', () => {

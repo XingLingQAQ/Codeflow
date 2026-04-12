@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GeminiAdapter, MultimodalInput } from '../GeminiAdapter.js';
 import { AdapterConfig, APIError, TimeoutError } from '../types.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { HookEvent } from '../../hooks/types.js';
 
 // Mock Google Generative AI SDK
 vi.mock('@google/generative-ai', () => {
@@ -93,10 +94,53 @@ describe('GeminiAdapter', () => {
 
       expect(response.content).toBe('Hello, world!');
       expect(response.model).toBe('gemini-2.0-flash-exp');
-      expect(response.usage.promptTokens).toBe(10);
-      expect(response.usage.completionTokens).toBe(5);
-      expect(response.usage.totalTokens).toBe(15);
+      expect(response.usage?.promptTokens).toBe(10);
+      expect(response.usage?.completionTokens).toBe(5);
+      expect(response.usage?.totalTokens).toBe(15);
       expect(response.finishReason).toBe('STOP');
+    });
+
+    it('applies before_send payload mutations to prompt and model selection', async () => {
+      const manager = new HookManager();
+      manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
+        ...payload,
+        model: 'gemini-hook-model',
+        temperature: 0.1,
+        maxTokens: 33,
+        messages: [
+          { role: 'system', content: 'hooked system', timestamp: Date.now() },
+          { role: 'user', content: 'rewritten prompt', timestamp: Date.now() },
+        ],
+      }));
+      adapter = new GeminiAdapter(mockConfig, manager);
+
+      const mockClient = (adapter as any).client;
+      const switchedModel = { generateContent: vi.fn().mockResolvedValue({
+        response: {
+          text: () => 'hooked response',
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 5,
+            totalTokenCount: 15,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        },
+      }) };
+      mockClient.getGenerativeModel.mockReturnValue(switchedModel);
+
+      const response = await adapter.send('Hello');
+
+      expect(mockClient.getGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-hook-model' });
+      expect(switchedModel.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contents: [{ role: 'user', parts: [{ text: 'rewritten prompt' }] }],
+          generationConfig: expect.objectContaining({
+            temperature: 0.1,
+            maxOutputTokens: 33,
+          }),
+        })
+      );
+      expect(response.model).toBe('gemini-hook-model');
     });
 
     it('should send multimodal message', async () => {
@@ -320,7 +364,6 @@ describe('GeminiAdapter', () => {
       const mockModel = (adapter as any).model;
       mockModel.generateContent.mockResolvedValue(mockResponse);
 
-      // Add many messages
       for (let i = 0; i < 15; i++) {
         await adapter.send(`Message ${i}`);
       }
@@ -405,39 +448,39 @@ describe('GeminiAdapter', () => {
 
   describe('error handling', () => {
     it('should identify retryable errors', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
 
-      expect((adapter as any).isRetryableError(new Error('rate limit'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('timeout'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('503'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('429'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('invalid request'))).toBe(false);
+      expect((freshAdapter as any).isRetryableError(new Error('rate limit'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('timeout'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('503'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('429'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('invalid request'))).toBe(false);
     });
 
     it('should wrap errors as APIError', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
       const error = new Error('Test error');
 
-      const wrapped = (adapter as any).wrapError(error);
+      const wrapped = (freshAdapter as any).wrapError(error);
 
       expect(wrapped).toBeInstanceOf(APIError);
       expect(wrapped.message).toBe('Test error');
     });
 
     it('should preserve TimeoutError', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
       const error = new TimeoutError();
 
-      const wrapped = (adapter as any).wrapError(error);
+      const wrapped = (freshAdapter as any).wrapError(error);
 
       expect(wrapped).toBeInstanceOf(TimeoutError);
     });
 
     it('should preserve APIError', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
       const error = new APIError('API Error', 500);
 
-      const wrapped = (adapter as any).wrapError(error);
+      const wrapped = (freshAdapter as any).wrapError(error);
 
       expect(wrapped).toBeInstanceOf(APIError);
       expect(wrapped.statusCode).toBe(500);

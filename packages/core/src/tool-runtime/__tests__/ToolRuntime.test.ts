@@ -264,27 +264,9 @@ describe('headless tool runtime', () => {
     expect(auditEntries.some((entry) => entry.resource.type === 'skill')).toBe(true);
   });
 
-  it('lets AgentRuntime execute registered skills through headless runtime', async () => {
-    const runtime = new AgentRuntime();
-    const editor = createEditor();
 
-    runtime.registerExecutor(
-      'claude',
-      editor,
-      {
-        name: 'claude',
-        supportedTypes: ['code-edit'],
-        maxConcurrency: 1,
-        estimatedSpeed: 'fast',
-        features: {
-          streaming: false,
-          multiFile: true,
-          contextAware: true,
-          codeReview: false,
-        },
-      },
-      'claude-opus-4.6'
-    );
+  it('blocks skills when runtime metadata disables skill execution', async () => {
+    const runtime = new AgentRuntime();
 
     runtime.registerSkill({
       manifest: {
@@ -310,15 +292,129 @@ describe('headless tool runtime', () => {
       },
     });
 
-    const output = await runtime.executeSkill<{ echoed: string }>('skill.inspect', { text: 'runtime' }, {
-      taskId: 'task-skill',
-      sessionId: 'sess-skill',
-      agentId: 'claude',
-      triggerReason: 'follow-up task',
+    await expect(
+      runtime.executeSkill<{ echoed: string }>('skill.inspect', { text: 'runtime' }, {
+        taskId: 'task-skill-disabled',
+        sessionId: 'sess-skill-disabled',
+        agentId: 'claude',
+        triggerReason: 'disabled by controls',
+        metadata: {
+          skillControls: {
+            enabled: false,
+          },
+        },
+      })
+    ).rejects.toThrow('Skill execution disabled by runtime controls');
+
+    const [record] = runtime.getSkillExecutionRecords();
+    expect(record?.status).toBe('failed');
+    expect(record?.approvalState).toBe('rejected');
+    expect(record?.error).toBe('Skill execution disabled by runtime controls');
+  });
+
+  it('blocks skills outside runtime allowlist metadata', async () => {
+    const runtime = new AgentRuntime();
+
+    runtime.registerSkill({
+      manifest: {
+        skillId: 'skill.inspect',
+        version: '1.0.0',
+        description: 'inspect text',
+        tags: ['skill', 'inspect'],
+        riskLevel: 'low',
+        source: 'internal',
+        entryPoints: ['agent'],
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+          },
+          required: ['text'],
+        },
+      },
+      handler: {
+        execute: async (input) => ({
+          echoed: (input as { text: string }).text,
+        }),
+      },
     });
 
+    await expect(
+      runtime.executeSkill<{ echoed: string }>('skill.inspect', { text: 'runtime' }, {
+        taskId: 'task-skill-allowlist',
+        sessionId: 'sess-skill-allowlist',
+        agentId: 'claude',
+        triggerReason: 'not in allowlist',
+        metadata: {
+          skillControls: {
+            allowedSkills: ['skill.other'],
+          },
+        },
+      })
+    ).rejects.toThrow('Skill execution denied by runtime controls: skill.inspect');
+
+    const [record] = runtime.getSkillExecutionRecords();
+    expect(record?.status).toBe('failed');
+    expect(record?.approvalState).toBe('rejected');
+    expect(record?.error).toBe('Skill execution denied by runtime controls: skill.inspect');
+  });
+
+  it('allows skills when runtime metadata allowlist includes skill id', async () => {
+    const runtime = new AgentRuntime();
+
+    runtime.registerSkill({
+      manifest: {
+        skillId: 'skill.inspect',
+        version: '1.0.0',
+        description: 'inspect text',
+        tags: ['skill', 'inspect'],
+        riskLevel: 'low',
+        source: 'internal',
+        entryPoints: ['agent'],
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: { type: 'string' },
+          },
+          required: ['text'],
+        },
+      },
+      handler: {
+        execute: async (input, context) => ({
+          echoed: (input as { text: string }).text,
+          metadata: context.metadata,
+        }),
+      },
+    });
+
+    const output = await runtime.executeSkill<{ echoed: string; metadata?: Record<string, unknown> }>(
+      'skill.inspect',
+      { text: 'runtime' },
+      {
+        taskId: 'task-skill-allowed',
+        sessionId: 'sess-skill-allowed',
+        agentId: 'claude',
+        triggerReason: 'in allowlist',
+        metadata: {
+          skillControls: {
+            enabled: true,
+            allowedSkills: ['skill.inspect'],
+          },
+          requestId: 'req-skill-1',
+        },
+      }
+    );
+
     expect(output.echoed).toBe('runtime');
+    expect(output.metadata).toMatchObject({
+      skillControls: {
+        enabled: true,
+        allowedSkills: ['skill.inspect'],
+      },
+      requestId: 'req-skill-1',
+    });
     expect(runtime.getSkillExecutionRecords()).toHaveLength(1);
+    expect(runtime.getSkillExecutionRecords()[0]?.status).toBe('success');
   });
 
   it('shares registry and traces across file search skill and mcp gateways', async () => {
