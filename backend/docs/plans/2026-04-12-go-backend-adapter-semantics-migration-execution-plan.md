@@ -153,6 +153,29 @@ created_at: 2026-04-12T12:51:13.074604+00:00
    - `go test ./internal/config ./internal/commander`
    - 重点断言 `ResolveConfig()` 返回 declaration semantics，及 `BuildAgentFromResolved()` 能构建带 adapter 的 `AgentConfig`
 
+### Wave 5 frozen slices
+
+**第五轮冻结为 production bootstrap wiring，不引入全局 commander runtime。**
+
+1. **config 与 agent service 在 main 启动链显式初始化**
+   - `cmd/codeflow-server/main.go:50` 新增 `initConfigService()`，不再依赖 handler 首次访问时懒初始化
+   - `cmd/codeflow-server/main.go:58` 启动期显式创建并设置 `agent.NewInMemoryAgentService()`
+   - 目标是让 config / agent 成为可审计的 startup dependency，而不是隐式全局回退
+
+2. **默认角色 resolve/build 在启动期前置校验**
+   - `cmd/codeflow-server/main.go:63` 新增 `registerConfiguredAgents()`
+   - 对 `main/coder/sub` 依次执行 `ResolveConfig()`、`RoleFromConfigRole()`、`BuildAgentFromResolved()`
+   - 非法 provider 在 server 启动期直接暴露；缺失 API channel 维持兼容并跳过注册
+
+3. **本轮只注册 agent metadata，不把 commander 生产 runtime 整体接入**
+   - `cmd/codeflow-server/main.go:80` 仅将构建结果映射为 `agent.Agent` 并注册到 `agent service`
+   - `/api/v1/agents` 与 workflow overview 可见默认角色信息，但不新增全局 commander 单例
+   - hook/skill/tool/cowork execution boundary 继续留在 TS runtime/core
+
+4. **本轮验证口径**
+   - `go test ./cmd/codeflow-server ./internal/config ./internal/commander`
+   - 重点断言 `registerConfiguredAgents()` 能注册 3 个默认角色、缺失 API channel 时跳过、非法 provider 时启动失败
+
 ## Wave 3：验证与清理
 
 **验证边界真的收口，避免留下双真相源。**

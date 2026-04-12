@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api"
+	"github.com/codeflow/backend/internal/commander"
+	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
@@ -43,6 +46,22 @@ func run() error {
 
 	// Check if debug mode is enabled
 	debugMode := os.Getenv("DEBUG") == "true"
+
+	configSvc, configClose, err := initConfigService()
+	if err != nil {
+		return err
+	}
+	defer configClose()
+	cfgsvc.SetConfigService(configSvc)
+	defer cfgsvc.SetConfigService(nil)
+
+	agentSvc := agent.NewInMemoryAgentService()
+	agent.SetAgentService(agentSvc)
+	defer agent.SetAgentService(nil)
+
+	if err := registerConfiguredAgents(configSvc, agentSvc); err != nil {
+		return err
+	}
 
 	plannerSvc, plannerClose, err := initPlannerService()
 	if err != nil {
@@ -102,6 +121,52 @@ func initPlannerService() (planner.IPlanner, func(), error) {
 		return nil, func() {}, fmt.Errorf("init planner sqlite service: %w", err)
 	}
 	return svc, closeFunc(svc), nil
+}
+
+func initConfigService() (cfgsvc.IConfigService, func(), error) {
+	dbPath := durableDBPath("config.db")
+	svc, err := cfgsvc.NewSQLiteConfigService(dbPath)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("init config sqlite service: %w", err)
+	}
+	return svc, closeFunc(svc), nil
+}
+
+func registerConfiguredAgents(configSvc cfgsvc.IConfigService, agentSvc agent.IAgentService) error {
+	if configSvc == nil {
+		return fmt.Errorf("config service is nil")
+	}
+	if agentSvc == nil {
+		return fmt.Errorf("agent service is nil")
+	}
+
+	for _, role := range []cfgsvc.RoleType{cfgsvc.RoleMain, cfgsvc.RoleCoder, cfgsvc.RoleSub} {
+		resolved := configSvc.ResolveConfig("", role)
+		if resolved == nil {
+			return fmt.Errorf("resolve config for role %q returned nil", role)
+		}
+		if resolved.APIChannel == nil {
+			continue
+		}
+		agentRole, err := commander.RoleFromConfigRole(role)
+		if err != nil {
+			return err
+		}
+		built, err := commander.BuildAgentFromResolved(agentRole, resolved)
+		if err != nil {
+			return fmt.Errorf("build configured agent for role %q: %w", role, err)
+		}
+		agentSvc.RegisterAgent(&agent.Agent{
+			Name:   fmt.Sprintf("%s-agent", role),
+			Role:   agent.AgentRole(agentRole),
+			Status: agent.AgentStatusIdle,
+			Model:  built.Model,
+		})
+		if built.Adapter != nil {
+			_ = built.Adapter.Close()
+		}
+	}
+	return nil
 }
 
 func initProjectService() (project.IProjectService, func(), error) {
