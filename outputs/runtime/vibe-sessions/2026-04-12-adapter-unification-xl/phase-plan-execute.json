@@ -1,0 +1,26 @@
+{
+  "run_id": "2026-04-12-adapter-unification-xl",
+  "stage": "plan_execute",
+  "issue": "CFO-200",
+  "summary": "统一 adapter controls 与 commander 实链接线已落地，并完成定向回归。",
+  "implemented_files": [
+    "backend/internal/adapters/types.go",
+    "backend/internal/adapters/claude.go",
+    "backend/internal/adapters/adapters_test.go",
+    "backend/internal/commander/types.go",
+    "backend/internal/commander/commander.go",
+    "backend/internal/commander/commander_test.go",
+    "backend/internal/hotswap/hotswap_test.go"
+  ],
+  "verification": {
+    "commands": [
+      "go test ./internal/adapters ./internal/commander ./internal/hotswap ./internal/project"
+    ],
+    "result": "passed"
+  },
+  "scope_decisions": [
+    "adapter 继续承担 provider/protocol 与 request controls 转换职责",
+    "hook/skill/answer style 通过 RequestSemantics 与 commander runtime 接线，不下沉为 adapter 执行层",
+    "不新增平行 adapter runtime 或平行 config 模型"
+  ]
+}

@@ -313,11 +313,44 @@ func TestHotSwapManagerConfigure(t *testing.T) {
 			MaxRetries: 5,
 			BaseDelay:  2 * time.Second,
 		},
+		RelayConfig: RelayConfig{
+			Enabled:         false,
+			FallbackChain:   []string{"gemini-pro", "claude-3-sonnet"},
+			AutoSwitch:      true,
+			SwitchThreshold: 7,
+		},
 	}
 	manager.Configure(newConfig)
 
-	// 验证通过GetCurrentModel等方式间接验证配置已应用
-	// 由于config是私有的，我们通过行为验证
+	manager.mu.RLock()
+	defer manager.mu.RUnlock()
+	if manager.config.DefaultModel != "gemini-pro" {
+		t.Fatalf("expected default model gemini-pro, got %s", manager.config.DefaultModel)
+	}
+	if manager.config.AutoRetry {
+		t.Fatal("expected auto retry to be disabled")
+	}
+	if manager.config.ContextMigrationEnabled {
+		t.Fatal("expected context migration to be disabled")
+	}
+	if manager.config.MaxContextTokens != 50000 {
+		t.Fatalf("expected max context tokens 50000, got %d", manager.config.MaxContextTokens)
+	}
+	if manager.config.RetryStrategy.MaxRetries != 5 {
+		t.Fatalf("expected max retries 5, got %d", manager.config.RetryStrategy.MaxRetries)
+	}
+	if manager.config.RetryStrategy.BaseDelay != 2*time.Second {
+		t.Fatalf("expected base delay 2s, got %s", manager.config.RetryStrategy.BaseDelay)
+	}
+	if manager.config.RelayConfig.Enabled {
+		t.Fatal("expected relay to be disabled")
+	}
+	if manager.config.RelayConfig.SwitchThreshold != 7 {
+		t.Fatalf("expected switch threshold 7, got %d", manager.config.RelayConfig.SwitchThreshold)
+	}
+	if len(manager.config.RelayConfig.FallbackChain) != 2 || manager.config.RelayConfig.FallbackChain[0] != "gemini-pro" {
+		t.Fatalf("unexpected fallback chain: %v", manager.config.RelayConfig.FallbackChain)
+	}
 }
 
 func TestHotSwapManagerSwitchToUnavailable(t *testing.T) {

@@ -1,0 +1,14 @@
+{
+  "run_id": "2026-04-12-adapter-unification-xl",
+  "stage": "skeleton_check",
+  "repo_root": "D:/project/CodeFlow/.claude/worktrees/adapter-unification-lane",
+  "working_directory": "D:/project/CodeFlow/.claude/worktrees/adapter-unification-lane/backend",
+  "existing_requirement_docs": [],
+  "existing_plan_docs": [],
+  "notes": [
+    "adapter unified entry exists in backend/internal/adapters",
+    "Claude tool turn path is implemented",
+    "system prompt and runtime semantics are still split across config/commander/planning/hotswap",
+    "docs/requirements docs/plans and outputs/runtime/vibe-sessions were created for this governed run"
+  ]
+}

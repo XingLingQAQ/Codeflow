@@ -1,0 +1,47 @@
+{
+  "run_id": "2026-04-12-adapter-unification-xl",
+  "stage": "deep_interview",
+  "goal": "一次性并行收口 adapter 相关缺口，形成清晰且复用现有接口的统一适配层",
+  "deliverable": [
+    "adapter 需求冻结文档",
+    "XL 并行执行计划",
+    "并行实现与验证证据",
+    "cleanup receipt"
+  ],
+  "constraints": [
+    "必须使用 team 模式，由主代理指挥",
+    "不要补丁摞补丁",
+    "有现有相同方法/接口必须复用",
+    "不要过度防御性编程",
+    "一次性并行完成本轮功能完善"
+  ],
+  "acceptance_criteria": [
+    "普通 Send/Stream 路径具备统一 system prompt 与 response controls 接线",
+    "adapter Configure 热更新语义不再依赖零值判断",
+    "hook/skill/answer style 的接线边界被收口到现有 runtime，而不是继续漂移",
+    "至少一条 planning 或 commander 调用链复用同一 adapter 语义面",
+    "补齐相应测试与最小真实验证"
+  ],
+  "product_acceptance_criteria": [
+    "不新增平行 adapter runtime 或平行配置模型",
+    "Claude 保持已实现能力不回退",
+    "Settings 和 Config 真相源继续沿用现有 config 系统"
+  ],
+  "manual_spot_checks": [
+    "检查 planning orchestrator 使用 resolved system prompt 与 adapter tool turn 的链路",
+    "检查 commander context graft / system prompt 继承是否仍成立",
+    "检查 adapter runtime 热更新时 temperature/max_tokens/system prompt/answer style 语义是否一致"
+  ],
+  "completion_language_policy": "只有在代码、测试与治理产物齐备后才允许宣称完成",
+  "delivery_truth_contract": "所有结论必须以代码、测试和落盘文档为依据",
+  "non_goals": [
+    "不把 skill runtime 整体搬进 adapter",
+    "不在本轮实现所有非 Claude provider",
+    "不改写前端 Settings 主体语义"
+  ],
+  "autonomy_mode": "interactive_governed",
+  "inferred_assumptions": [
+    "用户希望这轮以架构收口优先，而不是先做表面兼容层",
+    "hook 与 skill 更可能需要通过 adapter capability/controls 接线，而不是直接成为 adapter 执行核心"
+  ]
+}

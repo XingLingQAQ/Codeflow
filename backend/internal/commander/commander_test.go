@@ -12,10 +12,11 @@ import (
 
 // MockAdapter 测试用模拟适配器
 type MockAdapter struct {
-	history    []adapters.Message
-	response   string
-	shouldFail bool
-	mu         sync.Mutex
+	history     []adapters.Message
+	response    string
+	shouldFail  bool
+	lastOptions *adapters.SendOptions
+	mu          sync.Mutex
 }
 
 func NewMockAdapter(response string) *MockAdapter {
@@ -26,6 +27,9 @@ func NewMockAdapter(response string) *MockAdapter {
 }
 
 func (m *MockAdapter) Send(ctx context.Context, prompt string, opts *adapters.SendOptions) (*adapters.AIResponse, error) {
+	m.mu.Lock()
+	m.lastOptions = opts
+	m.mu.Unlock()
 	if m.shouldFail {
 		return nil, context.DeadlineExceeded
 	}
@@ -83,6 +87,112 @@ func TestCommander_RegisterAgent(t *testing.T) {
 	}
 	if agent.SystemPrompt != "You are a helpful assistant" {
 		t.Errorf("Expected system prompt to be set")
+	}
+}
+
+func TestCommander_CallCoderAgentPassesAdapterSendOptions(t *testing.T) {
+	cmd := NewCommander(5)
+
+	mainAdapter := NewMockAdapter("main")
+	mainAdapter.SetHistory([]adapters.Message{{Role: adapters.RoleUser, Content: "root", Timestamp: time.Now()}})
+	coderAdapter := NewMockAdapter("Generated code: function hello() { return 'world'; }")
+	temperature := 0.35
+
+	cmd.RegisterAgent(AgentConfig{
+		Role:         RoleMain,
+		Adapter:      mainAdapter,
+		SystemPrompt: "Main system prompt",
+	})
+	cmd.RegisterAgent(AgentConfig{
+		Role:         RoleCoder,
+		Adapter:      coderAdapter,
+		SystemPrompt: "Coder system prompt",
+		Model:        "claude-test-model",
+		Temperature:  &temperature,
+		MaxTokens:    256,
+		AnswerStyle:  "concise",
+		Capabilities: []string{"code", "refactor"},
+		Controls:     &adapters.RequestControls{AllowedTools: []string{"call_coder_agent"}},
+	})
+
+	result, err := cmd.CallCoderAgent(CallCoderAgentParams{
+		Task:    "Write a hello function",
+		Context: "Need main context",
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %s", result.Error)
+	}
+
+	coderAdapter.mu.Lock()
+	defer coderAdapter.mu.Unlock()
+	if coderAdapter.lastOptions == nil {
+		t.Fatal("expected adapter send options")
+	}
+	if coderAdapter.lastOptions.System != "Main system prompt" {
+		t.Fatalf("expected grafted system prompt, got %q", coderAdapter.lastOptions.System)
+	}
+	if coderAdapter.lastOptions.Model != "claude-test-model" {
+		t.Fatalf("expected model to be forwarded, got %q", coderAdapter.lastOptions.Model)
+	}
+	if coderAdapter.lastOptions.Temperature == nil || *coderAdapter.lastOptions.Temperature != temperature {
+		t.Fatal("expected temperature to be forwarded")
+	}
+	if coderAdapter.lastOptions.MaxTokens != 256 {
+		t.Fatalf("expected max tokens 256, got %d", coderAdapter.lastOptions.MaxTokens)
+	}
+	if coderAdapter.lastOptions.Semantics != nil {
+		t.Fatal("expected commander not to forward runtime semantics into adapter")
+	}
+}
+
+func TestCommander_ConsultSubExpertPassesAdapterSendOptions(t *testing.T) {
+	cmd := NewCommander(5)
+
+	expertAdapter := NewMockAdapter("Security recommendation")
+	temperature := 0.55
+	cmd.RegisterAgent(AgentConfig{
+		Role:         RoleSubExpert,
+		Adapter:      expertAdapter,
+		SystemPrompt: "Sub expert prompt",
+		Model:        "claude-sub-model",
+		Temperature:  &temperature,
+		MaxTokens:    128,
+		AnswerStyle:  "detailed",
+	})
+
+	result, err := cmd.ConsultSubExpert(ConsultSubExpertParams{
+		Domain:   "security",
+		Question: "How to secure API endpoints?",
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %s", result.Error)
+	}
+
+	expertAdapter.mu.Lock()
+	defer expertAdapter.mu.Unlock()
+	if expertAdapter.lastOptions == nil {
+		t.Fatal("expected adapter send options")
+	}
+	if expertAdapter.lastOptions.System != "Sub expert prompt" {
+		t.Fatalf("expected sub expert system prompt, got %q", expertAdapter.lastOptions.System)
+	}
+	if expertAdapter.lastOptions.Model != "claude-sub-model" {
+		t.Fatalf("expected model to be forwarded, got %q", expertAdapter.lastOptions.Model)
+	}
+	if expertAdapter.lastOptions.Temperature == nil || *expertAdapter.lastOptions.Temperature != temperature {
+		t.Fatal("expected temperature to be forwarded")
+	}
+	if expertAdapter.lastOptions.MaxTokens != 128 {
+		t.Fatalf("expected max tokens 128, got %d", expertAdapter.lastOptions.MaxTokens)
+	}
+	if expertAdapter.lastOptions.Semantics != nil {
+		t.Fatal("expected runtime semantics to stay outside adapter send options")
 	}
 }
 

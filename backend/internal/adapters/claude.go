@@ -24,32 +24,7 @@ type BaseAdapter struct {
 // NewBaseAdapter 创建基础适配器
 func NewBaseAdapter(config *AdapterConfig) *BaseAdapter {
 	cfg := DefaultAdapterConfig
-	if config != nil {
-		if config.APIKey != "" {
-			cfg.APIKey = config.APIKey
-		}
-		if config.BaseURL != "" {
-			cfg.BaseURL = config.BaseURL
-		}
-		if config.Model != "" {
-			cfg.Model = config.Model
-		}
-		if config.Temperature != 0 {
-			cfg.Temperature = config.Temperature
-		}
-		if config.MaxTokens > 0 {
-			cfg.MaxTokens = config.MaxTokens
-		}
-		if config.Timeout > 0 {
-			cfg.Timeout = config.Timeout
-		}
-		if config.MaxRetries > 0 {
-			cfg.MaxRetries = config.MaxRetries
-		}
-		if config.RetryDelay > 0 {
-			cfg.RetryDelay = config.RetryDelay
-		}
-	}
+	mergeAdapterConfig(&cfg, config)
 
 	return &BaseAdapter{
 		config:  cfg,
@@ -114,30 +89,37 @@ func (a *BaseAdapter) Configure(config *AdapterConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if config.APIKey != "" {
-		a.config.APIKey = config.APIKey
+	mergeAdapterConfig(&a.config, config)
+	a.httpClient.Timeout = a.config.Timeout
+}
+
+func mergeAdapterConfig(dst *AdapterConfig, src *AdapterConfig) {
+	if dst == nil || src == nil {
+		return
 	}
-	if config.BaseURL != "" {
-		a.config.BaseURL = config.BaseURL
+	if src.APIKey != "" {
+		dst.APIKey = src.APIKey
 	}
-	if config.Model != "" {
-		a.config.Model = config.Model
+	if src.BaseURL != "" {
+		dst.BaseURL = src.BaseURL
 	}
-	if config.Temperature != 0 {
-		a.config.Temperature = config.Temperature
+	if src.Model != "" {
+		dst.Model = src.Model
 	}
-	if config.MaxTokens > 0 {
-		a.config.MaxTokens = config.MaxTokens
+	if src.ForceTemperature || src.Temperature != 0 {
+		dst.Temperature = src.Temperature
 	}
-	if config.Timeout > 0 {
-		a.config.Timeout = config.Timeout
-		a.httpClient.Timeout = config.Timeout
+	if src.ForceMaxTokens || src.MaxTokens > 0 {
+		dst.MaxTokens = src.MaxTokens
 	}
-	if config.MaxRetries > 0 {
-		a.config.MaxRetries = config.MaxRetries
+	if src.ForceTimeout || src.Timeout > 0 {
+		dst.Timeout = src.Timeout
 	}
-	if config.RetryDelay > 0 {
-		a.config.RetryDelay = config.RetryDelay
+	if src.ForceMaxRetries || src.MaxRetries > 0 {
+		dst.MaxRetries = src.MaxRetries
+	}
+	if src.ForceRetryDelay || src.RetryDelay > 0 {
+		dst.RetryDelay = src.RetryDelay
 	}
 }
 
@@ -182,6 +164,41 @@ func (a *BaseAdapter) DoRequest(ctx context.Context, method, url string, body in
 	}
 
 	return nil, lastErr
+}
+
+type requestControls struct {
+	System      string
+	Semantics   *RequestSemantics
+	Model       string
+	Temperature *float64
+	MaxTokens   int
+}
+
+func resolveSendControls(config AdapterConfig, options *SendOptions) requestControls {
+	return requestControls{
+		System:      pickSystem(options),
+		Semantics:   pickSemantics(options),
+		Model:       pickModel(config.Model, options),
+		Temperature: pickTemperature(config.Temperature, options),
+		MaxTokens:   pickMaxTokens(config.MaxTokens, options),
+	}
+}
+
+func resolveToolTurnControls(config AdapterConfig, req *ToolTurnRequest) requestControls {
+	if req == nil {
+		return requestControls{
+			Model:       config.Model,
+			Temperature: pickTemperature(config.Temperature, nil),
+			MaxTokens:   config.MaxTokens,
+		}
+	}
+	return requestControls{
+		System:      pickToolTurnSystem(req),
+		Semantics:   pickToolTurnSemantics(req),
+		Model:       firstNonEmpty(req.Model, config.Model),
+		Temperature: pickTemperatureFromRequest(req.Temperature, config.Temperature),
+		MaxTokens:   positiveOrDefault(req.MaxTokens, config.MaxTokens),
+	}
 }
 
 func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, body interface{}, headers map[string]string) (*http.Response, error) {
@@ -290,11 +307,14 @@ func (a *ClaudeAdapter) Send(ctx context.Context, prompt string, options *SendOp
 	}
 	a.AddMessage(userMsg)
 
+	controls := resolveSendControls(a.config, options)
 	resp, err := a.SendToolTurn(ctx, &ToolTurnRequest{
 		Messages:    a.GetHistory(),
-		Model:       pickModel(a.config.Model, options),
-		MaxTokens:   pickMaxTokens(a.config.MaxTokens, options),
-		Temperature: pickTemperature(a.config.Temperature, options),
+		System:      controls.System,
+		Semantics:   controls.Semantics,
+		Model:       controls.Model,
+		MaxTokens:   controls.MaxTokens,
+		Temperature: controls.Temperature,
 	})
 	if err != nil {
 		return nil, err
@@ -320,14 +340,15 @@ func (a *ClaudeAdapter) SendToolTurn(ctx context.Context, req *ToolTurnRequest) 
 	if len(messages) == 0 {
 		messages = a.GetHistory()
 	}
+	controls := resolveToolTurnControls(a.config, req)
 
 	reqBody := claudeRequest{
-		Model:       firstNonEmpty(req.Model, a.config.Model),
+		Model:       controls.Model,
 		Messages:    buildClaudeMessages(messages),
-		System:      req.System,
+		System:      composeSystemInstruction(controls.System, controls.Semantics),
 		Tools:       buildClaudeTools(req.Tools),
-		MaxTokens:   positiveOrDefault(req.MaxTokens, a.config.MaxTokens),
-		Temperature: derefOrDefault(req.Temperature, a.config.Temperature),
+		MaxTokens:   controls.MaxTokens,
+		Temperature: derefOrDefault(controls.Temperature, a.config.Temperature),
 		Stream:      false,
 	}
 
@@ -385,15 +406,13 @@ func (a *ClaudeAdapter) Stream(ctx context.Context, prompt string, options *Send
 	}
 	a.AddMessage(userMsg)
 
-	model := pickModel(a.config.Model, options)
-	temperature := derefOrDefault(pickTemperature(a.config.Temperature, options), a.config.Temperature)
-	maxTokens := pickMaxTokens(a.config.MaxTokens, options)
-
+	controls := resolveSendControls(a.config, options)
 	reqBody := claudeRequest{
-		Model:       model,
+		Model:       controls.Model,
 		Messages:    buildClaudeMessages(a.GetHistory()),
-		MaxTokens:   maxTokens,
-		Temperature: temperature,
+		System:      composeSystemInstruction(controls.System, controls.Semantics),
+		MaxTokens:   controls.MaxTokens,
+		Temperature: derefOrDefault(controls.Temperature, a.config.Temperature),
 		Stream:      true,
 	}
 
@@ -626,6 +645,105 @@ func pickModel(defaultModel string, options *SendOptions) string {
 		return options.Model
 	}
 	return defaultModel
+}
+
+func pickSystem(options *SendOptions) string {
+	if options == nil {
+		return ""
+	}
+	if options.System != "" {
+		return options.System
+	}
+	if options.Semantics != nil {
+		return options.Semantics.SystemPrompt
+	}
+	return ""
+}
+
+func pickToolTurnSystem(req *ToolTurnRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.System != "" {
+		return req.System
+	}
+	if req.Semantics != nil {
+		return req.Semantics.SystemPrompt
+	}
+	return ""
+}
+
+func pickSemantics(options *SendOptions) *RequestSemantics {
+	if options == nil {
+		return nil
+	}
+	return CloneRequestSemantics(options.Semantics)
+}
+
+func pickToolTurnSemantics(req *ToolTurnRequest) *RequestSemantics {
+	if req == nil {
+		return nil
+	}
+	return CloneRequestSemantics(req.Semantics)
+}
+func pickTemperatureFromRequest(value *float64, fallback float64) *float64 {
+	if value != nil {
+		return value
+	}
+	resolved := fallback
+	return &resolved
+}
+
+func composeSystemInstruction(system string, semantics *RequestSemantics) string {
+	base := strings.TrimSpace(system)
+	if semantics == nil {
+		return base
+	}
+
+	parts := make([]string, 0, 4)
+	if base != "" {
+		parts = append(parts, base)
+	}
+	if style := strings.TrimSpace(semantics.AnswerStyle); style != "" {
+		parts = append(parts, "Answer style: "+style)
+	}
+	if len(semantics.Capabilities) > 0 {
+		parts = append(parts, "Declared capabilities: "+strings.Join(semantics.Capabilities, ", "))
+	}
+	if controls := formatControlsDirective(semantics.Controls); controls != "" {
+		parts = append(parts, controls)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func formatControlsDirective(controls *RequestControls) string {
+	if controls == nil {
+		return ""
+	}
+
+	parts := make([]string, 0, 6)
+	if controls.EnableTools != nil {
+		parts = append(parts, fmt.Sprintf("tools enabled: %t", *controls.EnableTools))
+	}
+	if controls.EnableSkills != nil {
+		parts = append(parts, fmt.Sprintf("skills enabled: %t", *controls.EnableSkills))
+	}
+	if controls.EnableHooks != nil {
+		parts = append(parts, fmt.Sprintf("hooks enabled: %t", *controls.EnableHooks))
+	}
+	if len(controls.AllowedTools) > 0 {
+		parts = append(parts, "allowed tools: "+strings.Join(controls.AllowedTools, ", "))
+	}
+	if len(controls.AllowedSkills) > 0 {
+		parts = append(parts, "allowed skills: "+strings.Join(controls.AllowedSkills, ", "))
+	}
+	if len(controls.AllowedHooks) > 0 {
+		parts = append(parts, "allowed hooks: "+strings.Join(controls.AllowedHooks, ", "))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Runtime controls:\n- " + strings.Join(parts, "\n- ")
 }
 
 func pickMaxTokens(defaultMaxTokens int, options *SendOptions) int {

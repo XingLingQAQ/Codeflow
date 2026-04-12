@@ -60,14 +60,60 @@ type StreamChunk struct {
 	Done  bool   `json:"done"`
 }
 
+// RequestControls 统一请求控制面。
+type RequestControls struct {
+	AllowedTools  []string `json:"allowed_tools,omitempty"`
+	AllowedSkills []string `json:"allowed_skills,omitempty"`
+	AllowedHooks  []string `json:"allowed_hooks,omitempty"`
+	EnableTools   *bool    `json:"enable_tools,omitempty"`
+	EnableSkills  *bool    `json:"enable_skills,omitempty"`
+	EnableHooks   *bool    `json:"enable_hooks,omitempty"`
+}
+
+// RequestSemantics 统一请求语义面。
+type RequestSemantics struct {
+	SystemPrompt string           `json:"system_prompt,omitempty"`
+	AnswerStyle  string           `json:"answer_style,omitempty"`
+	Capabilities []string         `json:"capabilities,omitempty"`
+	Controls     *RequestControls `json:"controls,omitempty"`
+}
+
+// CloneRequestSemantics 深拷贝请求语义，避免调用方共享可变切片。
+func CloneRequestSemantics(semantics *RequestSemantics) *RequestSemantics {
+	if semantics == nil {
+		return nil
+	}
+
+	clone := *semantics
+	if len(semantics.Capabilities) > 0 {
+		clone.Capabilities = append([]string(nil), semantics.Capabilities...)
+	}
+	if semantics.Controls != nil {
+		controls := *semantics.Controls
+		if len(semantics.Controls.AllowedTools) > 0 {
+			controls.AllowedTools = append([]string(nil), semantics.Controls.AllowedTools...)
+		}
+		if len(semantics.Controls.AllowedSkills) > 0 {
+			controls.AllowedSkills = append([]string(nil), semantics.Controls.AllowedSkills...)
+		}
+		if len(semantics.Controls.AllowedHooks) > 0 {
+			controls.AllowedHooks = append([]string(nil), semantics.Controls.AllowedHooks...)
+		}
+		clone.Controls = &controls
+	}
+	return &clone
+}
+
 // SendOptions 发送选项
 type SendOptions struct {
-	Model       string         `json:"model,omitempty"`
-	Temperature *float64       `json:"temperature,omitempty"`
-	MaxTokens   int            `json:"max_tokens,omitempty"`
-	Stream      bool           `json:"stream,omitempty"`
-	Timeout     time.Duration  `json:"timeout,omitempty"`
-	Extra       map[string]any `json:"extra,omitempty"`
+	System      string            `json:"system,omitempty"`
+	Semantics   *RequestSemantics `json:"semantics,omitempty"`
+	Model       string            `json:"model,omitempty"`
+	Temperature *float64          `json:"temperature,omitempty"`
+	MaxTokens   int               `json:"max_tokens,omitempty"`
+	Stream      bool              `json:"stream,omitempty"`
+	Timeout     time.Duration     `json:"timeout,omitempty"`
+	Extra       map[string]any    `json:"extra,omitempty"`
 }
 
 // ToolDefinition 工具定义
@@ -99,12 +145,13 @@ type ToolPropertyItem struct {
 
 // ToolTurnRequest 原生工具回合请求
 type ToolTurnRequest struct {
-	Messages    []Message        `json:"messages,omitempty"`
-	Tools       []ToolDefinition `json:"tools,omitempty"`
-	System      string           `json:"system,omitempty"`
-	Model       string           `json:"model,omitempty"`
-	Temperature *float64         `json:"temperature,omitempty"`
-	MaxTokens   int              `json:"max_tokens,omitempty"`
+	Messages    []Message          `json:"messages,omitempty"`
+	Tools       []ToolDefinition   `json:"tools,omitempty"`
+	System      string             `json:"system,omitempty"`
+	Semantics   *RequestSemantics  `json:"semantics,omitempty"`
+	Model       string             `json:"model,omitempty"`
+	Temperature *float64           `json:"temperature,omitempty"`
+	MaxTokens   int                `json:"max_tokens,omitempty"`
 }
 
 // ToolTurnResponse 原生工具回合响应
@@ -126,6 +173,12 @@ type AdapterConfig struct {
 	Timeout     time.Duration `json:"timeout,omitempty"`
 	MaxRetries  int           `json:"max_retries,omitempty"`
 	RetryDelay  time.Duration `json:"retry_delay,omitempty"`
+
+	ForceTemperature bool `json:"-"`
+	ForceMaxTokens   bool `json:"-"`
+	ForceTimeout     bool `json:"-"`
+	ForceMaxRetries  bool `json:"-"`
+	ForceRetryDelay  bool `json:"-"`
 }
 
 // ICliAdapter CLI适配器接口

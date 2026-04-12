@@ -111,12 +111,15 @@ func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult
 	prompt := c.buildCoderPrompt(params)
 
 	// 嫁接上下文
+	var graftedCtx *GraftedContext
 	if params.Context != "" {
 		mainAgent := c.GetAgent(RoleMain)
 		if mainAgent != nil {
-			graftedCtx, err := c.GraftContext(RoleMain, RoleCoder, &ContextGraftConfig{
-				InheritMessages:  true,
-				MaxContextTokens: 4000,
+			var err error
+			graftedCtx, err = c.GraftContext(RoleMain, RoleCoder, &ContextGraftConfig{
+				InheritMessages:     true,
+				InheritSystemPrompt: true,
+				MaxContextTokens:    4000,
 			})
 			if err == nil && coderAgent.Adapter != nil {
 				coderAgent.Adapter.SetHistory(graftedCtx.Messages)
@@ -140,7 +143,8 @@ func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	response, err := coderAgent.Adapter.Send(ctx, prompt, nil)
+	sendOptions := buildAgentSendOptions(coderAgent, graftedCtx)
+	response, err := coderAgent.Adapter.Send(ctx, prompt, sendOptions)
 	if err != nil {
 		result := &ToolCallResult{
 			Success:   false,
@@ -233,12 +237,15 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 	prompt := c.buildSubExpertPrompt(params)
 
 	// 嫁接上下文
+	var graftedCtx *GraftedContext
 	if params.Context != "" {
 		mainAgent := c.GetAgent(RoleMain)
 		if mainAgent != nil {
-			graftedCtx, err := c.GraftContext(RoleMain, RoleSubExpert, &ContextGraftConfig{
-				InheritMessages:  true,
-				MaxContextTokens: 2000,
+			var err error
+			graftedCtx, err = c.GraftContext(RoleMain, RoleSubExpert, &ContextGraftConfig{
+				InheritMessages:     true,
+				InheritSystemPrompt: true,
+				MaxContextTokens:    2000,
 			})
 			if err == nil && subExpert.Adapter != nil {
 				subExpert.Adapter.SetHistory(graftedCtx.Messages)
@@ -262,7 +269,8 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	response, err := subExpert.Adapter.Send(ctx, prompt, nil)
+	sendOptions := buildAgentSendOptions(subExpert, graftedCtx)
+	response, err := subExpert.Adapter.Send(ctx, prompt, sendOptions)
 	if err != nil {
 		result := &ToolCallResult{
 			Success:   false,
@@ -290,6 +298,55 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 
 	trace.Result = result
 	return result, nil
+}
+
+func buildAgentSendOptions(agent *AgentConfig, graftedCtx *GraftedContext) *adapters.SendOptions {
+	if agent == nil {
+		return nil
+	}
+
+	systemPrompt := agent.SystemPrompt
+	if graftedCtx != nil && graftedCtx.SystemPrompt != "" {
+		systemPrompt = graftedCtx.SystemPrompt
+	}
+
+	options := &adapters.SendOptions{
+		System:      systemPrompt,
+		Model:       agent.Model,
+		Temperature: cloneFloat64(agent.Temperature),
+		MaxTokens:   agent.MaxTokens,
+	}
+
+	if options.System == "" && options.Model == "" && options.Temperature == nil && options.MaxTokens == 0 {
+		return nil
+	}
+
+	return options
+}
+
+func cloneFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneRequestControls(controls *adapters.RequestControls) *adapters.RequestControls {
+	if controls == nil {
+		return nil
+	}
+	clone := *controls
+	if len(controls.AllowedTools) > 0 {
+		clone.AllowedTools = append([]string(nil), controls.AllowedTools...)
+	}
+	if len(controls.AllowedSkills) > 0 {
+		clone.AllowedSkills = append([]string(nil), controls.AllowedSkills...)
+	}
+	if len(controls.AllowedHooks) > 0 {
+		clone.AllowedHooks = append([]string(nil), controls.AllowedHooks...)
+	}
+	return &clone
 }
 
 // GraftContext 嫁接上下文
