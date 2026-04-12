@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
+	"github.com/codeflow/backend/internal/config"
 )
 
 // Commander 指挥官模式实现
@@ -298,6 +299,107 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 
 	trace.Result = result
 	return result, nil
+}
+
+func BuildAgentConfigFromResolved(role AgentRole, resolved *config.ResolvedConfig, adapter adapters.ICliAdapter) (*AgentConfig, error) {
+	if resolved == nil {
+		return nil, fmt.Errorf("resolved config is nil")
+	}
+	if adapter == nil {
+		return nil, fmt.Errorf("adapter is nil")
+	}
+
+	agent := &AgentConfig{
+		Role:         role,
+		Adapter:      adapter,
+		SystemPrompt: strings.TrimSpace(resolved.SystemPrompt),
+		Model:        strings.TrimSpace(resolved.Model),
+		MaxDepth:     0,
+		Timeout:      resolved.Timeout,
+	}
+	temperature := resolved.Temperature
+	agent.Temperature = &temperature
+	if resolved.MaxTokens != nil {
+		agent.MaxTokens = *resolved.MaxTokens
+	}
+	if trimmed := strings.TrimSpace(resolved.AnswerStyle); trimmed != "" {
+		agent.AnswerStyle = trimmed
+	}
+	if len(resolved.Capabilities) > 0 {
+		agent.Capabilities = append([]string(nil), resolved.Capabilities...)
+	}
+	if controls := buildResolvedRequestControls(resolved); controls != nil {
+		agent.Controls = controls
+	}
+	return agent, nil
+}
+
+func BuildAgentFromResolved(role AgentRole, resolved *config.ResolvedConfig) (*AgentConfig, error) {
+	if resolved == nil {
+		return nil, fmt.Errorf("resolved config is nil")
+	}
+	if resolved.APIChannel == nil {
+		return nil, fmt.Errorf("resolved config api channel is nil")
+	}
+
+	provider, err := resolved.APIChannel.AdapterProvider()
+	if err != nil {
+		return nil, err
+	}
+
+	adapterConfig := &adapters.AdapterConfig{
+		APIKey:           resolved.APIChannel.APIKey,
+		BaseURL:          resolved.APIChannel.BaseURL,
+		Model:            strings.TrimSpace(resolved.Model),
+		Temperature:      resolved.Temperature,
+		MaxRetries:       resolved.MaxRetries,
+		ForceMaxRetries:  true,
+		ForceTemperature: true,
+	}
+	if resolved.MaxTokens != nil {
+		adapterConfig.MaxTokens = *resolved.MaxTokens
+		adapterConfig.ForceMaxTokens = true
+	}
+	if resolved.Timeout > 0 {
+		adapterConfig.Timeout = time.Duration(resolved.Timeout) * time.Millisecond
+		adapterConfig.ForceTimeout = true
+	}
+
+	adapter, err := adapters.NewAdapter(provider, adapterConfig)
+	if err != nil {
+		return nil, err
+	}
+	return BuildAgentConfigFromResolved(role, resolved, adapter)
+}
+
+func RoleFromConfigRole(role config.RoleType) (AgentRole, error) {
+	switch role {
+	case config.RoleMain:
+		return RoleMain, nil
+	case config.RoleCoder:
+		return RoleCoder, nil
+	case config.RoleSub:
+		return RoleSubExpert, nil
+	default:
+		return "", fmt.Errorf("unsupported config role %q", role)
+	}
+}
+
+func buildResolvedRequestControls(resolved *config.ResolvedConfig) *adapters.RequestControls {
+	if resolved == nil {
+		return nil
+	}
+	controls := &adapters.RequestControls{}
+	if len(resolved.AllowedSkills) > 0 {
+		controls.AllowedSkills = append([]string(nil), resolved.AllowedSkills...)
+	}
+	if len(resolved.AllowedHooks) > 0 {
+		controls.AllowedHooks = append([]string(nil), resolved.AllowedHooks...)
+	}
+	if len(controls.AllowedSkills) == 0 && len(controls.AllowedHooks) == 0 {
+		return nil
+	}
+	return controls
 }
 
 func buildAgentSendOptions(agent *AgentConfig, graftedCtx *GraftedContext) *adapters.SendOptions {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
+	"github.com/codeflow/backend/internal/config"
 )
 
 // MockAdapter 测试用模拟适配器
@@ -68,25 +69,144 @@ func (m *MockAdapter) GetConfig() adapters.AdapterConfig {
 }
 func (m *MockAdapter) Close() error { return nil }
 
-func TestCommander_RegisterAgent(t *testing.T) {
-	cmd := NewCommander(5)
-
-	adapter := NewMockAdapter("test response")
-	cmd.RegisterAgent(AgentConfig{
-		Role:         RoleMain,
-		Adapter:      adapter,
-		SystemPrompt: "You are a helpful assistant",
-	})
-
-	agent := cmd.GetAgent(RoleMain)
-	if agent == nil {
-		t.Fatal("Expected agent to be registered")
+func TestBuildAgentConfigFromResolved(t *testing.T) {
+	adapter := NewMockAdapter("builder")
+	maxTokens := 512
+	resolved := &config.ResolvedConfig{
+		Model:         "claude-builder-model",
+		Temperature:   0.25,
+		MaxTokens:     &maxTokens,
+		SystemPrompt:  "Builder prompt",
+		AnswerStyle:   "concise",
+		Capabilities:  []string{"code", "review"},
+		AllowedSkills: []string{"orchestrator"},
+		AllowedHooks:  []string{"pre-commit"},
+		Timeout:       45000,
 	}
-	if agent.Role != RoleMain {
-		t.Errorf("Expected role %s, got %s", RoleMain, agent.Role)
+
+	agent, err := BuildAgentConfigFromResolved(RoleCoder, resolved, adapter)
+	if err != nil {
+		t.Fatalf("BuildAgentConfigFromResolved() error = %v", err)
 	}
-	if agent.SystemPrompt != "You are a helpful assistant" {
-		t.Errorf("Expected system prompt to be set")
+	if agent.Role != RoleCoder {
+		t.Fatalf("expected role %s, got %s", RoleCoder, agent.Role)
+	}
+	if agent.Adapter != adapter {
+		t.Fatal("expected adapter to be forwarded")
+	}
+	if agent.SystemPrompt != "Builder prompt" {
+		t.Fatalf("expected system prompt to be forwarded, got %q", agent.SystemPrompt)
+	}
+	if agent.Model != "claude-builder-model" {
+		t.Fatalf("expected model to be forwarded, got %q", agent.Model)
+	}
+	if agent.Temperature == nil || *agent.Temperature != 0.25 {
+		t.Fatalf("expected temperature 0.25, got %#v", agent.Temperature)
+	}
+	if agent.MaxTokens != 512 {
+		t.Fatalf("expected max tokens 512, got %d", agent.MaxTokens)
+	}
+	if agent.AnswerStyle != "concise" {
+		t.Fatalf("expected answer style concise, got %q", agent.AnswerStyle)
+	}
+	if len(agent.Capabilities) != 2 || agent.Capabilities[0] != "code" || agent.Capabilities[1] != "review" {
+		t.Fatalf("expected capabilities to be forwarded, got %#v", agent.Capabilities)
+	}
+	if agent.Controls == nil {
+		t.Fatal("expected controls to be built")
+	}
+	if len(agent.Controls.AllowedSkills) != 1 || agent.Controls.AllowedSkills[0] != "orchestrator" {
+		t.Fatalf("expected allowed skills to be forwarded, got %#v", agent.Controls.AllowedSkills)
+	}
+	if len(agent.Controls.AllowedHooks) != 1 || agent.Controls.AllowedHooks[0] != "pre-commit" {
+		t.Fatalf("expected allowed hooks to be forwarded, got %#v", agent.Controls.AllowedHooks)
+	}
+	if agent.Timeout != 45000 {
+		t.Fatalf("expected timeout 45000, got %d", agent.Timeout)
+	}
+}
+
+func TestBuildAgentFromResolved(t *testing.T) {
+	maxTokens := 256
+	resolved := &config.ResolvedConfig{
+		Model:        "claude-runtime-model",
+		Temperature:  0.4,
+		MaxTokens:    &maxTokens,
+		SystemPrompt: "Runtime prompt",
+		AnswerStyle:  "detailed",
+		Capabilities: []string{"analysis"},
+		AllowedHooks: []string{"audit"},
+		APIChannel: &config.APIChannel{
+			ID:       "default",
+			Name:     "Default",
+			Provider: config.ProviderAnthropic,
+			APIKey:   "test-key",
+			Enabled:  true,
+		},
+		Timeout:    12000,
+		MaxRetries: 4,
+	}
+
+	agent, err := BuildAgentFromResolved(RoleMain, resolved)
+	if err != nil {
+		t.Fatalf("BuildAgentFromResolved() error = %v", err)
+	}
+	if agent == nil || agent.Adapter == nil {
+		t.Fatal("expected adapter-backed agent")
+	}
+	cfg := agent.Adapter.GetConfig()
+	if cfg.Model != "claude-runtime-model" {
+		t.Fatalf("expected adapter model claude-runtime-model, got %q", cfg.Model)
+	}
+	if cfg.APIKey != "test-key" {
+		t.Fatalf("expected api key to be forwarded, got %q", cfg.APIKey)
+	}
+	if cfg.MaxTokens != 256 {
+		t.Fatalf("expected adapter max tokens 256, got %d", cfg.MaxTokens)
+	}
+	if cfg.MaxRetries != 4 {
+		t.Fatalf("expected adapter max retries 4, got %d", cfg.MaxRetries)
+	}
+	if cfg.Timeout != 12*time.Second {
+		t.Fatalf("expected adapter timeout 12s, got %s", cfg.Timeout)
+	}
+	if agent.AnswerStyle != "detailed" {
+		t.Fatalf("expected answer style detailed, got %q", agent.AnswerStyle)
+	}
+	if agent.Controls == nil || len(agent.Controls.AllowedHooks) != 1 || agent.Controls.AllowedHooks[0] != "audit" {
+		t.Fatalf("expected allowed hooks audit, got %#v", agent.Controls)
+	}
+}
+
+func TestRoleFromConfigRole(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   config.RoleType
+		want    AgentRole
+		wantErr bool
+	}{
+		{name: "main", input: config.RoleMain, want: RoleMain},
+		{name: "coder", input: config.RoleCoder, want: RoleCoder},
+		{name: "sub", input: config.RoleSub, want: RoleSubExpert},
+		{name: "invalid", input: config.RoleType("invalid"), wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := RoleFromConfigRole(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %s, got %s", tc.want, got)
+			}
+		})
 	}
 }
 

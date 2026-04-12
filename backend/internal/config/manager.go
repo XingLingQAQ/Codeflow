@@ -160,6 +160,10 @@ func (m *ConfigManager) ResolveConfig(sessionID string, role RoleType) *Resolved
 	mcpTools := make([]string, len(m.globalConfig.PublicMCP))
 	copy(mcpTools, m.globalConfig.PublicMCP)
 	var systemPrompt string
+	var answerStyle string
+	var capabilities []string
+	var allowedSkills []string
+	var allowedHooks []string
 	apiChannelID := "default"
 
 	// 2. 应用Session配置
@@ -190,6 +194,10 @@ func (m *ConfigManager) ResolveConfig(sessionID string, role RoleType) *Resolved
 			apiChannelID = roleCfg.APIChannel
 			mcpTools = append(mcpTools, roleCfg.MCPTools...)
 			systemPrompt = roleCfg.SystemPrompt
+			answerStyle = roleCfg.AnswerStyle
+			capabilities = append([]string(nil), roleCfg.Capabilities...)
+			allowedSkills = append([]string(nil), roleCfg.AllowedSkills...)
+			allowedHooks = append([]string(nil), roleCfg.AllowedHooks...)
 		}
 	}
 
@@ -198,17 +206,24 @@ func (m *ConfigManager) ResolveConfig(sessionID string, role RoleType) *Resolved
 
 	// 5. 去重MCP Tools
 	mcpTools = uniqueStrings(mcpTools)
+	capabilities = uniqueStrings(capabilities)
+	allowedSkills = uniqueStrings(allowedSkills)
+	allowedHooks = uniqueStrings(allowedHooks)
 
 	return &ResolvedConfig{
-		Model:        model,
-		Temperature:  temperature,
-		TopP:         topP,
-		MaxTokens:    maxTokens,
-		APIChannel:   apiChannel,
-		MCPTools:     mcpTools,
-		SystemPrompt: systemPrompt,
-		Timeout:      m.globalConfig.Timeout,
-		MaxRetries:   m.globalConfig.MaxRetries,
+		Model:         model,
+		Temperature:   temperature,
+		TopP:          topP,
+		MaxTokens:     maxTokens,
+		APIChannel:    apiChannel,
+		MCPTools:      mcpTools,
+		SystemPrompt:  systemPrompt,
+		AnswerStyle:   answerStyle,
+		Capabilities:  capabilities,
+		AllowedSkills: allowedSkills,
+		AllowedHooks:  allowedHooks,
+		Timeout:       m.globalConfig.Timeout,
+		MaxRetries:    m.globalConfig.MaxRetries,
 	}
 }
 

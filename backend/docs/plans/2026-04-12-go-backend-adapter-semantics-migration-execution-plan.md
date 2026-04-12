@@ -130,6 +130,29 @@ created_at: 2026-04-12T12:51:13.074604+00:00
    - `tsc --noEmit --target es2022 --module nodenext --moduleResolution nodenext --skipLibCheck` 针对改动文件通过
    - `vitest` 入口缺失，`packages/core` 全量编译受外部依赖类型缺失影响，需在交接中声明限制
 
+### Wave 4 frozen slices
+
+**第四轮冻结为 Go declaration semantics/control handoff，不进入 TS runtime boundary。**
+
+1. **config declaration semantics 进入 ResolvedConfig 真相面**
+   - `internal/config/types.go:73` 为 `RoleConfig` 新增 `answer_style` / `capabilities` / `allowed_skills` / `allowed_hooks`
+   - `internal/config/types.go:94` 为 `ResolvedConfig` 同步新增声明层语义字段，避免后续 bootstrap 再复制一套 DTO
+   - `internal/config/manager.go:155` 在 `ResolveConfig()` 内完成字段聚合与去重
+
+2. **commander 新增从 resolved config 构建 agent 的装配 helper**
+   - `internal/commander/commander.go:304` 新增 `BuildAgentConfigFromResolved()`
+   - `internal/commander/commander.go:338` 新增 `BuildAgentFromResolved()`，复用 `APIChannel.AdapterProvider()` 与 `adapters.NewAdapter()`
+   - `internal/commander/commander.go:376` 新增 `RoleFromConfigRole()`，只映射 `main/coder/sub -> main/coder/sub_expert`
+
+3. **声明性 controls 仅映射到 runtime semantics，不改执行边界**
+   - `allowed_skills` / `allowed_hooks` 只进入 `adapters.RequestControls`
+   - 不新增 pricing、hotswap capabilities、executor naming 相关逻辑
+   - hook/skill/tool/cowork 真实执行仍留在 TS runtime/core
+
+4. **本轮验证口径**
+   - `go test ./internal/config ./internal/commander`
+   - 重点断言 `ResolveConfig()` 返回 declaration semantics，及 `BuildAgentFromResolved()` 能构建带 adapter 的 `AgentConfig`
+
 ## Wave 3：验证与清理
 
 **验证边界真的收口，避免留下双真相源。**

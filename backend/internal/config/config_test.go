@@ -171,17 +171,42 @@ func TestConfigManagerResolveConfig(t *testing.T) {
 		t.Error("expected max tokens 2000")
 	}
 
-	// 添加角色配置（应该覆盖会话配置）
+	manager.SaveRoleConfig(RoleMain, &RoleConfig{
+		Model:         "role-model",
+		Temperature:   0.9,
+		APIChannel:    "default",
+		MCPTools:      []string{"role-tool", "public-tool"},
+		SystemPrompt:  "role prompt",
+		AnswerStyle:   "concise",
+		Capabilities:  []string{"code", "review", "code"},
+		AllowedSkills: []string{"orchestrator", "orchestrator"},
+		AllowedHooks:  []string{"pre-commit", "pre-commit"},
+	})
+
 	resolved = manager.ResolveConfig("session-001", RoleMain)
-	if resolved.Model != "claude-3-5-sonnet-20241022" {
+	if resolved.Model != "role-model" {
 		t.Errorf("expected role model to override, got %s", resolved.Model)
 	}
-	if resolved.Temperature != 1.0 {
-		t.Errorf("expected role temperature 1.0, got %f", resolved.Temperature)
+	if resolved.Temperature != 0.9 {
+		t.Errorf("expected role temperature 0.9, got %f", resolved.Temperature)
 	}
-	// MCP tools应该合并
-	if len(resolved.MCPTools) < 2 {
-		t.Errorf("expected at least 2 mcp tools, got %d", len(resolved.MCPTools))
+	if resolved.SystemPrompt != "role prompt" {
+		t.Fatalf("expected role prompt, got %q", resolved.SystemPrompt)
+	}
+	if resolved.AnswerStyle != "concise" {
+		t.Fatalf("expected answer style concise, got %q", resolved.AnswerStyle)
+	}
+	if len(resolved.Capabilities) != 2 || resolved.Capabilities[0] != "code" || resolved.Capabilities[1] != "review" {
+		t.Fatalf("expected deduped capabilities, got %#v", resolved.Capabilities)
+	}
+	if len(resolved.AllowedSkills) != 1 || resolved.AllowedSkills[0] != "orchestrator" {
+		t.Fatalf("expected deduped allowed skills, got %#v", resolved.AllowedSkills)
+	}
+	if len(resolved.AllowedHooks) != 1 || resolved.AllowedHooks[0] != "pre-commit" {
+		t.Fatalf("expected deduped allowed hooks, got %#v", resolved.AllowedHooks)
+	}
+	if len(resolved.MCPTools) != 2 {
+		t.Fatalf("expected deduped mcp tools, got %#v", resolved.MCPTools)
 	}
 }
 
