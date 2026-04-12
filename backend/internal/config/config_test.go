@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/codeflow/backend/internal/adapters"
 )
 
 func TestConfigManagerBasic(t *testing.T) {
@@ -264,6 +267,52 @@ func TestConfigManagerConflictDetection(t *testing.T) {
 	conflicts = manager.DetectConflicts()
 	if len(conflicts) != 2 {
 		t.Errorf("expected 2 conflicts, got %d", len(conflicts))
+	}
+}
+
+func TestProviderToAdapterProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider Provider
+		want     adapters.Provider
+	}{
+		{name: "anthropic maps to claude", provider: ProviderAnthropic, want: adapters.ProviderClaude},
+		{name: "google maps to gemini", provider: ProviderGoogle, want: adapters.ProviderGemini},
+		{name: "openai stays openai", provider: ProviderOpenAI, want: adapters.ProviderOpenAI},
+		{name: "custom stays claude-compatible", provider: ProviderCustom, want: adapters.ProviderClaude},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.provider.ToAdapterProvider()
+			if err != nil {
+				t.Fatalf("ToAdapterProvider() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %s, got %s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestConfigManagerDetectConflictsRejectsUnsupportedProvider(t *testing.T) {
+	manager := NewConfigManager(nil)
+
+	if err := manager.AddAPIChannel(&APIChannel{
+		ID:       "channel-invalid-provider",
+		Name:     "Invalid Provider",
+		Provider: Provider("azure"),
+		Enabled:  true,
+	}); err != nil {
+		t.Fatalf("add api channel: %v", err)
+	}
+
+	conflicts := manager.DetectConflicts()
+	if len(conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d (%v)", len(conflicts), conflicts)
+	}
+	if !strings.Contains(conflicts[0], "unsupported provider 'azure'") {
+		t.Fatalf("expected unsupported provider conflict, got %q", conflicts[0])
 	}
 }
 

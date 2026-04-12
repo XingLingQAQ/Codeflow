@@ -1,5 +1,7 @@
 package config
 
+import "github.com/codeflow/backend/internal/adapters"
+
 // Provider API提供商类型
 type Provider string
 
@@ -9,6 +11,16 @@ const (
 	ProviderGoogle    Provider = "google"
 	ProviderCustom    Provider = "custom"
 )
+
+// ToAdapterProvider 归一化配置 provider 到 adapters 真相源。
+func (p Provider) ToAdapterProvider() (adapters.Provider, error) {
+	return adapters.ProviderFromString(string(p))
+}
+
+// AdapterProvider 返回 API 通道对应的 adapters provider。
+func (c APIChannel) AdapterProvider() (adapters.Provider, error) {
+	return c.Provider.ToAdapterProvider()
+}
 
 // SessionMode 会话模式
 type SessionMode string

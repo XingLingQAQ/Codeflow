@@ -87,6 +87,27 @@ created_at: 2026-04-12T12:51:13.074604+00:00
 3. 保持 `packages/core` 的 hook/skill/tool/commander/cowork 运行时不动或仅做边界解耦
 4. 每个切片都补最相关的单测或回归验证
 
+### Wave 2 frozen slices
+
+**第二轮已冻结并完成的最小切片如下。**
+
+1. **config provider canonical handoff 只走 Go**
+   - 保留 `internal/config/types.go:3` 的对外兼容 provider 值：`anthropic/openai/google/custom`
+   - Go 内部 canonical provider 真相源统一委托到 `internal/adapters/types.go:327`
+   - `internal/config/types.go:15` 新增 `ToAdapterProvider()` / `AdapterProvider()`，避免继续复制 alias 规则
+
+2. **非法 provider 在 config 冲突检测提前暴露**
+   - `internal/config/manager.go:285` 现在会对 `APIChannel.Provider` 做 canonical 校验
+   - 非法 provider 不再等到后续 runtime/adapter 构造才失败
+
+3. **TS 继续只保留执行边界**
+   - `packages/core/src/config/types.ts:15` 与 `packages/core/src/hotswap/types.ts:14` 的 provider 字面值兼容壳暂不改
+   - hook/skill/tool/cowork enforcement 继续留在 TS runtime，不把声明层校验迁进去
+
+4. **本轮验证口径**
+   - `go test ./internal/config`
+   - `go test ./internal/config ./internal/adapters ./internal/commander ./internal/hotswap`
+
 ## Wave 3：验证与清理
 
 **验证边界真的收口，避免留下双真相源。**

@@ -277,6 +277,14 @@ func (m *ConfigManager) DetectConflicts() []string {
 
 	var conflicts []string
 
+	for _, ch := range m.globalConfig.APIPool {
+		if _, err := ch.AdapterProvider(); err != nil {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"API channel '%s' uses unsupported provider '%s'",
+				ch.ID, ch.Provider))
+		}
+	}
+
 	for _, role := range []RoleType{RoleMain, RoleCoder, RoleSub} {
 		roleCfg := m.roleConfigs[role]
 		if roleCfg == nil {
