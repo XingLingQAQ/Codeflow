@@ -1,0 +1,45 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "stage": "deep_interview",
+  "mode": "interactive_governed",
+  "lane": "root_governed",
+  "goal": "Move backend-facing adapter/provider conversion and request semantics into Go while keeping TS runtime/core for hook, skill, tool, commander, and cowork execution.",
+  "deliverable": "A frozen requirement document, an execution plan, and the first migration slices for Go-owned backend functionality.",
+  "constraints": [
+    "Use team mode with leader-directed parallel reconnaissance",
+    "Reuse existing adapter and runtime methods instead of creating new abstractions",
+    "Do not move hook/skill execution into backend adapters",
+    "Do not create a second runtime or duplicate semantic truth source",
+    "Keep changes backward compatible unless explicitly scoped otherwise"
+  ],
+  "acceptance_criteria": [
+    "Requirement doc states exact Go-owned migration scope and explicit non-goals",
+    "Execution plan enumerates first migration waves with file-level ownership boundaries",
+    "Go truth anchors and TS runtime keep-boundaries are backed by file:line evidence",
+    "First migration slices are identified around backend-facing provider conversion and request semantics only"
+  ],
+  "product_acceptance_criteria": [
+    "Backend request semantics have one clear truth source in Go",
+    "TS runtime/core remains the only execution surface for hooks, skills, tools, commander, and cowork",
+    "No new parallel adapter abstraction is introduced"
+  ],
+  "manual_spot_checks": [
+    "Confirm Go adapter types already cover semantics and tool-turn request payloads",
+    "Confirm TS runtime still owns hook and skill execution entry points",
+    "Confirm migration plan excludes wholesale TS runtime relocation"
+  ],
+  "completion_language_policy": "Do not claim migration complete; only claim preparation artifacts and scoped migration plan are complete when evidenced.",
+  "delivery_truth_contract": "Requirement and plan docs under docs/, plus receipts under outputs/runtime/vibe-sessions/, are the canonical truth for this preparation phase.",
+  "non_goals": [
+    "Migrating HookManager, SkillDispatcher, HeadlessToolRuntime, Commander, or Cowork runtime into Go",
+    "Rebuilding provider behavior from scratch when an existing method already exists",
+    "Changing frontend/TUI behavior in this preparation phase"
+  ],
+  "autonomy_mode": "interactive_governed",
+  "inferred_assumptions": [
+    "Go backend should own backend-facing provider conversion and request semantics",
+    "TS runtime/core should remain execution-oriented rather than service/platform-oriented",
+    "The first implementation wave should favor deleting duplication over adding compatibility wrappers"
+  ],
+  "timestamp": "2026-04-12T12:51:13.074604+00:00"
+}

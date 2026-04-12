@@ -78,6 +78,25 @@ type RequestSemantics struct {
 	Controls     *RequestControls `json:"controls,omitempty"`
 }
 
+// CloneRequestControls 深拷贝请求控制面，避免调用方共享可变切片。
+func CloneRequestControls(controls *RequestControls) *RequestControls {
+	if controls == nil {
+		return nil
+	}
+
+	clone := *controls
+	if len(controls.AllowedTools) > 0 {
+		clone.AllowedTools = append([]string(nil), controls.AllowedTools...)
+	}
+	if len(controls.AllowedSkills) > 0 {
+		clone.AllowedSkills = append([]string(nil), controls.AllowedSkills...)
+	}
+	if len(controls.AllowedHooks) > 0 {
+		clone.AllowedHooks = append([]string(nil), controls.AllowedHooks...)
+	}
+	return &clone
+}
+
 // CloneRequestSemantics 深拷贝请求语义，避免调用方共享可变切片。
 func CloneRequestSemantics(semantics *RequestSemantics) *RequestSemantics {
 	if semantics == nil {
@@ -89,17 +108,7 @@ func CloneRequestSemantics(semantics *RequestSemantics) *RequestSemantics {
 		clone.Capabilities = append([]string(nil), semantics.Capabilities...)
 	}
 	if semantics.Controls != nil {
-		controls := *semantics.Controls
-		if len(semantics.Controls.AllowedTools) > 0 {
-			controls.AllowedTools = append([]string(nil), semantics.Controls.AllowedTools...)
-		}
-		if len(semantics.Controls.AllowedSkills) > 0 {
-			controls.AllowedSkills = append([]string(nil), semantics.Controls.AllowedSkills...)
-		}
-		if len(semantics.Controls.AllowedHooks) > 0 {
-			controls.AllowedHooks = append([]string(nil), semantics.Controls.AllowedHooks...)
-		}
-		clone.Controls = &controls
+		clone.Controls = CloneRequestControls(semantics.Controls)
 	}
 	return &clone
 }
@@ -145,13 +154,13 @@ type ToolPropertyItem struct {
 
 // ToolTurnRequest 原生工具回合请求
 type ToolTurnRequest struct {
-	Messages    []Message          `json:"messages,omitempty"`
-	Tools       []ToolDefinition   `json:"tools,omitempty"`
-	System      string             `json:"system,omitempty"`
-	Semantics   *RequestSemantics  `json:"semantics,omitempty"`
-	Model       string             `json:"model,omitempty"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	MaxTokens   int                `json:"max_tokens,omitempty"`
+	Messages    []Message         `json:"messages,omitempty"`
+	Tools       []ToolDefinition  `json:"tools,omitempty"`
+	System      string            `json:"system,omitempty"`
+	Semantics   *RequestSemantics `json:"semantics,omitempty"`
+	Model       string            `json:"model,omitempty"`
+	Temperature *float64          `json:"temperature,omitempty"`
+	MaxTokens   int               `json:"max_tokens,omitempty"`
 }
 
 // ToolTurnResponse 原生工具回合响应
@@ -217,6 +226,7 @@ const (
 	ProviderOpenAI Provider = "openai"
 	ProviderGemini Provider = "gemini"
 	ProviderCodex  Provider = "codex"
+	ProviderCustom Provider = "custom"
 )
 
 // APIError API错误
@@ -304,14 +314,14 @@ var DefaultAdapterConfig = AdapterConfig{
 }
 
 var providerAliases = map[string]Provider{
-	"":           ProviderClaude,
-	"claude":     ProviderClaude,
-	"anthropic":  ProviderClaude,
-	"custom":     ProviderClaude,
-	"openai":     ProviderOpenAI,
-	"gemini":     ProviderGemini,
-	"google":     ProviderGemini,
-	"codex":      ProviderCodex,
+	"":          ProviderClaude,
+	"claude":    ProviderClaude,
+	"anthropic": ProviderClaude,
+	"custom":    ProviderClaude,
+	"openai":    ProviderOpenAI,
+	"gemini":    ProviderGemini,
+	"google":    ProviderGemini,
+	"codex":     ProviderCodex,
 }
 
 // ProviderFromString 规范化外部 provider 名称到 adapters.Provider。

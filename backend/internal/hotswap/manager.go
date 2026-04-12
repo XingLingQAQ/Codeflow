@@ -374,8 +374,8 @@ func (m *HotSwapManager) ResetFailureCount(modelID string) {
 func (m *HotSwapManager) estimateTokens(messages []adapters.Message) int {
 	total := 0
 	for _, msg := range messages {
-		// 简单估算：每4个字符约1个token
-		total += len(msg.Content) / 4
+		// 继续沿用粗估口径，但字符数统一复用 adapters 真相源。
+		total += adapters.ApproxMessageChars(msg) / 4
 	}
 	return total
 }
@@ -390,7 +390,7 @@ func (m *HotSwapManager) truncateHistory(history []adapters.Message, maxTokens i
 	currentTokens := 0
 
 	for i := len(history) - 1; i >= 0; i-- {
-		msgTokens := len(history[i].Content) / 4
+		msgTokens := adapters.ApproxMessageChars(history[i]) / 4
 		if currentTokens+msgTokens > maxTokens/2 { // 保留一半给输出
 			break
 		}

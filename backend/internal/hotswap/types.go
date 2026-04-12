@@ -6,15 +6,15 @@ import (
 	"github.com/codeflow/backend/internal/adapters"
 )
 
-// ModelProvider 模型提供商
-type ModelProvider string
+// ModelProvider 模型提供商。
+type ModelProvider = adapters.Provider
 
 const (
-	ProviderClaude ModelProvider = "claude"
-	ProviderGemini ModelProvider = "gemini"
-	ProviderCodex  ModelProvider = "codex"
-	ProviderOpenAI ModelProvider = "openai"
-	ProviderCustom ModelProvider = "custom"
+	ProviderClaude ModelProvider = adapters.ProviderClaude
+	ProviderGemini ModelProvider = adapters.ProviderGemini
+	ProviderCodex  ModelProvider = adapters.ProviderCodex
+	ProviderOpenAI ModelProvider = adapters.ProviderOpenAI
+	ProviderCustom ModelProvider = adapters.ProviderCustom
 )
 
 // ModelStatus 模型状态

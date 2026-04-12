@@ -143,8 +143,20 @@ func TestCommander_CallCoderAgentPassesAdapterSendOptions(t *testing.T) {
 	if coderAdapter.lastOptions.MaxTokens != 256 {
 		t.Fatalf("expected max tokens 256, got %d", coderAdapter.lastOptions.MaxTokens)
 	}
-	if coderAdapter.lastOptions.Semantics != nil {
-		t.Fatal("expected commander not to forward runtime semantics into adapter")
+	if coderAdapter.lastOptions.Semantics == nil {
+		t.Fatal("expected commander to forward request semantics into adapter")
+	}
+	if coderAdapter.lastOptions.Semantics.AnswerStyle != "concise" {
+		t.Fatalf("expected answer style concise, got %q", coderAdapter.lastOptions.Semantics.AnswerStyle)
+	}
+	if len(coderAdapter.lastOptions.Semantics.Capabilities) != 2 || coderAdapter.lastOptions.Semantics.Capabilities[0] != "code" || coderAdapter.lastOptions.Semantics.Capabilities[1] != "refactor" {
+		t.Fatalf("expected capabilities to be forwarded, got %#v", coderAdapter.lastOptions.Semantics.Capabilities)
+	}
+	if coderAdapter.lastOptions.Semantics.Controls == nil || len(coderAdapter.lastOptions.Semantics.Controls.AllowedTools) != 1 || coderAdapter.lastOptions.Semantics.Controls.AllowedTools[0] != "call_coder_agent" {
+		t.Fatalf("expected request controls to be forwarded, got %#v", coderAdapter.lastOptions.Semantics.Controls)
+	}
+	if coderAdapter.lastOptions.Semantics.SystemPrompt != "" {
+		t.Fatalf("expected system prompt to stay in top-level options, got %q", coderAdapter.lastOptions.Semantics.SystemPrompt)
 	}
 }
 
@@ -191,8 +203,17 @@ func TestCommander_ConsultSubExpertPassesAdapterSendOptions(t *testing.T) {
 	if expertAdapter.lastOptions.MaxTokens != 128 {
 		t.Fatalf("expected max tokens 128, got %d", expertAdapter.lastOptions.MaxTokens)
 	}
-	if expertAdapter.lastOptions.Semantics != nil {
-		t.Fatal("expected runtime semantics to stay outside adapter send options")
+	if expertAdapter.lastOptions.Semantics == nil {
+		t.Fatal("expected answer style semantics to be forwarded")
+	}
+	if expertAdapter.lastOptions.Semantics.AnswerStyle != "detailed" {
+		t.Fatalf("expected answer style detailed, got %q", expertAdapter.lastOptions.Semantics.AnswerStyle)
+	}
+	if len(expertAdapter.lastOptions.Semantics.Capabilities) != 0 {
+		t.Fatalf("expected no capabilities, got %#v", expertAdapter.lastOptions.Semantics.Capabilities)
+	}
+	if expertAdapter.lastOptions.Semantics.Controls != nil {
+		t.Fatalf("expected no controls, got %#v", expertAdapter.lastOptions.Semantics.Controls)
 	}
 }
 

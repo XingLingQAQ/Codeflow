@@ -312,16 +312,37 @@ func buildAgentSendOptions(agent *AgentConfig, graftedCtx *GraftedContext) *adap
 
 	options := &adapters.SendOptions{
 		System:      systemPrompt,
+		Semantics:   buildAgentRequestSemantics(agent),
 		Model:       agent.Model,
 		Temperature: cloneFloat64(agent.Temperature),
 		MaxTokens:   agent.MaxTokens,
 	}
 
-	if options.System == "" && options.Model == "" && options.Temperature == nil && options.MaxTokens == 0 {
+	if options.System == "" && options.Semantics == nil && options.Model == "" && options.Temperature == nil && options.MaxTokens == 0 {
 		return nil
 	}
 
 	return options
+}
+
+func buildAgentRequestSemantics(agent *AgentConfig) *adapters.RequestSemantics {
+	if agent == nil {
+		return nil
+	}
+
+	semantics := &adapters.RequestSemantics{
+		AnswerStyle: strings.TrimSpace(agent.AnswerStyle),
+		Controls:    adapters.CloneRequestControls(agent.Controls),
+	}
+	if len(agent.Capabilities) > 0 {
+		semantics.Capabilities = append([]string(nil), agent.Capabilities...)
+	}
+
+	if semantics.AnswerStyle == "" && len(semantics.Capabilities) == 0 && semantics.Controls == nil {
+		return nil
+	}
+
+	return semantics
 }
 
 func cloneFloat64(value *float64) *float64 {
@@ -330,23 +351,6 @@ func cloneFloat64(value *float64) *float64 {
 	}
 	cloned := *value
 	return &cloned
-}
-
-func cloneRequestControls(controls *adapters.RequestControls) *adapters.RequestControls {
-	if controls == nil {
-		return nil
-	}
-	clone := *controls
-	if len(controls.AllowedTools) > 0 {
-		clone.AllowedTools = append([]string(nil), controls.AllowedTools...)
-	}
-	if len(controls.AllowedSkills) > 0 {
-		clone.AllowedSkills = append([]string(nil), controls.AllowedSkills...)
-	}
-	if len(controls.AllowedHooks) > 0 {
-		clone.AllowedHooks = append([]string(nil), controls.AllowedHooks...)
-	}
-	return &clone
 }
 
 // GraftContext 嫁接上下文
