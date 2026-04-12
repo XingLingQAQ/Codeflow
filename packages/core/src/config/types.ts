@@ -3,6 +3,44 @@
  * 支持三级配置继承：Global → Session → Role
  */
 
+export type CanonicalProvider = 'anthropic' | 'openai' | 'google' | 'local' | 'custom';
+export type APIChannelProvider = Exclude<CanonicalProvider, 'local'>;
+export type RuntimeProviderFamily = 'claude' | 'gemini' | 'codex' | 'openai' | 'custom';
+
+/**
+ * 将运行时 provider family 归一到声明侧 canonical provider。
+ */
+export function toCanonicalProvider(
+  provider: CanonicalProvider | RuntimeProviderFamily
+): CanonicalProvider {
+  switch (provider) {
+    case 'claude':
+      return 'anthropic';
+    case 'gemini':
+      return 'google';
+    case 'codex':
+      return 'openai';
+    default:
+      return provider;
+  }
+}
+
+/**
+ * 将声明侧 canonical provider 映射到运行时 provider family。
+ */
+export function toRuntimeProviderFamily(
+  provider: APIChannelProvider | RuntimeProviderFamily
+): RuntimeProviderFamily {
+  switch (provider) {
+    case 'anthropic':
+      return 'claude';
+    case 'google':
+      return 'gemini';
+    default:
+      return provider;
+  }
+}
+
 export interface GlobalConfig {
   defaultModel: string;
   apiPool: APIChannel[];
@@ -15,7 +53,7 @@ export interface GlobalConfig {
 export interface APIChannel {
   id: string;
   name: string;
-  provider: 'anthropic' | 'openai' | 'google' | 'custom';
+  provider: APIChannelProvider;
   apiKey?: string;
   baseURL?: string;
   enabled: boolean;

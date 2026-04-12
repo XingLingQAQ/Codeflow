@@ -1,0 +1,42 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "phase": "wave3-ts-provider-alias-unification",
+  "status": "completed",
+  "scope": {
+    "goal": "unify TypeScript provider canonical/runtime family types without moving TS execution boundary or controls metadata",
+    "files": [
+      "packages/core/src/config/types.ts",
+      "packages/core/src/config/ModelRegistry.ts",
+      "packages/core/src/hotswap/types.ts",
+      "packages/core/src/config/__tests__/providerAliases.test.ts",
+      "backend/docs/plans/2026-04-12-go-backend-adapter-semantics-migration-execution-plan.md"
+    ]
+  },
+  "implemented": [
+    "added shared CanonicalProvider, APIChannelProvider, and RuntimeProviderFamily types in packages/core config types",
+    "added toCanonicalProvider and toRuntimeProviderFamily helper functions for TS-side alias mapping",
+    "updated ModelRegistry to reuse canonical provider type and HotSwap model info to reuse runtime provider family type"
+  ],
+  "verification": [
+    "tsc --noEmit --target es2022 --module nodenext --moduleResolution nodenext --skipLibCheck packages/core/src/config/types.ts packages/core/src/config/ModelRegistry.ts packages/core/src/hotswap/types.ts"
+  ],
+  "validation_limited": "vitest executable is unavailable in this worktree and packages/core full build is blocked by missing external dependency type resolution for openai and @google/generative-ai",
+  "manual_test": [
+    "restore/install vitest executable in workspace, then run targeted tests: packages/core/src/config/__tests__/providerAliases.test.ts packages/core/src/config/__tests__/ModelRegistry.test.ts packages/core/src/hotswap/__tests__/HotSwapManager.test.ts",
+    "after restoring dependency type resolution, rerun tsc -b packages/core"
+  ],
+  "evidence": [
+    "scoped diff only touches provider shared types/helper and targeted test file",
+    "direct tsc noEmit check passed for touched source files",
+    "codex executor boundary remains unchanged in packages/core/src/cowork/factory.ts"
+  ],
+  "risk": "low provider alias logic is centralized without changing runtime executor registration; remaining risk is limited to unexecuted TS test harness in current environment",
+  "runtime_boundary": {
+    "ts_runtime_unchanged": true,
+    "notes": [
+      "hook, skill, tool runtime and cowork enforcement remain in TypeScript",
+      "codex stays a runtime executor family instead of being flattened away"
+    ]
+  },
+  "completed_at": "2026-04-12T15:35:55Z"
+}

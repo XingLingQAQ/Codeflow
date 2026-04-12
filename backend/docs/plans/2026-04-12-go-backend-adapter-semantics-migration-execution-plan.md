@@ -108,6 +108,28 @@ created_at: 2026-04-12T12:51:13.074604+00:00
    - `go test ./internal/config`
    - `go test ./internal/config ./internal/adapters ./internal/commander ./internal/hotswap`
 
+### Wave 3 frozen slices
+
+**第三轮冻结为 TS provider 类型与 alias 收口，不进入 controls metadata。**
+
+1. **TS provider 声明与运行时 family 改为共享类型**
+   - `packages/core/src/config/types.ts:6` 新增 `CanonicalProvider` / `APIChannelProvider` / `RuntimeProviderFamily`
+   - `packages/core/src/config/ModelRegistry.ts:2` 改为复用 canonical provider，而不是继续内联联合类型
+   - `packages/core/src/hotswap/types.ts:5` 改为复用 runtime provider family，保留 `codex` 作为 runtime executor family
+
+2. **provider alias 规则在 TS 侧集中表达**
+   - `packages/core/src/config/types.ts:13` 新增 `toCanonicalProvider()`
+   - `packages/core/src/config/types.ts:31` 新增 `toRuntimeProviderFamily()`
+   - `claude→anthropic`、`gemini→google`、`codex→openai` 只在 helper 内表达，不再散落字面量
+
+3. **运行时边界保持不变**
+   - `packages/core/src/cowork/factory.ts:237` 的 `codex` executor 注册保持不变
+   - hook/skill/tool runtime 与 controls metadata 不在本轮改动范围内
+
+4. **本轮验证口径（受限验收）**
+   - `tsc --noEmit --target es2022 --module nodenext --moduleResolution nodenext --skipLibCheck` 针对改动文件通过
+   - `vitest` 入口缺失，`packages/core` 全量编译受外部依赖类型缺失影响，需在交接中声明限制
+
 ## Wave 3：验证与清理
 
 **验证边界真的收口，避免留下双真相源。**

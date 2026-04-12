@@ -2,6 +2,7 @@
  * 模型热切换类型定义
  */
 
+import type { RuntimeProviderFamily } from '../config/types.js';
 import { Message } from '../hooks/types.js';
 import { AdapterConfig } from '../adapters/types.js';
 
@@ -11,7 +12,7 @@ import { AdapterConfig } from '../adapters/types.js';
 export interface ModelInfo {
   id: string;
   name: string;
-  provider: 'claude' | 'gemini' | 'codex' | 'openai' | 'custom';
+  provider: RuntimeProviderFamily;
   capabilities: ModelCapabilities;
   contextWindow: number;
   maxOutputTokens: number;
