@@ -176,6 +176,29 @@ created_at: 2026-04-12T12:51:13.074604+00:00
    - `go test ./cmd/codeflow-server ./internal/config ./internal/commander`
    - 重点断言 `registerConfiguredAgents()` 能注册 3 个默认角色、缺失 API channel 时跳过、非法 provider 时启动失败
 
+### Wave 6 frozen slices
+
+**第六轮冻结为 builder-only / no-owner closeout，继续把 execution boundary 固定在 TS runtime/core。**
+
+1. **Go 侧保持 builder-only，不新增真实 runtime consumer**
+   - `cmd/codeflow-server/main.go:135` 的 `registerConfiguredAgents()` 仍只做 `ResolveConfig()` → `BuildAgentFromResolved()` → `RegisterAgent()`
+   - `cmd/codeflow-server/main.go:159` 仅把构建结果映射成 `agent.Agent` metadata，`cmd/codeflow-server/main.go:165` 在注册后立即关闭 `built.Adapter`
+   - 这说明当前 Go 侧没有持续持有 adapter / commander runtime 的真实 consumer，本轮不扩展 owner/runtime wiring
+
+2. **TS execution boundary 继续留在 runtime/core**
+   - `../packages/core/src/tool-runtime/HeadlessToolRuntime.ts:54` 仍统一收口 `HookManager` / `SkillDispatcher` / `MCPGateway` / `ToolExecutor`
+   - `../packages/core/src/tool-runtime/types.ts:33` 的 `ToolContext` 继续以 `entryPoint/sessionId/taskId/agentId` 表达执行上下文
+   - 因此 hook / skill / tool / cowork 的 execution boundary 继续留在 TS，不在 Go 补 owner-aware orchestration
+
+3. **owner 需求暂冻结为 no-owner，不在本轮偷渡**
+   - 当前 Go 启动链只有角色级 register/build 证据，没有 owner 级消费面：`cmd/codeflow-server/main.go:143`、`cmd/codeflow-server/main.go:159`
+   - 当前 TS runtime 暴露的是 session / task / agent 作用域，而不是 owner 作用域：`../packages/core/src/tool-runtime/types.ts:35`
+   - 所以如果未来确实要做 owner，必须另开一个 session-scoped runtime interface 切片，先定义 owner 如何挂接到现有 `ToolContext` / runtime trace，再评估是否需要 Go/TS 边界调整
+
+4. **本轮关闭口径**
+   - 维持 builder-only / no-owner frozen state，不新增 Go runtime wiring
+   - 该结论是治理冻结，不是功能否定；后续若出现真实 consumer，再另开切片
+
 ## Wave 3：验证与清理
 
 **验证边界真的收口，避免留下双真相源。**
