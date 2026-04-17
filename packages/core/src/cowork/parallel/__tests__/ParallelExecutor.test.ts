@@ -12,7 +12,9 @@ import {
 import { ResultCollector } from '../ResultCollector.js';
 import { WorkerPool } from '../WorkerPool.js';
 import { CodexCodeEditor } from '../../editors/CodexCodeEditor.js';
+import { GeminiCodeEditor } from '../../editors/GeminiCodeEditor.js';
 import { CodexCLIAdapter } from '../../adapters/CodexCLIAdapter.js';
+import { GeminiCLIAdapter } from '../../adapters/GeminiCLIAdapter.js';
 import {
   CoworkTask,
   ICodeEditor,
@@ -286,6 +288,24 @@ describe('ParallelExecutor', () => {
       expect(clonedEditor.getAdapter()).toBe(codexCliAdapter);
       expect(clonedEditor.getConfig().cwd).toBe('/sandboxed-cwd');
       expect(clonedEditor.getConfig().model).toBe('gpt-5-codex');
+    });
+  });
+
+  describe('Gemini editor cloning', () => {
+    it('preserves Gemini CLI adapter when cloning editor for worktree cwd', () => {
+      const geminiCliAdapter = new GeminiCLIAdapter({ geminiPath: 'gemini' });
+      const editor = new GeminiCodeEditor(geminiCliAdapter, {
+        cwd: '/original-cwd',
+        model: 'gemini-2.5-pro',
+      });
+
+      const clonedEditor = (executor as any).cloneEditorForCwd(editor, '/sandboxed-cwd') as GeminiCodeEditor;
+
+      expect(clonedEditor).toBeInstanceOf(GeminiCodeEditor);
+      expect(clonedEditor).not.toBe(editor);
+      expect(clonedEditor.getAdapter()).toBe(geminiCliAdapter);
+      expect(clonedEditor.getConfig().cwd).toBe('/sandboxed-cwd');
+      expect(clonedEditor.getConfig().model).toBe('gemini-2.5-pro');
     });
   });
 

@@ -11,6 +11,7 @@ import {
 import { CoworkOrchestrator } from '../CoworkOrchestrator.js';
 import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
 import { CodexCLIAdapter } from '../adapters/CodexCLIAdapter.js';
+import { GeminiCLIAdapter } from '../adapters/GeminiCLIAdapter.js';
 import { HookEvent } from '../../hooks/types.js';
 
 function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
@@ -35,6 +36,11 @@ function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
 
 function createCodexCliAdapter(overrides: Record<string, unknown> = {}) {
   const adapter = new CodexCLIAdapter({ codexPath: 'codex' });
+  return Object.assign(adapter, overrides);
+}
+
+function createGeminiCliAdapter(overrides: Record<string, unknown> = {}) {
+  const adapter = new GeminiCLIAdapter({ geminiPath: 'gemini' });
   return Object.assign(adapter, overrides);
 }
 
@@ -189,6 +195,16 @@ describe('Factory Functions', () => {
       expect(editor.name).toBe('gemini-editor');
       expect(orchestrator.getExecutor('gemini')).toBeDefined();
     });
+
+    it('should register Gemini CLI adapter as executor', () => {
+      const geminiCliAdapter = createGeminiCliAdapter();
+
+      const editor = registerGeminiExecutor(orchestrator, geminiCliAdapter);
+
+      expect(editor.name).toBe('gemini-editor');
+      expect(orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(editor.getAdapter()).toBe(geminiCliAdapter);
+    });
   });
   describe('registerCodexExecutor', () => {
     it('should register Codex executor', () => {
@@ -212,6 +228,21 @@ describe('Factory Functions', () => {
   });
 
   describe('createOrchestratorWithAllEditors', () => {
+    it('should create orchestrator with a real Gemini CLI adapter', () => {
+      const geminiCliAdapter = createGeminiCliAdapter();
+
+      const result = createOrchestratorWithAllEditors({
+        geminiCliAdapter,
+      });
+
+      expect(result.geminiEditor).toBeDefined();
+      expect(result.orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(result.geminiEditor?.getAdapter()).toBe(geminiCliAdapter);
+      expect(geminiCliAdapter.getHookManager()).toBe(result.orchestrator.getHookManager());
+
+      result.orchestrator.cleanup();
+    });
+
     it('should create orchestrator with a real Codex CLI adapter', () => {
       const codexCliAdapter = createCodexCliAdapter();
 

@@ -21,7 +21,6 @@ import { CodexCodeEditor } from '../editors/CodexCodeEditor.js';
 import { GeminiCodeEditor } from '../editors/GeminiCodeEditor.js';
 import { AiderAdapter } from '../adapters/AiderAdapter.js';
 import { ClaudeAdapter } from '../../adapters/ClaudeAdapter.js';
-import { GeminiAdapter } from '../../adapters/GeminiAdapter.js';
 
 /**
  * Agent Worker 状态
@@ -140,8 +139,8 @@ export class ParallelExecutor extends EventEmitter {
     }
 
     if (editor instanceof GeminiCodeEditor) {
-      return new GeminiCodeEditor((editor as any).adapter as GeminiAdapter, {
-        ...(editor as any).config,
+      return new GeminiCodeEditor(editor.getAdapter(), {
+        ...editor.getConfig(),
         cwd,
       });
     }

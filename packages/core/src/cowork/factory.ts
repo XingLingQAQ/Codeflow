@@ -9,9 +9,14 @@ import { AgentRuntime } from './runtime.js';
 import { CoworkOrchestrator } from './CoworkOrchestrator.js';
 import { AiderAdapter, AiderConfig } from './adapters/AiderAdapter.js';
 import { CodexCLIAdapter } from './adapters/CodexCLIAdapter.js';
+import { GeminiCLIAdapter } from './adapters/GeminiCLIAdapter.js';
 import { AiderCodeEditor, AiderEditorConfig } from './editors/AiderCodeEditor.js';
 import { ClaudeCodeEditor, ClaudeEditorConfig } from './editors/ClaudeCodeEditor.js';
-import { GeminiCodeEditor, GeminiEditorConfig } from './editors/GeminiCodeEditor.js';
+import {
+  GeminiCodeEditor,
+  GeminiEditorAdapter,
+  GeminiEditorConfig,
+} from './editors/GeminiCodeEditor.js';
 import { CodexCodeEditor, CodexEditorAdapter, CodexEditorConfig } from './editors/CodexCodeEditor.js';
 import { ClaudeAdapter } from '../adapters/ClaudeAdapter.js';
 import { GeminiAdapter } from '../adapters/GeminiAdapter.js';
@@ -201,12 +206,12 @@ export function registerClaudeExecutor(
  */
 export function registerGeminiExecutor(
   orchestrator: CoworkOrchestrator,
-  adapter: GeminiAdapter,
+  adapter: GeminiEditorAdapter,
   config?: GeminiEditorConfig,
   capabilities?: Partial<ExecutorCapabilities>,
   hookManager?: HookManager,
 ): GeminiCodeEditor {
-  const editor = new GeminiCodeEditor(attachHookManager(adapter, hookManager), config);
+  const editor = new GeminiCodeEditor(attachHookManager(adapter as HookAwareAdapter, hookManager) as GeminiEditorAdapter, config);
 
   const caps: ExecutorCapabilities = {
     ...DEFAULT_GEMINI_CAPABILITIES,
@@ -248,6 +253,7 @@ export interface AllEditorsConfig {
   claudeAdapter?: ClaudeAdapter;
   claudeConfig?: ClaudeEditorConfig;
   geminiAdapter?: GeminiAdapter;
+  geminiCliAdapter?: GeminiCLIAdapter;
   geminiConfig?: GeminiEditorConfig;
   codexAdapter?: CodexAdapter;
   codexCliAdapter?: CodexCLIAdapter;
@@ -288,10 +294,11 @@ export function createOrchestratorWithAllEditors(config: AllEditorsConfig = {}):
     );
   }
 
-  if (config.geminiAdapter) {
+  const geminiExecutorAdapter = config.geminiCliAdapter ?? config.geminiAdapter;
+  if (geminiExecutorAdapter) {
     geminiEditor = registerGeminiExecutor(
       orchestrator,
-      config.geminiAdapter,
+      geminiExecutorAdapter,
       config.geminiConfig,
       undefined,
       sharedHookManager,

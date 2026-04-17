@@ -1,7 +1,6 @@
 /**
  * Gemini Code Editor
- * 基于 GeminiAdapter 实现 ICodeEditor 接口
- * 复用 Claude Editor 的 Prompt 模板
+ * 同时支持 Gemini API adapter 与 cowork Gemini CLI adapter
  */
 
 import { readFile, writeFile, copyFile, unlink, mkdir } from 'fs/promises';
@@ -9,6 +8,19 @@ import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { ICodeEditor, EditResult, Diff, DiffHunk } from '../types.js';
 import { GeminiAdapter } from '../../adapters/GeminiAdapter.js';
+import { GeminiCLIAdapter } from '../adapters/GeminiCLIAdapter.js';
+
+export type GeminiEditorAdapter = GeminiAdapter | GeminiCLIAdapter;
+
+interface GeminiPromptOptions {
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+}
+
+interface GeminiPromptExecutor {
+  executePrompt(prompt: string, options: GeminiPromptOptions): Promise<string>;
+}
 
 /**
  * Gemini Editor 配置
@@ -74,18 +86,60 @@ const PREVIEW_PROMPT_TEMPLATE = `You are a code editing assistant. Preview the c
 
 ## Output (unified diff only):`;
 
+class GeminiApiPromptExecutor implements GeminiPromptExecutor {
+  constructor(private readonly adapter: GeminiAdapter) {}
+
+  async executePrompt(prompt: string, options: GeminiPromptOptions): Promise<string> {
+    const response = await this.adapter.send(prompt, {
+      model: options.model,
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+    });
+    return response.content;
+  }
+}
+
+class GeminiCliPromptExecutor implements GeminiPromptExecutor {
+  constructor(private readonly adapter: GeminiCLIAdapter) {}
+
+  async executePrompt(prompt: string, options: GeminiPromptOptions): Promise<string> {
+    const originalConfig = this.adapter.getConfig();
+    this.adapter.configure({
+      model: options.model || originalConfig.model,
+    });
+
+    try {
+      const result = await this.adapter.execute(prompt, {
+        cwd: originalConfig.cwd,
+      });
+
+      if (result.exitCode !== 0) {
+        throw new Error(result.stderr || `Gemini CLI exited with code ${result.exitCode}`);
+      }
+
+      return result.stdout;
+    } finally {
+      this.adapter.configure({
+        model: originalConfig.model,
+      });
+    }
+  }
+}
+
 /**
  * Gemini Code Editor
  */
 export class GeminiCodeEditor implements ICodeEditor {
   readonly name = 'gemini-editor';
 
-  private adapter: GeminiAdapter;
+  private adapter: GeminiEditorAdapter;
+  private executor: GeminiPromptExecutor;
   private config: GeminiEditorConfig;
   private backupStack: BackupRecord[] = [];
 
-  constructor(adapter: GeminiAdapter, config: GeminiEditorConfig = {}) {
+  constructor(adapter: GeminiEditorAdapter, config: GeminiEditorConfig = {}) {
     this.adapter = adapter;
+    this.executor = this.createPromptExecutor(adapter);
     this.config = {
       autoBackup: true,
       backupDir: '.gemini-backups',
@@ -119,14 +173,10 @@ export class GeminiCodeEditor implements ICodeEditor {
       .replace('{instruction}', instruction);
 
     try {
-      const response = await this.adapter.send(prompt, {
-        model: this.config.model,
-        maxTokens: this.config.maxTokens,
-        temperature: this.config.temperature,
-      });
+      const output = await this.executePrompt(prompt);
 
       // 解析 diff
-      const diff = this.parseDiff(response.content, file);
+      const diff = this.parseDiff(output, file);
 
       if (diff.hunks.length === 0) {
         return {
@@ -187,13 +237,9 @@ export class GeminiCodeEditor implements ICodeEditor {
       .replace('{instruction}', instruction);
 
     try {
-      const response = await this.adapter.send(prompt, {
-        model: this.config.model,
-        maxTokens: this.config.maxTokens,
-        temperature: this.config.temperature,
-      });
+      const output = await this.executePrompt(prompt);
 
-      return this.parseDiff(response.content, file);
+      return this.parseDiff(output, file);
     } catch {
       return this.emptyDiff(file);
     }
@@ -281,7 +327,31 @@ export class GeminiCodeEditor implements ICodeEditor {
     this.backupStack = [];
   }
 
+  getAdapter(): GeminiEditorAdapter {
+    return this.adapter;
+  }
+
+  getConfig(): GeminiEditorConfig {
+    return { ...this.config };
+  }
+
   // ==================== 私有方法 ====================
+
+  private createPromptExecutor(adapter: GeminiEditorAdapter): GeminiPromptExecutor {
+    if (adapter instanceof GeminiCLIAdapter) {
+      return new GeminiCliPromptExecutor(adapter);
+    }
+
+    return new GeminiApiPromptExecutor(adapter);
+  }
+
+  private async executePrompt(prompt: string): Promise<string> {
+    return this.executor.executePrompt(prompt, {
+      model: this.config.model,
+      maxTokens: this.config.maxTokens,
+      temperature: this.config.temperature,
+    });
+  }
 
   private resolvePath(file: string): string {
     if (this.config.cwd) {
@@ -296,7 +366,7 @@ export class GeminiCodeEditor implements ICodeEditor {
     const backupPath = join(
       dirname(file),
       backupDir,
-      `${timestamp}_${file.replace(/[/\\]/g, '_')}`
+      `${timestamp}_${file.replace(/[/\\]/g, '_')}`,
     );
 
     // 确保备份目录存在

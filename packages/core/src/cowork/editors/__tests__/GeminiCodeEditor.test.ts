@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GeminiCodeEditor } from '../GeminiCodeEditor.js';
+import { GeminiCLIAdapter } from '../../adapters/GeminiCLIAdapter.js';
 
 // Mock GeminiAdapter
 const createMockAdapter = () => ({
@@ -56,7 +57,7 @@ describe('GeminiCodeEditor', () => {
  }`,
       });
 
-      const result = await editor.edit('test.ts', 'Add logging');
+      await editor.edit('test.ts', 'Add logging');
 
       expect(mockAdapter.send).toHaveBeenCalled();
       const prompt = mockAdapter.send.mock.calls[0][0];
@@ -217,12 +218,44 @@ describe('GeminiCodeEditor', () => {
       await editor.edit('test.ts', 'Test instruction');
 
       const prompt = mockAdapter.send.mock.calls[0][0];
-      // 验证 prompt 包含关键结构
       expect(prompt).toContain('## Rules:');
       expect(prompt).toContain('## Input File:');
       expect(prompt).toContain('## Current Content:');
       expect(prompt).toContain('## Instruction:');
       expect(prompt).toContain('## Output (unified diff only):');
+    });
+  });
+
+  describe('CLI adapter path', () => {
+    it('should execute prompt through Gemini CLI adapter', async () => {
+      const cliAdapter = new GeminiCLIAdapter({
+        geminiPath: 'gemini',
+        model: 'gemini-2.5-pro',
+        cwd: '/workspace',
+      });
+      const executeSpy = vi.spyOn(cliAdapter, 'execute').mockResolvedValue({
+        stdout: `--- a/test.ts
++++ b/test.ts
+@@ -1,1 +1,2 @@
+ const x = 1;
++const y = 2;`,
+        stderr: '',
+        exitCode: 0,
+        duration: 1,
+      });
+      const configureSpy = vi.spyOn(cliAdapter, 'configure');
+
+      const cliEditor = new GeminiCodeEditor(cliAdapter, {
+        autoBackup: false,
+        model: 'gemini-2.5-pro',
+      });
+
+      const result = await cliEditor.edit('test.ts', 'Add variable');
+
+      expect(executeSpy).toHaveBeenCalled();
+      expect(configureSpy).toHaveBeenCalledWith({ model: 'gemini-2.5-pro' });
+      expect(result.success).toBe(true);
+      expect(result.diff.additions).toBe(1);
     });
   });
 });
