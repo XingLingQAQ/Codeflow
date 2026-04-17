@@ -11,6 +11,8 @@ import {
 } from '../ParallelExecutor.js';
 import { ResultCollector } from '../ResultCollector.js';
 import { WorkerPool } from '../WorkerPool.js';
+import { CodexCodeEditor } from '../../editors/CodexCodeEditor.js';
+import { CodexCLIAdapter } from '../../adapters/CodexCLIAdapter.js';
 import {
   CoworkTask,
   ICodeEditor,
@@ -269,17 +271,48 @@ describe('ParallelExecutor', () => {
     });
   });
 
+  describe('Codex editor cloning', () => {
+    it('preserves Codex CLI adapter when cloning editor for worktree cwd', () => {
+      const codexCliAdapter = new CodexCLIAdapter({ codexPath: 'codex' });
+      const editor = new CodexCodeEditor(codexCliAdapter, {
+        cwd: '/original-cwd',
+        model: 'gpt-5-codex',
+      });
+
+      const clonedEditor = (executor as any).cloneEditorForCwd(editor, '/sandboxed-cwd') as CodexCodeEditor;
+
+      expect(clonedEditor).toBeInstanceOf(CodexCodeEditor);
+      expect(clonedEditor).not.toBe(editor);
+      expect(clonedEditor.getAdapter()).toBe(codexCliAdapter);
+      expect(clonedEditor.getConfig().cwd).toBe('/sandboxed-cwd');
+      expect(clonedEditor.getConfig().model).toBe('gpt-5-codex');
+    });
+  });
+
   describe('config', () => {
-    it('should return config', () => {
+    it('should return current config', () => {
       const config = executor.getConfig();
+
       expect(config.maxWorkers).toBe(3);
       expect(config.timeout).toBe(10000);
+      expect(config.cleanupOnComplete).toBe(true);
+      expect(config.worktreePrefix).toBe('parallel-worker');
+      expect(config.failFast).toBe(false);
     });
 
-    it('should update config', () => {
-      executor.updateConfig({ maxWorkers: 5 });
+    it('should update config when not executing', () => {
+      executor.updateConfig({
+        maxWorkers: 4,
+        timeout: 5000,
+        failFast: true,
+      });
+
       const config = executor.getConfig();
-      expect(config.maxWorkers).toBe(5);
+
+      expect(config.maxWorkers).toBe(4);
+      expect(config.timeout).toBe(5000);
+      expect(config.failFast).toBe(true);
+      expect(config.cleanupOnComplete).toBe(true);
     });
   });
 });

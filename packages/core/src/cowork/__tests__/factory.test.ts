@@ -10,6 +10,7 @@ import {
 } from '../factory.js';
 import { CoworkOrchestrator } from '../CoworkOrchestrator.js';
 import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
+import { CodexCLIAdapter } from '../adapters/CodexCLIAdapter.js';
 import { HookEvent } from '../../hooks/types.js';
 
 function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
@@ -23,13 +24,18 @@ function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
     rewind: vi.fn(),
     compact: vi.fn(),
     configure: vi.fn(),
-    getConfig: vi.fn(),
+    getConfig: vi.fn().mockReturnValue({ model: 'test-model' }),
     setHookManager: vi.fn((manager) => {
       hookManager = manager;
     }),
     getHookManager: vi.fn(() => hookManager),
     ...overrides,
   };
+}
+
+function createCodexCliAdapter(overrides: Record<string, unknown> = {}) {
+  const adapter = new CodexCLIAdapter({ codexPath: 'codex' });
+  return Object.assign(adapter, overrides);
 }
 
 describe('Factory Functions', () => {
@@ -184,7 +190,6 @@ describe('Factory Functions', () => {
       expect(orchestrator.getExecutor('gemini')).toBeDefined();
     });
   });
-
   describe('registerCodexExecutor', () => {
     it('should register Codex executor', () => {
       const mockAdapter = createHookAwareAdapter();
@@ -194,25 +199,30 @@ describe('Factory Functions', () => {
       expect(editor.name).toBe('codex-editor');
       expect(orchestrator.getExecutor('codex')).toBeDefined();
     });
+
+    it('should register Codex CLI adapter as executor', () => {
+      const codexCliAdapter = createCodexCliAdapter();
+
+      const editor = registerCodexExecutor(orchestrator, codexCliAdapter);
+
+      expect(editor.name).toBe('codex-editor');
+      expect(orchestrator.getExecutor('codex')).toBeDefined();
+      expect(editor.getAdapter()).toBe(codexCliAdapter);
+    });
   });
 
   describe('createOrchestratorWithAllEditors', () => {
-    it('should create orchestrator with all editors registered', () => {
-      const mockClaudeAdapter = createHookAwareAdapter();
-      const mockGeminiAdapter = createHookAwareAdapter();
-      const mockCodexAdapter = createHookAwareAdapter();
+    it('should create orchestrator with a real Codex CLI adapter', () => {
+      const codexCliAdapter = createCodexCliAdapter();
 
       const result = createOrchestratorWithAllEditors({
-        claudeAdapter: mockClaudeAdapter as any,
-        geminiAdapter: mockGeminiAdapter as any,
-        codexAdapter: mockCodexAdapter as any,
+        codexCliAdapter,
       });
 
-      expect(result.orchestrator).toBeInstanceOf(CoworkOrchestrator);
-      expect(result.orchestrator.getExecutor('aider')).toBeDefined();
-      expect(result.orchestrator.getExecutor('claude')).toBeDefined();
-      expect(result.orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(result.codexEditor).toBeDefined();
       expect(result.orchestrator.getExecutor('codex')).toBeDefined();
+      expect(result.codexEditor?.getAdapter()).toBe(codexCliAdapter);
+      expect(codexCliAdapter.getHookManager()).toBe(result.orchestrator.getHookManager());
 
       result.orchestrator.cleanup();
     });
@@ -222,7 +232,7 @@ describe('Factory Functions', () => {
       const mockGeminiAdapter = createHookAwareAdapter();
       const mockCodexAdapter = createHookAwareAdapter();
 
-      createOrchestratorWithAllEditors({
+      const result = createOrchestratorWithAllEditors({
         claudeAdapter: mockClaudeAdapter as any,
         geminiAdapter: mockGeminiAdapter as any,
         codexAdapter: mockCodexAdapter as any,
