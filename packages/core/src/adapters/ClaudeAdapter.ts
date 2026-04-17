@@ -1,5 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ICliAdapter, AdapterConfig, SendOptions, APIError, TimeoutError } from './types.js';
+import {
+  ICliAdapter,
+  AdapterConfig,
+  SendOptions,
+  APIError,
+  TimeoutError,
+  AdapterPayloadContext,
+  toHookPayload,
+  applyHookPayload,
+} from './types.js';
 import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
@@ -54,36 +63,9 @@ export class ClaudeAdapter implements ICliAdapter {
     };
     this.history.push(userMessage);
 
-    // 构建请求 payload
-    let payload = {
-      messages: this.history.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      model: options?.model || this.config.model,
-      temperature: options?.temperature ?? this.config.temperature,
-      max_tokens: options?.maxTokens || this.config.maxTokens,
-    };
-
-    // 触发 hook_before_send
-    if (this.hookManager) {
-      const processedPayload = await this.hookManager.hook_before_send({
-        messages: this.history,
-        model: payload.model,
-        temperature: payload.temperature,
-        maxTokens: payload.max_tokens,
-      });
-
-      payload = {
-        messages: processedPayload.messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-        model: processedPayload.model || payload.model,
-        temperature: processedPayload.temperature ?? payload.temperature,
-        max_tokens: processedPayload.maxTokens || payload.max_tokens,
-      };
-    }
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+    const system = this.extractSystemPrompt(payload.messages);
+    const messages = this.mapMessagesToProviderPayload(payload.messages);
 
     try {
       // 发送请求
@@ -93,10 +75,11 @@ export class ClaudeAdapter implements ICliAdapter {
         }
 
         return await this.client.messages.create({
-          messages: payload.messages as Anthropic.MessageParam[],
+          messages,
+          system,
           model: payload.model,
           temperature: payload.temperature,
-          max_tokens: payload.max_tokens!,
+          max_tokens: payload.maxTokens!,
           stream: false,
         });
       }, options?.timeout);
@@ -156,43 +139,17 @@ export class ClaudeAdapter implements ICliAdapter {
     };
     this.history.push(userMessage);
 
-    // 构建请求 payload
-    let payload = {
-      messages: this.history.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      model: options?.model || this.config.model,
-      temperature: options?.temperature ?? this.config.temperature,
-      max_tokens: options?.maxTokens || this.config.maxTokens,
-    };
-
-    // 触发 hook_before_send
-    if (this.hookManager) {
-      const processedPayload = await this.hookManager.hook_before_send({
-        messages: this.history,
-        model: payload.model,
-        temperature: payload.temperature,
-        maxTokens: payload.max_tokens,
-      });
-
-      payload = {
-        messages: processedPayload.messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-        model: processedPayload.model || payload.model,
-        temperature: processedPayload.temperature ?? payload.temperature,
-        max_tokens: processedPayload.maxTokens || payload.max_tokens,
-      };
-    }
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+    const system = this.extractSystemPrompt(payload.messages);
+    const messages = this.mapMessagesToProviderPayload(payload.messages);
 
     try {
       const stream = await this.client.messages.create({
-        messages: payload.messages as Anthropic.MessageParam[],
+        messages,
+        system,
         model: payload.model,
         temperature: payload.temperature,
-        max_tokens: payload.max_tokens!,
+        max_tokens: payload.maxTokens!,
         stream: true,
       });
 
@@ -254,9 +211,44 @@ export class ClaudeAdapter implements ICliAdapter {
     }
   }
 
-  /**
-   * 获取对话历史
-   */
+  private buildPayloadContext(options?: SendOptions): AdapterPayloadContext {
+    return {
+      messages: [...this.history],
+      model: options?.model || this.config.model,
+      temperature: options?.temperature ?? this.config.temperature,
+      maxTokens: options?.maxTokens || this.config.maxTokens,
+    };
+  }
+
+  private mapMessagesToProviderPayload(messages: Message[]): Anthropic.MessageParam[] {
+    return messages
+      .filter((message): message is Message & { role: 'user' | 'assistant' } =>
+        message.role === 'user' || message.role === 'assistant'
+      )
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      })) as Anthropic.MessageParam[];
+  }
+
+  private extractSystemPrompt(messages: Message[]): string | undefined {
+    const systemMessages = messages.filter((message) => message.role === 'system');
+    if (systemMessages.length === 0) {
+      return undefined;
+    }
+
+    return systemMessages.map((message) => message.content).join('\n\n');
+  }
+
+  private async applyBeforeSendHooks(context: AdapterPayloadContext): Promise<AdapterPayloadContext> {
+    if (!this.hookManager) {
+      return context;
+    }
+
+    const processedPayload = await this.hookManager.hook_before_send(toHookPayload(context));
+    return applyHookPayload(context, processedPayload);
+  }
+
   getHistory(): Message[] {
     return [...this.history];
   }

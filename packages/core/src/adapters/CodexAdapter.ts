@@ -4,7 +4,16 @@
  */
 
 import OpenAI from 'openai';
-import { ICliAdapter, AdapterConfig, SendOptions, APIError, TimeoutError } from './types.js';
+import {
+  ICliAdapter,
+  AdapterConfig,
+  SendOptions,
+  APIError,
+  TimeoutError,
+  AdapterPayloadContext,
+  toHookPayload,
+  applyHookPayload,
+} from './types.js';
 import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
@@ -48,6 +57,24 @@ export class CodexAdapter implements ICliAdapter {
     return this.hookManager;
   }
 
+
+  private buildPayloadContext(options?: SendOptions): AdapterPayloadContext {
+    return {
+      messages: [...this.history],
+      model: options?.model || this.config.model,
+      temperature: options?.temperature ?? this.config.temperature,
+      maxTokens: options?.maxTokens || this.config.maxTokens,
+    };
+  }
+
+  private async applyBeforeSendHooks(context: AdapterPayloadContext): Promise<AdapterPayloadContext> {
+    if (!this.hookManager) {
+      return context;
+    }
+
+    const processedPayload = await this.hookManager.hook_before_send(toHookPayload(context));
+    return applyHookPayload(context, processedPayload);
+  }
   async send(prompt: string, options?: SendOptions): Promise<AIResponse> {
     const mergedOptions = { ...this.config, ...options };
 
@@ -60,23 +87,7 @@ export class CodexAdapter implements ICliAdapter {
 
     this.history.push(userMessage);
 
-    // Hook: before_send
-    let payload = {
-      messages: [...this.history],
-      model: mergedOptions.model!,
-      temperature: mergedOptions.temperature,
-      maxTokens: mergedOptions.maxTokens,
-    };
-
-    if (this.hookManager) {
-      const processedPayload = await this.hookManager.hook_before_send(payload);
-      payload = {
-        messages: [...processedPayload.messages],
-        model: processedPayload.model || payload.model,
-        temperature: processedPayload.temperature ?? payload.temperature,
-        maxTokens: processedPayload.maxTokens || payload.maxTokens,
-      };
-    }
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
 
     // 转换为 OpenAI 格式
     const messages = payload.messages.map((msg) => ({

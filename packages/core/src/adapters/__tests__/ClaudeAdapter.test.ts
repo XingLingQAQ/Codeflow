@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ClaudeAdapter } from '../ClaudeAdapter.js';
 import { AdapterConfig, APIError, TimeoutError } from '../types.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { HookEvent } from '../../hooks/types.js';
 
 // Mock Anthropic SDK
 vi.mock('@anthropic-ai/sdk', () => {
@@ -94,6 +95,45 @@ describe('ClaudeAdapter', () => {
       expect(response.usage.completionTokens).toBe(5);
       expect(response.usage.totalTokens).toBe(15);
       expect(response.finishReason).toBe('end_turn');
+    });
+
+    it('applies before_send payload mutations to provider request', async () => {
+      const manager = new HookManager();
+      manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
+        ...payload,
+        model: 'claude-hook-model',
+        temperature: 0.1,
+        maxTokens: 12,
+        messages: [
+          { role: 'system', content: 'hooked-system', timestamp: Date.now() },
+          ...payload.messages,
+        ],
+      }));
+      adapter = new ClaudeAdapter(mockConfig, manager);
+
+      const mockResponse = {
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-hook-model',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stop_reason: 'end_turn',
+      };
+
+      const mockClient = (adapter as any).client;
+      mockClient.messages.create.mockResolvedValue(mockResponse);
+
+      await adapter.send('Hello');
+
+      expect(mockClient.messages.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'claude-hook-model',
+          system: 'hooked-system',
+          temperature: 0.1,
+          max_tokens: 12,
+          messages: expect.arrayContaining([
+            expect.objectContaining({ role: 'user', content: 'Hello' }),
+          ]),
+        })
+      );
     });
 
     it('should add messages to history', async () => {

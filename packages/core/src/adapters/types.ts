@@ -2,7 +2,7 @@
  * CLI Adapter 接口类型定义
  */
 
-import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
+import { Message, AIResponse, StreamChunk, RequestPayload } from '../hooks/types.js';
 
 /**
  * 发送选项
@@ -14,6 +14,32 @@ export interface SendOptions {
   stream?: boolean;
   timeout?: number;
   [key: string]: unknown;
+}
+
+export interface ProviderRequestConfig {
+  apiKey?: string;
+  baseURL?: string;
+  timeout?: number;
+  maxRetries?: number;
+}
+
+export interface AdapterRuntimeConfig extends ProviderRequestConfig {
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+/**
+ * 运行时 resolved config 的最小只读视图。
+ * provider 认证/重试属于 provider request config；
+ * runtime metadata 继续由 ConfigManager/runtime 真相源持有，不下沉到 adapter config。
+ */
+export interface ResolvedAdapterConfig extends AdapterRuntimeConfig {
+  systemPrompt?: string;
+  answerStyle?: string;
+  capabilities?: string[];
+  allowedSkills?: string[];
+  allowedHooks?: string[];
 }
 
 /**
@@ -28,6 +54,34 @@ export interface AdapterConfig {
   timeout?: number;
   maxRetries?: number;
   retryDelay?: number;
+}
+
+export interface AdapterPayloadContext {
+  messages: Message[];
+  model: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export function toHookPayload(context: AdapterPayloadContext): RequestPayload {
+  return {
+    messages: context.messages.map((message) => ({ ...message })),
+    model: context.model,
+    temperature: context.temperature,
+    maxTokens: context.maxTokens,
+  };
+}
+
+export function applyHookPayload(
+  context: AdapterPayloadContext,
+  payload: RequestPayload
+): AdapterPayloadContext {
+  return {
+    messages: (payload.messages ?? context.messages).map((message) => ({ ...message })),
+    model: typeof payload.model === 'string' && payload.model.length > 0 ? payload.model : context.model,
+    temperature: payload.temperature ?? context.temperature,
+    maxTokens: payload.maxTokens ?? context.maxTokens,
+  };
 }
 
 /**

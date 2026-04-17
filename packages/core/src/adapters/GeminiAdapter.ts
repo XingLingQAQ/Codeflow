@@ -4,7 +4,16 @@
  */
 
 import { GoogleGenerativeAI, GenerativeModel, Content, Part } from '@google/generative-ai';
-import { ICliAdapter, AdapterConfig, SendOptions, APIError, TimeoutError } from './types.js';
+import {
+  ICliAdapter,
+  AdapterConfig,
+  SendOptions,
+  APIError,
+  TimeoutError,
+  AdapterPayloadContext,
+  toHookPayload,
+  applyHookPayload,
+} from './types.js';
 import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
@@ -49,6 +58,24 @@ export class GeminiAdapter implements ICliAdapter {
     return this.hookManager;
   }
 
+  private buildPayloadContext(options?: SendOptions): AdapterPayloadContext {
+    return {
+      messages: [...this.history],
+      model: options?.model || this.config.model,
+      temperature: options?.temperature ?? this.config.temperature,
+      maxTokens: options?.maxTokens || this.config.maxTokens,
+    };
+  }
+
+  private async applyBeforeSendHooks(context: AdapterPayloadContext): Promise<AdapterPayloadContext> {
+    if (!this.hookManager) {
+      return context;
+    }
+
+    const processedPayload = await this.hookManager.hook_before_send(toHookPayload(context));
+    return applyHookPayload(context, processedPayload);
+  }
+
   async send(prompt: string | MultimodalInput, options?: SendOptions): Promise<AIResponse> {
     const mergedOptions = { ...this.config, ...options };
 
@@ -60,22 +87,7 @@ export class GeminiAdapter implements ICliAdapter {
 
     this.history.push(userMessage);
 
-    let payload = {
-      messages: [...this.history],
-      model: mergedOptions.model!,
-      temperature: mergedOptions.temperature,
-      maxTokens: mergedOptions.maxTokens,
-    };
-
-    if (this.hookManager) {
-      const processedPayload = await this.hookManager.hook_before_send(payload);
-      payload = {
-        messages: [...processedPayload.messages],
-        model: processedPayload.model || payload.model,
-        temperature: processedPayload.temperature ?? payload.temperature,
-        maxTokens: processedPayload.maxTokens || payload.maxTokens,
-      };
-    }
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
 
     const effectivePrompt = this.resolvePromptFromPayload(prompt, payload.messages);
     const contents = this.convertToGeminiFormat(effectivePrompt);
