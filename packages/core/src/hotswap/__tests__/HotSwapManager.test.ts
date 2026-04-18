@@ -8,6 +8,7 @@ import { Message } from '../../hooks/types.js';
 function createMockAdapter(history: Message[] = []): ICliAdapter {
   return {
     send: vi.fn().mockResolvedValue({ content: 'Response', model: 'test' }),
+    stream: vi.fn(),
     receive: vi.fn(),
     getHistory: vi.fn().mockReturnValue(history),
     setHistory: vi.fn(),

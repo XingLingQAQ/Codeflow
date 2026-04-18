@@ -8,6 +8,7 @@ import { CodexCodeEditor } from '../CodexCodeEditor.js';
 // Mock CodexAdapter
 const createMockAdapter = () => ({
   send: vi.fn(),
+  stream: vi.fn(),
   receive: vi.fn(),
   getHistory: vi.fn().mockReturnValue([]),
   setHistory: vi.fn(),

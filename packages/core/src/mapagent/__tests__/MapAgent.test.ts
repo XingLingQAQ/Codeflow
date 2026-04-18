@@ -20,6 +20,7 @@ function createMockAdapter(response?: string): ICliAdapter {
       content: response || '{"entities":[],"decisions":[],"relations":[]}',
       model: 'test',
     }),
+    stream: vi.fn(),
     receive: vi.fn(),
     getHistory: vi.fn().mockReturnValue([]),
     setHistory: vi.fn(),

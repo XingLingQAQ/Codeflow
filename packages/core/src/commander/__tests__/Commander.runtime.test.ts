@@ -11,6 +11,7 @@ function createHookAwareAdapter(): ICliAdapter & { setHookManager: ReturnType<ty
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       finishReason: 'stop',
     }),
+    stream: vi.fn(),
     receive: vi.fn(),
     getHistory: vi.fn().mockReturnValue([]),
     setHistory: vi.fn(),

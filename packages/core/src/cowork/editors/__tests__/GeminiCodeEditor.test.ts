@@ -9,6 +9,7 @@ import { GeminiCLIAdapter } from '../../adapters/GeminiCLIAdapter.js';
 // Mock GeminiAdapter
 const createMockAdapter = () => ({
   send: vi.fn(),
+  stream: vi.fn(),
   receive: vi.fn(),
   getHistory: vi.fn().mockReturnValue([]),
   setHistory: vi.fn(),

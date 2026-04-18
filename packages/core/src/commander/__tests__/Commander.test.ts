@@ -18,6 +18,7 @@ function createMockAdapter(options: MockAdapterOptions = {}): ICliAdapter {
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       finishReason: 'stop',
     }),
+    stream: vi.fn(),
     receive: vi.fn(),
     getHistory: vi.fn().mockReturnValue(options.history ?? []),
     setHistory: vi.fn(),
