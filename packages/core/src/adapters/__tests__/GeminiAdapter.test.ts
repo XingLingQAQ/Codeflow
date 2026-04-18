@@ -546,13 +546,158 @@ describe('GeminiAdapter', () => {
       expect(config.maxTokens).toBe(4096);
     });
 
-    it('should call getGenerativeModel when model name changes', () => {
+    it('should preserve existing values when update fields are undefined', () => {
+      adapter.configure({
+        temperature: undefined,
+        maxTokens: undefined,
+        timeout: undefined,
+        maxRetries: undefined,
+      });
+
+      expect(adapter.getConfig()).toMatchObject({
+        temperature: 0.7,
+        maxTokens: 8192,
+        timeout: 60000,
+        maxRetries: 3,
+      });
+    });
+
+    it('should keep explicit zero values in runtime configuration', () => {
+      adapter.configure({ temperature: 0, maxTokens: 0, timeout: 0, maxRetries: 0 });
+
+      expect(adapter.getConfig()).toMatchObject({
+        temperature: 0,
+        maxTokens: 0,
+        timeout: 0,
+        maxRetries: 0,
+      });
+    });
+
+    it('should recreate client when apiKey changes', () => {
+      const oldClient = (adapter as any).client;
+
+      adapter.configure({ apiKey: 'new-api-key' });
+
+      expect((adapter as any).client).not.toBe(oldClient);
+      expect(adapter.getConfig().apiKey).toBe('new-api-key');
+    });
+
+    it('should recreate model with baseURL when provider request config changes', () => {
       const mockClient = (adapter as any).client;
       const spy = vi.spyOn(mockClient, 'getGenerativeModel');
 
-      adapter.configure({ model: 'gemini-pro' });
+      adapter.configure({ model: 'gemini-pro', baseURL: 'https://proxy.example.com', timeout: 1500, maxRetries: 5 });
 
-      expect(spy).toHaveBeenCalledWith({ model: 'gemini-pro' });
+      expect(spy).toHaveBeenCalledWith(
+        { model: 'gemini-pro' },
+        { baseUrl: 'https://proxy.example.com' }
+      );
+      expect(adapter.getConfig()).toMatchObject({
+        model: 'gemini-pro',
+        baseURL: 'https://proxy.example.com',
+        timeout: 1500,
+        maxRetries: 5,
+      });
+    });
+
+    it('should use updated provider config across send stream and ad hoc model resolution', async () => {
+      adapter.configure({
+        baseURL: 'https://proxy.example.com',
+        timeout: 0,
+        maxRetries: 0,
+        temperature: 0,
+        maxTokens: 0,
+      });
+
+      const configuredModel = (adapter as any).model;
+      configuredModel.generateContent.mockResolvedValue({
+        response: {
+          text: () => 'configured send',
+          usageMetadata: {
+            promptTokenCount: 1,
+            candidatesTokenCount: 1,
+            totalTokenCount: 2,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        },
+      });
+      configuredModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'configured' };
+          yield { text: () => ' stream' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 1,
+            candidatesTokenCount: 1,
+            totalTokenCount: 2,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      await adapter.send('Hello');
+      for await (const _chunk of adapter.stream('Hello')) {
+      }
+
+      const mockClient = (adapter as any).client;
+      const alternateModel = {
+        generateContent: vi.fn().mockResolvedValue({
+          response: {
+            text: () => 'alternate model',
+            usageMetadata: {
+              promptTokenCount: 1,
+              candidatesTokenCount: 1,
+              totalTokenCount: 2,
+            },
+            candidates: [{ finishReason: 'STOP' }],
+          },
+        }),
+      };
+      mockClient.getGenerativeModel.mockReturnValueOnce(alternateModel as any);
+
+      await adapter.send('Switch', { model: 'gemini-1.5-pro' });
+
+      expect(configuredModel.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: expect.objectContaining({
+            temperature: 0,
+            maxOutputTokens: 0,
+          }),
+        })
+      );
+      expect(configuredModel.generateContentStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: expect.objectContaining({
+            temperature: 0,
+            maxOutputTokens: 0,
+          }),
+        })
+      );
+      expect(mockClient.getGenerativeModel).toHaveBeenCalledWith(
+        { model: 'gemini-1.5-pro' },
+        { baseUrl: 'https://proxy.example.com' }
+      );
+      expect(alternateModel.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: expect.objectContaining({
+            temperature: 0,
+            maxOutputTokens: 0,
+          }),
+        })
+      );
+    });
+
+    it('should treat maxRetries zero as single attempt without fallback retries', async () => {
+      adapter.configure({ maxRetries: 0, timeout: 1 });
+
+      const mockModel = (adapter as any).model;
+      mockModel.generateContent.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, 100))
+      );
+
+      await expect(adapter.send('Hello')).rejects.toThrow(TimeoutError);
+      expect(mockModel.generateContent).toHaveBeenCalledTimes(1);
     });
   });
 

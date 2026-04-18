@@ -41,15 +41,15 @@ export class GeminiAdapter implements ICliAdapter {
       maxRetries: 3,
       retryDelay: 1000,
       ...config,
-      model: config.model || 'gemini-2.0-flash-exp',
+      model: config.model ?? 'gemini-2.0-flash-exp',
     };
 
     if (!this.config.apiKey) {
       throw new Error('Gemini API key is required');
     }
 
-    this.client = new GoogleGenerativeAI(this.config.apiKey);
-    this.model = this.client.getGenerativeModel({ model: this.config.model });
+    this.client = this.createClient(this.config);
+    this.model = this.createModel(this.config.model);
     this.hookManager = hookManager;
   }
 
@@ -61,12 +61,53 @@ export class GeminiAdapter implements ICliAdapter {
     return this.hookManager;
   }
 
+  private createClient(config: AdapterConfig): GoogleGenerativeAI {
+    return new GoogleGenerativeAI(config.apiKey!);
+  }
+
+  private createModel(modelName: string): GenerativeModel {
+    if (this.config.baseURL) {
+      return this.client.getGenerativeModel({ model: modelName }, { baseUrl: this.config.baseURL });
+    }
+
+    return this.client.getGenerativeModel({ model: modelName });
+  }
+
+  private mergeConfig(config: Partial<AdapterConfig>): AdapterConfig {
+    const nextConfig: AdapterConfig = { ...this.config };
+
+    for (const [key, value] of Object.entries(config)) {
+      if (value !== undefined) {
+        (nextConfig as Record<string, unknown>)[key] = value;
+      }
+    }
+
+    return nextConfig;
+  }
+
+  private mergeRuntimeOptions(options?: SendOptions): SendOptions & AdapterConfig {
+    const mergedOptions: SendOptions & AdapterConfig = { ...this.config };
+
+    for (const [key, value] of Object.entries(options ?? {})) {
+      if (value !== undefined) {
+        (mergedOptions as Record<string, unknown>)[key] = value;
+      }
+    }
+
+    return mergedOptions;
+  }
+
+  private resolveAttemptCount(maxRetries?: number): number {
+    const configuredRetries = maxRetries ?? 3;
+    return configuredRetries <= 0 ? 1 : configuredRetries;
+  }
+
   private buildPayloadContext(options?: SendOptions): AdapterPayloadContext {
     return {
       messages: [...this.history],
-      model: options?.model || this.config.model,
+      model: options?.model ?? this.config.model,
       temperature: options?.temperature ?? this.config.temperature,
-      maxTokens: options?.maxTokens || this.config.maxTokens,
+      maxTokens: options?.maxTokens ?? this.config.maxTokens,
     };
   }
 
@@ -84,7 +125,7 @@ export class GeminiAdapter implements ICliAdapter {
       throw new Error('Use stream() for streaming responses');
     }
 
-    const mergedOptions = { ...this.config, ...options };
+    const mergedOptions = this.mergeRuntimeOptions(options);
 
     const userMessage: Message = {
       role: 'user',
@@ -97,9 +138,10 @@ export class GeminiAdapter implements ICliAdapter {
     const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
     const request = this.buildGeminiRequest(prompt, payload.messages);
     const model = this.getModel(payload.model);
+    const maxAttempts = this.resolveAttemptCount(mergedOptions.maxRetries);
 
     let lastError: Error | null = null;
-    for (let attempt = 0; attempt < (mergedOptions.maxRetries || 3); attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const result = await this.sendWithTimeout(model, request, {
           ...mergedOptions,
@@ -135,8 +177,8 @@ export class GeminiAdapter implements ICliAdapter {
         lastError = error as Error;
 
         if (error instanceof TimeoutError || this.isRetryableError(error)) {
-          if (attempt < (mergedOptions.maxRetries || 3) - 1) {
-            await this.delay(mergedOptions.retryDelay || 1000);
+          if (attempt < maxAttempts - 1) {
+            await this.delay(mergedOptions.retryDelay ?? 1000);
             continue;
           }
         }
@@ -149,7 +191,7 @@ export class GeminiAdapter implements ICliAdapter {
   }
 
   async *stream(prompt: string | MultimodalInput, options?: SendOptions): AsyncGenerator<StreamChunk> {
-    const mergedOptions = { ...this.config, ...options };
+    const mergedOptions = this.mergeRuntimeOptions(options);
 
     const userMessage: Message = {
       role: 'user',
@@ -214,10 +256,20 @@ export class GeminiAdapter implements ICliAdapter {
   }
 
   configure(config: Partial<AdapterConfig>): void {
-    this.config = { ...this.config, ...config };
+    this.config = this.mergeConfig(config);
 
-    if (config.model) {
-      this.model = this.client.getGenerativeModel({ model: config.model });
+    const shouldRecreateClient = config.apiKey !== undefined;
+    const shouldRecreateModel =
+      shouldRecreateClient ||
+      config.model !== undefined ||
+      config.baseURL !== undefined;
+
+    if (shouldRecreateClient) {
+      this.client = this.createClient(this.config);
+    }
+
+    if (shouldRecreateModel) {
+      this.model = this.createModel(this.config.model);
     }
   }
 
@@ -269,7 +321,7 @@ export class GeminiAdapter implements ICliAdapter {
 
   private getModel(modelName?: string): GenerativeModel {
     if (modelName && modelName !== this.config.model) {
-      return this.client.getGenerativeModel({ model: modelName });
+      return this.createModel(modelName);
     }
 
     return this.model;
@@ -312,7 +364,7 @@ export class GeminiAdapter implements ICliAdapter {
     options: SendOptions & AdapterConfig
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<{ response: { text: () => string; usageMetadata?: any; candidates?: any[] } }> {
-    const timeout = options.timeout || 60000;
+    const timeout = options.timeout ?? 60000;
 
     return Promise.race([
       model.generateContent({
@@ -332,7 +384,7 @@ export class GeminiAdapter implements ICliAdapter {
     request: { contents: Content[]; systemInstruction?: string },
     options: SendOptions & AdapterConfig
   ): AsyncGenerator<StreamChunk> {
-    const timeout = options.timeout || 60000;
+    const timeout = options.timeout ?? 60000;
 
     try {
       const streamResult = await Promise.race([
