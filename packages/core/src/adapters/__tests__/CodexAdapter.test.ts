@@ -186,7 +186,13 @@ describe('CodexAdapter', () => {
       await expect(adapter.send('Hello')).rejects.toThrow(APIError);
     });
 
-    it('should handle streaming', async () => {
+    it('should throw error for stream option', async () => {
+      await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
+        'Use stream() for streaming responses'
+      );
+    });
+
+    it('should handle streaming via stream()', async () => {
       const mockStream = [
         { choices: [{ delta: { content: 'Hello' } }] },
         { choices: [{ delta: { content: ' world' } }] },
@@ -202,16 +208,59 @@ describe('CodexAdapter', () => {
         },
       });
 
-      const response = await adapter.send('Hello', { stream: true });
+      const deltas: string[] = [];
+      let finalDone = false;
+      for await (const chunk of adapter.stream('Hello')) {
+        if (chunk.delta) {
+          deltas.push(chunk.delta);
+        }
+        if (chunk.done) {
+          finalDone = true;
+        }
+      }
 
-      expect(response.content).toBe('Hello world');
+      expect(deltas).toEqual(['Hello', ' world']);
+      expect(finalDone).toBe(true);
+      expect(mockHookManager.hook_on_stream).toHaveBeenCalled();
+      expect(mockHookManager.hook_post_response).toHaveBeenCalled();
+      expect(adapter.getHistory().at(-1)?.content).toBe('Hello world');
     });
   });
 
   describe('receive', () => {
-    it('should throw error when no active stream', async () => {
+    it('should throw no active stream error', async () => {
       const generator = adapter.receive();
       await expect(generator.next()).rejects.toThrow('No active stream');
+    });
+
+    it('should continue active stream and clear state after completion', async () => {
+      const mockStream = [
+        { choices: [{ delta: { content: 'Hello' } }] },
+        { choices: [{ delta: { content: ' world' } }] },
+      ];
+
+      const mockClient = (adapter as any).client;
+      mockClient.chat.completions.create.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          for (const chunk of mockStream) {
+            yield chunk;
+          }
+        },
+      });
+
+      const stream = adapter.stream('Hello');
+      const first = await stream.next();
+      expect(first.value).toMatchObject({ delta: 'Hello', done: false });
+
+      const received: string[] = [];
+      for await (const chunk of adapter.receive()) {
+        if (chunk.delta) {
+          received.push(chunk.delta);
+        }
+      }
+
+      expect(received).toEqual([' world']);
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 

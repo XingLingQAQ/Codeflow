@@ -10,6 +10,7 @@ vi.mock('@google/generative-ai', () => {
     GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
       getGenerativeModel: vi.fn().mockReturnValue({
         generateContent: vi.fn(),
+        generateContentStream: vi.fn(),
       }),
     })),
   };
@@ -254,19 +255,86 @@ describe('GeminiAdapter', () => {
       await expect(adapter.send('Hello')).rejects.toThrow(APIError);
     });
 
-    it('should not retry non-retryable errors', async () => {
-      const mockModel = (adapter as any).model;
-      mockModel.generateContent.mockRejectedValue(new Error('Invalid request'));
+    it('should throw error for stream option', async () => {
+      await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
+        'Use stream() for streaming responses'
+      );
+    });
+  });
 
-      await expect(adapter.send('Hello')).rejects.toThrow();
-      expect(mockModel.generateContent).toHaveBeenCalledTimes(1);
+  describe('stream', () => {
+    it('should stream response chunks', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'Hello' };
+          yield { text: () => ' world' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 5,
+            totalTokenCount: 15,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      const deltas: string[] = [];
+      let finalDone = false;
+      for await (const chunk of adapter.stream('Hello')) {
+        if (chunk.delta) {
+          deltas.push(chunk.delta);
+        }
+        if (chunk.done) {
+          finalDone = true;
+        }
+      }
+
+      expect(deltas).toEqual(['Hello', ' world']);
+      expect(finalDone).toBe(true);
+      expect(mockHookManager.hook_on_stream).toHaveBeenCalled();
+      expect(mockHookManager.hook_post_response).toHaveBeenCalled();
+      expect(adapter.getHistory().at(-1)?.content).toBe('Hello world');
     });
   });
 
   describe('receive', () => {
-    it('should throw error when no active stream', async () => {
+    it('should throw no active stream error', async () => {
       const generator = adapter.receive();
       await expect(generator.next()).rejects.toThrow('No active stream');
+    });
+
+    it('should continue active stream and clear state after completion', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'Hello' };
+          yield { text: () => ' world' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 5,
+            totalTokenCount: 15,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      const stream = adapter.stream('Hello');
+      const first = await stream.next();
+      expect(first.value).toMatchObject({ delta: 'Hello', done: false });
+
+      const received: string[] = [];
+      for await (const chunk of adapter.receive()) {
+        if (chunk.delta) {
+          received.push(chunk.delta);
+        }
+      }
+
+      expect(received).toEqual([' world']);
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 

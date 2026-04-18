@@ -90,6 +90,7 @@ export function applyHookPayload(
 export interface ICliAdapter {
   // 基础通信
   send(prompt: string, options?: SendOptions): Promise<AIResponse>;
+  stream(prompt: string, options?: SendOptions): AsyncGenerator<StreamChunk>;
   receive(): AsyncGenerator<StreamChunk>;
 
   // 上下文管理

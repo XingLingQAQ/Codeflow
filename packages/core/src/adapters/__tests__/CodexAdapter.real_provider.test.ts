@@ -9,7 +9,8 @@ const providerModel = process.env.REAL_PROVIDER_MODEL || 'gpt-5.1-codex';
 
 const runOrSkip = providerBase && providerKey ? describe : describe.skip;
 
-runOrSkip('CodexAdapter real provider hook e2e', () => {
+// 该文件只验证 Codex API adapter 的 real provider hook 路径，不作为 cowork CLI adapter 完整性证据。
+runOrSkip('CodexAdapter real provider hook e2e (API path only)', () => {
   it(
     'applies before_send mutation on real request and triggers post_response',
     async () => {
@@ -146,13 +147,18 @@ runOrSkip('CodexAdapter real provider hook e2e', () => {
         hookManager
       );
 
-      const response = await adapter.send('请用一句话确认 stream hook 已触发', { stream: true });
+      let content = '';
+      for await (const chunk of adapter.stream('请用一句话确认 stream hook 已触发')) {
+        if (!chunk.done) {
+          content += chunk.delta;
+        }
+      }
 
       expect(beforeSendCalled).toBe(true);
       expect(streamChunkCount).toBeGreaterThan(0);
       expect(postResponseCalled).toBe(true);
-      expect(response.content.length).toBeGreaterThan(0);
-      expect(response.model).toBeTruthy();
+      expect(content.length).toBeGreaterThan(0);
+      expect(adapter.getHistory().at(-1)?.content.length).toBeGreaterThan(0);
     },
     120000
   );

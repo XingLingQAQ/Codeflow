@@ -77,6 +77,10 @@ export class GeminiAdapter implements ICliAdapter {
   }
 
   async send(prompt: string | MultimodalInput, options?: SendOptions): Promise<AIResponse> {
+    if (options?.stream) {
+      throw new Error('Use stream() for streaming responses');
+    }
+
     const mergedOptions = { ...this.config, ...options };
 
     const userMessage: Message = {
@@ -88,18 +92,14 @@ export class GeminiAdapter implements ICliAdapter {
     this.history.push(userMessage);
 
     const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
-
     const effectivePrompt = this.resolvePromptFromPayload(prompt, payload.messages);
     const contents = this.convertToGeminiFormat(effectivePrompt);
-
-    if (payload.model && payload.model !== this.config.model) {
-      this.model = this.client.getGenerativeModel({ model: payload.model });
-    }
+    const model = this.getModel(payload.model);
 
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < (mergedOptions.maxRetries || 3); attempt++) {
       try {
-        const result = await this.sendWithTimeout(contents, {
+        const result = await this.sendWithTimeout(model, contents, {
           ...mergedOptions,
           model: payload.model,
           temperature: payload.temperature,
@@ -146,12 +146,47 @@ export class GeminiAdapter implements ICliAdapter {
     throw lastError || new APIError('Request failed after retries');
   }
 
+  async *stream(prompt: string, options?: SendOptions): AsyncGenerator<StreamChunk> {
+    const mergedOptions = { ...this.config, ...options };
+
+    const userMessage: Message = {
+      role: 'user',
+      content: prompt,
+      timestamp: Date.now(),
+    };
+
+    this.history.push(userMessage);
+
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+    const effectivePrompt = this.resolvePromptFromPayload(prompt, payload.messages);
+    const contents = this.convertToGeminiFormat(effectivePrompt);
+    const model = this.getModel(payload.model);
+
+    const streamGenerator = this.createStreamGenerator(model, contents, {
+      ...mergedOptions,
+      model: payload.model,
+      temperature: payload.temperature,
+      maxTokens: payload.maxTokens,
+    });
+    this.currentStream = streamGenerator;
+
+    try {
+      yield* streamGenerator;
+    } finally {
+      this.currentStream = undefined;
+    }
+  }
+
   async *receive(): AsyncGenerator<StreamChunk> {
     if (!this.currentStream) {
       throw new Error('No active stream');
     }
 
-    yield* this.currentStream;
+    try {
+      yield* this.currentStream;
+    } finally {
+      this.currentStream = undefined;
+    }
   }
 
   getHistory(): Message[] {
@@ -204,8 +239,6 @@ export class GeminiAdapter implements ICliAdapter {
     };
   }
 
-  // ==================== 私有方法 ====================
-
   private convertToGeminiFormat(prompt: string | MultimodalInput): Content[] {
     if (typeof prompt === 'string') {
       return [{ role: 'user', parts: [{ text: prompt }] }];
@@ -231,7 +264,16 @@ export class GeminiAdapter implements ICliAdapter {
     return [{ role: 'user', parts }];
   }
 
+  private getModel(modelName?: string): GenerativeModel {
+    if (modelName && modelName !== this.config.model) {
+      return this.client.getGenerativeModel({ model: modelName });
+    }
+
+    return this.model;
+  }
+
   private async sendWithTimeout(
+    model: GenerativeModel,
     contents: Content[],
     options: SendOptions & AdapterConfig
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -239,7 +281,7 @@ export class GeminiAdapter implements ICliAdapter {
     const timeout = options.timeout || 60000;
 
     return Promise.race([
-      this.model.generateContent({
+      model.generateContent({
         contents,
         generationConfig: {
           temperature: options.temperature,
@@ -248,6 +290,92 @@ export class GeminiAdapter implements ICliAdapter {
       }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new TimeoutError()), timeout)),
     ]);
+  }
+
+  private async *createStreamGenerator(
+    model: GenerativeModel,
+    contents: Content[],
+    options: SendOptions & AdapterConfig
+  ): AsyncGenerator<StreamChunk> {
+    const timeout = options.timeout || 60000;
+
+    try {
+      const streamResult = await Promise.race([
+        model.generateContentStream({
+          contents,
+          generationConfig: {
+            temperature: options.temperature,
+            maxOutputTokens: options.maxTokens,
+          },
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new TimeoutError()), timeout)),
+      ]);
+
+      let fullContent = '';
+      let index = 0;
+
+      for await (const chunkResponse of streamResult.stream) {
+        const delta = chunkResponse.text();
+        if (!delta) {
+          continue;
+        }
+
+        fullContent += delta;
+
+        const chunk: StreamChunk = {
+          delta,
+          index: index++,
+          done: false,
+        };
+
+        if (this.hookManager) {
+          this.hookManager.hook_on_stream(chunk);
+        }
+
+        yield chunk;
+      }
+
+      const finalResponse = await Promise.race([
+        streamResult.response,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new TimeoutError()), timeout)),
+      ]);
+
+      const finalChunk: StreamChunk = {
+        delta: '',
+        index,
+        done: true,
+      };
+
+      if (this.hookManager) {
+        this.hookManager.hook_on_stream(finalChunk);
+      }
+
+      yield finalChunk;
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: fullContent,
+        timestamp: Date.now(),
+      };
+      this.history.push(assistantMessage);
+
+      const response: AIResponse = {
+        content: fullContent,
+        model: options.model,
+        usage: {
+          promptTokens: finalResponse.usageMetadata?.promptTokenCount || 0,
+          completionTokens: finalResponse.usageMetadata?.candidatesTokenCount || 0,
+          totalTokens: finalResponse.usageMetadata?.totalTokenCount || 0,
+        },
+        finishReason: finalResponse.candidates?.[0]?.finishReason || 'stop',
+      };
+
+      if (this.hookManager) {
+        await this.hookManager.hook_post_response(response);
+      }
+    } catch (error) {
+      throw this.wrapError(error);
+    }
   }
 
   private isRetryableError(error: unknown): boolean {

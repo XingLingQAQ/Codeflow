@@ -210,7 +210,7 @@ describe('ClaudeAdapter', () => {
 
     it('should throw error for stream option', async () => {
       await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
-        'Use receive() for streaming responses'
+        'Use stream() for streaming responses'
       );
     });
   });
@@ -291,9 +291,40 @@ describe('ClaudeAdapter', () => {
   });
 
   describe('receive', () => {
-    it('should throw error when no active stream', async () => {
+    it('should throw no active stream error', async () => {
       const generator = adapter.receive();
       await expect(generator.next()).rejects.toThrow('No active stream');
+    });
+
+    it('should continue active stream and clear state after completion', async () => {
+      const mockStream = [
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+        { type: 'message_stop' },
+      ];
+
+      const mockClient = (adapter as any).client;
+      mockClient.messages.create.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          for (const event of mockStream) {
+            yield event;
+          }
+        },
+      });
+
+      const stream = adapter.stream('Hello');
+      const first = await stream.next();
+      expect(first.value).toMatchObject({ delta: 'Hello', done: false });
+
+      const received: string[] = [];
+      for await (const chunk of adapter.receive()) {
+        if (chunk.delta) {
+          received.push(chunk.delta);
+        }
+      }
+
+      expect(received).toEqual([' world']);
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 

@@ -55,6 +55,10 @@ export class ClaudeAdapter implements ICliAdapter {
    * 发送消息并获取响应
    */
   async send(prompt: string, options?: SendOptions): Promise<AIResponse> {
+    if (options?.stream) {
+      throw new Error('Use stream() for streaming responses');
+    }
+
     // 添加用户消息到历史
     const userMessage: Message = {
       role: 'user',
@@ -70,10 +74,6 @@ export class ClaudeAdapter implements ICliAdapter {
     try {
       // 发送请求
       const response = await this.executeWithRetry(async () => {
-        if (options?.stream) {
-          throw new Error('Use receive() for streaming responses');
-        }
-
         return await this.client.messages.create({
           messages,
           system,
@@ -121,10 +121,14 @@ export class ClaudeAdapter implements ICliAdapter {
    */
   async *receive(): AsyncGenerator<StreamChunk> {
     if (!this.currentStream) {
-      throw new Error('No active stream. Call send() with stream: true first');
+      throw new Error('No active stream');
     }
 
-    yield* this.currentStream;
+    try {
+      yield* this.currentStream;
+    } finally {
+      this.currentStream = undefined;
+    }
   }
 
   /**
@@ -143,71 +147,19 @@ export class ClaudeAdapter implements ICliAdapter {
     const system = this.extractSystemPrompt(payload.messages);
     const messages = this.mapMessagesToProviderPayload(payload.messages);
 
+    const streamGenerator = this.createStreamGenerator({
+      messages,
+      system,
+      model: payload.model,
+      temperature: payload.temperature,
+      maxTokens: payload.maxTokens,
+    });
+    this.currentStream = streamGenerator;
+
     try {
-      const stream = await this.client.messages.create({
-        messages,
-        system,
-        model: payload.model,
-        temperature: payload.temperature,
-        max_tokens: payload.maxTokens!,
-        stream: true,
-      });
-
-      let fullContent = '';
-      let index = 0;
-
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          const chunk: StreamChunk = {
-            delta: event.delta.text,
-            index: index++,
-            done: false,
-          };
-
-          fullContent += event.delta.text;
-
-          // 触发 hook_on_stream
-          if (this.hookManager) {
-            this.hookManager.hook_on_stream(chunk);
-          }
-
-          yield chunk;
-        }
-
-        if (event.type === 'message_stop') {
-          const finalChunk: StreamChunk = {
-            delta: '',
-            index: index,
-            done: true,
-          };
-
-          // 触发 hook_on_stream
-          if (this.hookManager) {
-            this.hookManager.hook_on_stream(finalChunk);
-          }
-
-          yield finalChunk;
-        }
-      }
-
-      // 添加助手消息到历史
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: fullContent,
-        timestamp: Date.now(),
-      };
-      this.history.push(assistantMessage);
-
-      // 触发 hook_post_response
-      if (this.hookManager) {
-        await this.hookManager.hook_post_response({
-          content: fullContent,
-          model: payload.model,
-        });
-      }
-    } catch (error) {
-      this.handleError(error);
-      throw error;
+      yield* streamGenerator;
+    } finally {
+      this.currentStream = undefined;
     }
   }
 
@@ -328,6 +280,77 @@ export class ClaudeAdapter implements ICliAdapter {
    */
   getConfig(): AdapterConfig {
     return { ...this.config };
+  }
+
+  private async *createStreamGenerator(payload: {
+    messages: Anthropic.MessageParam[];
+    system?: string;
+    model: string;
+    temperature?: number;
+    maxTokens?: number;
+  }): AsyncGenerator<StreamChunk> {
+    try {
+      const stream = await this.client.messages.create({
+        messages: payload.messages,
+        system: payload.system,
+        model: payload.model,
+        temperature: payload.temperature,
+        max_tokens: payload.maxTokens!,
+        stream: true,
+      });
+
+      let fullContent = '';
+      let index = 0;
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          const chunk: StreamChunk = {
+            delta: event.delta.text,
+            index: index++,
+            done: false,
+          };
+
+          fullContent += event.delta.text;
+
+          if (this.hookManager) {
+            this.hookManager.hook_on_stream(chunk);
+          }
+
+          yield chunk;
+        }
+
+        if (event.type === 'message_stop') {
+          const finalChunk: StreamChunk = {
+            delta: '',
+            index,
+            done: true,
+          };
+
+          if (this.hookManager) {
+            this.hookManager.hook_on_stream(finalChunk);
+          }
+
+          yield finalChunk;
+        }
+      }
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: fullContent,
+        timestamp: Date.now(),
+      };
+      this.history.push(assistantMessage);
+
+      if (this.hookManager) {
+        await this.hookManager.hook_post_response({
+          content: fullContent,
+          model: payload.model,
+        });
+      }
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
   }
 
   /**
