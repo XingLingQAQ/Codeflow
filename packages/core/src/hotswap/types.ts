@@ -2,9 +2,8 @@
  * 模型热切换类型定义
  */
 
-import type { RuntimeProviderFamily } from '../config/types.js';
+import type { ResolvedConfig, RuntimeProviderFamily } from '../config/types.js';
 import { Message } from '../hooks/types.js';
-import { AdapterConfig } from '../adapters/types.js';
 
 export const CLI_PROVIDER_MODEL_IDS = {
   'gemini-cli': ['gemini-2.0-flash-exp', 'gemini-2.5-pro'],
@@ -100,6 +99,7 @@ export interface SwitchOptions {
   migrateContext: boolean;
   fallbackOnError: boolean;
   retryCount?: number;
+  resolvedConfig?: ResolvedConfig;
 }
 
 /**
@@ -161,7 +161,7 @@ export interface IHotSwapManager {
 
   // 重试/接力
   retry(options?: Partial<RetryStrategy>): Promise<SwitchResult>;
-  relay(fallbackChain?: string[]): Promise<SwitchResult>;
+  relay(fallbackChain?: string[], options?: Partial<SwitchOptions>): Promise<SwitchResult>;
 
   // 上下文迁移
   migrateContext(targetModel: string): Promise<ContextMigrationResult>;

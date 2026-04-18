@@ -2,9 +2,29 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { HotSwapManager } from '../HotSwapManager.js';
 import { ModelInfo, PREDEFINED_MODELS } from '../types.js';
 import { ICliAdapter } from '../../adapters/types.js';
+import type { ResolvedConfig } from '../../config/types.js';
 import { Message } from '../../hooks/types.js';
 
-// Mock adapter factory
+function createResolvedConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
+  return {
+    model: 'gemini-2.0-flash-exp',
+    temperature: 0.4,
+    maxTokens: 2048,
+    mcpTools: [],
+    apiChannel: {
+      id: 'default',
+      name: 'Default',
+      provider: 'google',
+      apiKey: 'gemini-key',
+      baseURL: 'https://gemini.example.com',
+      enabled: true,
+    },
+    timeout: 45000,
+    maxRetries: 2,
+    ...overrides,
+  };
+}
+
 function createMockAdapter(history: Message[] = []): ICliAdapter {
   return {
     send: vi.fn().mockResolvedValue({ content: 'Response', model: 'test' }),
@@ -17,6 +37,11 @@ function createMockAdapter(history: Message[] = []): ICliAdapter {
     configure: vi.fn(),
     getConfig: vi.fn().mockReturnValue({ model: 'test' }),
   } as unknown as ICliAdapter;
+}
+
+function getLastConfigurePatch(adapter: ICliAdapter): Record<string, unknown> | undefined {
+  const calls = (adapter.configure as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+  return calls.at(-1)?.[0] as Record<string, unknown> | undefined;
 }
 
 describe('HotSwapManager', () => {
@@ -345,24 +370,103 @@ describe('HotSwapManager', () => {
       expect(result.contextMigrated).toBe(true);
     });
 
-    it('should return tokens migrated count', async () => {
-      const history: Message[] = [
-        { role: 'user', content: 'Hello world', timestamp: Date.now() },
-      ];
+    it('should pass resolved runtime config into target adapter configure', async () => {
+      const sourceAdapter = createMockAdapter();
+      const targetAdapter = createMockAdapter();
+      const resolvedConfig = createResolvedConfig();
 
-      // Create fresh manager for this test
+      manager.registerAdapter('claude-3-opus', sourceAdapter);
+      manager.registerAdapter('gemini-pro', targetAdapter);
+
+      await manager.switchModel('gemini-pro', {
+        resolvedConfig,
+      });
+
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+        apiKey: 'gemini-key',
+        baseURL: 'https://gemini.example.com',
+      });
+    });
+
+    it('should preserve explicit zero values while omitting undefined fields', async () => {
+      const targetAdapter = createMockAdapter();
+
+      manager.registerAdapter('claude-3-opus', createMockAdapter());
+      manager.registerAdapter('gemini-pro', targetAdapter);
+
+      await manager.switchModel('gemini-pro', {
+        resolvedConfig: createResolvedConfig({
+          temperature: 0,
+          maxTokens: undefined,
+          timeout: 0,
+          maxRetries: undefined,
+          apiChannel: {
+            id: 'default',
+            name: 'Default',
+            provider: 'google',
+            enabled: true,
+          },
+        }),
+      });
+
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0,
+        timeout: 0,
+      });
+    });
+
+    it('should preserve migrateContext and configure bridge together', async () => {
+      const history: Message[] = [
+        { role: 'user', content: 'Hello', timestamp: Date.now() },
+        { role: 'assistant', content: 'Hi', timestamp: Date.now() },
+      ];
       const testManager = new HotSwapManager();
       const sourceAdapter = createMockAdapter(history);
+      const targetAdapter = createMockAdapter();
+
       testManager.registerAdapter('claude-3-opus', sourceAdapter);
-      testManager.registerAdapter('gemini-pro', createMockAdapter());
+      testManager.registerAdapter('gemini-pro', targetAdapter);
 
       const result = await testManager.switchModel('gemini-pro', {
         preserveHistory: true,
         migrateContext: true,
+        resolvedConfig: createResolvedConfig(),
       });
 
-      expect(result.tokensMigrated).toBeGreaterThan(0);
+      expect(result.success).toBe(true);
+      expect(result.contextMigrated).toBe(true);
+      expect(targetAdapter.configure).toHaveBeenCalledTimes(1);
+      expect(targetAdapter.setHistory).toHaveBeenCalledWith(history);
     });
+
+    it('should not forward provider request config across provider families', async () => {
+      const sourceAdapter = createMockAdapter();
+      const targetAdapter = createMockAdapter();
+
+      manager.registerAdapter('claude-3-opus', sourceAdapter);
+      manager.registerAdapter('codex-cli', targetAdapter);
+
+      await manager.switchModel('codex-cli', {
+        resolvedConfig: createResolvedConfig({
+          model: 'gemini-2.0-flash-exp',
+        }),
+      });
+
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+      });
+    });
+
 
     it('should fallback on error when option enabled', async () => {
       manager.registerAdapter('claude-3-sonnet', createMockAdapter());
@@ -383,6 +487,157 @@ describe('HotSwapManager', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Cannot switch');
+    });
+
+    it('should configure target adapter with resolved runtime config', async () => {
+      const history: Message[] = [
+        { role: 'user', content: 'Hello bridge', timestamp: Date.now() },
+        { role: 'assistant', content: 'Bridge ready', timestamp: Date.now() },
+      ];
+      const testManager = new HotSwapManager();
+      const sourceAdapter = createMockAdapter(history);
+      const targetAdapter = createMockAdapter();
+
+      testManager.registerAdapter('claude-3-opus', sourceAdapter);
+      testManager.registerAdapter('gemini-pro', targetAdapter);
+
+      const result = await testManager.switchModel('gemini-pro', {
+        preserveHistory: true,
+        migrateContext: true,
+        resolvedConfig: createResolvedConfig(),
+      });
+
+      expect(result.success).toBe(true);
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+        apiKey: 'gemini-key',
+        baseURL: 'https://gemini.example.com',
+      });
+      expect(targetAdapter.setHistory).toHaveBeenCalledWith(history);
+    });
+
+    it('should forward resolved runtime config through fallback relay', async () => {
+      const history: Message[] = [
+        { role: 'user', content: 'Fallback bridge', timestamp: Date.now() },
+      ];
+      const testManager = new HotSwapManager();
+      const sourceAdapter = createMockAdapter(history);
+      const fallbackAdapter = createMockAdapter();
+
+      testManager.registerAdapter('claude-3-opus', sourceAdapter);
+      testManager.registerAdapter('gemini-pro', fallbackAdapter);
+
+      const result = await testManager.switchModel('codex-cli', {
+        fallbackOnError: true,
+        preserveHistory: true,
+        migrateContext: true,
+        resolvedConfig: createResolvedConfig(),
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.currentModel).toBe('gemini-pro');
+      expect(fallbackAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+        apiKey: 'gemini-key',
+        baseURL: 'https://gemini.example.com',
+      });
+      expect(fallbackAdapter.setHistory).toHaveBeenCalledWith(history);
+    });
+
+    it('should filter provider request fields when providers differ', async () => {
+      const targetAdapter = createMockAdapter();
+      manager.registerAdapter('claude-3-opus', createMockAdapter());
+      manager.registerAdapter('claude-3-sonnet', targetAdapter);
+
+      const result = await manager.switchModel('claude-3-sonnet', {
+        resolvedConfig: createResolvedConfig(),
+      });
+
+      expect(result.success).toBe(true);
+      const patch = getLastConfigurePatch(targetAdapter);
+      expect(patch).toMatchObject({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+      });
+      expect(patch).not.toHaveProperty('apiKey');
+      expect(patch).not.toHaveProperty('baseURL');
+    });
+
+    it('should keep openai provider request config for codex targets', async () => {
+      const targetAdapter = createMockAdapter();
+      manager.registerAdapter('claude-3-opus', createMockAdapter());
+      manager.registerAdapter('codex-cli', targetAdapter);
+
+      const result = await manager.switchModel('codex-cli', {
+        resolvedConfig: createResolvedConfig({
+          model: 'gpt-5.4',
+          apiChannel: {
+            id: 'openai',
+            name: 'OpenAI',
+            provider: 'openai',
+            apiKey: 'openai-key',
+            baseURL: 'https://openai.example.com',
+            enabled: true,
+          },
+        }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gpt-5.4',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+        apiKey: 'openai-key',
+        baseURL: 'https://openai.example.com',
+      });
+    });
+
+    it('should preserve zero values and skip undefined fields in resolved config', async () => {
+      const targetAdapter = createMockAdapter();
+      manager.registerAdapter('claude-3-opus', createMockAdapter());
+      manager.registerAdapter('gemini-pro', targetAdapter);
+
+      const result = await manager.switchModel('gemini-pro', {
+        resolvedConfig: createResolvedConfig({
+          temperature: 0,
+          maxTokens: 0,
+          timeout: 0,
+          maxRetries: 0,
+          apiChannel: {
+            id: 'default',
+            name: 'Default',
+            provider: 'google',
+            apiKey: undefined,
+            baseURL: undefined,
+            enabled: true,
+          },
+        }),
+      });
+
+      expect(result.success).toBe(true);
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0,
+        maxTokens: 0,
+        timeout: 0,
+        maxRetries: 0,
+      });
+      const patch = getLastConfigurePatch(targetAdapter);
+      expect(patch).not.toHaveProperty('apiKey');
+      expect(patch).not.toHaveProperty('baseURL');
     });
   });
 
@@ -472,6 +727,35 @@ describe('HotSwapManager', () => {
       const result = await manager.relay();
 
       expect(result.success).toBe(true);
+    });
+
+    it('should pass resolved runtime config through direct relay', async () => {
+      const history: Message[] = [
+        { role: 'user', content: 'Relay bridge', timestamp: Date.now() },
+      ];
+      const sourceAdapter = createMockAdapter(history);
+      const targetAdapter = createMockAdapter();
+
+      manager.registerAdapter('claude-3-opus', sourceAdapter);
+      manager.registerAdapter('gemini-pro', targetAdapter);
+
+      const result = await manager.relay(['gemini-pro'], {
+        preserveHistory: true,
+        migrateContext: true,
+        resolvedConfig: createResolvedConfig(),
+      });
+
+      expect(result.success).toBe(true);
+      expect(targetAdapter.configure).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        temperature: 0.4,
+        maxTokens: 2048,
+        timeout: 45000,
+        maxRetries: 2,
+        apiKey: 'gemini-key',
+        baseURL: 'https://gemini.example.com',
+      });
+      expect(targetAdapter.setHistory).toHaveBeenCalledWith(history);
     });
   });
 
