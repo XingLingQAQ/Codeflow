@@ -27,76 +27,125 @@ export class CodexAdapter {
         });
         this.hookManager = hookManager;
     }
+    setHookManager(hookManager) {
+        this.hookManager = hookManager;
+    }
+    getHookManager() {
+        return this.hookManager;
+    }
     async send(prompt, options) {
+        if (options?.stream) {
+            throw new Error('Use stream() for streaming responses');
+        }
         const mergedOptions = { ...this.config, ...options };
-        // 构建消息
         const userMessage = {
             role: 'user',
             content: prompt,
             timestamp: Date.now(),
         };
         this.history.push(userMessage);
-        // Hook: before_send
-        const payload = {
+        let payload = {
             messages: [...this.history],
             model: mergedOptions.model,
             temperature: mergedOptions.temperature,
             maxTokens: mergedOptions.maxTokens,
         };
         if (this.hookManager) {
-            await this.hookManager.hook_before_send(payload);
+            const processedPayload = await this.hookManager.hook_before_send(payload);
+            payload = {
+                messages: [...processedPayload.messages],
+                model: processedPayload.model || payload.model,
+                temperature: processedPayload.temperature ?? payload.temperature,
+                maxTokens: processedPayload.maxTokens || payload.maxTokens,
+            };
         }
-        // 转换为 OpenAI 格式
-        const messages = this.history.map((msg) => ({
+        const messages = payload.messages.map((msg) => ({
             role: msg.role,
             content: msg.content,
         }));
         try {
-            if (mergedOptions.stream) {
-                // 流式响应
-                return await this.handleStream(messages, mergedOptions);
+            const completion = await this.client.chat.completions.create({
+                model: payload.model,
+                messages: messages,
+                temperature: payload.temperature,
+                max_tokens: payload.maxTokens,
+            });
+            const response = {
+                content: completion.choices[0]?.message?.content || '',
+                model: completion.model,
+                usage: {
+                    promptTokens: completion.usage?.prompt_tokens || 0,
+                    completionTokens: completion.usage?.completion_tokens || 0,
+                    totalTokens: completion.usage?.total_tokens || 0,
+                },
+                finishReason: completion.choices[0]?.finish_reason || 'stop',
+            };
+            const assistantMessage = {
+                role: 'assistant',
+                content: response.content,
+                timestamp: Date.now(),
+            };
+            this.history.push(assistantMessage);
+            if (this.hookManager) {
+                await this.hookManager.hook_post_response(response);
             }
-            else {
-                // 非流式响应
-                const completion = await this.client.chat.completions.create({
-                    model: mergedOptions.model,
-                    messages: messages,
-                    temperature: mergedOptions.temperature,
-                    max_tokens: mergedOptions.maxTokens,
-                });
-                const response = {
-                    content: completion.choices[0]?.message?.content || '',
-                    model: completion.model,
-                    usage: {
-                        promptTokens: completion.usage?.prompt_tokens || 0,
-                        completionTokens: completion.usage?.completion_tokens || 0,
-                        totalTokens: completion.usage?.total_tokens || 0,
-                    },
-                    finishReason: completion.choices[0]?.finish_reason || 'stop',
-                };
-                // 保存助手消息
-                const assistantMessage = {
-                    role: 'assistant',
-                    content: response.content,
-                    timestamp: Date.now(),
-                };
-                this.history.push(assistantMessage);
-                // Hook: post_response
-                if (this.hookManager) {
-                    await this.hookManager.hook_post_response(response);
-                }
-                return response;
-            }
+            return response;
         }
         catch (error) {
             throw this.wrapError(error);
+        }
+    }
+    async *stream(prompt, options) {
+        const mergedOptions = { ...this.config, ...options };
+        const userMessage = {
+            role: 'user',
+            content: prompt,
+            timestamp: Date.now(),
+        };
+        this.history.push(userMessage);
+        let payload = {
+            messages: [...this.history],
+            model: mergedOptions.model,
+            temperature: mergedOptions.temperature,
+            maxTokens: mergedOptions.maxTokens,
+        };
+        if (this.hookManager) {
+            const processedPayload = await this.hookManager.hook_before_send(payload);
+            payload = {
+                messages: [...processedPayload.messages],
+                model: processedPayload.model || payload.model,
+                temperature: processedPayload.temperature ?? payload.temperature,
+                maxTokens: processedPayload.maxTokens || payload.maxTokens,
+            };
+        }
+        const messages = payload.messages.map((msg) => ({
+            role: msg.role,
+            content: msg.content,
+        }));
+        const streamGenerator = this.createStreamGenerator({
+            messages,
+            model: payload.model,
+            temperature: payload.temperature,
+            maxTokens: payload.maxTokens,
+        });
+        this.currentStream = streamGenerator;
+        try {
+            yield* streamGenerator;
+        }
+        finally {
+            this.currentStream = undefined;
         }
     }
     async *receive() {
         if (!this.currentStream) {
             throw new Error('No active stream');
         }
-        yield* this.currentStream;
+        try {
+            yield* this.currentStream;
+        }
+        finally {
+            this.currentStream = undefined;
+        }
     }
     getHistory() {
         return [...this.history];
@@ -131,68 +180,65 @@ export class CodexAdapter {
     getConfig() {
         return { ...this.config };
     }
-    // ==================== 私有方法 ====================
-    async handleStream(messages, options) {
-        const stream = await this.client.chat.completions.create({
-            model: options.model,
-            messages: messages,
-            temperature: options.temperature,
-            max_tokens: options.maxTokens,
-            stream: true,
-        });
-        let fullContent = '';
-        let index = 0;
-        this.currentStream = async function* () {
+    async *createStreamGenerator(payload) {
+        try {
+            const stream = await this.client.chat.completions.create({
+                model: payload.model,
+                messages: payload.messages,
+                temperature: payload.temperature,
+                max_tokens: payload.maxTokens,
+                stream: true,
+            });
+            let fullContent = '';
+            let index = 0;
             for await (const chunk of stream) {
                 const delta = chunk.choices[0]?.delta?.content || '';
-                if (delta) {
-                    fullContent += delta;
-                    const streamChunk = {
-                        delta,
-                        index: index++,
-                        done: false,
-                    };
-                    // Hook: on_stream
-                    if (this.hookManager) {
-                        this.hookManager.hook_on_stream(streamChunk);
-                    }
-                    yield streamChunk;
+                if (!delta) {
+                    continue;
                 }
+                fullContent += delta;
+                const streamChunk = {
+                    delta,
+                    index: index++,
+                    done: false,
+                };
+                if (this.hookManager) {
+                    this.hookManager.hook_on_stream(streamChunk);
+                }
+                yield streamChunk;
             }
-            // 最后一个 chunk
-            yield {
+            const finalChunk = {
                 delta: '',
-                index: index++,
+                index,
                 done: true,
             };
-        }.bind(this)();
-        // 等待流完成
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        for await (const _ of this.currentStream) {
-            // 消费流
+            if (this.hookManager) {
+                this.hookManager.hook_on_stream(finalChunk);
+            }
+            yield finalChunk;
+            const assistantMessage = {
+                role: 'assistant',
+                content: fullContent,
+                timestamp: Date.now(),
+            };
+            this.history.push(assistantMessage);
+            const response = {
+                content: fullContent,
+                model: payload.model,
+                usage: {
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    totalTokens: 0,
+                },
+                finishReason: 'stop',
+            };
+            if (this.hookManager) {
+                await this.hookManager.hook_post_response(response);
+            }
         }
-        // 保存助手消息
-        const assistantMessage = {
-            role: 'assistant',
-            content: fullContent,
-            timestamp: Date.now(),
-        };
-        this.history.push(assistantMessage);
-        const response = {
-            content: fullContent,
-            model: options.model,
-            usage: {
-                promptTokens: 0,
-                completionTokens: 0,
-                totalTokens: 0,
-            },
-            finishReason: 'stop',
-        };
-        // Hook: post_response
-        if (this.hookManager) {
-            await this.hookManager.hook_post_response(response);
+        catch (error) {
+            throw this.wrapError(error);
         }
-        return response;
     }
     wrapError(error) {
         if (error instanceof TimeoutError || error instanceof APIError) {
