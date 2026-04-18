@@ -6,6 +6,58 @@ import type { RuntimeProviderFamily } from '../config/types.js';
 import { Message } from '../hooks/types.js';
 import { AdapterConfig } from '../adapters/types.js';
 
+export const CLI_PROVIDER_MODEL_IDS = {
+  'gemini-cli': ['gemini-2.0-flash-exp', 'gemini-2.5-pro'],
+  'codex-cli': ['gpt-5.4', 'gpt-5-codex'],
+} as const;
+
+export type CliAdapterId = keyof typeof CLI_PROVIDER_MODEL_IDS;
+export type CliProviderModelId<TAdapterId extends CliAdapterId = CliAdapterId> =
+  (typeof CLI_PROVIDER_MODEL_IDS)[TAdapterId][number];
+export type GeminiCliProviderModelId = CliProviderModelId<'gemini-cli'>;
+export type CodexCliProviderModelId = CliProviderModelId<'codex-cli'>;
+
+const PREDEFINED_CLI_MODELS: ModelInfo[] = [
+  {
+    id: 'gemini-cli',
+    name: 'Gemini CLI',
+    provider: 'gemini',
+    capabilities: {
+      streaming: true,
+      vision: false,
+      functionCalling: false,
+      codeExecution: false,
+      multimodal: false,
+    },
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+    available: false,
+    status: 'offline',
+    adapterKind: 'cli',
+    adapterId: 'gemini-cli',
+    supportedModelIds: CLI_PROVIDER_MODEL_IDS['gemini-cli'],
+  },
+  {
+    id: 'codex-cli',
+    name: 'Codex CLI',
+    provider: 'codex',
+    capabilities: {
+      streaming: true,
+      vision: false,
+      functionCalling: false,
+      codeExecution: false,
+      multimodal: false,
+    },
+    contextWindow: 200000,
+    maxOutputTokens: 4096,
+    available: false,
+    status: 'offline',
+    adapterKind: 'cli',
+    adapterId: 'codex-cli',
+    supportedModelIds: CLI_PROVIDER_MODEL_IDS['codex-cli'],
+  },
+];
+
 /**
  * 模型信息
  */
@@ -20,6 +72,13 @@ export interface ModelInfo {
   costPer1kOutput?: number;
   available: boolean;
   status?: 'online' | 'degraded' | 'offline';
+  adapterKind?: 'api' | 'cli';
+  // CLI adapter identity；可能与 runtime executor key 和上游 provider model id 不同。
+  adapterId?: string;
+  // 上游 provider model id；仅在当前已解析/已选中时设置。
+  modelId?: string;
+  // CLI adapter 当前真实接线支持的 provider model 列表，不代表当前已选中哪一个。
+  supportedModelIds?: readonly string[];
 }
 
 /**
@@ -199,20 +258,5 @@ export const PREDEFINED_MODELS: ModelInfo[] = [
     available: true,
     status: 'online',
   },
-  {
-    id: 'codex-cli',
-    name: 'Codex CLI',
-    provider: 'codex',
-    capabilities: {
-      streaming: true,
-      vision: false,
-      functionCalling: true,
-      codeExecution: true,
-      multimodal: false,
-    },
-    contextWindow: 128000,
-    maxOutputTokens: 4096,
-    available: true,
-    status: 'online',
-  },
+  ...PREDEFINED_CLI_MODELS,
 ];

@@ -35,12 +35,24 @@ function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
 }
 
 function createCodexCliAdapter(overrides: Record<string, unknown> = {}) {
-  const adapter = new CodexCLIAdapter({ codexPath: 'codex' });
+  const adapter = new CodexCLIAdapter({
+    codexPath: 'codex',
+    model: 'gpt-5.4',
+    sandbox: 'workspace-write',
+    skipGitRepoCheck: true,
+    ephemeral: true,
+    outputLastMessage: true,
+  });
   return Object.assign(adapter, overrides);
 }
 
 function createGeminiCliAdapter(overrides: Record<string, unknown> = {}) {
-  const adapter = new GeminiCLIAdapter({ geminiPath: 'gemini' });
+  const adapter = new GeminiCLIAdapter({
+    geminiPath: 'gemini',
+    model: 'gemini-2.5-pro',
+    sandbox: true,
+    includeDirectories: ['/workspace/project'],
+  });
   return Object.assign(adapter, overrides);
 }
 
@@ -196,14 +208,21 @@ describe('Factory Functions', () => {
       expect(orchestrator.getExecutor('gemini')).toBeDefined();
     });
 
-    it('should register Gemini CLI adapter as executor', () => {
+    it('should register Gemini CLI adapter as provider executor', () => {
       const geminiCliAdapter = createGeminiCliAdapter();
 
       const editor = registerGeminiExecutor(orchestrator, geminiCliAdapter);
 
       expect(editor.name).toBe('gemini-editor');
       expect(orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(orchestrator.getExecutor('gemini-cli')).toBeUndefined();
       expect(editor.getAdapter()).toBe(geminiCliAdapter);
+      expect(geminiCliAdapter.getConfig()).toMatchObject({
+        geminiPath: 'gemini',
+        model: 'gemini-2.5-pro',
+        sandbox: true,
+        includeDirectories: ['/workspace/project'],
+      });
     });
   });
   describe('registerCodexExecutor', () => {
@@ -216,14 +235,23 @@ describe('Factory Functions', () => {
       expect(orchestrator.getExecutor('codex')).toBeDefined();
     });
 
-    it('should register Codex CLI adapter as executor', () => {
+    it('should register Codex CLI adapter as provider executor', () => {
       const codexCliAdapter = createCodexCliAdapter();
 
       const editor = registerCodexExecutor(orchestrator, codexCliAdapter);
 
       expect(editor.name).toBe('codex-editor');
       expect(orchestrator.getExecutor('codex')).toBeDefined();
+      expect(orchestrator.getExecutor('codex-cli')).toBeUndefined();
       expect(editor.getAdapter()).toBe(codexCliAdapter);
+      expect(codexCliAdapter.getConfig()).toMatchObject({
+        codexPath: 'codex',
+        model: 'gpt-5.4',
+        sandbox: 'workspace-write',
+        skipGitRepoCheck: true,
+        ephemeral: true,
+        outputLastMessage: true,
+      });
     });
   });
 
@@ -254,6 +282,23 @@ describe('Factory Functions', () => {
       expect(result.orchestrator.getExecutor('codex')).toBeDefined();
       expect(result.codexEditor?.getAdapter()).toBe(codexCliAdapter);
       expect(codexCliAdapter.getHookManager()).toBe(result.orchestrator.getHookManager());
+
+      result.orchestrator.cleanup();
+    });
+
+    it('should keep provider executor keys when wiring real CLI adapters', () => {
+      const geminiCliAdapter = createGeminiCliAdapter();
+      const codexCliAdapter = createCodexCliAdapter();
+
+      const result = createOrchestratorWithAllEditors({
+        geminiCliAdapter,
+        codexCliAdapter,
+      });
+
+      expect(result.orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(result.orchestrator.getExecutor('codex')).toBeDefined();
+      expect(result.orchestrator.getExecutor('gemini-cli')).toBeUndefined();
+      expect(result.orchestrator.getExecutor('codex-cli')).toBeUndefined();
 
       result.orchestrator.cleanup();
     });

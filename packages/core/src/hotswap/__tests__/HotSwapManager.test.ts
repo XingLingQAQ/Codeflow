@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { HotSwapManager } from '../HotSwapManager.js';
-import { ModelInfo, HotSwapConfig, PREDEFINED_MODELS } from '../types.js';
+import { ModelInfo, PREDEFINED_MODELS } from '../types.js';
 import { ICliAdapter } from '../../adapters/types.js';
 import { Message } from '../../hooks/types.js';
 
@@ -43,6 +43,23 @@ describe('HotSwapManager', () => {
       const models = manager.getAvailableModels();
       expect(models.length).toBeGreaterThan(0);
     });
+
+    it('should keep predefined CLI models offline until adapters are registered', () => {
+      expect(manager.getModelInfo('gemini-cli')).toMatchObject({
+        available: false,
+        status: 'offline',
+        adapterKind: 'cli',
+        adapterId: 'gemini-cli',
+        supportedModelIds: ['gemini-2.0-flash-exp', 'gemini-2.5-pro'],
+      });
+      expect(manager.getModelInfo('codex-cli')).toMatchObject({
+        available: false,
+        status: 'offline',
+        adapterKind: 'cli',
+        adapterId: 'codex-cli',
+        supportedModelIds: ['gpt-5.4', 'gpt-5-codex'],
+      });
+    });
   });
 
   describe('registerAdapter', () => {
@@ -51,6 +68,31 @@ describe('HotSwapManager', () => {
       manager.registerAdapter('claude-3-opus', adapter);
 
       expect(manager.canSwitch('claude-3-opus')).toBe(true);
+    });
+
+    it('should promote predefined CLI model online when adapter is registered', () => {
+      const before = manager.getModelInfo('gemini-cli');
+      expect(before?.available).toBe(false);
+      expect(before?.status).toBe('offline');
+
+      manager.registerAdapter('gemini-cli', createMockAdapter());
+
+      const after = manager.getModelInfo('gemini-cli');
+      expect(after?.available).toBe(true);
+      expect(after?.status).toBe('online');
+      expect(manager.canSwitch('gemini-cli')).toBe(true);
+    });
+
+    it('should preserve CLI identity fields when predefined metadata is promoted online', () => {
+      manager.registerAdapter('codex-cli', createMockAdapter());
+
+      expect(manager.getModelInfo('codex-cli')).toMatchObject({
+        available: true,
+        status: 'online',
+        adapterKind: 'cli',
+        adapterId: 'codex-cli',
+        supportedModelIds: ['gpt-5.4', 'gpt-5-codex'],
+      });
     });
 
     it('should set first registered adapter as current', () => {
@@ -113,6 +155,17 @@ describe('HotSwapManager', () => {
       expect(ids).toContain('claude-3-opus');
       expect(ids).toContain('gemini-pro');
     });
+
+    it('should exclude CLI models until their adapters are registered', () => {
+      const idsBefore = manager.getAvailableModels().map(m => m.id);
+      expect(idsBefore).not.toContain('gemini-cli');
+      expect(idsBefore).not.toContain('codex-cli');
+
+      manager.registerAdapter('codex-cli', createMockAdapter());
+
+      const idsAfter = manager.getAvailableModels().map(m => m.id);
+      expect(idsAfter).toContain('codex-cli');
+    });
   });
 
   describe('getCurrentModel', () => {
@@ -136,6 +189,22 @@ describe('HotSwapManager', () => {
       expect(info).toBeDefined();
       expect(info?.name).toBe('Claude 3 Opus');
       expect(info?.provider).toBe('claude');
+    });
+
+    it('should expose CLI predefined metadata identity fields', () => {
+      const info = manager.getModelInfo('gemini-cli');
+      const predefined = PREDEFINED_MODELS.find((model) => model.id === 'gemini-cli');
+
+      expect(predefined).toMatchObject({
+        adapterKind: 'cli',
+        adapterId: 'gemini-cli',
+        supportedModelIds: ['gemini-2.0-flash-exp', 'gemini-2.5-pro'],
+      });
+      expect(info).toMatchObject({
+        adapterKind: 'cli',
+        adapterId: 'gemini-cli',
+        supportedModelIds: ['gemini-2.0-flash-exp', 'gemini-2.5-pro'],
+      });
     });
 
     it('should return null for unknown model', () => {
