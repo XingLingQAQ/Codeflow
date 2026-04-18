@@ -77,7 +77,7 @@ export class CodexAdapter implements ICliAdapter {
 
   async send(prompt: string, options?: SendOptions): Promise<AIResponse> {
     if (options?.stream) {
-      return this.collectStreamResponse(prompt, options);
+      throw new Error('Use stream() for streaming responses');
     }
 
     const userMessage: Message = {
@@ -208,52 +208,6 @@ export class CodexAdapter implements ICliAdapter {
 
   getConfig(): AdapterConfig {
     return { ...this.config };
-  }
-
-  private async collectStreamResponse(prompt: string, options?: SendOptions): Promise<AIResponse> {
-    const userMessage: Message = {
-      role: 'user',
-      content: prompt,
-      timestamp: Date.now(),
-    };
-
-    this.history.push(userMessage);
-
-    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
-    const messages = payload.messages.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-
-    const streamGenerator = this.createStreamGenerator({
-      messages,
-      model: payload.model,
-      temperature: payload.temperature,
-      maxTokens: payload.maxTokens,
-    });
-    this.currentStream = streamGenerator;
-
-    let fullContent = '';
-    try {
-      for await (const chunk of streamGenerator) {
-        if (!chunk.done) {
-          fullContent += chunk.delta;
-        }
-      }
-    } finally {
-      this.currentStream = undefined;
-    }
-
-    return {
-      content: fullContent,
-      model: payload.model,
-      usage: {
-        promptTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-      },
-      finishReason: 'stop',
-    };
   }
 
   private async *createStreamGenerator(payload: {
