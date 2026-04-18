@@ -146,12 +146,12 @@ export class GeminiAdapter implements ICliAdapter {
     throw lastError || new APIError('Request failed after retries');
   }
 
-  async *stream(prompt: string, options?: SendOptions): AsyncGenerator<StreamChunk> {
+  async *stream(prompt: string | MultimodalInput, options?: SendOptions): AsyncGenerator<StreamChunk> {
     const mergedOptions = { ...this.config, ...options };
 
     const userMessage: Message = {
       role: 'user',
-      content: prompt,
+      content: typeof prompt === 'string' ? prompt : prompt.text || '',
       timestamp: Date.now(),
     };
 

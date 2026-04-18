@@ -297,6 +297,65 @@ describe('GeminiAdapter', () => {
       expect(mockHookManager.hook_post_response).toHaveBeenCalled();
       expect(adapter.getHistory().at(-1)?.content).toBe('Hello world');
     });
+
+    it('should stream multimodal input through the same provider path', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'Image' };
+          yield { text: () => ' summary' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 20,
+            candidatesTokenCount: 8,
+            totalTokenCount: 28,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      const input: MultimodalInput = {
+        text: 'Describe this image',
+        images: [{ data: 'base64data', mimeType: 'image/png' }],
+      };
+
+      const deltas: string[] = [];
+      for await (const chunk of adapter.stream(input)) {
+        if (chunk.delta) {
+          deltas.push(chunk.delta);
+        }
+      }
+
+      expect(deltas).toEqual(['Image', ' summary']);
+      expect(mockModel.generateContentStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: 'Describe this image' },
+                { inlineData: { data: 'base64data', mimeType: 'image/png' } },
+              ],
+            },
+          ],
+        })
+      );
+      expect(adapter.getHistory()[0]).toMatchObject({ role: 'user', content: 'Describe this image' });
+      expect(adapter.getHistory().at(-1)?.content).toBe('Image summary');
+    });
+
+    it('should clear current stream state after stream failure', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockRejectedValue(new Error('stream failed'));
+
+      await expect(async () => {
+        for await (const _chunk of adapter.stream('Hello')) {
+        }
+      }).rejects.toThrow(APIError);
+
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
+    });
   });
 
   describe('receive', () => {
