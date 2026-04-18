@@ -1,0 +1,33 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "phase": "wave6-builder-only-no-owner-freeze",
+  "status": "completed",
+  "scope": {
+    "goal": "freeze the adapter migration at a builder-only, no-owner boundary: Go may resolve config, build adapters, and register boot metadata, while live runtime execution ownership remains in the TypeScript runtime"
+  },
+  "implemented": [
+    "froze wave 6 at a governance conclusion instead of extending Go into a runtime owner",
+    "confirmed Go ownership stops at resolved-config to adapter-builder to boot metadata registration handoff",
+    "confirmed no Go-side global commander, live session orchestrator, or execution control plane is introduced in this lane",
+    "confirmed TypeScript runtime remains the owner of tool, hook, permission, and isolated execution boundaries"
+  ],
+  "evidence": [
+    "backend/cmd/codeflow-server/main.go:135-169 registerConfiguredAgents resolves config, builds adapters, registers idle agent metadata, and closes the transient adapter immediately",
+    "backend/internal/commander/commander.go:337-447 BuildAgentFromResolved plus send-options/request-semantics helpers form a builder handoff, not a persistent runtime owner",
+    "backend/internal/api/handlers/agents.go:14-22 GetAgents only exposes agent-service snapshots to API consumers",
+    "backend/internal/workflow/service.go:119-148 and 295-319 workflow overview/replay load and filter registered agent snapshots without executing agents",
+    "packages/core/src/cowork/runtime.ts:395-415 and 814-835 instantiate HeadlessToolRuntime and enforce runtime permission boundaries inside the TypeScript cowork runtime"
+  ],
+  "risk": "low: the freeze narrows scope and clarifies ownership, but any future attempt to move live execution into Go must be treated as a new architecture decision rather than a continuation of this wave",
+  "runtime_boundary": {
+    "go_builder_only": true,
+    "go_runtime_owner": false,
+    "ts_runtime_owner": true,
+    "notes": [
+      "Go stops at resolved-config, adapter construction, and boot-time metadata registration",
+      "TypeScript runtime keeps HeadlessToolRuntime, hook controls, policy evaluation, and isolated execution decisions",
+      "No new global commander singleton or Go-side live execution loop is introduced by this freeze decision"
+    ]
+  },
+  "completed_at": "2026-04-13T13:40:42Z"
+}

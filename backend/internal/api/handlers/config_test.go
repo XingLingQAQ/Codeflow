@@ -91,44 +91,41 @@ func TestUpdateGlobalConfigAPI(t *testing.T) {
 	assert.Equal(t, 10000, resp.SummaryThreshold)
 }
 
-func TestUpdateGlobalConfigPartialPreservesExistingFields(t *testing.T) {
+func TestUpdateGlobalConfigAllowsExplicitZeroValues(t *testing.T) {
 	router := setupConfigRouter()
 	svc := config.NewConfigManager(nil)
 	config.SetConfigService(svc)
 
 	seed := &config.GlobalConfig{
-		DefaultModel: "old-model",
-		APIPool: []config.APIChannel{
-			{
-				ID:       "provider-1",
-				Name:     "AIHubMix-Provider",
-				Provider: config.ProviderCustom,
-				APIKey:   "secret",
-				BaseURL:  "http://154.217.240.67:8090/",
-				Enabled:  true,
-			},
-		},
-		PublicMCP:        []string{"playwright", "memory"},
+		DefaultModel:     "old-model",
 		SummaryThreshold: 20000,
 		MaxRetries:       3,
 		Timeout:          60000,
 	}
 	_ = svc.SaveGlobalConfig(seed)
 
-	body := []byte(`{"default_model":"AIHubMix-Provider"}`)
+	body := []byte(`{"summary_threshold":0,"max_retries":0,"timeout":0}`)
 	req, _ := http.NewRequest("PUT", "/api/v1/config/global", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	updated := decodeConfigResponseData[config.GlobalConfig](t, w.Body.Bytes())
-	assert.Equal(t, "AIHubMix-Provider", updated.DefaultModel)
-	assert.Len(t, updated.APIPool, 1)
-	assert.Equal(t, "provider-1", updated.APIPool[0].ID)
-	assert.Equal(t, "http://154.217.240.67:8090/", updated.APIPool[0].BaseURL)
-	assert.Equal(t, []string{"playwright", "memory"}, updated.PublicMCP)
+	assert.Equal(t, "old-model", updated.DefaultModel)
+	assert.Equal(t, 0, updated.SummaryThreshold)
+	assert.Equal(t, 0, updated.MaxRetries)
+	assert.Equal(t, 0, updated.Timeout)
+
+	stored := svc.LoadGlobalConfig()
+	if assert.NotNil(t, stored) {
+		assert.Equal(t, 0, stored.SummaryThreshold)
+		assert.Equal(t, 0, stored.MaxRetries)
+		assert.Equal(t, 0, stored.Timeout)
+	}
 }
+
 
 func TestGetSessionConfigAPI(t *testing.T) {
 	router := setupConfigRouter()
@@ -192,6 +189,55 @@ func TestUpdateSessionConfigAPI(t *testing.T) {
 	resp := decodeConfigResponseData[config.SessionConfig](t, w.Body.Bytes())
 	assert.Equal(t, "test-session", resp.SessionID)
 	assert.Equal(t, "session-model", resp.OverrideModel)
+}
+
+func TestUpdateSessionConfigPartialPreservesExistingFieldsAPI(t *testing.T) {
+	router := setupConfigRouter()
+	svc := config.NewConfigManager(nil)
+	config.SetConfigService(svc)
+
+	temp := 0.8
+	maxTokens := 2048
+	err := svc.SaveSessionConfig(&config.SessionConfig{
+		SessionID:     "test-session",
+		Mode:          config.ModeDevelopment,
+		OverrideModel: "seed-model",
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+	})
+	assert.NoError(t, err)
+
+	updatedTemp := 0.3
+	body := []byte(`{"temperature":0.3}`)
+	req, _ := http.NewRequest("PUT", "/api/v1/config/sessions/test-session", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := decodeConfigResponseData[config.SessionConfig](t, w.Body.Bytes())
+	assert.Equal(t, "test-session", resp.SessionID)
+	assert.Equal(t, config.ModeDevelopment, resp.Mode)
+	assert.Equal(t, "seed-model", resp.OverrideModel)
+	if assert.NotNil(t, resp.Temperature) {
+		assert.Equal(t, updatedTemp, *resp.Temperature)
+	}
+	if assert.NotNil(t, resp.MaxTokens) {
+		assert.Equal(t, 2048, *resp.MaxTokens)
+	}
+
+	stored := svc.LoadSessionConfig("test-session")
+	if assert.NotNil(t, stored) {
+		assert.Equal(t, config.ModeDevelopment, stored.Mode)
+		assert.Equal(t, "seed-model", stored.OverrideModel)
+		if assert.NotNil(t, stored.Temperature) {
+			assert.Equal(t, updatedTemp, *stored.Temperature)
+		}
+		if assert.NotNil(t, stored.MaxTokens) {
+			assert.Equal(t, 2048, *stored.MaxTokens)
+		}
+	}
 }
 
 func TestGetRoleConfigAPI(t *testing.T) {

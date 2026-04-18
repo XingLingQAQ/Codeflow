@@ -1,0 +1,38 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "phase": "wave4-declaration-semantics-handoff",
+  "status": "completed",
+  "scope": {
+    "goal": "move declaration-side request semantics and controls into Go resolved config and reusable commander builders without moving TS runtime/core execution boundary",
+    "files": [
+      "internal/config/types.go",
+      "internal/config/manager.go",
+      "internal/config/config_test.go",
+      "internal/commander/commander.go",
+      "internal/commander/commander_test.go",
+      "docs/plans/2026-04-12-go-backend-adapter-semantics-migration-execution-plan.md"
+    ]
+  },
+  "implemented": [
+    "added answer_style, capabilities, allowed_skills, and allowed_hooks to config.RoleConfig and config.ResolvedConfig as Go declaration semantics truth",
+    "updated ResolveConfig to aggregate and dedupe declaration semantics/control fields alongside existing model, token, and timeout resolution",
+    "added BuildAgentConfigFromResolved, BuildAgentFromResolved, RoleFromConfigRole, and resolved control mapping helpers in commander for reusable ResolvedConfig to AgentConfig handoff"
+  ],
+  "verification": [
+    "go test ./internal/config ./internal/commander"
+  ],
+  "evidence": [
+    "ResolveConfig now returns declaration semantics and deduped allowed_skills/allowed_hooks in internal/config/config_test.go",
+    "BuildAgentFromResolved constructs adapter-backed AgentConfig with semantics/control metadata in internal/commander/commander_test.go",
+    "buildAgentSendOptions and buildAgentRequestSemantics remain the runtime-facing handoff boundary"
+  ],
+  "risk": "low change is additive, reuses existing adapters and commander interfaces, and leaves TS hook/skill/tool/cowork execution ownership unchanged",
+  "runtime_boundary": {
+    "ts_runtime_unchanged": true,
+    "notes": [
+      "hook, skill, tool, commander, and cowork execution remain in TypeScript runtime/core",
+      "this slice adds reusable Go-side builder capability but does not claim production bootstrap wiring is complete"
+    ]
+  },
+  "completed_at": "2026-04-12T16:20:00Z"
+}

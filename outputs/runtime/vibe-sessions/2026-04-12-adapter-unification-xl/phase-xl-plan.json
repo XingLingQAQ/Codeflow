@@ -1,0 +1,15 @@
+{
+  "run_id": "2026-04-12-adapter-unification-xl",
+  "stage": "xl_plan",
+  "grade": "XL",
+  "requirement_doc": "docs/requirements/2026-04-12-adapter-unification.md",
+  "plan_doc": "docs/plans/2026-04-12-adapter-unification-execution-plan.md",
+  "waves": [
+    "Wave 1A adapter controls",
+    "Wave 1B runtime hot update semantics",
+    "Wave 1C hook-skill-style boundary",
+    "Wave 2 chain integration",
+    "Wave 3 verification",
+    "Wave 4 cleanup"
+  ]
+}

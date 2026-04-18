@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { CodexAdapter } from '../CodexAdapter.js';
 import { AdapterConfig, APIError } from '../types.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { HookEvent } from '../../hooks/types.js';
 
 // Mock OpenAI SDK
 vi.mock('openai', () => {
@@ -41,6 +42,11 @@ describe('CodexAdapter', () => {
       }),
       hook_post_response: vi.fn().mockResolvedValue(undefined),
       hook_on_stream: vi.fn(),
+      hook_before_compress: vi.fn().mockResolvedValue({
+        entities: ['session'],
+        decisions: ['preserve recent turns'],
+        relations: [],
+      }),
     } as unknown as HookManager;
 
     adapter = new CodexAdapter(mockConfig, mockHookManager);
@@ -102,6 +108,44 @@ describe('CodexAdapter', () => {
       expect(response.finishReason).toBe('stop');
     });
 
+    it('applies before_send payload mutations to provider request', async () => {
+      const manager = new HookManager();
+      manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
+        ...payload,
+        model: 'hook-model',
+        temperature: 0.1,
+        maxTokens: 12,
+        messages: [
+          { role: 'system', content: 'hooked-system', timestamp: Date.now() },
+          ...payload.messages,
+        ],
+      }));
+      adapter = new CodexAdapter(mockConfig, manager);
+
+      const mockResponse = {
+        choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
+        model: 'hook-model',
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      };
+
+      const mockClient = (adapter as any).client;
+      mockClient.chat.completions.create.mockResolvedValue(mockResponse);
+
+      await adapter.send('Hello');
+
+      expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'hook-model',
+          temperature: 0.1,
+          max_tokens: 12,
+          messages: expect.arrayContaining([
+            expect.objectContaining({ role: 'system', content: 'hooked-system' }),
+            expect.objectContaining({ role: 'user', content: 'Hello' }),
+          ]),
+        })
+      );
+    });
+
     it('should add messages to history', async () => {
       const mockResponse = {
         choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
@@ -147,7 +191,13 @@ describe('CodexAdapter', () => {
       await expect(adapter.send('Hello')).rejects.toThrow(APIError);
     });
 
-    it('should handle streaming', async () => {
+    it('should throw error for stream option', async () => {
+      await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
+        'Use stream() for streaming responses'
+      );
+    });
+
+    it('should handle streaming via stream()', async () => {
       const mockStream = [
         { choices: [{ delta: { content: 'Hello' } }] },
         { choices: [{ delta: { content: ' world' } }] },
@@ -163,16 +213,59 @@ describe('CodexAdapter', () => {
         },
       });
 
-      const response = await adapter.send('Hello', { stream: true });
+      const deltas: string[] = [];
+      let finalDone = false;
+      for await (const chunk of adapter.stream('Hello')) {
+        if (chunk.delta) {
+          deltas.push(chunk.delta);
+        }
+        if (chunk.done) {
+          finalDone = true;
+        }
+      }
 
-      expect(response.content).toBe('Hello world');
+      expect(deltas).toEqual(['Hello', ' world']);
+      expect(finalDone).toBe(true);
+      expect(mockHookManager.hook_on_stream).toHaveBeenCalled();
+      expect(mockHookManager.hook_post_response).toHaveBeenCalled();
+      expect(adapter.getHistory().at(-1)?.content).toBe('Hello world');
     });
   });
 
   describe('receive', () => {
-    it('should throw error when no active stream', async () => {
+    it('should throw no active stream error', async () => {
       const generator = adapter.receive();
       await expect(generator.next()).rejects.toThrow('No active stream');
+    });
+
+    it('should continue active stream and clear state after completion', async () => {
+      const mockStream = [
+        { choices: [{ delta: { content: 'Hello' } }] },
+        { choices: [{ delta: { content: ' world' } }] },
+      ];
+
+      const mockClient = (adapter as any).client;
+      mockClient.chat.completions.create.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          for (const chunk of mockStream) {
+            yield chunk;
+          }
+        },
+      });
+
+      const stream = adapter.stream('Hello');
+      const first = await stream.next();
+      expect(first.value).toMatchObject({ delta: 'Hello', done: false });
+
+      const received: string[] = [];
+      for await (const chunk of adapter.receive()) {
+        if (chunk.delta) {
+          received.push(chunk.delta);
+        }
+      }
+
+      expect(received).toEqual([' world']);
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 
@@ -213,7 +306,7 @@ describe('CodexAdapter', () => {
   });
 
   describe('rewind', () => {
-    it('should rewind specified steps', async () => {
+    it('should rewind specified steps by completed turns', async () => {
       const mockResponse = {
         choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
         model: 'gpt-4',
@@ -229,20 +322,39 @@ describe('CodexAdapter', () => {
       await adapter.rewind(1);
 
       const history = adapter.getHistory();
-      expect(history.length).toBe(3);
+      expect(history).toHaveLength(2);
+      expect(history.map((message) => message.content)).toEqual(['Message 1', 'Response']);
+    });
+
+    it('should preserve system prompts when rewinding completed turns', async () => {
+      adapter.setHistory([
+        { role: 'system', content: 'system prompt', timestamp: 1 },
+        { role: 'user', content: 'Message 1', timestamp: 2 },
+        { role: 'assistant', content: 'Response 1', timestamp: 3 },
+        { role: 'user', content: 'Message 2', timestamp: 4 },
+        { role: 'assistant', content: 'Response 2', timestamp: 5 },
+      ]);
+
+      await adapter.rewind(1);
+
+      expect(adapter.getHistory().map((message) => `${message.role}:${message.content}`)).toEqual([
+        'system:system prompt',
+        'user:Message 1',
+        'assistant:Response 1',
+      ]);
     });
 
     it('should throw error for invalid steps', async () => {
-      await expect(adapter.rewind(0)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(0)).rejects.toThrow('Steps must be positive');
     });
 
     it('should throw error when rewinding too many steps', async () => {
-      await expect(adapter.rewind(10)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(10)).rejects.toThrow('Cannot rewind');
     });
   });
 
   describe('compact', () => {
-    it('should compact history', async () => {
+    it('should compact history with governance summary and recent turns', async () => {
       const mockResponse = {
         choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
         model: 'gpt-4',
@@ -252,7 +364,6 @@ describe('CodexAdapter', () => {
       const mockClient = (adapter as any).client;
       mockClient.chat.completions.create.mockResolvedValue(mockResponse);
 
-      // Add many messages
       for (let i = 0; i < 15; i++) {
         await adapter.send(`Message ${i}`);
       }
@@ -260,7 +371,11 @@ describe('CodexAdapter', () => {
       await adapter.compact();
 
       const history = adapter.getHistory();
-      expect(history.length).toBeLessThanOrEqual(10);
+      expect(history[0]).toMatchObject({ role: 'system' });
+      expect(history[0]?.content).toContain('[Compressed Context]');
+      expect(history.slice(1).length).toBeGreaterThan(0);
+      expect(history.at(-1)?.role).toBe('assistant');
+      expect(mockHookManager.hook_before_compress).toHaveBeenCalled();
     });
   });
 
@@ -349,3 +464,4 @@ describe('CodexAdapter', () => {
     });
   });
 });
+

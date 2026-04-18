@@ -89,6 +89,60 @@ func TestSQLiteConfigServiceSessionPersistence(t *testing.T) {
 	}
 }
 
+func TestSQLiteConfigServiceSessionPartialUpdatePreservesExistingFields(t *testing.T) {
+	dbPath := "test_session_partial_update.db"
+	defer os.Remove(dbPath)
+
+	svc, err := NewSQLiteConfigService(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteConfigService failed: %v", err)
+	}
+	defer svc.Close()
+
+	temp := 0.8
+	maxTokens := 2048
+	if err := svc.SaveSessionConfig(&SessionConfig{
+		SessionID:     "test-session",
+		Mode:          ModeDevelopment,
+		OverrideModel: "test-model",
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+	}); err != nil {
+		t.Fatalf("seed session config: %v", err)
+	}
+
+	updatedMaxTokens := 4096
+	if err := svc.SaveSessionConfig(&SessionConfig{
+		SessionID: "test-session",
+		MaxTokens: &updatedMaxTokens,
+	}); err != nil {
+		t.Fatalf("partial update session config: %v", err)
+	}
+
+	svc2, err := NewSQLiteConfigService(dbPath)
+	if err != nil {
+		t.Fatalf("Reload failed: %v", err)
+	}
+	defer svc2.Close()
+
+	loaded := svc2.LoadSessionConfig("test-session")
+	if loaded == nil {
+		t.Fatal("session config not found")
+	}
+	if loaded.Mode != ModeDevelopment {
+		t.Errorf("expected development mode, got %s", loaded.Mode)
+	}
+	if loaded.OverrideModel != "test-model" {
+		t.Errorf("expected override model preserved, got %s", loaded.OverrideModel)
+	}
+	if loaded.Temperature == nil || *loaded.Temperature != 0.8 {
+		t.Fatalf("expected temperature preserved as 0.8, got %v", loaded.Temperature)
+	}
+	if loaded.MaxTokens == nil || *loaded.MaxTokens != 4096 {
+		t.Fatalf("expected updated max tokens 4096, got %v", loaded.MaxTokens)
+	}
+}
+
 func TestSQLiteConfigServiceRolePersistence(t *testing.T) {
 	dbPath := "test_role_config.db"
 	defer os.Remove(dbPath)

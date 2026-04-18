@@ -84,7 +84,8 @@ func (s *SQLiteConfigService) SaveSessionConfig(config *SessionConfig) error {
 	if err := s.ConfigManager.SaveSessionConfig(config); err != nil {
 		return err
 	}
-	return s.saveSessionConfigToDB(config)
+	merged := s.ConfigManager.LoadSessionConfig(config.SessionID)
+	return s.saveSessionConfigToDB(merged)
 }
 
 // SaveRoleConfig overrides to persist to SQLite.

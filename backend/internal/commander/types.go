@@ -15,11 +15,17 @@ const (
 
 // AgentConfig 代理配置
 type AgentConfig struct {
-	Role         AgentRole              `json:"role"`
-	Adapter      adapters.ICliAdapter   `json:"-"`
-	SystemPrompt string                 `json:"system_prompt,omitempty"`
-	MaxDepth     int                    `json:"max_depth,omitempty"`
-	Timeout      int                    `json:"timeout,omitempty"`
+	Role         AgentRole                 `json:"role"`
+	Adapter      adapters.ICliAdapter      `json:"-"`
+	SystemPrompt string                    `json:"system_prompt,omitempty"`
+	Model        string                    `json:"model,omitempty"`
+	Temperature  *float64                  `json:"temperature,omitempty"`
+	MaxTokens    int                       `json:"max_tokens,omitempty"`
+	AnswerStyle  string                    `json:"answer_style,omitempty"`
+	Capabilities []string                  `json:"capabilities,omitempty"`
+	Controls     *adapters.RequestControls `json:"controls,omitempty"`
+	MaxDepth     int                       `json:"max_depth,omitempty"`
+	Timeout      int                       `json:"timeout,omitempty"`
 }
 
 // CallCoderAgentParams 调用Coder代理参数
@@ -41,12 +47,12 @@ type ConsultSubExpertParams struct {
 
 // ToolCallResult 工具调用结果
 type ToolCallResult struct {
-	Success    bool       `json:"success"`
-	Output     string     `json:"output"`
-	AgentRole  AgentRole  `json:"agent_role"`
+	Success    bool        `json:"success"`
+	Output     string      `json:"output"`
+	AgentRole  AgentRole   `json:"agent_role"`
 	TokenUsage *TokenUsage `json:"token_usage,omitempty"`
-	Duration   int64      `json:"duration,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	Duration   int64       `json:"duration,omitempty"`
+	Error      string      `json:"error,omitempty"`
 }
 
 // TokenUsage Token使用量
@@ -66,8 +72,8 @@ type ContextGraftConfig struct {
 
 // GraftedContext 嫁接后的上下文
 type GraftedContext struct {
-	Messages     []adapters.Message    `json:"messages"`
-	SystemPrompt string                `json:"system_prompt,omitempty"`
+	Messages     []adapters.Message     `json:"messages"`
+	SystemPrompt string                 `json:"system_prompt,omitempty"`
 	Metadata     GraftedContextMetadata `json:"metadata"`
 }
 
@@ -80,9 +86,9 @@ type GraftedContextMetadata struct {
 
 // ToolDefinition 工具定义
 type ToolDefinition struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  ToolDefinitionParams   `json:"parameters"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Parameters  ToolDefinitionParams `json:"parameters"`
 }
 
 // ToolDefinitionParams 工具定义参数

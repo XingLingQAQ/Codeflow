@@ -1,0 +1,36 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "phase": "wave5-production-bootstrap-wiring",
+  "status": "completed",
+  "scope": {
+    "goal": "wire config resolve/build into backend startup so default agents are validated and registered at boot without introducing a global commander runtime",
+    "files": [
+      "cmd/codeflow-server/main.go",
+      "cmd/codeflow-server/main_test.go",
+      "docs/plans/2026-04-12-go-backend-adapter-semantics-migration-execution-plan.md"
+    ]
+  },
+  "implemented": [
+    "added explicit SQLite-backed config service initialization in cmd/codeflow-server startup flow",
+    "added registerConfiguredAgents startup helper that resolves main/coder/sub roles, reuses commander RoleFromConfigRole and BuildAgentFromResolved, and registers agent metadata into agent service",
+    "kept missing API channel backward compatible by skipping registration while still surfacing unsupported providers during startup"
+  ],
+  "verification": [
+    "go test ./cmd/codeflow-server ./internal/config ./internal/commander"
+  ],
+  "evidence": [
+    "cmd/codeflow-server/main_test.go asserts three default roles are registered with idle status and model metadata",
+    "cmd/codeflow-server/main_test.go asserts missing API channel is skipped without startup failure",
+    "cmd/codeflow-server/main_test.go asserts unsupported provider causes registerConfiguredAgents to fail",
+    "cmd/codeflow-server/main.go now initializes config service and agent service before api.NewServer"
+  ],
+  "risk": "low startup wiring is additive, validates existing config semantics earlier, and avoids expanding Go ownership into TS runtime execution",
+  "runtime_boundary": {
+    "ts_runtime_unchanged": true,
+    "notes": [
+      "hook, skill, tool, commander, and cowork execution remain in TypeScript runtime/core",
+      "this slice only registers boot-time agent metadata and does not create a production global commander singleton"
+    ]
+  },
+  "completed_at": "2026-04-12T17:40:00Z"
+}

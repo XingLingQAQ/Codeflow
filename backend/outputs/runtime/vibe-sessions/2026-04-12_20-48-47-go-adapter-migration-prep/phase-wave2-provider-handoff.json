@@ -1,0 +1,30 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "phase": "wave2-provider-handoff",
+  "status": "completed",
+  "scope": {
+    "goal": "keep config provider compatibility while routing Go canonical provider handoff through adapters truth source",
+    "files": [
+      "internal/config/types.go",
+      "internal/config/manager.go",
+      "internal/config/config_test.go"
+    ]
+  },
+  "implemented": [
+    "added Provider.ToAdapterProvider and APIChannel.AdapterProvider in config",
+    "reused adapters.ProviderFromString as the only Go canonical provider normalization rule",
+    "extended DetectConflicts to surface unsupported API channel providers early"
+  ],
+  "verification": [
+    "go test ./internal/config",
+    "go test ./internal/config ./internal/adapters ./internal/commander ./internal/hotswap"
+  ],
+  "runtime_boundary": {
+    "ts_runtime_unchanged": true,
+    "notes": [
+      "packages/core execution and enforcement layers remain unchanged",
+      "config public provider literals remain anthropic/openai/google/custom for compatibility"
+    ]
+  },
+  "completed_at": "2026-04-12T14:32:00Z"
+}

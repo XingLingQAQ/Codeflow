@@ -7,6 +7,15 @@ import (
 	"github.com/codeflow/backend/internal/config"
 )
 
+type globalConfigPatch struct {
+	DefaultModel     *string               `json:"default_model"`
+	APIPool          *[]config.APIChannel  `json:"api_pool"`
+	PublicMCP        *[]string             `json:"public_mcp"`
+	SummaryThreshold *int                  `json:"summary_threshold"`
+	MaxRetries       *int                  `json:"max_retries"`
+	Timeout          *int                  `json:"timeout"`
+}
+
 // GetGlobalConfig returns the global configuration.
 func GetGlobalConfig(c *gin.Context) {
 	svc := config.GetConfigService()
@@ -16,7 +25,7 @@ func GetGlobalConfig(c *gin.Context) {
 
 // UpdateGlobalConfig updates the global configuration.
 func UpdateGlobalConfig(c *gin.Context) {
-	var req config.GlobalConfig
+	var req globalConfigPatch
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, 400, err.Error())
 		return
@@ -37,26 +46,29 @@ func UpdateGlobalConfig(c *gin.Context) {
 	respondOK(c, merged)
 }
 
-func mergeGlobalConfig(current, updates *config.GlobalConfig) config.GlobalConfig {
+func mergeGlobalConfig(current *config.GlobalConfig, updates *globalConfigPatch) config.GlobalConfig {
 	merged := *current
+	if updates == nil {
+		return merged
+	}
 
-	if updates.DefaultModel != "" {
-		merged.DefaultModel = updates.DefaultModel
+	if updates.DefaultModel != nil {
+		merged.DefaultModel = *updates.DefaultModel
 	}
 	if updates.APIPool != nil {
-		merged.APIPool = updates.APIPool
+		merged.APIPool = *updates.APIPool
 	}
 	if updates.PublicMCP != nil {
-		merged.PublicMCP = updates.PublicMCP
+		merged.PublicMCP = *updates.PublicMCP
 	}
-	if updates.SummaryThreshold != 0 {
-		merged.SummaryThreshold = updates.SummaryThreshold
+	if updates.SummaryThreshold != nil {
+		merged.SummaryThreshold = *updates.SummaryThreshold
 	}
-	if updates.MaxRetries != 0 {
-		merged.MaxRetries = updates.MaxRetries
+	if updates.MaxRetries != nil {
+		merged.MaxRetries = *updates.MaxRetries
 	}
-	if updates.Timeout != 0 {
-		merged.Timeout = updates.Timeout
+	if updates.Timeout != nil {
+		merged.Timeout = *updates.Timeout
 	}
 
 	return merged
@@ -103,7 +115,13 @@ func UpdateSessionConfig(c *gin.Context) {
 		return
 	}
 
-	respondOK(c, req)
+	updated := svc.LoadSessionConfig(sessionID)
+	if updated == nil {
+		respondError(c, 500, "session config not found after save")
+		return
+	}
+
+	respondOK(c, updated)
 }
 
 // GetRoleConfig returns the role configuration.

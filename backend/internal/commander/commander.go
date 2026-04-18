@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
+	"github.com/codeflow/backend/internal/config"
 )
 
 // Commander 指挥官模式实现
@@ -111,12 +112,15 @@ func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult
 	prompt := c.buildCoderPrompt(params)
 
 	// 嫁接上下文
+	var graftedCtx *GraftedContext
 	if params.Context != "" {
 		mainAgent := c.GetAgent(RoleMain)
 		if mainAgent != nil {
-			graftedCtx, err := c.GraftContext(RoleMain, RoleCoder, &ContextGraftConfig{
-				InheritMessages:  true,
-				MaxContextTokens: 4000,
+			var err error
+			graftedCtx, err = c.GraftContext(RoleMain, RoleCoder, &ContextGraftConfig{
+				InheritMessages:     true,
+				InheritSystemPrompt: true,
+				MaxContextTokens:    4000,
 			})
 			if err == nil && coderAgent.Adapter != nil {
 				coderAgent.Adapter.SetHistory(graftedCtx.Messages)
@@ -140,7 +144,8 @@ func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	response, err := coderAgent.Adapter.Send(ctx, prompt, nil)
+	sendOptions := buildAgentSendOptions(coderAgent, graftedCtx)
+	response, err := coderAgent.Adapter.Send(ctx, prompt, sendOptions)
 	if err != nil {
 		result := &ToolCallResult{
 			Success:   false,
@@ -233,12 +238,15 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 	prompt := c.buildSubExpertPrompt(params)
 
 	// 嫁接上下文
+	var graftedCtx *GraftedContext
 	if params.Context != "" {
 		mainAgent := c.GetAgent(RoleMain)
 		if mainAgent != nil {
-			graftedCtx, err := c.GraftContext(RoleMain, RoleSubExpert, &ContextGraftConfig{
-				InheritMessages:  true,
-				MaxContextTokens: 2000,
+			var err error
+			graftedCtx, err = c.GraftContext(RoleMain, RoleSubExpert, &ContextGraftConfig{
+				InheritMessages:     true,
+				InheritSystemPrompt: true,
+				MaxContextTokens:    2000,
 			})
 			if err == nil && subExpert.Adapter != nil {
 				subExpert.Adapter.SetHistory(graftedCtx.Messages)
@@ -262,7 +270,8 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	response, err := subExpert.Adapter.Send(ctx, prompt, nil)
+	sendOptions := buildAgentSendOptions(subExpert, graftedCtx)
+	response, err := subExpert.Adapter.Send(ctx, prompt, sendOptions)
 	if err != nil {
 		result := &ToolCallResult{
 			Success:   false,
@@ -290,6 +299,160 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 
 	trace.Result = result
 	return result, nil
+}
+
+func BuildAgentConfigFromResolved(role AgentRole, resolved *config.ResolvedConfig, adapter adapters.ICliAdapter) (*AgentConfig, error) {
+	if resolved == nil {
+		return nil, fmt.Errorf("resolved config is nil")
+	}
+	if adapter == nil {
+		return nil, fmt.Errorf("adapter is nil")
+	}
+
+	agent := &AgentConfig{
+		Role:         role,
+		Adapter:      adapter,
+		SystemPrompt: strings.TrimSpace(resolved.SystemPrompt),
+		Model:        strings.TrimSpace(resolved.Model),
+		MaxDepth:     0,
+		Timeout:      resolved.Timeout,
+	}
+	temperature := resolved.Temperature
+	agent.Temperature = &temperature
+	if resolved.MaxTokens != nil {
+		agent.MaxTokens = *resolved.MaxTokens
+	}
+	if trimmed := strings.TrimSpace(resolved.AnswerStyle); trimmed != "" {
+		agent.AnswerStyle = trimmed
+	}
+	if len(resolved.Capabilities) > 0 {
+		agent.Capabilities = append([]string(nil), resolved.Capabilities...)
+	}
+	if controls := buildResolvedRequestControls(resolved); controls != nil {
+		agent.Controls = controls
+	}
+	return agent, nil
+}
+
+func BuildAgentFromResolved(role AgentRole, resolved *config.ResolvedConfig) (*AgentConfig, error) {
+	if resolved == nil {
+		return nil, fmt.Errorf("resolved config is nil")
+	}
+	if resolved.APIChannel == nil {
+		return nil, fmt.Errorf("resolved config api channel is nil")
+	}
+
+	provider, err := resolved.APIChannel.AdapterProvider()
+	if err != nil {
+		return nil, err
+	}
+
+	adapterConfig := &adapters.AdapterConfig{
+		APIKey:           resolved.APIChannel.APIKey,
+		BaseURL:          resolved.APIChannel.BaseURL,
+		Model:            strings.TrimSpace(resolved.Model),
+		Temperature:      resolved.Temperature,
+		MaxRetries:       resolved.MaxRetries,
+		ForceMaxRetries:  true,
+		ForceTemperature: true,
+	}
+	if resolved.MaxTokens != nil {
+		adapterConfig.MaxTokens = *resolved.MaxTokens
+		adapterConfig.ForceMaxTokens = true
+	}
+	if resolved.Timeout > 0 {
+		adapterConfig.Timeout = time.Duration(resolved.Timeout) * time.Millisecond
+		adapterConfig.ForceTimeout = true
+	}
+
+	adapter, err := adapters.NewAdapter(provider, adapterConfig)
+	if err != nil {
+		return nil, err
+	}
+	return BuildAgentConfigFromResolved(role, resolved, adapter)
+}
+
+func RoleFromConfigRole(role config.RoleType) (AgentRole, error) {
+	switch role {
+	case config.RoleMain:
+		return RoleMain, nil
+	case config.RoleCoder:
+		return RoleCoder, nil
+	case config.RoleSub:
+		return RoleSubExpert, nil
+	default:
+		return "", fmt.Errorf("unsupported config role %q", role)
+	}
+}
+
+func buildResolvedRequestControls(resolved *config.ResolvedConfig) *adapters.RequestControls {
+	if resolved == nil {
+		return nil
+	}
+	controls := &adapters.RequestControls{}
+	if len(resolved.AllowedSkills) > 0 {
+		controls.AllowedSkills = append([]string(nil), resolved.AllowedSkills...)
+	}
+	if len(resolved.AllowedHooks) > 0 {
+		controls.AllowedHooks = append([]string(nil), resolved.AllowedHooks...)
+	}
+	if len(controls.AllowedSkills) == 0 && len(controls.AllowedHooks) == 0 {
+		return nil
+	}
+	return controls
+}
+
+func buildAgentSendOptions(agent *AgentConfig, graftedCtx *GraftedContext) *adapters.SendOptions {
+	if agent == nil {
+		return nil
+	}
+
+	systemPrompt := agent.SystemPrompt
+	if graftedCtx != nil && graftedCtx.SystemPrompt != "" {
+		systemPrompt = graftedCtx.SystemPrompt
+	}
+
+	options := &adapters.SendOptions{
+		System:      systemPrompt,
+		Semantics:   buildAgentRequestSemantics(agent),
+		Model:       agent.Model,
+		Temperature: cloneFloat64(agent.Temperature),
+		MaxTokens:   agent.MaxTokens,
+	}
+
+	if options.System == "" && options.Semantics == nil && options.Model == "" && options.Temperature == nil && options.MaxTokens == 0 {
+		return nil
+	}
+
+	return options
+}
+
+func buildAgentRequestSemantics(agent *AgentConfig) *adapters.RequestSemantics {
+	if agent == nil {
+		return nil
+	}
+
+	semantics := &adapters.RequestSemantics{
+		AnswerStyle: strings.TrimSpace(agent.AnswerStyle),
+		Controls:    adapters.CloneRequestControls(agent.Controls),
+	}
+	if len(agent.Capabilities) > 0 {
+		semantics.Capabilities = append([]string(nil), agent.Capabilities...)
+	}
+
+	if semantics.AnswerStyle == "" && len(semantics.Capabilities) == 0 && semantics.Controls == nil {
+		return nil
+	}
+
+	return semantics
+}
+
+func cloneFloat64(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 // GraftContext 嫁接上下文

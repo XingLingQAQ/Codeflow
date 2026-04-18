@@ -9,6 +9,16 @@ import {
   APIChannel,
 } from './types.js';
 
+type RuntimeMetadata = {
+  answerStyle?: string;
+  capabilities?: string[];
+  allowedSkills?: string[];
+  allowedHooks?: string[];
+};
+
+type ResolvedRoleConfig = RoleConfig & RuntimeMetadata;
+type ResolvedRuntimeConfig = ResolvedConfig & RuntimeMetadata;
+
 /**
  * 默认全局配置
  */
@@ -24,13 +34,14 @@ const DEFAULT_GLOBAL_CONFIG: GlobalConfig = {
 /**
  * 默认角色配置
  */
-const DEFAULT_ROLE_CONFIGS: Record<'main' | 'coder' | 'sub', RoleConfig> = {
+const DEFAULT_ROLE_CONFIGS: Record<'main' | 'coder' | 'sub', ResolvedRoleConfig> = {
   main: {
     model: 'claude-3-5-sonnet-20241022',
     temperature: 1.0,
     apiChannel: 'default',
     mcpTools: ['orchestrator'],
     systemPrompt: 'You are the main AI commander.',
+    answerStyle: 'balanced',
   },
   coder: {
     model: 'claude-3-5-sonnet-20241022',
@@ -38,6 +49,8 @@ const DEFAULT_ROLE_CONFIGS: Record<'main' | 'coder' | 'sub', RoleConfig> = {
     apiChannel: 'default',
     mcpTools: ['filesystem', 'linter'],
     systemPrompt: 'You are a code implementation expert.',
+    answerStyle: 'concise',
+    capabilities: ['code'],
   },
   sub: {
     model: 'claude-3-5-haiku-20241022',
@@ -45,6 +58,7 @@ const DEFAULT_ROLE_CONFIGS: Record<'main' | 'coder' | 'sub', RoleConfig> = {
     apiChannel: 'default',
     mcpTools: ['websearch'],
     systemPrompt: 'You are a research assistant.',
+    answerStyle: 'concise',
   },
 };
 
@@ -55,7 +69,7 @@ const DEFAULT_ROLE_CONFIGS: Record<'main' | 'coder' | 'sub', RoleConfig> = {
 export class ConfigManager extends EventEmitter implements IConfigManager {
   private globalConfig: GlobalConfig;
   private sessionConfigs: Map<string, SessionConfig> = new Map();
-  private roleConfigs: Map<string, RoleConfig> = new Map();
+  private roleConfigs: Map<string, ResolvedRoleConfig> = new Map();
   private changeCallbacks: Set<(config: ConfigHierarchy) => void> = new Set();
 
   constructor(initialConfig?: Partial<GlobalConfig>) {
@@ -74,7 +88,7 @@ export class ConfigManager extends EventEmitter implements IConfigManager {
     return config ? { ...config } : null;
   }
 
-  loadRoleConfig(role: 'main' | 'coder' | 'sub'): RoleConfig | null {
+  loadRoleConfig(role: 'main' | 'coder' | 'sub'): ResolvedRoleConfig | null {
     const config = this.roleConfigs.get(role);
     return config ? { ...config } : { ...DEFAULT_ROLE_CONFIGS[role] };
   }
@@ -92,7 +106,7 @@ export class ConfigManager extends EventEmitter implements IConfigManager {
   }
 
   saveRoleConfig(role: 'main' | 'coder' | 'sub', config: RoleConfig): void {
-    this.roleConfigs.set(role, { ...config });
+    this.roleConfigs.set(role, { ...config } as ResolvedRoleConfig);
     this.notifyChange();
   }
 
@@ -101,7 +115,7 @@ export class ConfigManager extends EventEmitter implements IConfigManager {
   /**
    * 解析配置，按优先级合并：Role > Session > Global
    */
-  resolveConfig(sessionId?: string, role?: 'main' | 'coder' | 'sub'): ResolvedConfig {
+  resolveConfig(sessionId?: string, role?: 'main' | 'coder' | 'sub'): ResolvedRuntimeConfig {
     // 1. 从 Global 开始
     let model = this.globalConfig.defaultModel;
     let temperature = 1.0;
@@ -109,6 +123,10 @@ export class ConfigManager extends EventEmitter implements IConfigManager {
     let maxTokens: number | undefined;
     let mcpTools: string[] = [...this.globalConfig.publicMcp];
     let systemPrompt: string | undefined;
+    let answerStyle: string | undefined;
+    let capabilities: string[] | undefined;
+    let allowedSkills: string[] | undefined;
+    let allowedHooks: string[] | undefined;
     let apiChannelId = 'default';
 
     // 2. 应用 Session 配置
@@ -136,6 +154,10 @@ export class ConfigManager extends EventEmitter implements IConfigManager {
       apiChannelId = roleConfig.apiChannel;
       mcpTools = [...mcpTools, ...roleConfig.mcpTools];
       systemPrompt = roleConfig.systemPrompt;
+      answerStyle = roleConfig.answerStyle;
+      capabilities = roleConfig.capabilities ? [...roleConfig.capabilities] : undefined;
+      allowedSkills = roleConfig.allowedSkills ? [...roleConfig.allowedSkills] : undefined;
+      allowedHooks = roleConfig.allowedHooks ? [...roleConfig.allowedHooks] : undefined;
     }
 
     // 4. 解析 API Channel
@@ -149,6 +171,10 @@ export class ConfigManager extends EventEmitter implements IConfigManager {
       apiChannel,
       mcpTools: [...new Set(mcpTools)], // 去重
       systemPrompt,
+      answerStyle,
+      capabilities,
+      allowedSkills,
+      allowedHooks,
       timeout: this.globalConfig.timeout,
       maxRetries: this.globalConfig.maxRetries,
     };

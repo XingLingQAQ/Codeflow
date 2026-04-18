@@ -1,0 +1,19 @@
+{
+  "run_id": "2026-04-12-adapter-unification-xl",
+  "stage": "phase_cleanup",
+  "team": "adapter-unification-xl",
+  "receipts": [
+    "docs/requirements/2026-04-12-adapter-unification.md",
+    "docs/plans/2026-04-12-adapter-unification-execution-plan.md",
+    "outputs/runtime/vibe-sessions/2026-04-12-adapter-unification-xl/skeleton-receipt.json",
+    "outputs/runtime/vibe-sessions/2026-04-12-adapter-unification-xl/intent-contract.json",
+    "outputs/runtime/vibe-sessions/2026-04-12-adapter-unification-xl/phase-xl-plan.json",
+    "outputs/runtime/vibe-sessions/2026-04-12-adapter-unification-xl/phase-plan-execute.json"
+  ],
+  "cleanup": {
+    "temp_files_removed": false,
+    "team_shutdown_pending": true,
+    "git_commit_pending": true
+  },
+  "note": "代码与 CSV 提交完成后，再执行 team shutdown。"
+}

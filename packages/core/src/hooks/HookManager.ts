@@ -16,6 +16,7 @@ import {
   TaskExecutionResult,
   TaskFailureContext,
   CodeChangeEventRecorder,
+  HookRuntimeControls,
 } from './types.js';
 
 /**
@@ -25,11 +26,23 @@ import {
 export class HookManager extends EventEmitter implements IHookManager {
   private handlers: Map<HookEvent, Set<HookHandler>> = new Map();
   private readonly codeChangeEventRecorder?: CodeChangeEventRecorder;
+  private controls: {
+    enabled: boolean;
+    allowedHooks: HookEvent[];
+    hasExplicitAllowlist: boolean;
+  } = {
+    enabled: true,
+    allowedHooks: [],
+    hasExplicitAllowlist: false,
+  };
 
-  constructor(codeChangeEventRecorder?: CodeChangeEventRecorder) {
+  constructor(codeChangeEventRecorder?: CodeChangeEventRecorder, controls?: HookRuntimeControls) {
     super();
     this.codeChangeEventRecorder = codeChangeEventRecorder;
     this.initializeHandlers();
+    if (controls) {
+      this.setControls(controls);
+    }
   }
 
   private initializeHandlers(): void {
@@ -59,31 +72,70 @@ export class HookManager extends EventEmitter implements IHookManager {
     }
   }
 
+  public setControls(controls: HookRuntimeControls): void {
+    this.controls = {
+      enabled: controls.enabled ?? true,
+      allowedHooks: Array.isArray(controls.allowedHooks)
+        ? controls.allowedHooks.filter((hook): hook is HookEvent => Object.values(HookEvent).includes(hook as HookEvent))
+        : [],
+      hasExplicitAllowlist: Object.prototype.hasOwnProperty.call(controls, 'allowedHooks'),
+    };
+  }
+
+  public getControls(): Readonly<Required<HookRuntimeControls>> {
+    return {
+      enabled: this.controls.enabled,
+      allowedHooks: [...this.controls.allowedHooks],
+    };
+  }
+
+  private isEventAllowed(event: HookEvent): boolean {
+    if (!this.controls.enabled) {
+      return false;
+    }
+    if (!this.controls.hasExplicitAllowlist) {
+      return true;
+    }
+    return this.controls.allowedHooks.includes(event);
+  }
+
   /**
    * 执行 Hook 处理器链
    */
   private async executeHandlers<T, R>(
     event: HookEvent,
     data: T,
-    reducer?: (acc: R, result: R) => R
+    reducer?: (acc: R, result: R) => R,
+    options: {
+      chainPayload?: boolean;
+    } = {}
   ): Promise<R | undefined> {
+    if (!this.isEventAllowed(event)) {
+      return undefined;
+    }
+
     const handlers = this.handlers.get(event);
     if (!handlers || handlers.size === 0) {
       return undefined;
     }
 
     let result: R | undefined;
+    let currentData = data;
     for (const handler of handlers) {
-      const handlerResult = await handler(data);
+      const handlerInput = options.chainPayload ? currentData : data;
+      const handlerResult = await handler(handlerInput);
       if (reducer && handlerResult !== undefined) {
         result = reducer(result as R, handlerResult as R);
       } else if (handlerResult !== undefined) {
         result = handlerResult as R;
       }
+      if (options.chainPayload && handlerResult !== undefined) {
+        currentData = handlerResult as T;
+      }
     }
 
     // 触发 EventEmitter 事件
-    this.emit(event, data, result);
+    this.emit(event, options.chainPayload ? currentData : data, result);
 
     return result;
   }
@@ -95,7 +147,8 @@ export class HookManager extends EventEmitter implements IHookManager {
     const result = await this.executeHandlers<RequestPayload, RequestPayload>(
       HookEvent.BEFORE_SEND,
       payload,
-      (_, current) => current // 使用最后一个处理器的结果
+      undefined,
+      { chainPayload: true }
     );
     return result || payload;
   }
@@ -111,6 +164,10 @@ export class HookManager extends EventEmitter implements IHookManager {
    * 生命周期 Hook: 流式输出处理
    */
   hook_on_stream(chunk: StreamChunk): void {
+    if (!this.isEventAllowed(HookEvent.ON_STREAM)) {
+      return;
+    }
+
     const handlers = this.handlers.get(HookEvent.ON_STREAM);
     if (handlers) {
       handlers.forEach((handler) => handler(chunk));

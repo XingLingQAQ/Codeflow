@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import type { CanonicalProvider } from './types.js';
 
 /**
  * 模型能力标签
@@ -18,7 +19,7 @@ export type ModelCapability =
 /**
  * 模型提供商
  */
-export type ModelProvider = 'anthropic' | 'openai' | 'google' | 'local' | 'custom';
+export type ModelProvider = CanonicalProvider;
 
 /**
  * 模型成本配置（每百万 Token）

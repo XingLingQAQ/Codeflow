@@ -1,3 +1,5 @@
+import { HookManager } from '../hooks/HookManager.js';
+import type { HookRuntimeControls } from '../hooks/types.js';
 import type { IAuditManager } from '../audit/types.js';
 import { FileOperationService } from './FileOperationService.js';
 import { MCPGateway } from './MCPGateway.js';
@@ -41,6 +43,8 @@ export interface HeadlessToolRuntimeDeps {
   mcpGateway?: MCPGateway;
   skillRegistry?: SkillRegistry;
   skillDispatcher?: SkillDispatcher;
+  hookManager?: HookManager;
+  hookControls?: HookRuntimeControls;
 }
 
 /**
@@ -56,6 +60,7 @@ export class HeadlessToolRuntime {
   private readonly mcpGateway: MCPGateway;
   private readonly skillRegistry: SkillRegistry;
   private readonly skillDispatcher: SkillDispatcher;
+  private readonly hookManager: HookManager;
 
   constructor(deps: HeadlessToolRuntimeDeps = {}) {
     this.toolRegistry = deps.toolRegistry ?? new ToolRegistry();
@@ -76,6 +81,10 @@ export class HeadlessToolRuntime {
       new SkillDispatcher(this.skillRegistry, this, {
         auditManager: deps.auditManager,
       });
+    this.hookManager = deps.hookManager ?? new HookManager(undefined, deps.hookControls);
+    if (deps.hookControls) {
+      this.hookManager.setControls(deps.hookControls);
+    }
 
     this.registerBuiltinFileTools();
   }
@@ -110,6 +119,10 @@ export class HeadlessToolRuntime {
 
   getSkillDispatcher(): SkillDispatcher {
     return this.skillDispatcher;
+  }
+
+  getHookManager(): HookManager {
+    return this.hookManager;
   }
 
   getToolTraceCount(): number {

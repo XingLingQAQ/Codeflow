@@ -1,4 +1,6 @@
 import { AuditManager } from '../audit/AuditManager.js';
+import type { HookManager } from '../hooks/HookManager.js';
+import type { HookRuntimeControls } from '../hooks/types.js';
 import type { IAuditManager } from '../audit/types.js';
 import { HeadlessToolRuntime } from '../tool-runtime/HeadlessToolRuntime.js';
 import type { FileOperationService } from '../tool-runtime/FileOperationService.js';
@@ -372,6 +374,8 @@ export interface AgentRuntimeDeps {
   toolExecutor?: ToolExecutor;
   fileOperationService?: FileOperationService;
   headlessToolRuntime?: HeadlessToolRuntime;
+  hookManager?: HookManager;
+  hookControls?: HookRuntimeControls;
 }
 
 export class AgentRuntime implements AgentRuntimeLike {
@@ -402,6 +406,8 @@ export class AgentRuntime implements AgentRuntimeLike {
         toolRegistry: deps.toolRegistry,
         toolExecutor: deps.toolExecutor,
         fileOperationService: deps.fileOperationService,
+        hookManager: deps.hookManager,
+        hookControls: deps.hookControls,
       });
     this.toolRegistry = this.headlessToolRuntime.getToolRegistry();
     this.toolExecutor = this.headlessToolRuntime.getToolExecutor();
@@ -463,6 +469,10 @@ export class AgentRuntime implements AgentRuntimeLike {
     return this.toolExecutor;
   }
 
+  getHookManager(): HookManager {
+    return this.headlessToolRuntime.getHookManager();
+  }
+
   getToolTraces(): ToolCallTrace[] {
     return this.toolExecutor.getTraces();
   }
@@ -479,6 +489,7 @@ export class AgentRuntime implements AgentRuntimeLike {
       sessionId?: string;
       agentId?: string;
       triggerReason?: string;
+      metadata?: Record<string, unknown>;
     } = {},
   ): Promise<TOutput> {
     const result = await this.headlessToolRuntime.executeSkill<TOutput>({
@@ -495,6 +506,7 @@ export class AgentRuntime implements AgentRuntimeLike {
           type: 'agent',
           name: context.agentId ?? 'agent-runtime',
         },
+        metadata: context.metadata,
       },
     });
 

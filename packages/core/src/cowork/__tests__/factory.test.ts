@@ -1,7 +1,3 @@
-/**
- * Factory 函数单元测试
- */
-
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   registerAiderExecutor,
@@ -14,6 +10,51 @@ import {
 } from '../factory.js';
 import { CoworkOrchestrator } from '../CoworkOrchestrator.js';
 import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
+import { CodexCLIAdapter } from '../adapters/CodexCLIAdapter.js';
+import { GeminiCLIAdapter } from '../adapters/GeminiCLIAdapter.js';
+import { HookEvent } from '../../hooks/types.js';
+
+function createHookAwareAdapter(overrides: Record<string, unknown> = {}) {
+  let hookManager: any;
+  return {
+    send: vi.fn(),
+    stream: vi.fn(),
+    receive: vi.fn(),
+    getHistory: vi.fn().mockReturnValue([]),
+    setHistory: vi.fn(),
+    rewind: vi.fn(),
+    compact: vi.fn(),
+    configure: vi.fn(),
+    getConfig: vi.fn().mockReturnValue({ model: 'test-model' }),
+    setHookManager: vi.fn((manager) => {
+      hookManager = manager;
+    }),
+    getHookManager: vi.fn(() => hookManager),
+    ...overrides,
+  };
+}
+
+function createCodexCliAdapter(overrides: Record<string, unknown> = {}) {
+  const adapter = new CodexCLIAdapter({
+    codexPath: 'codex',
+    model: 'gpt-5.4',
+    sandbox: 'workspace-write',
+    skipGitRepoCheck: true,
+    ephemeral: true,
+    outputLastMessage: true,
+  });
+  return Object.assign(adapter, overrides);
+}
+
+function createGeminiCliAdapter(overrides: Record<string, unknown> = {}) {
+  const adapter = new GeminiCLIAdapter({
+    geminiPath: 'gemini',
+    model: 'gemini-2.5-pro',
+    sandbox: true,
+    includeDirectories: ['/workspace/project'],
+  });
+  return Object.assign(adapter, overrides);
+}
 
 describe('Factory Functions', () => {
   let orchestrator: CoworkOrchestrator;
@@ -131,113 +172,178 @@ describe('Factory Functions', () => {
 
   describe('registerClaudeExecutor', () => {
     it('should register Claude executor', () => {
-      // Mock adapter
-      const mockAdapter = {
-        send: vi.fn(),
-        stream: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockAdapter = createHookAwareAdapter();
 
       const editor = registerClaudeExecutor(orchestrator, mockAdapter as any);
 
       expect(editor.name).toBe('claude-editor');
       expect(orchestrator.getExecutor('claude')).toBeDefined();
     });
+
+    it('injects shared hook manager when provided', async () => {
+      const mockAdapter = createHookAwareAdapter();
+      const sharedHookManager = {
+        hook_before_send: vi.fn(async (payload) => ({
+          ...payload,
+          model: 'hooked-model',
+        })),
+      };
+
+      registerClaudeExecutor(orchestrator, mockAdapter as any, undefined, undefined, sharedHookManager as any);
+
+      expect(mockAdapter.setHookManager).toHaveBeenCalledWith(sharedHookManager);
+      const assigned = mockAdapter.setHookManager.mock.calls[0][0];
+      const output = await assigned.hook_before_send({ messages: [] });
+      expect(output.model).toBe('hooked-model');
+    });
   });
 
   describe('registerGeminiExecutor', () => {
     it('should register Gemini executor', () => {
-      const mockAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockAdapter = createHookAwareAdapter();
 
       const editor = registerGeminiExecutor(orchestrator, mockAdapter as any);
 
       expect(editor.name).toBe('gemini-editor');
       expect(orchestrator.getExecutor('gemini')).toBeDefined();
     });
-  });
 
+    it('should register Gemini CLI adapter as provider executor', () => {
+      const geminiCliAdapter = createGeminiCliAdapter();
+
+      const editor = registerGeminiExecutor(orchestrator, geminiCliAdapter);
+
+      expect(editor.name).toBe('gemini-editor');
+      expect(orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(orchestrator.getExecutor('gemini-cli')).toBeUndefined();
+      expect(editor.getAdapter()).toBe(geminiCliAdapter);
+      expect(geminiCliAdapter.getConfig()).toMatchObject({
+        geminiPath: 'gemini',
+        model: 'gemini-2.5-pro',
+        sandbox: true,
+        includeDirectories: ['/workspace/project'],
+      });
+    });
+  });
   describe('registerCodexExecutor', () => {
     it('should register Codex executor', () => {
-      const mockAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const mockAdapter = createHookAwareAdapter();
 
       const editor = registerCodexExecutor(orchestrator, mockAdapter as any);
 
       expect(editor.name).toBe('codex-editor');
       expect(orchestrator.getExecutor('codex')).toBeDefined();
     });
+
+    it('should register Codex CLI adapter as provider executor', () => {
+      const codexCliAdapter = createCodexCliAdapter();
+
+      const editor = registerCodexExecutor(orchestrator, codexCliAdapter);
+
+      expect(editor.name).toBe('codex-editor');
+      expect(orchestrator.getExecutor('codex')).toBeDefined();
+      expect(orchestrator.getExecutor('codex-cli')).toBeUndefined();
+      expect(editor.getAdapter()).toBe(codexCliAdapter);
+      expect(codexCliAdapter.getConfig()).toMatchObject({
+        codexPath: 'codex',
+        model: 'gpt-5.4',
+        sandbox: 'workspace-write',
+        skipGitRepoCheck: true,
+        ephemeral: true,
+        outputLastMessage: true,
+      });
+    });
   });
 
   describe('createOrchestratorWithAllEditors', () => {
-    it('should create orchestrator with all editors registered', () => {
-      const mockClaudeAdapter = {
-        send: vi.fn(),
-        stream: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+    it('should create orchestrator with a real Gemini CLI adapter', () => {
+      const geminiCliAdapter = createGeminiCliAdapter();
 
-      const mockGeminiAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      const result = createOrchestratorWithAllEditors({
+        geminiCliAdapter,
+      });
 
-      const mockCodexAdapter = {
-        send: vi.fn(),
-        receive: vi.fn(),
-        getHistory: vi.fn().mockReturnValue([]),
-        setHistory: vi.fn(),
-        rewind: vi.fn(),
-        compact: vi.fn(),
-        configure: vi.fn(),
-        getConfig: vi.fn(),
-      };
+      expect(result.geminiEditor).toBeDefined();
+      expect(result.orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(result.geminiEditor?.getAdapter()).toBe(geminiCliAdapter);
+      expect(geminiCliAdapter.getHookManager()).toBe(result.orchestrator.getHookManager());
+
+      result.orchestrator.cleanup();
+    });
+
+    it('should create orchestrator with a real Codex CLI adapter', () => {
+      const codexCliAdapter = createCodexCliAdapter();
+
+      const result = createOrchestratorWithAllEditors({
+        codexCliAdapter,
+      });
+
+      expect(result.codexEditor).toBeDefined();
+      expect(result.orchestrator.getExecutor('codex')).toBeDefined();
+      expect(result.codexEditor?.getAdapter()).toBe(codexCliAdapter);
+      expect(codexCliAdapter.getHookManager()).toBe(result.orchestrator.getHookManager());
+
+      result.orchestrator.cleanup();
+    });
+
+    it('should keep provider executor keys when wiring real CLI adapters', () => {
+      const geminiCliAdapter = createGeminiCliAdapter();
+      const codexCliAdapter = createCodexCliAdapter();
+
+      const result = createOrchestratorWithAllEditors({
+        geminiCliAdapter,
+        codexCliAdapter,
+      });
+
+      expect(result.orchestrator.getExecutor('gemini')).toBeDefined();
+      expect(result.orchestrator.getExecutor('codex')).toBeDefined();
+      expect(result.orchestrator.getExecutor('gemini-cli')).toBeUndefined();
+      expect(result.orchestrator.getExecutor('codex-cli')).toBeUndefined();
+
+      result.orchestrator.cleanup();
+    });
+
+    it('shares one hook manager across adapters and applies hook controls', async () => {
+      const mockClaudeAdapter = createHookAwareAdapter();
+      const mockGeminiAdapter = createHookAwareAdapter();
+      const mockCodexAdapter = createHookAwareAdapter();
 
       const result = createOrchestratorWithAllEditors({
         claudeAdapter: mockClaudeAdapter as any,
         geminiAdapter: mockGeminiAdapter as any,
         codexAdapter: mockCodexAdapter as any,
+        hookControls: {
+          enabled: true,
+          allowedHooks: [HookEvent.POST_RESPONSE],
+        },
       });
 
-      expect(result.orchestrator).toBeInstanceOf(CoworkOrchestrator);
-      expect(result.orchestrator.getExecutor('aider')).toBeDefined();
-      expect(result.orchestrator.getExecutor('claude')).toBeDefined();
-      expect(result.orchestrator.getExecutor('gemini')).toBeDefined();
-      expect(result.orchestrator.getExecutor('codex')).toBeDefined();
+      const claudeHookManager = mockClaudeAdapter.setHookManager.mock.calls[0][0];
+      const geminiHookManager = mockGeminiAdapter.setHookManager.mock.calls[0][0];
+      const codexHookManager = mockCodexAdapter.setHookManager.mock.calls[0][0];
 
-      result.orchestrator.cleanup();
+      const runtimeHookManager = result.orchestrator.getHookManager();
+
+      expect(claudeHookManager).toBe(geminiHookManager);
+      expect(geminiHookManager).toBe(codexHookManager);
+      expect(runtimeHookManager).toBe(claudeHookManager);
+
+      let blocked = false;
+      let allowed = false;
+      claudeHookManager.register(HookEvent.BEFORE_SEND, async (payload: any) => {
+        blocked = true;
+        return payload;
+      });
+      claudeHookManager.register(HookEvent.POST_RESPONSE, async () => {
+        allowed = true;
+      });
+
+      await claudeHookManager.hook_before_send({ messages: [], model: 'base' });
+      await claudeHookManager.hook_post_response({ content: 'ok', model: 'base' });
+
+      expect(blocked).toBe(false);
+      expect(allowed).toBe(true);
     });
   });
 });
+

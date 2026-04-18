@@ -101,6 +101,7 @@ describe('ConfigManager', () => {
       expect(config).toBeDefined();
       expect(config?.model).toBe('claude-3-5-sonnet-20241022');
       expect(config?.temperature).toBe(1.0);
+      expect(config?.answerStyle).toBe('balanced');
     });
 
     it('should return default config for coder role', () => {
@@ -335,6 +336,32 @@ describe('ConfigManager', () => {
       expect(resolved.model).toBe('claude-3-5-sonnet-20241022');
       expect(resolved.temperature).toBe(0.7);
       expect(resolved.mcpTools).toContain('filesystem');
+    });
+
+    it('should carry runtime metadata from role config', () => {
+      manager.saveRoleConfig('coder', {
+        model: 'role-model',
+        temperature: 0.7,
+        apiChannel: 'default',
+        mcpTools: ['coder-tool'],
+        systemPrompt: 'Coder prompt',
+        answerStyle: 'precise',
+        capabilities: ['code', 'diff'],
+        allowedSkills: ['skill.inspect'],
+        allowedHooks: ['before_send'],
+      } as RoleConfig & {
+        answerStyle?: string;
+        capabilities?: string[];
+        allowedSkills?: string[];
+        allowedHooks?: string[];
+      });
+
+      const resolved = manager.resolveConfig(undefined, 'coder');
+
+      expect(resolved.answerStyle).toBe('precise');
+      expect(resolved.capabilities).toEqual(['code', 'diff']);
+      expect(resolved.allowedSkills).toEqual(['skill.inspect']);
+      expect(resolved.allowedHooks).toEqual(['before_send']);
     });
 
     it('should include timeout and maxRetries from global', () => {

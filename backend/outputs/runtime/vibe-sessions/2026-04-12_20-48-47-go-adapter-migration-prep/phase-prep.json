@@ -1,0 +1,48 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "phase": "prep",
+  "status": "completed",
+  "artifacts": {
+    "requirement_doc": "docs/requirements/2026-04-12-go-backend-adapter-semantics-migration.md",
+    "plan_doc": "docs/plans/2026-04-12-go-backend-adapter-semantics-migration-execution-plan.md",
+    "skeleton_receipt": "outputs/runtime/vibe-sessions/2026-04-12_20-48-47-go-adapter-migration-prep/skeleton-receipt.json",
+    "intent_contract": "outputs/runtime/vibe-sessions/2026-04-12_20-48-47-go-adapter-migration-prep/intent-contract.json"
+  },
+  "team": [
+    "team-lead",
+    "go-surface-auditor",
+    "ts-runtime-boundary-auditor",
+    "duplication-auditor"
+  ],
+  "recon_summary": {
+    "go_truth": [
+      "internal/adapters/types.go:63",
+      "internal/adapters/types.go:146",
+      "internal/adapters/types.go:306",
+      "internal/adapters/claude.go:177",
+      "internal/adapters/claude.go:334",
+      "internal/adapters/claude.go:495",
+      "internal/adapters/claude.go:697",
+      "internal/config/manager.go:155"
+    ],
+    "ts_runtime_keep_boundary": [
+      "../packages/core/src/hooks/HookManager.ts:26",
+      "../packages/core/src/hooks/types.ts:5",
+      "../packages/core/src/hooks/types.ts:133",
+      "../packages/core/src/tool-runtime/HeadlessToolRuntime.ts:54",
+      "../packages/core/src/tool-runtime/SkillDispatcher.ts:130",
+      "../packages/core/src/commander/Commander.ts:56",
+      "../packages/core/src/cowork/runtime.ts:484",
+      "../packages/core/src/cowork/factory.ts:177"
+    ],
+    "frozen_slices": [
+      "provider canonicalization only in Go",
+      "RequestSemantics and RequestControls only in Go",
+      "declaration controls in Go and execution controls in TS",
+      "tool-turn shaping and provider payload conversion in Go"
+    ],
+    "first_coding_slice": "resolved request semantics and declaration controls handoff from Go to TS execution boundary"
+  },
+  "next_gate": "implement first migration slice without moving TS runtime/core",
+  "completed_at": "2026-04-12T13:16:00Z"
+}

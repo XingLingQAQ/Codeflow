@@ -11,7 +11,7 @@ import {
   LogOut, CreditCard, Key, Smartphone,
   Flame, Snowflake, Archive, ExternalLink, RefreshCw, Puzzle
 } from 'lucide-react';
-import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanListResponse, PlanTask, PlanTaskListResponse, Agent, GlobalConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, RawArchiveListResponse, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
+import { ViewMode, NavItem, AgentPreset, Project, ProjectListResponse, Plan, PlanListResponse, PlanTask, PlanTaskListResponse, Agent, GlobalConfig, ResolvedConfig, ConversationTraceResponse, MemoryAgentContextResult, MemoryAgentRetrieveResult, MemoryAgentSource, MemoryTier, WorkflowMetadata, WorkflowReplayData, WorkflowOverview, WorkflowTimelineResponse, WorkflowReplayResponse, RawArchiveListResponse, AuditLogListResponse, QueryMemoryNode, SAMGPathResponse, SAMGGraph, SAMGGraphImportResult } from './types';
 import { LogModal } from './components/LogModal';
 import { useApi, useMutation } from './hooks/useApi';
 import { EmptyState } from './components/EmptyState';
@@ -64,7 +64,7 @@ import { listRawArchive } from './services/raw_archive';
 import { getWorkflowOverview, getWorkflowTimeline, getWorkflowReplay } from './services/workflows';
 import { listAuditLogs } from './services/audit';
 import { retrieveMemoryAgent, buildMemoryAgentContext } from './services/memory_agent';
-import { getGlobalConfig, updateGlobalConfig } from './services/config';
+import { getGlobalConfig, updateGlobalConfig, resolveConfig } from './services/config';
 import { healthCheck } from './services/health';
 import { listHooks } from './services/hooks';
 import { findPaths, exportGraph, importGraph } from './services/samg';
@@ -838,6 +838,10 @@ const SettingsView = ({
   const { data: config, loading, error, refetch } = useApi<GlobalConfig>(
     (signal) => getGlobalConfig(signal), [],
   );
+  const { data: resolvedConfig, error: resolvedConfigError } = useApi<ResolvedConfig | null>(
+    (signal) => resolveConfig(undefined, signal),
+    [],
+  );
   const { data: backendHealth } = useApi<{ status: string }>(
     (signal) => healthCheck(signal), [],
   );
@@ -847,6 +851,7 @@ const SettingsView = ({
 
   const [model, setModel] = useState('');
   const [temp, setTemp] = useState(0.7);
+  const [maxTokens, setMaxTokens] = useState('');
 
   // Sync from API data
   useEffect(() => {
@@ -857,6 +862,15 @@ const SettingsView = ({
       setConfigError(true);
     }
   }, [config, error]);
+
+  useEffect(() => {
+    setTemp(resolvedConfig?.temperature ?? 0.7);
+    setMaxTokens(
+      resolvedConfig?.max_tokens !== undefined
+        ? String(resolvedConfig.max_tokens)
+        : '',
+    );
+  }, [resolvedConfig]);
 
   useEffect(() => {
     setProfileName(profile.name || '');
@@ -872,7 +886,8 @@ const SettingsView = ({
         email: profileEmail.trim(),
         role: profileRole.trim(),
       });
-      showToast("Settings saved successfully");
+      refetch();
+      showToast("Global settings saved. Runtime values are shown read-only until Settings is bound to a stable session scope.");
     } catch {
       showToast("Failed to save settings");
     }
@@ -896,6 +911,8 @@ const SettingsView = ({
     .slice(0, 2)
     .join('') || 'U';
   const apiChannels = config?.api_pool ?? [];
+  const runtimeScopeLabel = 'Not bound to a runtime session';
+  const runtimeLoadError = Boolean(resolvedConfigError);
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 relative overflow-hidden pb-16 md:pb-0">
@@ -977,6 +994,15 @@ const SettingsView = ({
                             Could not load config from server. Using defaults.
                         </div>
                     )}
+                    <div className={`p-4 border rounded-xl text-sm ${runtimeLoadError ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                      <div className="font-semibold">Runtime scope</div>
+                      <div className="mt-1 break-all">{runtimeScopeLabel}</div>
+                      {runtimeLoadError ? (
+                        <div className="mt-2 text-xs text-amber-700">Runtime defaults could not be loaded from the server. Values below may fall back to local defaults.</div>
+                      ) : (
+                        <div className="mt-2 text-xs text-slate-500">Temperature and max tokens reflect current resolved defaults only. Settings is not bound to a stable runtime session yet, so these values are read-only here.</div>
+                      )}
+                    </div>
                     <div className="space-y-3">
                          <label className="text-xs font-bold text-slate-700 uppercase">Default Model</label>
                          {modelOptions.length === 0 ? (
@@ -1007,13 +1033,31 @@ const SettingsView = ({
                             min="0" max="1" step="0.1"
                             value={temp}
                             onChange={(e) => setTemp(parseFloat(e.target.value))}
-                            className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                            disabled={true}
+                            className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
                          />
                          <div className="flex justify-between text-[10px] text-slate-400 font-medium">
                             <span>Precise</span>
                             <span>Balanced</span>
                             <span>Creative</span>
                          </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-700 uppercase">Max Tokens</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={maxTokens}
+                        onChange={(e) => setMaxTokens(e.target.value)}
+                        disabled={true}
+                        placeholder="Read-only until Settings is bound to a stable runtime session"
+                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <p className="text-xs text-slate-500">
+                        Read-only preview of resolved runtime defaults.
+                      </p>
                     </div>
                 </div>
              </SettingsSectionCard>

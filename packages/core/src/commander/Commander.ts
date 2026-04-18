@@ -17,8 +17,16 @@ import {
   CommanderEvent,
   CommanderEventHandler,
 } from './types.js';
-import { Message } from '../hooks/types.js';
+import { Message, getMessageText } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
+
+interface HookAwareAdapter {
+  setHookManager(hookManager?: HookManager): void;
+}
+
+function isHookAwareAdapter(adapter: AgentConfig['adapter']): adapter is AgentConfig['adapter'] & HookAwareAdapter {
+  return typeof (adapter as Partial<HookAwareAdapter>).setHookManager === 'function';
+}
 
 export class Commander implements ICommander {
   private agents: Map<AgentRole, AgentConfig> = new Map();
@@ -34,6 +42,9 @@ export class Commander implements ICommander {
   }
 
   registerAgent(config: AgentConfig): void {
+    if (this.hookManager && isHookAwareAdapter(config.adapter)) {
+      config.adapter.setHookManager(this.hookManager);
+    }
     this.agents.set(config.role, config);
     this.emit(CommanderEvent.AGENT_REGISTERED, { role: config.role });
   }
@@ -255,7 +266,7 @@ export class Commander implements ICommander {
       metadata: {
         sourceAgent: sourceRole,
         graftedAt: Date.now(),
-        tokenCount: Math.ceil(messages.reduce((acc, m) => acc + m.content.length, 0) / 4),
+        tokenCount: Math.ceil(messages.reduce((acc, m) => acc + getMessageText(m.content).length, 0) / 4),
       },
     };
 
@@ -433,7 +444,7 @@ export class Commander implements ICommander {
    * 使用改进的启发式算法
    */
   private estimateMessageTokens(message: Message): number {
-    const content = message.content;
+    const content = getMessageText(message.content);
     if (!content) return 0;
 
     let tokens = 0;

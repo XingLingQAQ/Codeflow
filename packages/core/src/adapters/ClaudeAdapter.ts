@@ -1,5 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ICliAdapter, AdapterConfig, SendOptions, APIError, TimeoutError } from './types.js';
+import {
+  ICliAdapter,
+  AdapterConfig,
+  SendOptions,
+  APIError,
+  TimeoutError,
+  AdapterPayloadContext,
+  toHookPayload,
+  applyHookPayload,
+} from './types.js';
 import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
@@ -34,10 +43,22 @@ export class ClaudeAdapter implements ICliAdapter {
     this.hookManager = hookManager;
   }
 
+  setHookManager(hookManager?: HookManager): void {
+    this.hookManager = hookManager;
+  }
+
+  getHookManager(): HookManager | undefined {
+    return this.hookManager;
+  }
+
   /**
    * 发送消息并获取响应
    */
   async send(prompt: string, options?: SendOptions): Promise<AIResponse> {
+    if (options?.stream) {
+      throw new Error('Use stream() for streaming responses');
+    }
+
     // 添加用户消息到历史
     const userMessage: Message = {
       role: 'user',
@@ -46,49 +67,19 @@ export class ClaudeAdapter implements ICliAdapter {
     };
     this.history.push(userMessage);
 
-    // 构建请求 payload
-    let payload = {
-      messages: this.history.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      model: options?.model || this.config.model,
-      temperature: options?.temperature ?? this.config.temperature,
-      max_tokens: options?.maxTokens || this.config.maxTokens,
-    };
-
-    // 触发 hook_before_send
-    if (this.hookManager) {
-      const processedPayload = await this.hookManager.hook_before_send({
-        messages: this.history,
-        model: payload.model,
-        temperature: payload.temperature,
-        maxTokens: payload.max_tokens,
-      });
-
-      payload = {
-        messages: processedPayload.messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-        model: processedPayload.model || payload.model,
-        temperature: processedPayload.temperature ?? payload.temperature,
-        max_tokens: processedPayload.maxTokens || payload.max_tokens,
-      };
-    }
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+    const system = this.extractSystemPrompt(payload.messages);
+    const messages = this.mapMessagesToProviderPayload(payload.messages);
 
     try {
       // 发送请求
       const response = await this.executeWithRetry(async () => {
-        if (options?.stream) {
-          throw new Error('Use receive() for streaming responses');
-        }
-
         return await this.client.messages.create({
-          messages: payload.messages as Anthropic.MessageParam[],
+          messages,
+          system,
           model: payload.model,
           temperature: payload.temperature,
-          max_tokens: payload.max_tokens!,
+          max_tokens: payload.maxTokens!,
           stream: false,
         });
       }, options?.timeout);
@@ -130,10 +121,14 @@ export class ClaudeAdapter implements ICliAdapter {
    */
   async *receive(): AsyncGenerator<StreamChunk> {
     if (!this.currentStream) {
-      throw new Error('No active stream. Call send() with stream: true first');
+      throw new Error('No active stream');
     }
 
-    yield* this.currentStream;
+    try {
+      yield* this.currentStream;
+    } finally {
+      this.currentStream = undefined;
+    }
   }
 
   /**
@@ -148,107 +143,64 @@ export class ClaudeAdapter implements ICliAdapter {
     };
     this.history.push(userMessage);
 
-    // 构建请求 payload
-    let payload = {
-      messages: this.history.map((msg) => ({
-        role: msg.role,
-        content: msg.content,
-      })),
-      model: options?.model || this.config.model,
-      temperature: options?.temperature ?? this.config.temperature,
-      max_tokens: options?.maxTokens || this.config.maxTokens,
-    };
+    const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+    const system = this.extractSystemPrompt(payload.messages);
+    const messages = this.mapMessagesToProviderPayload(payload.messages);
 
-    // 触发 hook_before_send
-    if (this.hookManager) {
-      const processedPayload = await this.hookManager.hook_before_send({
-        messages: this.history,
-        model: payload.model,
-        temperature: payload.temperature,
-        maxTokens: payload.max_tokens,
-      });
-
-      payload = {
-        messages: processedPayload.messages.map((msg) => ({
-          role: msg.role,
-          content: msg.content,
-        })),
-        model: processedPayload.model || payload.model,
-        temperature: processedPayload.temperature ?? payload.temperature,
-        max_tokens: processedPayload.maxTokens || payload.max_tokens,
-      };
-    }
+    const streamGenerator = this.createStreamGenerator({
+      messages,
+      system,
+      model: payload.model,
+      temperature: payload.temperature,
+      maxTokens: payload.maxTokens,
+    });
+    this.currentStream = streamGenerator;
 
     try {
-      const stream = await this.client.messages.create({
-        messages: payload.messages as Anthropic.MessageParam[],
-        model: payload.model,
-        temperature: payload.temperature,
-        max_tokens: payload.max_tokens!,
-        stream: true,
-      });
-
-      let fullContent = '';
-      let index = 0;
-
-      for await (const event of stream) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          const chunk: StreamChunk = {
-            delta: event.delta.text,
-            index: index++,
-            done: false,
-          };
-
-          fullContent += event.delta.text;
-
-          // 触发 hook_on_stream
-          if (this.hookManager) {
-            this.hookManager.hook_on_stream(chunk);
-          }
-
-          yield chunk;
-        }
-
-        if (event.type === 'message_stop') {
-          const finalChunk: StreamChunk = {
-            delta: '',
-            index: index,
-            done: true,
-          };
-
-          // 触发 hook_on_stream
-          if (this.hookManager) {
-            this.hookManager.hook_on_stream(finalChunk);
-          }
-
-          yield finalChunk;
-        }
-      }
-
-      // 添加助手消息到历史
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: fullContent,
-        timestamp: Date.now(),
-      };
-      this.history.push(assistantMessage);
-
-      // 触发 hook_post_response
-      if (this.hookManager) {
-        await this.hookManager.hook_post_response({
-          content: fullContent,
-          model: payload.model,
-        });
-      }
-    } catch (error) {
-      this.handleError(error);
-      throw error;
+      yield* streamGenerator;
+    } finally {
+      this.currentStream = undefined;
     }
   }
 
-  /**
-   * 获取对话历史
-   */
+  private buildPayloadContext(options?: SendOptions): AdapterPayloadContext {
+    return {
+      messages: [...this.history],
+      model: options?.model || this.config.model,
+      temperature: options?.temperature ?? this.config.temperature,
+      maxTokens: options?.maxTokens || this.config.maxTokens,
+    };
+  }
+
+  private mapMessagesToProviderPayload(messages: Message[]): Anthropic.MessageParam[] {
+    return messages
+      .filter((message): message is Message & { role: 'user' | 'assistant' } =>
+        message.role === 'user' || message.role === 'assistant'
+      )
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      })) as Anthropic.MessageParam[];
+  }
+
+  private extractSystemPrompt(messages: Message[]): string | undefined {
+    const systemMessages = messages.filter((message) => message.role === 'system');
+    if (systemMessages.length === 0) {
+      return undefined;
+    }
+
+    return systemMessages.map((message) => message.content).join('\n\n');
+  }
+
+  private async applyBeforeSendHooks(context: AdapterPayloadContext): Promise<AdapterPayloadContext> {
+    if (!this.hookManager) {
+      return context;
+    }
+
+    const processedPayload = await this.hookManager.hook_before_send(toHookPayload(context));
+    return applyHookPayload(context, processedPayload);
+  }
+
   getHistory(): Message[] {
     return [...this.history];
   }
@@ -328,6 +280,77 @@ export class ClaudeAdapter implements ICliAdapter {
    */
   getConfig(): AdapterConfig {
     return { ...this.config };
+  }
+
+  private async *createStreamGenerator(payload: {
+    messages: Anthropic.MessageParam[];
+    system?: string;
+    model: string;
+    temperature?: number;
+    maxTokens?: number;
+  }): AsyncGenerator<StreamChunk> {
+    try {
+      const stream = await this.client.messages.create({
+        messages: payload.messages,
+        system: payload.system,
+        model: payload.model,
+        temperature: payload.temperature,
+        max_tokens: payload.maxTokens!,
+        stream: true,
+      });
+
+      let fullContent = '';
+      let index = 0;
+
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          const chunk: StreamChunk = {
+            delta: event.delta.text,
+            index: index++,
+            done: false,
+          };
+
+          fullContent += event.delta.text;
+
+          if (this.hookManager) {
+            this.hookManager.hook_on_stream(chunk);
+          }
+
+          yield chunk;
+        }
+
+        if (event.type === 'message_stop') {
+          const finalChunk: StreamChunk = {
+            delta: '',
+            index,
+            done: true,
+          };
+
+          if (this.hookManager) {
+            this.hookManager.hook_on_stream(finalChunk);
+          }
+
+          yield finalChunk;
+        }
+      }
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: fullContent,
+        timestamp: Date.now(),
+      };
+      this.history.push(assistantMessage);
+
+      if (this.hookManager) {
+        await this.hookManager.hook_post_response({
+          content: fullContent,
+          model: payload.model,
+        });
+      }
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
   }
 
   /**

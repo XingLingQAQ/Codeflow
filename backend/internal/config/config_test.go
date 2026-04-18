@@ -3,8 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/codeflow/backend/internal/adapters"
 )
 
 func TestConfigManagerBasic(t *testing.T) {
@@ -51,6 +54,47 @@ func TestConfigManagerSessionConfig(t *testing.T) {
 	}
 	if loaded.OverrideModel != "claude-3-opus" {
 		t.Errorf("expected claude-3-opus, got %s", loaded.OverrideModel)
+	}
+}
+
+func TestConfigManagerSaveSessionConfigPreservesExistingFieldsOnPartialUpdate(t *testing.T) {
+	manager := NewConfigManager(nil)
+
+	temp := 0.8
+	maxTokens := 2048
+	if err := manager.SaveSessionConfig(&SessionConfig{
+		SessionID:     "session-001",
+		Mode:          ModeDevelopment,
+		OverrideModel: "claude-3-opus",
+		Temperature:   &temp,
+		MaxTokens:     &maxTokens,
+	}); err != nil {
+		t.Fatalf("seed session config: %v", err)
+	}
+
+	updatedTemp := 0.3
+	if err := manager.SaveSessionConfig(&SessionConfig{
+		SessionID:   "session-001",
+		Temperature: &updatedTemp,
+	}); err != nil {
+		t.Fatalf("partial update session config: %v", err)
+	}
+
+	loaded := manager.LoadSessionConfig("session-001")
+	if loaded == nil {
+		t.Fatal("expected session config")
+	}
+	if loaded.Mode != ModeDevelopment {
+		t.Errorf("expected development mode, got %s", loaded.Mode)
+	}
+	if loaded.OverrideModel != "claude-3-opus" {
+		t.Errorf("expected override model preserved, got %s", loaded.OverrideModel)
+	}
+	if loaded.Temperature == nil || *loaded.Temperature != 0.3 {
+		t.Fatalf("expected updated temperature 0.3, got %v", loaded.Temperature)
+	}
+	if loaded.MaxTokens == nil || *loaded.MaxTokens != 2048 {
+		t.Fatalf("expected max tokens preserved as 2048, got %v", loaded.MaxTokens)
 	}
 }
 
@@ -127,17 +171,42 @@ func TestConfigManagerResolveConfig(t *testing.T) {
 		t.Error("expected max tokens 2000")
 	}
 
-	// 添加角色配置（应该覆盖会话配置）
+	manager.SaveRoleConfig(RoleMain, &RoleConfig{
+		Model:         "role-model",
+		Temperature:   0.9,
+		APIChannel:    "default",
+		MCPTools:      []string{"role-tool", "public-tool"},
+		SystemPrompt:  "role prompt",
+		AnswerStyle:   "concise",
+		Capabilities:  []string{"code", "review", "code"},
+		AllowedSkills: []string{"orchestrator", "orchestrator"},
+		AllowedHooks:  []string{"pre-commit", "pre-commit"},
+	})
+
 	resolved = manager.ResolveConfig("session-001", RoleMain)
-	if resolved.Model != "claude-3-5-sonnet-20241022" {
+	if resolved.Model != "role-model" {
 		t.Errorf("expected role model to override, got %s", resolved.Model)
 	}
-	if resolved.Temperature != 1.0 {
-		t.Errorf("expected role temperature 1.0, got %f", resolved.Temperature)
+	if resolved.Temperature != 0.9 {
+		t.Errorf("expected role temperature 0.9, got %f", resolved.Temperature)
 	}
-	// MCP tools应该合并
-	if len(resolved.MCPTools) < 2 {
-		t.Errorf("expected at least 2 mcp tools, got %d", len(resolved.MCPTools))
+	if resolved.SystemPrompt != "role prompt" {
+		t.Fatalf("expected role prompt, got %q", resolved.SystemPrompt)
+	}
+	if resolved.AnswerStyle != "concise" {
+		t.Fatalf("expected answer style concise, got %q", resolved.AnswerStyle)
+	}
+	if len(resolved.Capabilities) != 2 || resolved.Capabilities[0] != "code" || resolved.Capabilities[1] != "review" {
+		t.Fatalf("expected deduped capabilities, got %#v", resolved.Capabilities)
+	}
+	if len(resolved.AllowedSkills) != 1 || resolved.AllowedSkills[0] != "orchestrator" {
+		t.Fatalf("expected deduped allowed skills, got %#v", resolved.AllowedSkills)
+	}
+	if len(resolved.AllowedHooks) != 1 || resolved.AllowedHooks[0] != "pre-commit" {
+		t.Fatalf("expected deduped allowed hooks, got %#v", resolved.AllowedHooks)
+	}
+	if len(resolved.MCPTools) != 2 {
+		t.Fatalf("expected deduped mcp tools, got %#v", resolved.MCPTools)
 	}
 }
 
@@ -223,6 +292,52 @@ func TestConfigManagerConflictDetection(t *testing.T) {
 	conflicts = manager.DetectConflicts()
 	if len(conflicts) != 2 {
 		t.Errorf("expected 2 conflicts, got %d", len(conflicts))
+	}
+}
+
+func TestProviderToAdapterProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider Provider
+		want     adapters.Provider
+	}{
+		{name: "anthropic maps to claude", provider: ProviderAnthropic, want: adapters.ProviderClaude},
+		{name: "google maps to gemini", provider: ProviderGoogle, want: adapters.ProviderGemini},
+		{name: "openai stays openai", provider: ProviderOpenAI, want: adapters.ProviderOpenAI},
+		{name: "custom stays claude-compatible", provider: ProviderCustom, want: adapters.ProviderClaude},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.provider.ToAdapterProvider()
+			if err != nil {
+				t.Fatalf("ToAdapterProvider() error = %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %s, got %s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestConfigManagerDetectConflictsRejectsUnsupportedProvider(t *testing.T) {
+	manager := NewConfigManager(nil)
+
+	if err := manager.AddAPIChannel(&APIChannel{
+		ID:       "channel-invalid-provider",
+		Name:     "Invalid Provider",
+		Provider: Provider("azure"),
+		Enabled:  true,
+	}); err != nil {
+		t.Fatalf("add api channel: %v", err)
+	}
+
+	conflicts := manager.DetectConflicts()
+	if len(conflicts) != 1 {
+		t.Fatalf("expected 1 conflict, got %d (%v)", len(conflicts), conflicts)
+	}
+	if !strings.Contains(conflicts[0], "unsupported provider 'azure'") {
+		t.Fatalf("expected unsupported provider conflict, got %q", conflicts[0])
 	}
 }
 

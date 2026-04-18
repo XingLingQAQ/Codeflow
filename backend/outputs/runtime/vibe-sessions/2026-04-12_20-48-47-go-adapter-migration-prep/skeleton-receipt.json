@@ -1,0 +1,34 @@
+{
+  "run_id": "2026-04-12_20-48-47-go-adapter-migration-prep",
+  "stage": "skeleton_check",
+  "mode": "interactive_governed",
+  "lane": "root_governed",
+  "cwd": "D:/project/CodeFlow/.claude/worktrees/adapter-unification-lane/backend",
+  "branch": "worktree-adapter-unification-lane",
+  "repo_shape": {
+    "docs_exists": true,
+    "requirements_dir": true,
+    "plans_dir": true,
+    "outputs_dir": true,
+    "go_backend_present": true,
+    "ts_runtime_present": true
+  },
+  "existing_truth_anchors": [
+    "internal/adapters/types.go:63",
+    "internal/adapters/claude.go:16",
+    "../packages/core/src/tool-runtime/HeadlessToolRuntime.ts:54",
+    "../packages/core/src/tool-runtime/SkillDispatcher.ts:18",
+    "../packages/core/src/hooks/HookManager.ts:26",
+    "../packages/core/src/commander/Commander.ts:31",
+    "../packages/core/src/cowork/runtime.ts:495"
+  ],
+  "goal": "Prepare a controlled migration that moves backend-facing adapter/provider conversion and request semantics into Go while preserving TS runtime/core execution surfaces.",
+  "constraints": [
+    "Do not migrate TS runtime/core wholesale",
+    "Reuse existing interfaces and methods",
+    "No parallel runtime",
+    "No patch-on-patch edits",
+    "Avoid over-defensive programming"
+  ],
+  "timestamp": "2026-04-12T12:51:13.074604+00:00"
+}

@@ -4,23 +4,35 @@ import { AgentConfig, AgentRole, CommanderEvent, CallCoderAgentParams, ConsultSu
 import { ICliAdapter } from '../../adapters/types.js';
 import { HookManager } from '../../hooks/HookManager.js';
 
+interface MockAdapterOptions {
+  hookAware?: boolean;
+  history?: any[];
+}
+
 // Mock adapter factory
-function createMockAdapter(history: any[] = []): ICliAdapter {
-  return {
+function createMockAdapter(options: MockAdapterOptions = {}): ICliAdapter {
+  const adapter = {
     send: vi.fn().mockResolvedValue({
       content: 'Mock response',
       model: 'test-model',
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       finishReason: 'stop',
     }),
+    stream: vi.fn(),
     receive: vi.fn(),
-    getHistory: vi.fn().mockReturnValue(history),
+    getHistory: vi.fn().mockReturnValue(options.history ?? []),
     setHistory: vi.fn(),
     rewind: vi.fn(),
     compact: vi.fn(),
     configure: vi.fn(),
     getConfig: vi.fn().mockReturnValue({ model: 'test-model' }),
-  } as unknown as ICliAdapter;
+  } as Record<string, unknown>;
+
+  if (options.hookAware) {
+    adapter.setHookManager = vi.fn();
+  }
+
+  return adapter as unknown as ICliAdapter;
 }
 
 describe('Commander', () => {
@@ -70,6 +82,19 @@ describe('Commander', () => {
       expect(agent).toBeDefined();
       expect(agent?.role).toBe('main');
       expect(agent?.systemPrompt).toBe('You are the main AI');
+    });
+
+    it('should inject hook manager into hook-aware adapters', () => {
+      const hookAwareAdapter = createMockAdapter({ hookAware: true }) as ICliAdapter & {
+        setHookManager: ReturnType<typeof vi.fn>;
+      };
+
+      commander.registerAgent({
+        role: 'main',
+        adapter: hookAwareAdapter,
+      });
+
+      expect(hookAwareAdapter.setHookManager).toHaveBeenCalledWith(mockHookManager);
     });
 
     it('should register coder agent', () => {
@@ -415,6 +440,7 @@ describe('Commander', () => {
     it('should not inherit messages when inheritMessages is false', async () => {
       const mainHistory = [
         { role: 'user' as const, content: 'Hello', timestamp: Date.now() },
+        { role: 'assistant' as const, content: 'Hi there', timestamp: Date.now() },
       ];
       (mockMainAdapter.getHistory as any).mockReturnValue(mainHistory);
 
@@ -422,7 +448,66 @@ describe('Commander', () => {
         inheritMessages: false,
       });
 
-      expect(grafted.messages).toHaveLength(0);
+      expect(grafted.messages).toEqual([]);
+      expect(grafted.metadata.tokenCount).toBe(0);
+    });
+
+    it('should keep richer tool turn messages and count projected tokens', async () => {
+      const mainHistory = [
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'text' as const, text: 'calling search' },
+            { type: 'tool_call' as const, id: 'call-1', toolName: 'search', args: { query: 'schema' } },
+          ],
+          timestamp: 1,
+        },
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'tool_result' as const, toolCallId: 'call-1', toolName: 'search', result: { hits: 3 } },
+          ],
+          timestamp: 2,
+        },
+      ];
+      (mockMainAdapter.getHistory as any).mockReturnValue(mainHistory);
+
+      const grafted = await commander.graftContext('main', 'coder');
+
+      expect(grafted.messages).toEqual(mainHistory);
+      expect(grafted.metadata.tokenCount).toBeGreaterThan(0);
+      expect((grafted.messages[0].content as any[])[1]).toMatchObject({
+        type: 'tool_call',
+        toolName: 'search',
+      });
+      expect((grafted.messages[1].content as any[])[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'search',
+      });
+    });
+
+    it('should keep most recent richer message when max tokens truncates context', async () => {
+      const mainHistory = [
+        { role: 'user' as const, content: 'A'.repeat(2000), timestamp: 1 },
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'tool_result' as const, toolCallId: 'call-1', toolName: 'search', result: { hits: 3 } },
+          ],
+          timestamp: 2,
+        },
+      ];
+      (mockMainAdapter.getHistory as any).mockReturnValue(mainHistory);
+
+      const grafted = await commander.graftContext('main', 'coder', {
+        maxContextTokens: 50,
+      });
+
+      expect(grafted.messages).toHaveLength(1);
+      expect((grafted.messages[0].content as any[])[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'search',
+      });
     });
 
     it('should emit CONTEXT_GRAFTED event', async () => {

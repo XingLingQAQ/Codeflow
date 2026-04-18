@@ -1,5 +1,7 @@
 package config
 
+import "github.com/codeflow/backend/internal/adapters"
+
 // Provider API提供商类型
 type Provider string
 
@@ -9,6 +11,16 @@ const (
 	ProviderGoogle    Provider = "google"
 	ProviderCustom    Provider = "custom"
 )
+
+// ToAdapterProvider 归一化配置 provider 到 adapters 真相源。
+func (p Provider) ToAdapterProvider() (adapters.Provider, error) {
+	return adapters.ProviderFromString(string(p))
+}
+
+// AdapterProvider 返回 API 通道对应的 adapters provider。
+func (c APIChannel) AdapterProvider() (adapters.Provider, error) {
+	return c.Provider.ToAdapterProvider()
+}
 
 // SessionMode 会话模式
 type SessionMode string
@@ -59,12 +71,16 @@ type SessionConfig struct {
 
 // RoleConfig 角色配置
 type RoleConfig struct {
-	Model        string   `json:"model" yaml:"model"`
-	Temperature  float64  `json:"temperature" yaml:"temperature"`
-	TopP         *float64 `json:"top_p,omitempty" yaml:"top_p,omitempty"`
-	APIChannel   string   `json:"api_channel" yaml:"api_channel"`
-	MCPTools     []string `json:"mcp_tools" yaml:"mcp_tools"`
-	SystemPrompt string   `json:"system_prompt" yaml:"system_prompt"`
+	Model         string   `json:"model" yaml:"model"`
+	Temperature   float64  `json:"temperature" yaml:"temperature"`
+	TopP          *float64 `json:"top_p,omitempty" yaml:"top_p,omitempty"`
+	APIChannel    string   `json:"api_channel" yaml:"api_channel"`
+	MCPTools      []string `json:"mcp_tools" yaml:"mcp_tools"`
+	SystemPrompt  string   `json:"system_prompt" yaml:"system_prompt"`
+	AnswerStyle   string   `json:"answer_style,omitempty" yaml:"answer_style,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	AllowedSkills []string `json:"allowed_skills,omitempty" yaml:"allowed_skills,omitempty"`
+	AllowedHooks  []string `json:"allowed_hooks,omitempty" yaml:"allowed_hooks,omitempty"`
 }
 
 // ConfigHierarchy 配置层级
@@ -76,15 +92,19 @@ type ConfigHierarchy struct {
 
 // ResolvedConfig 解析后的配置
 type ResolvedConfig struct {
-	Model        string      `json:"model"`
-	Temperature  float64     `json:"temperature"`
-	TopP         *float64    `json:"top_p,omitempty"`
-	MaxTokens    *int        `json:"max_tokens,omitempty"`
-	APIChannel   *APIChannel `json:"api_channel,omitempty"`
-	MCPTools     []string    `json:"mcp_tools"`
-	SystemPrompt string      `json:"system_prompt,omitempty"`
-	Timeout      int         `json:"timeout,omitempty"`
-	MaxRetries   int         `json:"max_retries,omitempty"`
+	Model         string      `json:"model"`
+	Temperature   float64     `json:"temperature"`
+	TopP          *float64    `json:"top_p,omitempty"`
+	MaxTokens     *int        `json:"max_tokens,omitempty"`
+	APIChannel    *APIChannel `json:"api_channel,omitempty"`
+	MCPTools      []string    `json:"mcp_tools"`
+	SystemPrompt  string      `json:"system_prompt,omitempty"`
+	AnswerStyle   string      `json:"answer_style,omitempty"`
+	Capabilities  []string    `json:"capabilities,omitempty"`
+	AllowedSkills []string    `json:"allowed_skills,omitempty"`
+	AllowedHooks  []string    `json:"allowed_hooks,omitempty"`
+	Timeout       int         `json:"timeout,omitempty"`
+	MaxRetries    int         `json:"max_retries,omitempty"`
 }
 
 // ConfigChangeCallback 配置变更回调

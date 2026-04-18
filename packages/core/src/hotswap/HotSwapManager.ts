@@ -14,8 +14,9 @@ import {
   DEFAULT_HOTSWAP_CONFIG,
   PREDEFINED_MODELS,
 } from './types.js';
-import { Message } from '../hooks/types.js';
-import { ICliAdapter } from '../adapters/types.js';
+import { toAdapterConfigPatch, toCanonicalProvider, type CanonicalProvider, type ResolvedConfig, type RuntimeProviderFamily } from '../config/types.js';
+import { Message, getMessageText } from '../hooks/types.js';
+import { AdapterConfig, ICliAdapter } from '../adapters/types.js';
 
 export class HotSwapManager implements IHotSwapManager {
   private config: HotSwapConfig;
@@ -38,6 +39,16 @@ export class HotSwapManager implements IHotSwapManager {
 
   registerAdapter(modelId: string, adapter: ICliAdapter): void {
     this.adapters.set(modelId, adapter);
+
+    const model = this.models.get(modelId);
+    if (model) {
+      this.models.set(modelId, {
+        ...model,
+        available: true,
+        status: 'online',
+      });
+    }
+
     if (!this.currentAdapter) {
       this.currentAdapter = adapter;
       this.currentModelId = modelId;
@@ -97,7 +108,7 @@ export class HotSwapManager implements IHotSwapManager {
 
     if (!this.canSwitch(modelId)) {
       if (opts.fallbackOnError) {
-        return this.relay();
+        return this.relay(undefined, opts);
       }
       return {
         success: false,
@@ -122,6 +133,11 @@ export class HotSwapManager implements IHotSwapManager {
       const newAdapter = this.adapters.get(modelId);
       if (!newAdapter) {
         throw new Error(`Adapter for ${modelId} not registered`);
+      }
+
+      const adapterConfig = this.buildAdapterConfigPatch(modelId, opts.resolvedConfig);
+      if (Object.keys(adapterConfig).length > 0) {
+        newAdapter.configure(adapterConfig);
       }
 
       // 迁移上下文
@@ -151,7 +167,7 @@ export class HotSwapManager implements IHotSwapManager {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       if (opts.fallbackOnError) {
-        return this.relay();
+        return this.relay(undefined, opts);
       }
 
       return {
@@ -209,7 +225,10 @@ export class HotSwapManager implements IHotSwapManager {
     };
   }
 
-  async relay(fallbackChain?: string[]): Promise<SwitchResult> {
+  async relay(
+    fallbackChain?: string[],
+    options: Partial<SwitchOptions> = {}
+  ): Promise<SwitchResult> {
     const chain = fallbackChain || this.config.relayConfig.fallbackChain;
     const previousModel = this.currentModelId || 'none';
 
@@ -218,9 +237,11 @@ export class HotSwapManager implements IHotSwapManager {
       if (!this.canSwitch(modelId)) continue;
 
       const result = await this.switchModel(modelId, {
-        preserveHistory: true,
-        migrateContext: true,
+        preserveHistory: options.preserveHistory ?? true,
+        migrateContext: options.migrateContext ?? true,
         fallbackOnError: false,
+        retryCount: options.retryCount,
+        resolvedConfig: options.resolvedConfig,
       });
 
       if (result.success) {
@@ -237,6 +258,7 @@ export class HotSwapManager implements IHotSwapManager {
       error: 'All fallback models failed',
     };
   }
+
 
   async migrateContext(targetModel: string): Promise<ContextMigrationResult> {
     if (!this.currentAdapter) {
@@ -299,11 +321,50 @@ export class HotSwapManager implements IHotSwapManager {
 
   // ==================== Private Methods ====================
 
+  private buildAdapterConfigPatch(
+    modelId: string,
+    resolvedConfig?: ResolvedConfig
+  ): Partial<AdapterConfig> {
+    if (!resolvedConfig) {
+      return {};
+    }
+
+    const targetModel = this.models.get(modelId);
+    if (!targetModel) {
+      return {};
+    }
+
+    const patch = toAdapterConfigPatch(resolvedConfig);
+    const targetProvider = this.resolveProviderRequestFamily(targetModel.provider);
+    const sourceProvider = this.resolveProviderRequestFamilyFromConfig(resolvedConfig);
+
+    if (targetProvider && sourceProvider && sourceProvider !== targetProvider) {
+      delete patch.apiKey;
+      delete patch.baseURL;
+    }
+
+    return patch;
+  }
+
+  private resolveProviderRequestFamily(
+    provider: RuntimeProviderFamily
+  ): CanonicalProvider | null {
+    return toCanonicalProvider(provider);
+  }
+
+  private resolveProviderRequestFamilyFromConfig(resolvedConfig?: ResolvedConfig): CanonicalProvider | null {
+    const apiChannelProvider = resolvedConfig?.apiChannel?.provider;
+    if (apiChannelProvider) {
+      return toCanonicalProvider(apiChannelProvider);
+    }
+
+    return null;
+  }
+
   private estimateTokens(messages: Message[]): number {
     let total = 0;
     for (const msg of messages) {
-      // 粗略估计：4 字符 ≈ 1 token
-      total += Math.ceil(msg.content.length / 4);
+      total += Math.ceil(getMessageText(msg.content).length / 4);
     }
     return total;
   }
@@ -315,7 +376,7 @@ export class HotSwapManager implements IHotSwapManager {
     // 从最新的消息开始，向前添加
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      const msgTokens = Math.ceil(msg.content.length / 4);
+      const msgTokens = Math.ceil(getMessageText(msg.content).length / 4);
 
       if (currentTokens + msgTokens > maxTokens) {
         break;

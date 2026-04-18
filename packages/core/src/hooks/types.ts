@@ -2,18 +2,180 @@
  * Hook Bus 事件系统类型定义
  */
 
+export type MessageRole = 'user' | 'assistant' | 'system';
+
+export interface MessageTextPart {
+  type: 'text';
+  text: string;
+}
+
+export interface MessageToolCallPart {
+  type: 'tool_call';
+  id: string;
+  toolName: string;
+  args?: unknown;
+}
+
+export interface MessageToolResultPart {
+  type: 'tool_result';
+  toolCallId?: string;
+  toolName: string;
+  result?: unknown;
+  isError?: boolean;
+}
+
+export interface MessageJsonPart {
+  type: 'json';
+  data: unknown;
+}
+
+export type MessagePart =
+  | MessageTextPart
+  | MessageToolCallPart
+  | MessageToolResultPart
+  | MessageJsonPart;
+
+export type MessageContent = string | MessagePart[];
+
+export interface MessageMetadata {
+  toolCallId?: string;
+  toolName?: string;
+  provider?: string;
+  [key: string]: unknown;
+}
+
+export interface Message {
+  role: MessageRole;
+  content: MessageContent;
+  timestamp?: number;
+  metadata?: MessageMetadata;
+}
+
+export function cloneMessagePart(part: MessagePart): MessagePart {
+  if (part.type === 'text') {
+    return { ...part };
+  }
+
+  if (part.type === 'tool_call') {
+    return {
+      ...part,
+      args: part.args === undefined ? undefined : structuredClone(part.args),
+    };
+  }
+
+  if (part.type === 'tool_result') {
+    return {
+      ...part,
+      result: part.result === undefined ? undefined : structuredClone(part.result),
+    };
+  }
+
+  return {
+    ...part,
+    data: structuredClone(part.data),
+  };
+}
+
+export function normalizeMessageContent(content: MessageContent): MessagePart[] {
+  if (typeof content === 'string') {
+    return [{ type: 'text', text: content }];
+  }
+
+  return content.map((part) => cloneMessagePart(part));
+}
+
+export function getMessageText(content: MessageContent): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  return content
+    .map((part) => {
+      switch (part.type) {
+        case 'text':
+          return part.text;
+        case 'tool_call':
+          return `[tool_call:${part.toolName}] ${safeJsonStringify(part.args)}`.trim();
+        case 'tool_result':
+          return `[tool_result:${part.toolName}] ${safeJsonStringify(part.result)}`.trim();
+        case 'json':
+          return safeJsonStringify(part.data);
+        default:
+          return '';
+      }
+    })
+    .filter((segment) => segment.length > 0)
+    .join('\n');
+}
+
+export function hasMessagePartType(
+  content: MessageContent,
+  type: MessagePart['type']
+): boolean {
+  return normalizeMessageContent(content).some((part) => part.type === type);
+}
+
+export function isToolTurnMessage(message: Message): boolean {
+  return hasMessagePartType(message.content, 'tool_call') || hasMessagePartType(message.content, 'tool_result');
+}
+
+export function cloneMessage(message: Message): Message {
+  return {
+    ...message,
+    content: typeof message.content === 'string'
+      ? message.content
+      : message.content.map((part) => cloneMessagePart(part)),
+    metadata: message.metadata ? structuredClone(message.metadata) : undefined,
+  };
+}
+
+export function serializeMessageContent(content: MessageContent): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  return JSON.stringify({ __codeflowMessageContent: true, parts: content });
+}
+
+export function deserializeMessageContent(content: string): MessageContent {
+  if (!content.startsWith('{')) {
+    return content;
+  }
+
+  try {
+    const parsed = JSON.parse(content) as { __codeflowMessageContent?: boolean; parts?: MessagePart[] };
+    if (parsed.__codeflowMessageContent && Array.isArray(parsed.parts)) {
+      return parsed.parts.map((part) => cloneMessagePart(part));
+    }
+  } catch {
+    return content;
+  }
+
+  return content;
+}
+
+function safeJsonStringify(value: unknown): string {
+  if (value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 export interface RequestPayload {
   messages: Message[];
   model?: string;
   temperature?: number;
   maxTokens?: number;
   [key: string]: unknown;
-}
-
-export interface Message {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp?: number;
 }
 
 export interface AIResponse {
@@ -128,6 +290,11 @@ export interface IHookManager {
   hook_after_task_execute(result: TaskExecutionResult): Promise<void>;
   hook_on_task_failure(context: TaskFailureContext): Promise<void>;
   hook_on_task_complete(result: TaskExecutionResult): Promise<void>;
+}
+
+export interface HookRuntimeControls {
+  enabled?: boolean;
+  allowedHooks?: string[];
 }
 
 /**

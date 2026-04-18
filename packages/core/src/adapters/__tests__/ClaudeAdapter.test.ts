@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ClaudeAdapter } from '../ClaudeAdapter.js';
 import { AdapterConfig, APIError, TimeoutError } from '../types.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { HookEvent, getMessageText } from '../../hooks/types.js';
 
 // Mock Anthropic SDK
 vi.mock('@anthropic-ai/sdk', () => {
@@ -96,6 +97,45 @@ describe('ClaudeAdapter', () => {
       expect(response.finishReason).toBe('end_turn');
     });
 
+    it('applies before_send payload mutations to provider request', async () => {
+      const manager = new HookManager();
+      manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
+        ...payload,
+        model: 'claude-hook-model',
+        temperature: 0.1,
+        maxTokens: 12,
+        messages: [
+          { role: 'system', content: 'hooked-system', timestamp: Date.now() },
+          ...payload.messages,
+        ],
+      }));
+      adapter = new ClaudeAdapter(mockConfig, manager);
+
+      const mockResponse = {
+        content: [{ type: 'text', text: 'Response' }],
+        model: 'claude-hook-model',
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stop_reason: 'end_turn',
+      };
+
+      const mockClient = (adapter as any).client;
+      mockClient.messages.create.mockResolvedValue(mockResponse);
+
+      await adapter.send('Hello');
+
+      expect(mockClient.messages.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'claude-hook-model',
+          system: 'hooked-system',
+          temperature: 0.1,
+          max_tokens: 12,
+          messages: expect.arrayContaining([
+            expect.objectContaining({ role: 'user', content: 'Hello' }),
+          ]),
+        })
+      );
+    });
+
     it('should add messages to history', async () => {
       const mockResponse = {
         content: [{ type: 'text', text: 'Response' }],
@@ -170,7 +210,7 @@ describe('ClaudeAdapter', () => {
 
     it('should throw error for stream option', async () => {
       await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
-        'Use receive() for streaming responses'
+        'Use stream() for streaming responses'
       );
     });
   });
@@ -251,9 +291,40 @@ describe('ClaudeAdapter', () => {
   });
 
   describe('receive', () => {
-    it('should throw error when no active stream', async () => {
+    it('should throw no active stream error', async () => {
       const generator = adapter.receive();
       await expect(generator.next()).rejects.toThrow('No active stream');
+    });
+
+    it('should continue active stream and clear state after completion', async () => {
+      const mockStream = [
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } },
+        { type: 'content_block_delta', delta: { type: 'text_delta', text: ' world' } },
+        { type: 'message_stop' },
+      ];
+
+      const mockClient = (adapter as any).client;
+      mockClient.messages.create.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          for (const event of mockStream) {
+            yield event;
+          }
+        },
+      });
+
+      const stream = adapter.stream('Hello');
+      const first = await stream.next();
+      expect(first.value).toMatchObject({ delta: 'Hello', done: false });
+
+      const received: string[] = [];
+      for await (const chunk of adapter.receive()) {
+        if (chunk.delta) {
+          received.push(chunk.delta);
+        }
+      }
+
+      expect(received).toEqual([' world']);
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 
@@ -280,17 +351,32 @@ describe('ClaudeAdapter', () => {
   });
 
   describe('setHistory', () => {
-    it('should set history', () => {
+    it('should preserve structured history via getHistory and setHistory', () => {
       const messages = [
-        { role: 'user' as const, content: 'Hello', timestamp: Date.now() },
-        { role: 'assistant' as const, content: 'Hi', timestamp: Date.now() },
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'text' as const, text: 'Planning' },
+            { type: 'tool_call' as const, id: 'call-1', toolName: 'search', args: { query: 'hooks' } },
+          ],
+          metadata: { toolCallId: 'call-1', provider: 'claude' },
+          timestamp: Date.now(),
+        },
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'tool_result' as const, toolCallId: 'call-1', toolName: 'search', result: { hits: 2 } },
+          ],
+          timestamp: Date.now(),
+        },
       ];
 
       adapter.setHistory(messages);
 
       const history = adapter.getHistory();
-      expect(history.length).toBe(2);
-      expect(history[0].content).toBe('Hello');
+      expect(history).toEqual(messages);
+      expect(history[0]).not.toBe(messages[0]);
+      expect(history[0].content).not.toBe(messages[0].content);
     });
   });
 
@@ -352,21 +438,40 @@ describe('ClaudeAdapter', () => {
       // Should have summary + recent 20% messages
       expect(history.length).toBeGreaterThan(0);
       expect(history[0].role).toBe('system');
-      expect(history[0].content).toContain('[Compressed Context]');
+      expect(getMessageText(history[0].content)).toContain('[Compressed Context]');
+    });
+
+    it('should not stack compressed context summaries on repeated compaction', async () => {
+      adapter.setHistory([
+        { role: 'system', content: '[Compressed Context]\nEntities: old\nDecisions: old\nRelations: ', timestamp: 1 },
+        { role: 'system', content: 'system prompt', timestamp: 2 },
+        { role: 'user', content: 'Message 1', timestamp: 3 },
+        { role: 'assistant', content: 'Response 1', timestamp: 4 },
+        { role: 'user', content: 'Message 2', timestamp: 5 },
+        { role: 'assistant', content: 'Response 2', timestamp: 6 },
+        { role: 'user', content: 'Message 3', timestamp: 7 },
+        { role: 'assistant', content: 'Response 3', timestamp: 8 },
+      ]);
+
+      await adapter.compact();
+
+      const summaries = adapter.getHistory().filter((message) =>
+        message.role === 'system' && getMessageText(message.content).startsWith('[Compressed Context]')
+      );
+      expect(summaries).toHaveLength(1);
+      expect(adapter.getHistory().some((message) => getMessageText(message.content) === 'system prompt')).toBe(true);
     });
 
     it('should call compress hook', async () => {
-      const mockResponse = {
-        content: [{ type: 'text', text: 'Response' }],
-        model: 'claude-3-5-sonnet-20241022',
-        usage: { input_tokens: 10, output_tokens: 5 },
-        stop_reason: 'end_turn',
-      };
+      adapter.setHistory([
+        { role: 'system', content: 'system prompt', timestamp: 1 },
+        { role: 'user', content: 'Message 1', timestamp: 2 },
+        { role: 'assistant', content: 'Response 1', timestamp: 3 },
+        { role: 'user', content: 'Message 2', timestamp: 4 },
+        { role: 'assistant', content: 'Response 2', timestamp: 5 },
+        { role: 'user', content: 'Message 3', timestamp: 6 },
+      ]);
 
-      const mockClient = (adapter as any).client;
-      mockClient.messages.create.mockResolvedValue(mockResponse);
-
-      await adapter.send('Message');
       await adapter.compact();
 
       expect(mockHookManager.hook_before_compress).toHaveBeenCalled();

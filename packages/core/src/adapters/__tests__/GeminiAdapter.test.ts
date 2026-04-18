@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GeminiAdapter, MultimodalInput } from '../GeminiAdapter.js';
 import { AdapterConfig, APIError, TimeoutError } from '../types.js';
 import { HookManager } from '../../hooks/HookManager.js';
+import { HookEvent } from '../../hooks/types.js';
 
 // Mock Google Generative AI SDK
 vi.mock('@google/generative-ai', () => {
@@ -9,6 +10,7 @@ vi.mock('@google/generative-ai', () => {
     GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
       getGenerativeModel: vi.fn().mockReturnValue({
         generateContent: vi.fn(),
+        generateContentStream: vi.fn(),
       }),
     })),
   };
@@ -39,6 +41,11 @@ describe('GeminiAdapter', () => {
       }),
       hook_post_response: vi.fn().mockResolvedValue(undefined),
       hook_on_stream: vi.fn(),
+      hook_before_compress: vi.fn().mockResolvedValue({
+        entities: ['session'],
+        decisions: ['preserve recent turns'],
+        relations: [],
+      }),
     } as unknown as HookManager;
 
     adapter = new GeminiAdapter(mockConfig, mockHookManager);
@@ -93,10 +100,60 @@ describe('GeminiAdapter', () => {
 
       expect(response.content).toBe('Hello, world!');
       expect(response.model).toBe('gemini-2.0-flash-exp');
-      expect(response.usage.promptTokens).toBe(10);
-      expect(response.usage.completionTokens).toBe(5);
-      expect(response.usage.totalTokens).toBe(15);
+      expect(response.usage?.promptTokens).toBe(10);
+      expect(response.usage?.completionTokens).toBe(5);
+      expect(response.usage?.totalTokens).toBe(15);
       expect(response.finishReason).toBe('STOP');
+    });
+
+    it('applies before_send payload mutations to provider request history governance', async () => {
+      const manager = new HookManager();
+      manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
+        ...payload,
+        model: 'gemini-hook-model',
+        temperature: 0.1,
+        maxTokens: 33,
+        messages: [
+          { role: 'system', content: 'hooked system', timestamp: Date.now() },
+          { role: 'user', content: 'earlier prompt', timestamp: Date.now() },
+          { role: 'assistant', content: 'earlier reply', timestamp: Date.now() },
+          { role: 'user', content: 'rewritten prompt', timestamp: Date.now() },
+        ],
+      }));
+      adapter = new GeminiAdapter(mockConfig, manager);
+
+      const mockClient = (adapter as any).client;
+      const switchedModel = { generateContent: vi.fn().mockResolvedValue({
+        response: {
+          text: () => 'hooked response',
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 5,
+            totalTokenCount: 15,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        },
+      }) };
+      mockClient.getGenerativeModel.mockReturnValue(switchedModel);
+
+      const response = await adapter.send('Hello');
+
+      expect(mockClient.getGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-hook-model' });
+      expect(switchedModel.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemInstruction: 'hooked system',
+          contents: [
+            { role: 'user', parts: [{ text: 'earlier prompt' }] },
+            { role: 'model', parts: [{ text: 'earlier reply' }] },
+            { role: 'user', parts: [{ text: 'rewritten prompt' }] },
+          ],
+          generationConfig: expect.objectContaining({
+            temperature: 0.1,
+            maxOutputTokens: 33,
+          }),
+        })
+      );
+      expect(response.model).toBe('gemini-hook-model');
     });
 
     it('should send multimodal message', async () => {
@@ -210,19 +267,145 @@ describe('GeminiAdapter', () => {
       await expect(adapter.send('Hello')).rejects.toThrow(APIError);
     });
 
-    it('should not retry non-retryable errors', async () => {
-      const mockModel = (adapter as any).model;
-      mockModel.generateContent.mockRejectedValue(new Error('Invalid request'));
+    it('should throw error for stream option', async () => {
+      await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
+        'Use stream() for streaming responses'
+      );
+    });
+  });
 
-      await expect(adapter.send('Hello')).rejects.toThrow();
-      expect(mockModel.generateContent).toHaveBeenCalledTimes(1);
+  describe('stream', () => {
+    it('should stream response chunks', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'Hello' };
+          yield { text: () => ' world' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 5,
+            totalTokenCount: 15,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      const deltas: string[] = [];
+      let finalDone = false;
+      for await (const chunk of adapter.stream('Hello')) {
+        if (chunk.delta) {
+          deltas.push(chunk.delta);
+        }
+        if (chunk.done) {
+          finalDone = true;
+        }
+      }
+
+      expect(deltas).toEqual(['Hello', ' world']);
+      expect(finalDone).toBe(true);
+      expect(mockHookManager.hook_on_stream).toHaveBeenCalled();
+      expect(mockHookManager.hook_post_response).toHaveBeenCalled();
+      expect(adapter.getHistory().at(-1)?.content).toBe('Hello world');
+    });
+
+    it('should stream multimodal input through the same provider path', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'Image' };
+          yield { text: () => ' summary' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 20,
+            candidatesTokenCount: 8,
+            totalTokenCount: 28,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      const input: MultimodalInput = {
+        text: 'Describe this image',
+        images: [{ data: 'base64data', mimeType: 'image/png' }],
+      };
+
+      const deltas: string[] = [];
+      for await (const chunk of adapter.stream(input)) {
+        if (chunk.delta) {
+          deltas.push(chunk.delta);
+        }
+      }
+
+      expect(deltas).toEqual(['Image', ' summary']);
+      expect(mockModel.generateContentStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: 'Describe this image' },
+                { inlineData: { data: 'base64data', mimeType: 'image/png' } },
+              ],
+            },
+          ],
+        })
+      );
+      expect(adapter.getHistory()[0]).toMatchObject({ role: 'user', content: 'Describe this image' });
+      expect(adapter.getHistory().at(-1)?.content).toBe('Image summary');
+    });
+
+    it('should clear current stream state after stream failure', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockRejectedValue(new Error('stream failed'));
+
+      await expect(async () => {
+        for await (const _chunk of adapter.stream('Hello')) {
+        }
+      }).rejects.toThrow(APIError);
+
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 
   describe('receive', () => {
-    it('should throw error when no active stream', async () => {
+    it('should throw no active stream error', async () => {
       const generator = adapter.receive();
       await expect(generator.next()).rejects.toThrow('No active stream');
+    });
+
+    it('should continue active stream and clear state after completion', async () => {
+      const mockModel = (adapter as any).model;
+      mockModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'Hello' };
+          yield { text: () => ' world' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 10,
+            candidatesTokenCount: 5,
+            totalTokenCount: 15,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      const stream = adapter.stream('Hello');
+      const first = await stream.next();
+      expect(first.value).toMatchObject({ delta: 'Hello', done: false });
+
+      const received: string[] = [];
+      for await (const chunk of adapter.receive()) {
+        if (chunk.delta) {
+          received.push(chunk.delta);
+        }
+      }
+
+      expect(received).toEqual([' world']);
+      await expect(adapter.receive().next()).rejects.toThrow('No active stream');
     });
   });
 
@@ -269,7 +452,7 @@ describe('GeminiAdapter', () => {
   });
 
   describe('rewind', () => {
-    it('should rewind specified steps', async () => {
+    it('should rewind specified steps by completed turns', async () => {
       const mockResponse = {
         response: {
           text: () => 'Response',
@@ -291,20 +474,39 @@ describe('GeminiAdapter', () => {
       await adapter.rewind(1);
 
       const history = adapter.getHistory();
-      expect(history.length).toBe(3);
+      expect(history).toHaveLength(2);
+      expect(history.map((message) => message.content)).toEqual(['Message 1', 'Response']);
+    });
+
+    it('should preserve system prompts when rewinding completed turns', async () => {
+      adapter.setHistory([
+        { role: 'system', content: 'system prompt', timestamp: 1 },
+        { role: 'user', content: 'Message 1', timestamp: 2 },
+        { role: 'assistant', content: 'Response 1', timestamp: 3 },
+        { role: 'user', content: 'Message 2', timestamp: 4 },
+        { role: 'assistant', content: 'Response 2', timestamp: 5 },
+      ]);
+
+      await adapter.rewind(1);
+
+      expect(adapter.getHistory().map((message) => `${message.role}:${message.content}`)).toEqual([
+        'system:system prompt',
+        'user:Message 1',
+        'assistant:Response 1',
+      ]);
     });
 
     it('should throw error for invalid steps', async () => {
-      await expect(adapter.rewind(0)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(0)).rejects.toThrow('Steps must be positive');
     });
 
     it('should throw error when rewinding too many steps', async () => {
-      await expect(adapter.rewind(10)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(10)).rejects.toThrow('Cannot rewind');
     });
   });
 
   describe('compact', () => {
-    it('should compact history', async () => {
+    it('should compact history with governance summary and recent turns', async () => {
       const mockResponse = {
         response: {
           text: () => 'Response',
@@ -320,7 +522,6 @@ describe('GeminiAdapter', () => {
       const mockModel = (adapter as any).model;
       mockModel.generateContent.mockResolvedValue(mockResponse);
 
-      // Add many messages
       for (let i = 0; i < 15; i++) {
         await adapter.send(`Message ${i}`);
       }
@@ -328,7 +529,11 @@ describe('GeminiAdapter', () => {
       await adapter.compact();
 
       const history = adapter.getHistory();
-      expect(history.length).toBeLessThanOrEqual(10);
+      expect(history[0]).toMatchObject({ role: 'system' });
+      expect(history[0]?.content).toContain('[Compressed Context]');
+      expect(history.slice(1).length).toBeGreaterThan(0);
+      expect(history.at(-1)?.role).toBe('assistant');
+      expect(mockHookManager.hook_before_compress).toHaveBeenCalled();
     });
   });
 
@@ -341,13 +546,158 @@ describe('GeminiAdapter', () => {
       expect(config.maxTokens).toBe(4096);
     });
 
-    it('should call getGenerativeModel when model name changes', () => {
+    it('should preserve existing values when update fields are undefined', () => {
+      adapter.configure({
+        temperature: undefined,
+        maxTokens: undefined,
+        timeout: undefined,
+        maxRetries: undefined,
+      });
+
+      expect(adapter.getConfig()).toMatchObject({
+        temperature: 0.7,
+        maxTokens: 8192,
+        timeout: 60000,
+        maxRetries: 3,
+      });
+    });
+
+    it('should keep explicit zero values in runtime configuration', () => {
+      adapter.configure({ temperature: 0, maxTokens: 0, timeout: 0, maxRetries: 0 });
+
+      expect(adapter.getConfig()).toMatchObject({
+        temperature: 0,
+        maxTokens: 0,
+        timeout: 0,
+        maxRetries: 0,
+      });
+    });
+
+    it('should recreate client when apiKey changes', () => {
+      const oldClient = (adapter as any).client;
+
+      adapter.configure({ apiKey: 'new-api-key' });
+
+      expect((adapter as any).client).not.toBe(oldClient);
+      expect(adapter.getConfig().apiKey).toBe('new-api-key');
+    });
+
+    it('should recreate model with baseURL when provider request config changes', () => {
       const mockClient = (adapter as any).client;
       const spy = vi.spyOn(mockClient, 'getGenerativeModel');
 
-      adapter.configure({ model: 'gemini-pro' });
+      adapter.configure({ model: 'gemini-pro', baseURL: 'https://proxy.example.com', timeout: 1500, maxRetries: 5 });
 
-      expect(spy).toHaveBeenCalledWith({ model: 'gemini-pro' });
+      expect(spy).toHaveBeenCalledWith(
+        { model: 'gemini-pro' },
+        { baseUrl: 'https://proxy.example.com' }
+      );
+      expect(adapter.getConfig()).toMatchObject({
+        model: 'gemini-pro',
+        baseURL: 'https://proxy.example.com',
+        timeout: 1500,
+        maxRetries: 5,
+      });
+    });
+
+    it('should use updated provider config across send stream and ad hoc model resolution', async () => {
+      adapter.configure({
+        baseURL: 'https://proxy.example.com',
+        timeout: 0,
+        maxRetries: 0,
+        temperature: 0,
+        maxTokens: 0,
+      });
+
+      const configuredModel = (adapter as any).model;
+      configuredModel.generateContent.mockResolvedValue({
+        response: {
+          text: () => 'configured send',
+          usageMetadata: {
+            promptTokenCount: 1,
+            candidatesTokenCount: 1,
+            totalTokenCount: 2,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        },
+      });
+      configuredModel.generateContentStream.mockResolvedValue({
+        stream: (async function* () {
+          yield { text: () => 'configured' };
+          yield { text: () => ' stream' };
+        })(),
+        response: Promise.resolve({
+          usageMetadata: {
+            promptTokenCount: 1,
+            candidatesTokenCount: 1,
+            totalTokenCount: 2,
+          },
+          candidates: [{ finishReason: 'STOP' }],
+        }),
+      });
+
+      await adapter.send('Hello');
+      for await (const _chunk of adapter.stream('Hello')) {
+      }
+
+      const mockClient = (adapter as any).client;
+      const alternateModel = {
+        generateContent: vi.fn().mockResolvedValue({
+          response: {
+            text: () => 'alternate model',
+            usageMetadata: {
+              promptTokenCount: 1,
+              candidatesTokenCount: 1,
+              totalTokenCount: 2,
+            },
+            candidates: [{ finishReason: 'STOP' }],
+          },
+        }),
+      };
+      mockClient.getGenerativeModel.mockReturnValueOnce(alternateModel as any);
+
+      await adapter.send('Switch', { model: 'gemini-1.5-pro' });
+
+      expect(configuredModel.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: expect.objectContaining({
+            temperature: 0,
+            maxOutputTokens: 0,
+          }),
+        })
+      );
+      expect(configuredModel.generateContentStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: expect.objectContaining({
+            temperature: 0,
+            maxOutputTokens: 0,
+          }),
+        })
+      );
+      expect(mockClient.getGenerativeModel).toHaveBeenCalledWith(
+        { model: 'gemini-1.5-pro' },
+        { baseUrl: 'https://proxy.example.com' }
+      );
+      expect(alternateModel.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: expect.objectContaining({
+            temperature: 0,
+            maxOutputTokens: 0,
+          }),
+        })
+      );
+    });
+
+    it('should treat maxRetries zero as single attempt without fallback retries', async () => {
+      adapter.configure({ maxRetries: 0, timeout: 1 });
+
+      const mockModel = (adapter as any).model;
+      mockModel.generateContent.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, 100))
+      );
+
+      await expect(adapter.send('Hello')).rejects.toThrow(TimeoutError);
+      expect(mockModel.generateContent).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -405,39 +755,39 @@ describe('GeminiAdapter', () => {
 
   describe('error handling', () => {
     it('should identify retryable errors', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
 
-      expect((adapter as any).isRetryableError(new Error('rate limit'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('timeout'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('503'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('429'))).toBe(true);
-      expect((adapter as any).isRetryableError(new Error('invalid request'))).toBe(false);
+      expect((freshAdapter as any).isRetryableError(new Error('rate limit'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('timeout'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('503'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('429'))).toBe(true);
+      expect((freshAdapter as any).isRetryableError(new Error('invalid request'))).toBe(false);
     });
 
     it('should wrap errors as APIError', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
       const error = new Error('Test error');
 
-      const wrapped = (adapter as any).wrapError(error);
+      const wrapped = (freshAdapter as any).wrapError(error);
 
       expect(wrapped).toBeInstanceOf(APIError);
       expect(wrapped.message).toBe('Test error');
     });
 
     it('should preserve TimeoutError', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
       const error = new TimeoutError();
 
-      const wrapped = (adapter as any).wrapError(error);
+      const wrapped = (freshAdapter as any).wrapError(error);
 
       expect(wrapped).toBeInstanceOf(TimeoutError);
     });
 
     it('should preserve APIError', () => {
-      const adapter = new GeminiAdapter(mockConfig);
+      const freshAdapter = new GeminiAdapter(mockConfig);
       const error = new APIError('API Error', 500);
 
-      const wrapped = (adapter as any).wrapError(error);
+      const wrapped = (freshAdapter as any).wrapError(error);
 
       expect(wrapped).toBeInstanceOf(APIError);
       expect(wrapped.statusCode).toBe(500);

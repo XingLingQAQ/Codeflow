@@ -8,14 +8,16 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
+	"github.com/codeflow/backend/internal/config"
 )
 
 // MockAdapter 测试用模拟适配器
 type MockAdapter struct {
-	history    []adapters.Message
-	response   string
-	shouldFail bool
-	mu         sync.Mutex
+	history     []adapters.Message
+	response    string
+	shouldFail  bool
+	lastOptions *adapters.SendOptions
+	mu          sync.Mutex
 }
 
 func NewMockAdapter(response string) *MockAdapter {
@@ -26,6 +28,9 @@ func NewMockAdapter(response string) *MockAdapter {
 }
 
 func (m *MockAdapter) Send(ctx context.Context, prompt string, opts *adapters.SendOptions) (*adapters.AIResponse, error) {
+	m.mu.Lock()
+	m.lastOptions = opts
+	m.mu.Unlock()
 	if m.shouldFail {
 		return nil, context.DeadlineExceeded
 	}
@@ -64,25 +69,271 @@ func (m *MockAdapter) GetConfig() adapters.AdapterConfig {
 }
 func (m *MockAdapter) Close() error { return nil }
 
-func TestCommander_RegisterAgent(t *testing.T) {
+func TestBuildAgentConfigFromResolved(t *testing.T) {
+	adapter := NewMockAdapter("builder")
+	maxTokens := 512
+	resolved := &config.ResolvedConfig{
+		Model:         "claude-builder-model",
+		Temperature:   0.25,
+		MaxTokens:     &maxTokens,
+		SystemPrompt:  "Builder prompt",
+		AnswerStyle:   "concise",
+		Capabilities:  []string{"code", "review"},
+		AllowedSkills: []string{"orchestrator"},
+		AllowedHooks:  []string{"pre-commit"},
+		Timeout:       45000,
+	}
+
+	agent, err := BuildAgentConfigFromResolved(RoleCoder, resolved, adapter)
+	if err != nil {
+		t.Fatalf("BuildAgentConfigFromResolved() error = %v", err)
+	}
+	if agent.Role != RoleCoder {
+		t.Fatalf("expected role %s, got %s", RoleCoder, agent.Role)
+	}
+	if agent.Adapter != adapter {
+		t.Fatal("expected adapter to be forwarded")
+	}
+	if agent.SystemPrompt != "Builder prompt" {
+		t.Fatalf("expected system prompt to be forwarded, got %q", agent.SystemPrompt)
+	}
+	if agent.Model != "claude-builder-model" {
+		t.Fatalf("expected model to be forwarded, got %q", agent.Model)
+	}
+	if agent.Temperature == nil || *agent.Temperature != 0.25 {
+		t.Fatalf("expected temperature 0.25, got %#v", agent.Temperature)
+	}
+	if agent.MaxTokens != 512 {
+		t.Fatalf("expected max tokens 512, got %d", agent.MaxTokens)
+	}
+	if agent.AnswerStyle != "concise" {
+		t.Fatalf("expected answer style concise, got %q", agent.AnswerStyle)
+	}
+	if len(agent.Capabilities) != 2 || agent.Capabilities[0] != "code" || agent.Capabilities[1] != "review" {
+		t.Fatalf("expected capabilities to be forwarded, got %#v", agent.Capabilities)
+	}
+	if agent.Controls == nil {
+		t.Fatal("expected controls to be built")
+	}
+	if len(agent.Controls.AllowedSkills) != 1 || agent.Controls.AllowedSkills[0] != "orchestrator" {
+		t.Fatalf("expected allowed skills to be forwarded, got %#v", agent.Controls.AllowedSkills)
+	}
+	if len(agent.Controls.AllowedHooks) != 1 || agent.Controls.AllowedHooks[0] != "pre-commit" {
+		t.Fatalf("expected allowed hooks to be forwarded, got %#v", agent.Controls.AllowedHooks)
+	}
+	if agent.Timeout != 45000 {
+		t.Fatalf("expected timeout 45000, got %d", agent.Timeout)
+	}
+}
+
+func TestBuildAgentFromResolved(t *testing.T) {
+	maxTokens := 256
+	resolved := &config.ResolvedConfig{
+		Model:        "claude-runtime-model",
+		Temperature:  0.4,
+		MaxTokens:    &maxTokens,
+		SystemPrompt: "Runtime prompt",
+		AnswerStyle:  "detailed",
+		Capabilities: []string{"analysis"},
+		AllowedHooks: []string{"audit"},
+		APIChannel: &config.APIChannel{
+			ID:       "default",
+			Name:     "Default",
+			Provider: config.ProviderAnthropic,
+			APIKey:   "test-key",
+			Enabled:  true,
+		},
+		Timeout:    12000,
+		MaxRetries: 4,
+	}
+
+	agent, err := BuildAgentFromResolved(RoleMain, resolved)
+	if err != nil {
+		t.Fatalf("BuildAgentFromResolved() error = %v", err)
+	}
+	if agent == nil || agent.Adapter == nil {
+		t.Fatal("expected adapter-backed agent")
+	}
+	cfg := agent.Adapter.GetConfig()
+	if cfg.Model != "claude-runtime-model" {
+		t.Fatalf("expected adapter model claude-runtime-model, got %q", cfg.Model)
+	}
+	if cfg.APIKey != "test-key" {
+		t.Fatalf("expected api key to be forwarded, got %q", cfg.APIKey)
+	}
+	if cfg.MaxTokens != 256 {
+		t.Fatalf("expected adapter max tokens 256, got %d", cfg.MaxTokens)
+	}
+	if cfg.MaxRetries != 4 {
+		t.Fatalf("expected adapter max retries 4, got %d", cfg.MaxRetries)
+	}
+	if cfg.Timeout != 12*time.Second {
+		t.Fatalf("expected adapter timeout 12s, got %s", cfg.Timeout)
+	}
+	if agent.AnswerStyle != "detailed" {
+		t.Fatalf("expected answer style detailed, got %q", agent.AnswerStyle)
+	}
+	if agent.Controls == nil || len(agent.Controls.AllowedHooks) != 1 || agent.Controls.AllowedHooks[0] != "audit" {
+		t.Fatalf("expected allowed hooks audit, got %#v", agent.Controls)
+	}
+}
+
+func TestRoleFromConfigRole(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   config.RoleType
+		want    AgentRole
+		wantErr bool
+	}{
+		{name: "main", input: config.RoleMain, want: RoleMain},
+		{name: "coder", input: config.RoleCoder, want: RoleCoder},
+		{name: "sub", input: config.RoleSub, want: RoleSubExpert},
+		{name: "invalid", input: config.RoleType("invalid"), wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := RoleFromConfigRole(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected %s, got %s", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestCommander_CallCoderAgentPassesAdapterSendOptions(t *testing.T) {
 	cmd := NewCommander(5)
 
-	adapter := NewMockAdapter("test response")
+	mainAdapter := NewMockAdapter("main")
+	mainAdapter.SetHistory([]adapters.Message{{Role: adapters.RoleUser, Content: "root", Timestamp: time.Now()}})
+	coderAdapter := NewMockAdapter("Generated code: function hello() { return 'world'; }")
+	temperature := 0.35
+
 	cmd.RegisterAgent(AgentConfig{
 		Role:         RoleMain,
-		Adapter:      adapter,
-		SystemPrompt: "You are a helpful assistant",
+		Adapter:      mainAdapter,
+		SystemPrompt: "Main system prompt",
+	})
+	cmd.RegisterAgent(AgentConfig{
+		Role:         RoleCoder,
+		Adapter:      coderAdapter,
+		SystemPrompt: "Coder system prompt",
+		Model:        "claude-test-model",
+		Temperature:  &temperature,
+		MaxTokens:    256,
+		AnswerStyle:  "concise",
+		Capabilities: []string{"code", "refactor"},
+		Controls:     &adapters.RequestControls{AllowedTools: []string{"call_coder_agent"}},
 	})
 
-	agent := cmd.GetAgent(RoleMain)
-	if agent == nil {
-		t.Fatal("Expected agent to be registered")
+	result, err := cmd.CallCoderAgent(CallCoderAgentParams{
+		Task:    "Write a hello function",
+		Context: "Need main context",
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
 	}
-	if agent.Role != RoleMain {
-		t.Errorf("Expected role %s, got %s", RoleMain, agent.Role)
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %s", result.Error)
 	}
-	if agent.SystemPrompt != "You are a helpful assistant" {
-		t.Errorf("Expected system prompt to be set")
+
+	coderAdapter.mu.Lock()
+	defer coderAdapter.mu.Unlock()
+	if coderAdapter.lastOptions == nil {
+		t.Fatal("expected adapter send options")
+	}
+	if coderAdapter.lastOptions.System != "Main system prompt" {
+		t.Fatalf("expected grafted system prompt, got %q", coderAdapter.lastOptions.System)
+	}
+	if coderAdapter.lastOptions.Model != "claude-test-model" {
+		t.Fatalf("expected model to be forwarded, got %q", coderAdapter.lastOptions.Model)
+	}
+	if coderAdapter.lastOptions.Temperature == nil || *coderAdapter.lastOptions.Temperature != temperature {
+		t.Fatal("expected temperature to be forwarded")
+	}
+	if coderAdapter.lastOptions.MaxTokens != 256 {
+		t.Fatalf("expected max tokens 256, got %d", coderAdapter.lastOptions.MaxTokens)
+	}
+	if coderAdapter.lastOptions.Semantics == nil {
+		t.Fatal("expected commander to forward request semantics into adapter")
+	}
+	if coderAdapter.lastOptions.Semantics.AnswerStyle != "concise" {
+		t.Fatalf("expected answer style concise, got %q", coderAdapter.lastOptions.Semantics.AnswerStyle)
+	}
+	if len(coderAdapter.lastOptions.Semantics.Capabilities) != 2 || coderAdapter.lastOptions.Semantics.Capabilities[0] != "code" || coderAdapter.lastOptions.Semantics.Capabilities[1] != "refactor" {
+		t.Fatalf("expected capabilities to be forwarded, got %#v", coderAdapter.lastOptions.Semantics.Capabilities)
+	}
+	if coderAdapter.lastOptions.Semantics.Controls == nil || len(coderAdapter.lastOptions.Semantics.Controls.AllowedTools) != 1 || coderAdapter.lastOptions.Semantics.Controls.AllowedTools[0] != "call_coder_agent" {
+		t.Fatalf("expected request controls to be forwarded, got %#v", coderAdapter.lastOptions.Semantics.Controls)
+	}
+	if coderAdapter.lastOptions.Semantics.SystemPrompt != "" {
+		t.Fatalf("expected system prompt to stay in top-level options, got %q", coderAdapter.lastOptions.Semantics.SystemPrompt)
+	}
+}
+
+func TestCommander_ConsultSubExpertPassesAdapterSendOptions(t *testing.T) {
+	cmd := NewCommander(5)
+
+	expertAdapter := NewMockAdapter("Security recommendation")
+	temperature := 0.55
+	cmd.RegisterAgent(AgentConfig{
+		Role:         RoleSubExpert,
+		Adapter:      expertAdapter,
+		SystemPrompt: "Sub expert prompt",
+		Model:        "claude-sub-model",
+		Temperature:  &temperature,
+		MaxTokens:    128,
+		AnswerStyle:  "detailed",
+	})
+
+	result, err := cmd.ConsultSubExpert(ConsultSubExpertParams{
+		Domain:   "security",
+		Question: "How to secure API endpoints?",
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Expected success, got error: %s", result.Error)
+	}
+
+	expertAdapter.mu.Lock()
+	defer expertAdapter.mu.Unlock()
+	if expertAdapter.lastOptions == nil {
+		t.Fatal("expected adapter send options")
+	}
+	if expertAdapter.lastOptions.System != "Sub expert prompt" {
+		t.Fatalf("expected sub expert system prompt, got %q", expertAdapter.lastOptions.System)
+	}
+	if expertAdapter.lastOptions.Model != "claude-sub-model" {
+		t.Fatalf("expected model to be forwarded, got %q", expertAdapter.lastOptions.Model)
+	}
+	if expertAdapter.lastOptions.Temperature == nil || *expertAdapter.lastOptions.Temperature != temperature {
+		t.Fatal("expected temperature to be forwarded")
+	}
+	if expertAdapter.lastOptions.MaxTokens != 128 {
+		t.Fatalf("expected max tokens 128, got %d", expertAdapter.lastOptions.MaxTokens)
+	}
+	if expertAdapter.lastOptions.Semantics == nil {
+		t.Fatal("expected answer style semantics to be forwarded")
+	}
+	if expertAdapter.lastOptions.Semantics.AnswerStyle != "detailed" {
+		t.Fatalf("expected answer style detailed, got %q", expertAdapter.lastOptions.Semantics.AnswerStyle)
+	}
+	if len(expertAdapter.lastOptions.Semantics.Capabilities) != 0 {
+		t.Fatalf("expected no capabilities, got %#v", expertAdapter.lastOptions.Semantics.Capabilities)
+	}
+	if expertAdapter.lastOptions.Semantics.Controls != nil {
+		t.Fatalf("expected no controls, got %#v", expertAdapter.lastOptions.Semantics.Controls)
 	}
 }
 

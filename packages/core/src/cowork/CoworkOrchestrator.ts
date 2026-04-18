@@ -87,6 +87,10 @@ export class CoworkOrchestrator extends EventEmitter {
     return this.runtime.getAllExecutors();
   }
 
+  getHookManager() {
+    return this.runtime.getHookManager?.();
+  }
+
   /**
    * 执行单个任务
    */
