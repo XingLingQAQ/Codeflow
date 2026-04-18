@@ -186,10 +186,29 @@ describe('CodexAdapter', () => {
       await expect(adapter.send('Hello')).rejects.toThrow(APIError);
     });
 
-    it('should throw error for stream option', async () => {
-      await expect(adapter.send('Hello', { stream: true })).rejects.toThrow(
-        'Use stream() for streaming responses'
-      );
+    it('should keep stream shim compatibility on send', async () => {
+      const mockStream = [
+        { choices: [{ delta: { content: 'Hello' } }] },
+        { choices: [{ delta: { content: ' world' } }] },
+        { choices: [{ delta: {} }] },
+      ];
+
+      const mockClient = (adapter as any).client;
+      mockClient.chat.completions.create.mockResolvedValue({
+        [Symbol.asyncIterator]: async function* () {
+          for (const chunk of mockStream) {
+            yield chunk;
+          }
+        },
+      });
+
+      const response = await adapter.send('Hello', { stream: true });
+
+      expect(response.content).toBe('Hello world');
+      expect(response.finishReason).toBe('stop');
+      expect(mockHookManager.hook_on_stream).toHaveBeenCalled();
+      expect(mockHookManager.hook_post_response).toHaveBeenCalled();
+      expect(adapter.getHistory().at(-1)?.content).toBe('Hello world');
     });
 
     it('should handle streaming via stream()', async () => {
