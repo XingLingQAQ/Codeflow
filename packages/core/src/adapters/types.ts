@@ -2,7 +2,7 @@
  * CLI Adapter 接口类型定义
  */
 
-import { Message, AIResponse, StreamChunk, RequestPayload } from '../hooks/types.js';
+import { Message, AIResponse, StreamChunk, RequestPayload, DecisionSkeleton } from '../hooks/types.js';
 
 /**
  * 发送选项
@@ -82,6 +82,95 @@ export function applyHookPayload(
     temperature: payload.temperature ?? context.temperature,
     maxTokens: payload.maxTokens ?? context.maxTokens,
   };
+}
+
+export interface HistoryGovernanceParts {
+  systemMessages: Message[];
+  dialogueMessages: Message[];
+}
+
+export function splitHistoryForGovernance(messages: Message[]): HistoryGovernanceParts {
+  const systemMessages: Message[] = [];
+  const dialogueMessages: Message[] = [];
+
+  for (const message of messages) {
+    if (message.role === 'system') {
+      systemMessages.push({ ...message });
+      continue;
+    }
+    dialogueMessages.push({ ...message });
+  }
+
+  return { systemMessages, dialogueMessages };
+}
+
+export function countCompletedTurns(messages: Message[]): number {
+  return messages.filter((message) => message.role === 'assistant').length;
+}
+
+export function rewindHistoryByTurns(messages: Message[], steps: number): Message[] {
+  if (steps <= 0) {
+    throw new Error('Steps must be positive');
+  }
+
+  const { systemMessages, dialogueMessages } = splitHistoryForGovernance(messages);
+  const assistantBoundaries = dialogueMessages.flatMap((message, index) =>
+    message.role === 'assistant' ? [index + 1] : []
+  );
+  const availableTurns = assistantBoundaries.length;
+  if (steps > availableTurns) {
+    throw new Error(`Cannot rewind ${steps} steps, only ${availableTurns} rounds available`);
+  }
+
+  const turnsToKeep = availableTurns - steps;
+  const cutoff = turnsToKeep === 0 ? 0 : assistantBoundaries[turnsToKeep - 1];
+  return [...systemMessages, ...dialogueMessages.slice(0, cutoff)];
+}
+
+export async function compactHistoryWithSummary(
+  messages: Message[],
+  options: {
+    buildSkeleton?: (messages: Message[], tokenCount: number) => Promise<DecisionSkeleton>;
+    estimateTokens?: (messages: Message[]) => number;
+    keepRatio?: number;
+    minimumRecentMessages?: number;
+    summaryTimestamp?: number;
+  } = {}
+): Promise<Message[]> {
+  if (messages.length === 0) {
+    return [];
+  }
+
+  const { systemMessages, dialogueMessages } = splitHistoryForGovernance(messages);
+  if (dialogueMessages.length === 0 || !options.buildSkeleton) {
+    return [...systemMessages, ...dialogueMessages];
+  }
+
+  const estimateTokens = options.estimateTokens ?? ((history: Message[]) => history.reduce((sum, message) => sum + Math.ceil((message.content?.length ?? 0) / 4), 0));
+  const keepRatio = options.keepRatio ?? 0.2;
+  const minimumRecentMessages = options.minimumRecentMessages ?? 2;
+  const keepCount = Math.min(
+    dialogueMessages.length,
+    Math.max(minimumRecentMessages, Math.ceil(dialogueMessages.length * keepRatio))
+  );
+  const recentMessages = dialogueMessages.slice(-keepCount);
+  const olderMessages = dialogueMessages.slice(0, -keepCount);
+
+  if (olderMessages.length === 0) {
+    return [...systemMessages, ...recentMessages];
+  }
+
+  const skeletonSource = [...systemMessages, ...olderMessages];
+  const skeleton = await options.buildSkeleton(skeletonSource, estimateTokens(skeletonSource));
+  const relations = skeleton.relations.map((relation) => `${relation.from} ${relation.type} ${relation.to}`).join(', ');
+  const summaryMessage: Message = {
+    role: 'system',
+    content: `[Compressed Context]\nEntities: ${skeleton.entities.join(', ')}\nDecisions: ${skeleton.decisions.join('; ')}\nRelations: ${relations}`,
+    timestamp: options.summaryTimestamp ?? Date.now(),
+  };
+
+  const preservedSystemMessages = systemMessages.filter((message) => !message.content.startsWith('[Compressed Context]'));
+  return [...preservedSystemMessages, summaryMessage, ...recentMessages];
 }
 
 /**

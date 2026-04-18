@@ -13,6 +13,9 @@ import {
   AdapterPayloadContext,
   toHookPayload,
   applyHookPayload,
+  rewindHistoryByTurns,
+  compactHistoryWithSummary,
+  splitHistoryForGovernance,
 } from './types.js';
 import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
@@ -92,14 +95,13 @@ export class GeminiAdapter implements ICliAdapter {
     this.history.push(userMessage);
 
     const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
-    const effectivePrompt = this.resolvePromptFromPayload(prompt, payload.messages);
-    const contents = this.convertToGeminiFormat(effectivePrompt);
+    const request = this.buildGeminiRequest(prompt, payload.messages);
     const model = this.getModel(payload.model);
 
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < (mergedOptions.maxRetries || 3); attempt++) {
       try {
-        const result = await this.sendWithTimeout(model, contents, {
+        const result = await this.sendWithTimeout(model, request, {
           ...mergedOptions,
           model: payload.model,
           temperature: payload.temperature,
@@ -158,11 +160,10 @@ export class GeminiAdapter implements ICliAdapter {
     this.history.push(userMessage);
 
     const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
-    const effectivePrompt = this.resolvePromptFromPayload(prompt, payload.messages);
-    const contents = this.convertToGeminiFormat(effectivePrompt);
+    const request = this.buildGeminiRequest(prompt, payload.messages);
     const model = this.getModel(payload.model);
 
-    const streamGenerator = this.createStreamGenerator(model, contents, {
+    const streamGenerator = this.createStreamGenerator(model, request, {
       ...mergedOptions,
       model: payload.model,
       temperature: payload.temperature,
@@ -198,16 +199,18 @@ export class GeminiAdapter implements ICliAdapter {
   }
 
   async rewind(steps: number): Promise<void> {
-    if (steps <= 0 || steps > this.history.length) {
-      throw new Error('Invalid rewind steps');
-    }
-    this.history = this.history.slice(0, -steps);
+    this.history = rewindHistoryByTurns(this.history, steps);
   }
 
   async compact(): Promise<void> {
-    if (this.history.length > 10) {
-      this.history = this.history.slice(-10);
-    }
+    this.history = await compactHistoryWithSummary(this.history, {
+      buildSkeleton: this.hookManager
+        ? async (messages, tokenCount) => this.hookManager!.hook_before_compress({
+            messages,
+            tokenCount,
+          })
+        : undefined,
+    });
   }
 
   configure(config: Partial<AdapterConfig>): void {
@@ -272,9 +275,40 @@ export class GeminiAdapter implements ICliAdapter {
     return this.model;
   }
 
+  private buildGeminiRequest(
+    originalPrompt: string | MultimodalInput,
+    messages: Message[]
+  ): { contents: Content[]; systemInstruction?: string } {
+    const { systemMessages, dialogueMessages } = splitHistoryForGovernance(messages);
+    const latestUserIndex = [...dialogueMessages].map((message, index) => ({ message, index })).reverse().find(({ message }) => message.role === 'user')?.index;
+    const latestPrompt = this.resolvePromptFromPayload(originalPrompt, messages);
+    const contents: Content[] = [];
+
+    for (const [index, message] of dialogueMessages.entries()) {
+      if (message.role === 'assistant') {
+        contents.push({ role: 'model', parts: [{ text: message.content }] });
+        continue;
+      }
+
+      if (index === latestUserIndex) {
+        const prompt = typeof latestPrompt === 'string' ? latestPrompt : { ...latestPrompt, text: message.content };
+        contents.push(...this.convertToGeminiFormat(prompt));
+        continue;
+      }
+
+      contents.push({ role: 'user', parts: [{ text: message.content }] });
+    }
+
+    const systemInstruction = systemMessages.length > 0
+      ? systemMessages.map((message) => message.content).join('\n\n')
+      : undefined;
+
+    return { contents, systemInstruction };
+  }
+
   private async sendWithTimeout(
     model: GenerativeModel,
-    contents: Content[],
+    request: { contents: Content[]; systemInstruction?: string },
     options: SendOptions & AdapterConfig
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<{ response: { text: () => string; usageMetadata?: any; candidates?: any[] } }> {
@@ -282,7 +316,8 @@ export class GeminiAdapter implements ICliAdapter {
 
     return Promise.race([
       model.generateContent({
-        contents,
+        contents: request.contents,
+        systemInstruction: request.systemInstruction,
         generationConfig: {
           temperature: options.temperature,
           maxOutputTokens: options.maxTokens,
@@ -294,7 +329,7 @@ export class GeminiAdapter implements ICliAdapter {
 
   private async *createStreamGenerator(
     model: GenerativeModel,
-    contents: Content[],
+    request: { contents: Content[]; systemInstruction?: string },
     options: SendOptions & AdapterConfig
   ): AsyncGenerator<StreamChunk> {
     const timeout = options.timeout || 60000;
@@ -302,7 +337,8 @@ export class GeminiAdapter implements ICliAdapter {
     try {
       const streamResult = await Promise.race([
         model.generateContentStream({
-          contents,
+          contents: request.contents,
+          systemInstruction: request.systemInstruction,
           generationConfig: {
             temperature: options.temperature,
             maxOutputTokens: options.maxTokens,

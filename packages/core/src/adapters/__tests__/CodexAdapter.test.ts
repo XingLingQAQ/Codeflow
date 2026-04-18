@@ -42,6 +42,11 @@ describe('CodexAdapter', () => {
       }),
       hook_post_response: vi.fn().mockResolvedValue(undefined),
       hook_on_stream: vi.fn(),
+      hook_before_compress: vi.fn().mockResolvedValue({
+        entities: ['session'],
+        decisions: ['preserve recent turns'],
+        relations: [],
+      }),
     } as unknown as HookManager;
 
     adapter = new CodexAdapter(mockConfig, mockHookManager);
@@ -301,7 +306,7 @@ describe('CodexAdapter', () => {
   });
 
   describe('rewind', () => {
-    it('should rewind specified steps', async () => {
+    it('should rewind specified steps by completed turns', async () => {
       const mockResponse = {
         choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
         model: 'gpt-4',
@@ -317,20 +322,39 @@ describe('CodexAdapter', () => {
       await adapter.rewind(1);
 
       const history = adapter.getHistory();
-      expect(history.length).toBe(3);
+      expect(history).toHaveLength(2);
+      expect(history.map((message) => message.content)).toEqual(['Message 1', 'Response']);
+    });
+
+    it('should preserve system prompts when rewinding completed turns', async () => {
+      adapter.setHistory([
+        { role: 'system', content: 'system prompt', timestamp: 1 },
+        { role: 'user', content: 'Message 1', timestamp: 2 },
+        { role: 'assistant', content: 'Response 1', timestamp: 3 },
+        { role: 'user', content: 'Message 2', timestamp: 4 },
+        { role: 'assistant', content: 'Response 2', timestamp: 5 },
+      ]);
+
+      await adapter.rewind(1);
+
+      expect(adapter.getHistory().map((message) => `${message.role}:${message.content}`)).toEqual([
+        'system:system prompt',
+        'user:Message 1',
+        'assistant:Response 1',
+      ]);
     });
 
     it('should throw error for invalid steps', async () => {
-      await expect(adapter.rewind(0)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(0)).rejects.toThrow('Steps must be positive');
     });
 
     it('should throw error when rewinding too many steps', async () => {
-      await expect(adapter.rewind(10)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(10)).rejects.toThrow('Cannot rewind');
     });
   });
 
   describe('compact', () => {
-    it('should compact history', async () => {
+    it('should compact history with governance summary and recent turns', async () => {
       const mockResponse = {
         choices: [{ message: { content: 'Response' }, finish_reason: 'stop' }],
         model: 'gpt-4',
@@ -347,7 +371,11 @@ describe('CodexAdapter', () => {
       await adapter.compact();
 
       const history = adapter.getHistory();
-      expect(history.length).toBeLessThanOrEqual(10);
+      expect(history[0]).toMatchObject({ role: 'system' });
+      expect(history[0]?.content).toContain('[Compressed Context]');
+      expect(history.slice(1).length).toBeGreaterThan(0);
+      expect(history.at(-1)?.role).toBe('assistant');
+      expect(mockHookManager.hook_before_compress).toHaveBeenCalled();
     });
   });
 

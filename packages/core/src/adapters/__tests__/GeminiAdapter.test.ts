@@ -41,6 +41,11 @@ describe('GeminiAdapter', () => {
       }),
       hook_post_response: vi.fn().mockResolvedValue(undefined),
       hook_on_stream: vi.fn(),
+      hook_before_compress: vi.fn().mockResolvedValue({
+        entities: ['session'],
+        decisions: ['preserve recent turns'],
+        relations: [],
+      }),
     } as unknown as HookManager;
 
     adapter = new GeminiAdapter(mockConfig, mockHookManager);
@@ -101,7 +106,7 @@ describe('GeminiAdapter', () => {
       expect(response.finishReason).toBe('STOP');
     });
 
-    it('applies before_send payload mutations to prompt and model selection', async () => {
+    it('applies before_send payload mutations to provider request history governance', async () => {
       const manager = new HookManager();
       manager.register(HookEvent.BEFORE_SEND, async (payload) => ({
         ...payload,
@@ -110,6 +115,8 @@ describe('GeminiAdapter', () => {
         maxTokens: 33,
         messages: [
           { role: 'system', content: 'hooked system', timestamp: Date.now() },
+          { role: 'user', content: 'earlier prompt', timestamp: Date.now() },
+          { role: 'assistant', content: 'earlier reply', timestamp: Date.now() },
           { role: 'user', content: 'rewritten prompt', timestamp: Date.now() },
         ],
       }));
@@ -134,7 +141,12 @@ describe('GeminiAdapter', () => {
       expect(mockClient.getGenerativeModel).toHaveBeenCalledWith({ model: 'gemini-hook-model' });
       expect(switchedModel.generateContent).toHaveBeenCalledWith(
         expect.objectContaining({
-          contents: [{ role: 'user', parts: [{ text: 'rewritten prompt' }] }],
+          systemInstruction: 'hooked system',
+          contents: [
+            { role: 'user', parts: [{ text: 'earlier prompt' }] },
+            { role: 'model', parts: [{ text: 'earlier reply' }] },
+            { role: 'user', parts: [{ text: 'rewritten prompt' }] },
+          ],
           generationConfig: expect.objectContaining({
             temperature: 0.1,
             maxOutputTokens: 33,
@@ -440,7 +452,7 @@ describe('GeminiAdapter', () => {
   });
 
   describe('rewind', () => {
-    it('should rewind specified steps', async () => {
+    it('should rewind specified steps by completed turns', async () => {
       const mockResponse = {
         response: {
           text: () => 'Response',
@@ -462,20 +474,39 @@ describe('GeminiAdapter', () => {
       await adapter.rewind(1);
 
       const history = adapter.getHistory();
-      expect(history.length).toBe(3);
+      expect(history).toHaveLength(2);
+      expect(history.map((message) => message.content)).toEqual(['Message 1', 'Response']);
+    });
+
+    it('should preserve system prompts when rewinding completed turns', async () => {
+      adapter.setHistory([
+        { role: 'system', content: 'system prompt', timestamp: 1 },
+        { role: 'user', content: 'Message 1', timestamp: 2 },
+        { role: 'assistant', content: 'Response 1', timestamp: 3 },
+        { role: 'user', content: 'Message 2', timestamp: 4 },
+        { role: 'assistant', content: 'Response 2', timestamp: 5 },
+      ]);
+
+      await adapter.rewind(1);
+
+      expect(adapter.getHistory().map((message) => `${message.role}:${message.content}`)).toEqual([
+        'system:system prompt',
+        'user:Message 1',
+        'assistant:Response 1',
+      ]);
     });
 
     it('should throw error for invalid steps', async () => {
-      await expect(adapter.rewind(0)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(0)).rejects.toThrow('Steps must be positive');
     });
 
     it('should throw error when rewinding too many steps', async () => {
-      await expect(adapter.rewind(10)).rejects.toThrow('Invalid rewind steps');
+      await expect(adapter.rewind(10)).rejects.toThrow('Cannot rewind');
     });
   });
 
   describe('compact', () => {
-    it('should compact history', async () => {
+    it('should compact history with governance summary and recent turns', async () => {
       const mockResponse = {
         response: {
           text: () => 'Response',
@@ -498,7 +529,11 @@ describe('GeminiAdapter', () => {
       await adapter.compact();
 
       const history = adapter.getHistory();
-      expect(history.length).toBeLessThanOrEqual(10);
+      expect(history[0]).toMatchObject({ role: 'system' });
+      expect(history[0]?.content).toContain('[Compressed Context]');
+      expect(history.slice(1).length).toBeGreaterThan(0);
+      expect(history.at(-1)?.role).toBe('assistant');
+      expect(mockHookManager.hook_before_compress).toHaveBeenCalled();
     });
   });
 

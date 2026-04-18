@@ -426,6 +426,27 @@ describe('ClaudeAdapter', () => {
       expect(history[0].content).toContain('[Compressed Context]');
     });
 
+    it('should not stack compressed context summaries on repeated compaction', async () => {
+      adapter.setHistory([
+        { role: 'system', content: '[Compressed Context]\nEntities: old\nDecisions: old\nRelations: ', timestamp: 1 },
+        { role: 'system', content: 'system prompt', timestamp: 2 },
+        { role: 'user', content: 'Message 1', timestamp: 3 },
+        { role: 'assistant', content: 'Response 1', timestamp: 4 },
+        { role: 'user', content: 'Message 2', timestamp: 5 },
+        { role: 'assistant', content: 'Response 2', timestamp: 6 },
+        { role: 'user', content: 'Message 3', timestamp: 7 },
+        { role: 'assistant', content: 'Response 3', timestamp: 8 },
+      ]);
+
+      await adapter.compact();
+
+      const summaries = adapter.getHistory().filter((message) =>
+        message.role === 'system' && message.content.startsWith('[Compressed Context]')
+      );
+      expect(summaries).toHaveLength(1);
+      expect(adapter.getHistory().some((message) => message.content === 'system prompt')).toBe(true);
+    });
+
     it('should call compress hook', async () => {
       const mockResponse = {
         content: [{ type: 'text', text: 'Response' }],

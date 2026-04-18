@@ -13,6 +13,8 @@ import {
   AdapterPayloadContext,
   toHookPayload,
   applyHookPayload,
+  rewindHistoryByTurns,
+  compactHistoryWithSummary,
 } from './types.js';
 import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
@@ -181,16 +183,18 @@ export class CodexAdapter implements ICliAdapter {
   }
 
   async rewind(steps: number): Promise<void> {
-    if (steps <= 0 || steps > this.history.length) {
-      throw new Error('Invalid rewind steps');
-    }
-    this.history = this.history.slice(0, -steps);
+    this.history = rewindHistoryByTurns(this.history, steps);
   }
 
   async compact(): Promise<void> {
-    if (this.history.length > 10) {
-      this.history = this.history.slice(-10);
-    }
+    this.history = await compactHistoryWithSummary(this.history, {
+      buildSkeleton: this.hookManager
+        ? async (messages, tokenCount) => this.hookManager!.hook_before_compress({
+            messages,
+            tokenCount,
+          })
+        : undefined,
+    });
   }
 
   configure(config: Partial<AdapterConfig>): void {
