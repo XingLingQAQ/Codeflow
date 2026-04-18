@@ -17,7 +17,7 @@ import {
   CommanderEvent,
   CommanderEventHandler,
 } from './types.js';
-import { Message } from '../hooks/types.js';
+import { Message, getMessageText } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
 interface HookAwareAdapter {
@@ -266,7 +266,7 @@ export class Commander implements ICommander {
       metadata: {
         sourceAgent: sourceRole,
         graftedAt: Date.now(),
-        tokenCount: Math.ceil(messages.reduce((acc, m) => acc + m.content.length, 0) / 4),
+        tokenCount: Math.ceil(messages.reduce((acc, m) => acc + getMessageText(m.content).length, 0) / 4),
       },
     };
 
@@ -444,7 +444,7 @@ export class Commander implements ICommander {
    * 使用改进的启发式算法
    */
   private estimateMessageTokens(message: Message): number {
-    const content = message.content;
+    const content = getMessageText(message.content);
     if (!content) return 0;
 
     let tokens = 0;

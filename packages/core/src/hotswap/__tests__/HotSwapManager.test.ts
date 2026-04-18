@@ -808,11 +808,24 @@ describe('HotSwapManager', () => {
       expect(result.migratedTokens).toBeLessThan(result.originalTokens);
     });
 
-    it('should preserve recent messages when truncating', async () => {
+    it('should preserve recent richer tool turn messages when truncating', async () => {
       const history: Message[] = [
         { role: 'user', content: 'A'.repeat(10000), timestamp: 1 },
-        { role: 'assistant', content: 'B'.repeat(10000), timestamp: 2 },
-        { role: 'user', content: 'Recent message', timestamp: 3 },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'calling search' },
+            { type: 'tool_call', id: 'call-1', toolName: 'search', args: { query: 'recent' } },
+          ],
+          timestamp: 2,
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'tool_result', toolCallId: 'call-1', toolName: 'search', result: { hits: 2 } },
+          ],
+          timestamp: 3,
+        },
       ];
 
       manager.registerAdapter('claude-3-opus', createMockAdapter(history));
@@ -820,8 +833,9 @@ describe('HotSwapManager', () => {
 
       const result = await manager.migrateContext('gemini-pro');
 
-      // Should keep the most recent message
-      expect(result.messages.some(m => m.content === 'Recent message')).toBe(true);
+      expect(result.messages).toHaveLength(2);
+      expect((result.messages[0].content as any[])[1]).toMatchObject({ type: 'tool_call', toolName: 'search' });
+      expect((result.messages[1].content as any[])[0]).toMatchObject({ type: 'tool_result', toolName: 'search' });
     });
   });
 

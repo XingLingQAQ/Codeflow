@@ -440,6 +440,7 @@ describe('Commander', () => {
     it('should not inherit messages when inheritMessages is false', async () => {
       const mainHistory = [
         { role: 'user' as const, content: 'Hello', timestamp: Date.now() },
+        { role: 'assistant' as const, content: 'Hi there', timestamp: Date.now() },
       ];
       (mockMainAdapter.getHistory as any).mockReturnValue(mainHistory);
 
@@ -447,7 +448,66 @@ describe('Commander', () => {
         inheritMessages: false,
       });
 
-      expect(grafted.messages).toHaveLength(0);
+      expect(grafted.messages).toEqual([]);
+      expect(grafted.metadata.tokenCount).toBe(0);
+    });
+
+    it('should keep richer tool turn messages and count projected tokens', async () => {
+      const mainHistory = [
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'text' as const, text: 'calling search' },
+            { type: 'tool_call' as const, id: 'call-1', toolName: 'search', args: { query: 'schema' } },
+          ],
+          timestamp: 1,
+        },
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'tool_result' as const, toolCallId: 'call-1', toolName: 'search', result: { hits: 3 } },
+          ],
+          timestamp: 2,
+        },
+      ];
+      (mockMainAdapter.getHistory as any).mockReturnValue(mainHistory);
+
+      const grafted = await commander.graftContext('main', 'coder');
+
+      expect(grafted.messages).toEqual(mainHistory);
+      expect(grafted.metadata.tokenCount).toBeGreaterThan(0);
+      expect((grafted.messages[0].content as any[])[1]).toMatchObject({
+        type: 'tool_call',
+        toolName: 'search',
+      });
+      expect((grafted.messages[1].content as any[])[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'search',
+      });
+    });
+
+    it('should keep most recent richer message when max tokens truncates context', async () => {
+      const mainHistory = [
+        { role: 'user' as const, content: 'A'.repeat(2000), timestamp: 1 },
+        {
+          role: 'assistant' as const,
+          content: [
+            { type: 'tool_result' as const, toolCallId: 'call-1', toolName: 'search', result: { hits: 3 } },
+          ],
+          timestamp: 2,
+        },
+      ];
+      (mockMainAdapter.getHistory as any).mockReturnValue(mainHistory);
+
+      const grafted = await commander.graftContext('main', 'coder', {
+        maxContextTokens: 50,
+      });
+
+      expect(grafted.messages).toHaveLength(1);
+      expect((grafted.messages[0].content as any[])[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'search',
+      });
     });
 
     it('should emit CONTEXT_GRAFTED event', async () => {

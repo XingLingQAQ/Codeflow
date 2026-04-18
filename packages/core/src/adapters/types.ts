@@ -2,7 +2,18 @@
  * CLI Adapter 接口类型定义
  */
 
-import { Message, AIResponse, StreamChunk, RequestPayload, DecisionSkeleton } from '../hooks/types.js';
+import {
+  Message,
+  AIResponse,
+  StreamChunk,
+  RequestPayload,
+  DecisionSkeleton,
+  cloneMessage,
+  getMessageText,
+  serializeMessageContent,
+  deserializeMessageContent,
+  isToolTurnMessage,
+} from '../hooks/types.js';
 
 /**
  * 发送选项
@@ -63,9 +74,38 @@ export interface AdapterPayloadContext {
   maxTokens?: number;
 }
 
+export function cloneMessages(messages: Message[]): Message[] {
+  return messages.map((message) => cloneMessage(message));
+}
+
+export function messageToText(message: Message): string {
+  return getMessageText(message.content);
+}
+
+export function messagesToPrompt(messages: Message[], separator = '\n\n'): string {
+  return messages.map((message) => messageToText(message)).join(separator);
+}
+
+export function serializeMessage<T extends Message>(message: T): T & { content: string } {
+  return {
+    ...cloneMessage(message),
+    content: serializeMessageContent(message.content),
+  } as T & { content: string };
+}
+
+export function deserializeMessage<T extends Message>(message: T): T {
+  return {
+    ...cloneMessage(message),
+    content:
+      typeof message.content === 'string'
+        ? deserializeMessageContent(message.content)
+        : message.content,
+  } as T;
+}
+
 export function toHookPayload(context: AdapterPayloadContext): RequestPayload {
   return {
-    messages: context.messages.map((message) => ({ ...message })),
+    messages: cloneMessages(context.messages),
     model: context.model,
     temperature: context.temperature,
     maxTokens: context.maxTokens,
@@ -77,7 +117,7 @@ export function applyHookPayload(
   payload: RequestPayload
 ): AdapterPayloadContext {
   return {
-    messages: (payload.messages ?? context.messages).map((message) => ({ ...message })),
+    messages: cloneMessages(payload.messages ?? context.messages),
     model: typeof payload.model === 'string' && payload.model.length > 0 ? payload.model : context.model,
     temperature: payload.temperature ?? context.temperature,
     maxTokens: payload.maxTokens ?? context.maxTokens,
@@ -95,10 +135,10 @@ export function splitHistoryForGovernance(messages: Message[]): HistoryGovernanc
 
   for (const message of messages) {
     if (message.role === 'system') {
-      systemMessages.push({ ...message });
+      systemMessages.push(cloneMessage(message));
       continue;
     }
-    dialogueMessages.push({ ...message });
+    dialogueMessages.push(cloneMessage(message));
   }
 
   return { systemMessages, dialogueMessages };
@@ -124,7 +164,7 @@ export function rewindHistoryByTurns(messages: Message[], steps: number): Messag
 
   const turnsToKeep = availableTurns - steps;
   const cutoff = turnsToKeep === 0 ? 0 : assistantBoundaries[turnsToKeep - 1];
-  return [...systemMessages, ...dialogueMessages.slice(0, cutoff)];
+  return [...systemMessages, ...dialogueMessages.slice(0, cutoff)].map((message) => cloneMessage(message));
 }
 
 export async function compactHistoryWithSummary(
@@ -143,10 +183,12 @@ export async function compactHistoryWithSummary(
 
   const { systemMessages, dialogueMessages } = splitHistoryForGovernance(messages);
   if (dialogueMessages.length === 0 || !options.buildSkeleton) {
-    return [...systemMessages, ...dialogueMessages];
+    return [...systemMessages, ...dialogueMessages].map((message) => cloneMessage(message));
   }
 
-  const estimateTokens = options.estimateTokens ?? ((history: Message[]) => history.reduce((sum, message) => sum + Math.ceil((message.content?.length ?? 0) / 4), 0));
+  const estimateTokens =
+    options.estimateTokens ??
+    ((history: Message[]) => history.reduce((sum, message) => sum + Math.ceil(messageToText(message).length / 4), 0));
   const keepRatio = options.keepRatio ?? 0.2;
   const minimumRecentMessages = options.minimumRecentMessages ?? 2;
   const keepCount = Math.min(
@@ -157,7 +199,7 @@ export async function compactHistoryWithSummary(
   const olderMessages = dialogueMessages.slice(0, -keepCount);
 
   if (olderMessages.length === 0) {
-    return [...systemMessages, ...recentMessages];
+    return [...systemMessages, ...recentMessages].map((message) => cloneMessage(message));
   }
 
   const skeletonSource = [...systemMessages, ...olderMessages];
@@ -169,8 +211,14 @@ export async function compactHistoryWithSummary(
     timestamp: options.summaryTimestamp ?? Date.now(),
   };
 
-  const preservedSystemMessages = systemMessages.filter((message) => !message.content.startsWith('[Compressed Context]'));
-  return [...preservedSystemMessages, summaryMessage, ...recentMessages];
+  const preservedSystemMessages = systemMessages.filter(
+    (message) => !messageToText(message).startsWith('[Compressed Context]')
+  );
+  return [...preservedSystemMessages, summaryMessage, ...recentMessages].map((message) => cloneMessage(message));
+}
+
+export function hasToolTurns(messages: Message[]): boolean {
+  return messages.some((message) => isToolTurnMessage(message));
 }
 
 /**

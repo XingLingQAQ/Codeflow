@@ -15,7 +15,7 @@ import {
   PREDEFINED_MODELS,
 } from './types.js';
 import { toAdapterConfigPatch, toCanonicalProvider, type CanonicalProvider, type ResolvedConfig, type RuntimeProviderFamily } from '../config/types.js';
-import { Message } from '../hooks/types.js';
+import { Message, getMessageText } from '../hooks/types.js';
 import { AdapterConfig, ICliAdapter } from '../adapters/types.js';
 
 export class HotSwapManager implements IHotSwapManager {
@@ -364,8 +364,7 @@ export class HotSwapManager implements IHotSwapManager {
   private estimateTokens(messages: Message[]): number {
     let total = 0;
     for (const msg of messages) {
-      // 粗略估计：4 字符 ≈ 1 token
-      total += Math.ceil(msg.content.length / 4);
+      total += Math.ceil(getMessageText(msg.content).length / 4);
     }
     return total;
   }
@@ -377,7 +376,7 @@ export class HotSwapManager implements IHotSwapManager {
     // 从最新的消息开始，向前添加
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      const msgTokens = Math.ceil(msg.content.length / 4);
+      const msgTokens = Math.ceil(getMessageText(msg.content).length / 4);
 
       if (currentTokens + msgTokens > maxTokens) {
         break;
