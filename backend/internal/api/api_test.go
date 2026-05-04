@@ -370,7 +370,7 @@ func TestDebateAPI(t *testing.T) {
 
 	t.Run("GET /api/v1/debates/:id", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1/debates/test-debate", nil)
+		req, _ := http.NewRequest("GET", "/api/v1/debates/33333333-3333-3333-3333-333333333333", nil)
 		server.Router().ServeHTTP(w, req)
 
 		// May return 200 or 404 depending on existence

@@ -63,7 +63,7 @@ func GetAuditLogs(c *gin.Context) {
 
 	result, err := svc.Query(c.Request.Context(), query)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "query audit logs", err)
 		return
 	}
 
@@ -81,7 +81,7 @@ func VerifyAuditChain(c *gin.Context) {
 
 	result, err := svc.VerifyChain(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "verify audit chain", err)
 		return
 	}
 
@@ -99,7 +99,7 @@ func GetAuditStatistics(c *gin.Context) {
 
 	stats, err := svc.GetStatistics(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "get audit statistics", err)
 		return
 	}
 
@@ -121,13 +121,17 @@ func ExportAuditLogs(c *gin.Context) {
 	}
 
 	result, err := svc.Query(c.Request.Context(), query)
+	if err != nil {
+		respondInternalError(c, "export audit logs", err)
+		return
+	}
 	c.Header("Content-Type", "application/json")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=audit-logs-%d.json", getCurrentTimestamp()))
 
 	// Export as JSON
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "marshal audit export", err)
 		return
 	}
 

@@ -16,14 +16,14 @@ import (
 func CreateSnapshot(c *gin.Context) {
 	var req snapshot.SnapshotCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respondError(c, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	svc := snapshot.GetSnapshotService()
 	snap, err := svc.Create(c.Request.Context(), &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "create snapshot", err)
 		return
 	}
 
@@ -71,7 +71,7 @@ func GetSnapshots(c *gin.Context) {
 	svc := snapshot.GetSnapshotService()
 	resp, err := svc.List(c.Request.Context(), opts)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "list snapshots", err)
 		return
 	}
 
@@ -81,12 +81,15 @@ func GetSnapshots(c *gin.Context) {
 // GetSnapshot retrieves a snapshot by ID.
 // GET /api/v1/snapshots/:id
 func GetSnapshot(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id", "snapshot ID")
+	if !ok {
+		return
+	}
 
 	svc := snapshot.GetSnapshotService()
 	snap, err := svc.Get(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, http.StatusNotFound, "Snapshot not found")
 		return
 	}
 
@@ -96,7 +99,10 @@ func GetSnapshot(c *gin.Context) {
 // RestoreSnapshot restores the system state from a snapshot.
 // POST /api/v1/snapshots/:id/restore
 func RestoreSnapshot(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id", "snapshot ID")
+	if !ok {
+		return
+	}
 
 	startTime := time.Now()
 	svc := snapshot.GetSnapshotService()
@@ -104,7 +110,7 @@ func RestoreSnapshot(c *gin.Context) {
 	elapsed := time.Since(startTime)
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respondInternalError(c, "restore snapshot", err)
 		return
 	}
 
@@ -119,11 +125,14 @@ func RestoreSnapshot(c *gin.Context) {
 // DeleteSnapshot deletes a snapshot by ID.
 // DELETE /api/v1/snapshots/:id
 func DeleteSnapshot(c *gin.Context) {
-	id := c.Param("id")
+	id, ok := requireUUIDParam(c, "id", "snapshot ID")
+	if !ok {
+		return
+	}
 
 	svc := snapshot.GetSnapshotService()
 	if err := svc.Delete(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		respondError(c, http.StatusNotFound, "Snapshot not found")
 		return
 	}
 

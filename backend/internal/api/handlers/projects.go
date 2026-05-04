@@ -21,7 +21,7 @@ func GetProjects(c *gin.Context) {
 	svc := project.GetProjectService()
 	result, err := svc.ListProjects(c.Request.Context(), &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to list projects: "+err.Error())
+		respondInternalError(c, "list projects", err)
 		return
 	}
 
@@ -39,7 +39,7 @@ func CreateProject(c *gin.Context) {
 	svc := project.GetProjectService()
 	result, err := svc.CreateProject(c.Request.Context(), &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to create project: "+err.Error())
+		respondInternalError(c, "create project", err)
 		return
 	}
 
@@ -48,16 +48,15 @@ func CreateProject(c *gin.Context) {
 
 // GetProject handles GET /api/v1/projects/:id
 func GetProject(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
 	svc := project.GetProjectService()
 	result, err := svc.GetProject(c.Request.Context(), id)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to get project: "+err.Error())
+		respondInternalError(c, "get project", err)
 		return
 	}
 	if result == nil {
@@ -70,9 +69,8 @@ func GetProject(c *gin.Context) {
 
 // UpdateProject handles PUT /api/v1/projects/:id
 func UpdateProject(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
@@ -85,7 +83,7 @@ func UpdateProject(c *gin.Context) {
 	svc := project.GetProjectService()
 	result, err := svc.UpdateProject(c.Request.Context(), id, &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to update project: "+err.Error())
+		respondInternalError(c, "update project", err)
 		return
 	}
 
@@ -94,15 +92,14 @@ func UpdateProject(c *gin.Context) {
 
 // DeleteProject handles DELETE /api/v1/projects/:id
 func DeleteProject(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
 	svc := project.GetProjectService()
 	if err := svc.DeleteProject(c.Request.Context(), id); err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to delete project: "+err.Error())
+		respondInternalError(c, "delete project", err)
 		return
 	}
 
@@ -111,16 +108,15 @@ func DeleteProject(c *gin.Context) {
 
 // GetProjectPlans handles GET /api/v1/projects/:id/plans
 func GetProjectPlans(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
 	svc := project.GetProjectService()
 	plans, err := svc.GetProjectPlans(c.Request.Context(), id)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to get project plans: "+err.Error())
+		respondInternalError(c, "get project plans", err)
 		return
 	}
 
@@ -129,9 +125,8 @@ func GetProjectPlans(c *gin.Context) {
 
 // AddPlanToProject handles POST /api/v1/projects/:id/plans
 func AddPlanToProject(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
@@ -143,7 +138,7 @@ func AddPlanToProject(c *gin.Context) {
 
 	svc := project.GetProjectService()
 	if err := svc.AddPlanToProject(c.Request.Context(), id, req.PlanID); err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to add plan to project: "+err.Error())
+		respondInternalError(c, "add plan to project", err)
 		return
 	}
 
@@ -154,16 +149,18 @@ func AddPlanToProject(c *gin.Context) {
 
 // RemovePlanFromProject handles DELETE /api/v1/projects/:id/plans/:planId
 func RemovePlanFromProject(c *gin.Context) {
-	id := c.Param("id")
-	planID := c.Param("planId")
-	if id == "" || planID == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID or plan ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
+		return
+	}
+	planID, ok := requireUUIDParam(c, "planId", "plan ID")
+	if !ok {
 		return
 	}
 
 	svc := project.GetProjectService()
 	if err := svc.RemovePlanFromProject(c.Request.Context(), id, planID); err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to remove plan from project: "+err.Error())
+		respondInternalError(c, "remove plan from project", err)
 		return
 	}
 
@@ -172,9 +169,8 @@ func RemovePlanFromProject(c *gin.Context) {
 
 // GenerateProjectPlan handles POST /api/v1/projects/:id/plan
 func GenerateProjectPlan(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
@@ -196,9 +192,8 @@ func GenerateProjectPlan(c *gin.Context) {
 
 // GetProjectPlan handles GET /api/v1/projects/:id/plan
 func GetProjectPlan(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
@@ -217,9 +212,8 @@ func GetProjectPlan(c *gin.Context) {
 
 // ReviseProjectPlan handles POST /api/v1/projects/:id/plan/revise
 func ReviseProjectPlan(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
@@ -241,9 +235,8 @@ func ReviseProjectPlan(c *gin.Context) {
 
 // ApproveProjectPlan handles POST /api/v1/projects/:id/plan/approve
 func ApproveProjectPlan(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 
@@ -265,9 +258,8 @@ func ApproveProjectPlan(c *gin.Context) {
 
 // ExecuteProjectPlan handles POST /api/v1/projects/:id/plan/execute
 func ExecuteProjectPlan(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing project ID")
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
 		return
 	}
 

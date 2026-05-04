@@ -21,7 +21,7 @@ func CreateDebate(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.CreateDebate(c.Request.Context(), &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to create debate: "+err.Error())
+		respondInternalError(c, "create debate", err)
 		return
 	}
 
@@ -30,16 +30,15 @@ func CreateDebate(c *gin.Context) {
 
 // GetDebate handles GET /api/v1/debates/:id
 func GetDebate(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing debate ID")
+	id, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
 		return
 	}
 
 	svc := debate.GetDebateManager()
 	result, err := svc.GetDebate(c.Request.Context(), id)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to get debate: "+err.Error())
+		respondInternalError(c, "get debate", err)
 		return
 	}
 	if result == nil {
@@ -52,9 +51,8 @@ func GetDebate(c *gin.Context) {
 
 // NextDebateRound handles POST /api/v1/debates/:id/next-round
 func NextDebateRound(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing debate ID")
+	id, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
 		return
 	}
 
@@ -67,7 +65,7 @@ func NextDebateRound(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.NextRound(c.Request.Context(), id, &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to advance round: "+err.Error())
+		respondInternalError(c, "advance debate round", err)
 		return
 	}
 
@@ -88,10 +86,12 @@ func NextDebateRound(c *gin.Context) {
 
 // ResolveConflict handles POST /api/v1/debates/:id/conflicts/:cid/resolve
 func ResolveConflict(c *gin.Context) {
-	debateID := c.Param("id")
-	conflictID := c.Param("cid")
-	if debateID == "" || conflictID == "" {
-		respondError(c, http.StatusBadRequest, "Missing debate ID or conflict ID")
+	debateID, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
+		return
+	}
+	conflictID, ok := requireUUIDParam(c, "cid", "conflict ID")
+	if !ok {
 		return
 	}
 
@@ -104,7 +104,7 @@ func ResolveConflict(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.ResolveConflict(c.Request.Context(), debateID, conflictID, &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to resolve conflict: "+err.Error())
+		respondInternalError(c, "resolve debate conflict", err)
 		return
 	}
 
@@ -125,9 +125,8 @@ func ResolveConflict(c *gin.Context) {
 
 // SelectSolution handles POST /api/v1/debates/:id/select-solution
 func SelectSolution(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing debate ID")
+	id, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
 		return
 	}
 
@@ -140,7 +139,7 @@ func SelectSolution(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.SelectSolution(c.Request.Context(), id, &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to select solution: "+err.Error())
+		respondInternalError(c, "select debate solution", err)
 		return
 	}
 
@@ -161,9 +160,8 @@ func SelectSolution(c *gin.Context) {
 
 // ExportDebateReport handles GET /api/v1/debates/:id/export
 func ExportDebateReport(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing debate ID")
+	id, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
 		return
 	}
 
@@ -175,7 +173,7 @@ func ExportDebateReport(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	report, err := svc.ExportReport(c.Request.Context(), id)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to export report: "+err.Error())
+		respondInternalError(c, "export debate report", err)
 		return
 	}
 
@@ -190,9 +188,8 @@ func StreamDebate(c *gin.Context) {
 
 // ProposeSolution handles POST /api/v1/debates/:id/solutions (additional endpoint)
 func ProposeSolution(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing debate ID")
+	id, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
 		return
 	}
 
@@ -205,7 +202,7 @@ func ProposeSolution(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.ProposeSolution(c.Request.Context(), id, &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to propose solution: "+err.Error())
+		respondInternalError(c, "propose debate solution", err)
 		return
 	}
 
