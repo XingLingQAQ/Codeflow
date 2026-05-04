@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -26,7 +28,12 @@ type SQLiteConfigService struct {
 
 // NewSQLiteConfigService creates a new SQLite-backed config service.
 func NewSQLiteConfigService(dbPath string) (*SQLiteConfigService, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	connStr, err := buildConfigSQLiteConnString(dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -61,6 +68,21 @@ func NewSQLiteConfigService(dbPath string) (*SQLiteConfigService, error) {
 	})
 
 	return svc, nil
+}
+
+func buildConfigSQLiteConnString(dbPath string) (string, error) {
+	if dbPath == "" || dbPath == ":memory:" {
+		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	}
+
+	dir := filepath.Dir(dbPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create config db dir: %w", err)
+		}
+	}
+
+	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
 }
 
 // Close closes the database connection.

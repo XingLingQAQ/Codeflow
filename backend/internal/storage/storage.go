@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -67,11 +69,9 @@ type SessionStorage struct {
 
 // NewSessionStorage 创建会话存储
 func NewSessionStorage(dbPath string) (*SessionStorage, error) {
-	var connStr string
-	if dbPath == "" || dbPath == ":memory:" {
-		connStr = "file::memory:?cache=shared&_foreign_keys=on"
-	} else {
-		connStr = dbPath + "?_foreign_keys=on"
+	connStr, err := buildSessionSQLiteConnString(dbPath)
+	if err != nil {
+		return nil, err
 	}
 
 	db, err := sql.Open("sqlite3", connStr)
@@ -86,6 +86,21 @@ func NewSessionStorage(dbPath string) (*SessionStorage, error) {
 	}
 
 	return storage, nil
+}
+
+func buildSessionSQLiteConnString(dbPath string) (string, error) {
+	if dbPath == "" || dbPath == ":memory:" {
+		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	}
+
+	dir := filepath.Dir(dbPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("create session db dir: %w", err)
+		}
+	}
+
+	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
 }
 
 func (s *SessionStorage) initialize() error {
