@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/codeflow/backend/internal/hooks"
 )
 
 func TestNewAdapterFactoryClaude(t *testing.T) {
@@ -36,13 +39,39 @@ func TestNewAdapterFactoryDefaultsEmptyProviderToClaude(t *testing.T) {
 	}
 }
 
-func TestNewAdapterFactoryUnsupportedProvider(t *testing.T) {
-	adapter, err := NewAdapter(ProviderGemini, &AdapterConfig{Model: "gemini-pro"})
-	if err == nil {
-		t.Fatal("expected error for unimplemented provider")
+func TestNewAdapterFactoryProviders(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider Provider
+		model    string
+		wantType any
+	}{
+		{name: "openai", provider: ProviderOpenAI, model: "gpt-4o-mini", wantType: &OpenAIAdapter{}},
+		{name: "gemini", provider: ProviderGemini, model: "gemini-2.0-flash", wantType: &GeminiAdapter{}},
+		{name: "codex", provider: ProviderCodex, model: "gpt-4o-mini", wantType: &CodexAdapter{}},
 	}
-	if adapter != nil {
-		t.Fatalf("expected nil adapter on error, got %T", adapter)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter, err := NewAdapter(tt.provider, &AdapterConfig{Model: tt.model})
+			if err != nil {
+				t.Fatalf("NewAdapter: %v", err)
+			}
+			switch tt.wantType.(type) {
+			case *OpenAIAdapter:
+				if _, ok := adapter.(*OpenAIAdapter); !ok {
+					t.Fatalf("expected *OpenAIAdapter, got %T", adapter)
+				}
+			case *GeminiAdapter:
+				if _, ok := adapter.(*GeminiAdapter); !ok {
+					t.Fatalf("expected *GeminiAdapter, got %T", adapter)
+				}
+			case *CodexAdapter:
+				if _, ok := adapter.(*CodexAdapter); !ok {
+					t.Fatalf("expected *CodexAdapter, got %T", adapter)
+				}
+			}
+		})
 	}
 }
 
@@ -491,9 +520,9 @@ func TestClaudeAdapterSendUsesSharedSystemControls(t *testing.T) {
 	})
 
 	resp, err := adapter.Send(context.Background(), "hello", &SendOptions{
-		Semantics: &RequestSemantics{SystemPrompt: "semantic system prompt"},
-		Model:     "override-model",
-		MaxTokens: 321,
+		Semantics:   &RequestSemantics{SystemPrompt: "semantic system prompt"},
+		Model:       "override-model",
+		MaxTokens:   321,
 		Temperature: &temp,
 	})
 	if err != nil {
@@ -517,10 +546,10 @@ func TestClaudeAdapterSendToolTurnComposesSemanticControls(t *testing.T) {
 		}
 
 		resp := claudeResponse{
-			ID:   "msg_004",
-			Type: "message",
-			Role: "assistant",
-			Content: []claudeContentBlock{{Type: "text", Text: "composed controls ok"}},
+			ID:         "msg_004",
+			Type:       "message",
+			Role:       "assistant",
+			Content:    []claudeContentBlock{{Type: "text", Text: "composed controls ok"}},
 			Model:      "claude-3-5-sonnet",
 			StopReason: "tool_use",
 		}
@@ -722,5 +751,105 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.MaxRetries != 3 {
 		t.Errorf("expected max retries 3, got %d", cfg.MaxRetries)
+	}
+}
+
+func TestGetMessageTextProjectsStructuredBlocks(t *testing.T) {
+	message := Message{
+		Role:    RoleAssistant,
+		Content: "fallback",
+		Blocks: []ContentBlock{
+			{Type: "text", Text: "hello"},
+			{Type: "tool_use", ID: "tool-1", Name: "read_file", Input: map[string]any{"path": "README.md"}},
+			{Type: "tool_result", ToolUseID: "tool-1", Result: "ok"},
+			{Type: "json", Input: map[string]any{"done": true}},
+		},
+	}
+
+	text := GetMessageText(message)
+	for _, want := range []string{"hello", "[tool_call:read_file]", "README.md", "[tool_result:tool-1] ok", `"done":true`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected projected text to contain %q, got %s", want, text)
+		}
+	}
+}
+
+func TestApplyHookPayloadIgnoresEmptyMessageOverride(t *testing.T) {
+	temperature := 0.2
+	context := AdapterPayloadContext{
+		Messages:    []Message{{Role: RoleUser, Content: "keep"}},
+		Model:       "base-model",
+		Temperature: &temperature,
+		MaxTokens:   100,
+	}
+	payload := AdapterHookPayload{Messages: []Message{}, Model: "ignored-model", MaxTokens: 200}
+
+	applied := ApplyHookPayload(context, payload)
+	if len(applied.Messages) != 1 || applied.Messages[0].Content != "keep" {
+		t.Fatalf("expected original messages preserved, got %#v", applied.Messages)
+	}
+	if applied.Model != "base-model" || applied.MaxTokens != 100 {
+		t.Fatalf("expected scalar overrides ignored for empty message override, got model=%s maxTokens=%d", applied.Model, applied.MaxTokens)
+	}
+}
+
+func TestOpenAIAdapterSendUsesHooksAndProviderMapping(t *testing.T) {
+	previous := hooks.GetHookManager()
+	hooks.SetHookManager(nil)
+	defer hooks.SetHookManager(previous)
+
+	mgr := hooks.NewHookManager()
+	hooks.SetHookManager(mgr)
+
+	if err := mgr.Register(hooks.HookConfig{Name: "rewrite", Type: hooks.HookBeforeSend, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		hookPayload := payload.(AdapterHookPayload)
+		hookPayload.Model = "hook-model"
+		hookPayload.Messages = []Message{{Role: RoleUser, Content: "rewritten"}}
+		return hookPayload, nil
+	}); err != nil {
+		t.Fatalf("register before hook: %v", err)
+	}
+	if err := mgr.Register(hooks.HookConfig{Name: "post", Type: hooks.HookPostResponse, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		return payload, nil
+	}); err != nil {
+		t.Fatalf("register post hook: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openAIRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Model != "hook-model" {
+			t.Fatalf("expected hook model, got %s", req.Model)
+		}
+		if len(req.Messages) == 0 || req.Messages[len(req.Messages)-1].Content != "rewritten" {
+			t.Fatalf("expected rewritten message, got %#v", req.Messages)
+		}
+		_ = json.NewEncoder(w).Encode(openAIResponse{
+			Model: "hook-model",
+			Choices: []struct {
+				Message struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			}{
+				{Message: struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				}{Role: "assistant", Content: "ok"}, FinishReason: "stop"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	adapter := NewOpenAIAdapter(&AdapterConfig{APIKey: "test-key", BaseURL: server.URL, Model: "base-model", MaxRetries: 0})
+	response, err := adapter.Send(context.Background(), "original", &SendOptions{Semantics: &RequestSemantics{Controls: &RequestControls{AllowedHooks: []string{"hook_before_send", "hook_post_response"}}}})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if response.Content != "ok" {
+		t.Fatalf("expected ok response, got %s", response.Content)
 	}
 }

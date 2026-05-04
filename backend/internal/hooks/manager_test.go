@@ -569,7 +569,15 @@ func TestHookTypes(t *testing.T) {
 		HookAfterExec,
 		HookRestoreState,
 		HookOnUserInputSubmitted,
+		HookBeforeTaskExecute,
+		HookAfterTaskExecute,
+		HookOnTaskFailure,
+		HookOnTaskComplete,
 	}
 
-	assert.Len(t, types, 8)
+	assert.Len(t, types, 12)
+	assert.Equal(t, HookType("hook_before_task_execute"), HookBeforeTaskExecute)
+	assert.Equal(t, HookType("hook_after_task_execute"), HookAfterTaskExecute)
+	assert.Equal(t, HookType("hook_on_task_failure"), HookOnTaskFailure)
+	assert.Equal(t, HookType("hook_on_task_complete"), HookOnTaskComplete)
 }

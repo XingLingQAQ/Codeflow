@@ -11,9 +11,9 @@ type HookType string
 
 const (
 	// Lifecycle hooks
-	HookBeforeSend     HookType = "hook_before_send"
-	HookPostResponse   HookType = "hook_post_response"
-	HookOnStream       HookType = "hook_on_stream"
+	HookBeforeSend   HookType = "hook_before_send"
+	HookPostResponse HookType = "hook_post_response"
+	HookOnStream     HookType = "hook_on_stream"
 
 	// Context management hooks
 	HookBeforeCompress    HookType = "hook_before_compress"
@@ -25,6 +25,12 @@ const (
 
 	// Memory retrieval hooks
 	HookOnUserInputSubmitted HookType = "hook_on_user_input_submitted"
+
+	// Task lifecycle hooks
+	HookBeforeTaskExecute HookType = "hook_before_task_execute"
+	HookAfterTaskExecute  HookType = "hook_after_task_execute"
+	HookOnTaskFailure     HookType = "hook_on_task_failure"
+	HookOnTaskComplete    HookType = "hook_on_task_complete"
 )
 
 // HookFunc is the function signature for hook handlers.

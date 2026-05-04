@@ -355,8 +355,12 @@ func NewAdapter(provider Provider, config *AdapterConfig) (ICliAdapter, error) {
 	switch normalized {
 	case ProviderClaude:
 		return NewClaudeAdapter(config), nil
-	case ProviderOpenAI, ProviderGemini, ProviderCodex:
-		return nil, fmt.Errorf("adapter provider %q is not implemented", normalized)
+	case ProviderOpenAI:
+		return NewOpenAIAdapter(config), nil
+	case ProviderGemini:
+		return NewGeminiAdapter(config), nil
+	case ProviderCodex:
+		return NewCodexAdapter(config), nil
 	default:
 		return nil, fmt.Errorf("unsupported adapter provider %q", normalized)
 	}

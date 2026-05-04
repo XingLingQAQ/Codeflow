@@ -262,14 +262,14 @@ func NewClaudeAdapter(config *AdapterConfig) *ClaudeAdapter {
 }
 
 type claudeContentBlock struct {
-	Type      string                 `json:"type"`
-	Text      string                 `json:"text,omitempty"`
-	ID        string                 `json:"id,omitempty"`
-	Name      string                 `json:"name,omitempty"`
-	Input     map[string]any         `json:"input,omitempty"`
-	ToolUseID string                 `json:"tool_use_id,omitempty"`
-	Content   any                    `json:"content,omitempty"`
-	IsError   bool                   `json:"is_error,omitempty"`
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Content   any            `json:"content,omitempty"`
+	IsError   bool           `json:"is_error,omitempty"`
 }
 
 // claudeRequest Claude API请求
@@ -308,26 +308,40 @@ func (a *ClaudeAdapter) Send(ctx context.Context, prompt string, options *SendOp
 	a.AddMessage(userMsg)
 
 	controls := resolveSendControls(a.config, options)
-	resp, err := a.SendToolTurn(ctx, &ToolTurnRequest{
+	contextPayload := AdapterPayloadContext{
 		Messages:    a.GetHistory(),
+		Model:       controls.Model,
+		Temperature: controls.Temperature,
+		MaxTokens:   controls.MaxTokens,
+	}
+	processed, err := applyBeforeSendHooks(ctx, controls.SemanticsControl(), contextPayload)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := a.SendToolTurn(ctx, &ToolTurnRequest{
+		Messages:    processed.Messages,
 		System:      controls.System,
 		Semantics:   controls.Semantics,
-		Model:       controls.Model,
-		MaxTokens:   controls.MaxTokens,
-		Temperature: controls.Temperature,
+		Model:       processed.Model,
+		MaxTokens:   processed.MaxTokens,
+		Temperature: processed.Temperature,
 	})
 	if err != nil {
 		return nil, err
 	}
 	a.AddMessage(resp.Message)
 
-	return &AIResponse{
+	aiResponse := &AIResponse{
 		Content:      resp.Content,
 		Blocks:       cloneBlocks(resp.Blocks),
 		Model:        resp.Model,
 		Usage:        resp.Usage,
 		FinishReason: resp.FinishReason,
-	}, nil
+	}
+	if err := notifyAdapterPostResponse(ctx, controls.SemanticsControl(), aiResponse); err != nil {
+		return nil, err
+	}
+	return aiResponse, nil
 }
 
 // SendToolTurn 发送单轮原生工具协议请求
@@ -407,12 +421,22 @@ func (a *ClaudeAdapter) Stream(ctx context.Context, prompt string, options *Send
 	a.AddMessage(userMsg)
 
 	controls := resolveSendControls(a.config, options)
-	reqBody := claudeRequest{
+	contextPayload := AdapterPayloadContext{
+		Messages:    a.GetHistory(),
 		Model:       controls.Model,
-		Messages:    buildClaudeMessages(a.GetHistory()),
-		System:      composeSystemInstruction(controls.System, controls.Semantics),
+		Temperature: controls.Temperature,
 		MaxTokens:   controls.MaxTokens,
-		Temperature: derefOrDefault(controls.Temperature, a.config.Temperature),
+	}
+	processed, err := applyBeforeSendHooks(ctx, controls.SemanticsControl(), contextPayload)
+	if err != nil {
+		return nil, err
+	}
+	reqBody := claudeRequest{
+		Model:       processed.Model,
+		Messages:    buildClaudeMessages(processed.Messages),
+		System:      composeSystemInstruction(controls.System, controls.Semantics),
+		MaxTokens:   processed.MaxTokens,
+		Temperature: derefOrDefault(processed.Temperature, a.config.Temperature),
 		Stream:      true,
 	}
 
@@ -462,7 +486,9 @@ func (a *ClaudeAdapter) Stream(ctx context.Context, prompt string, options *Send
 
 			if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
 				fullContent.WriteString(event.Delta.Text)
-				ch <- StreamChunk{Delta: event.Delta.Text, Index: index, Done: false}
+				chunk := StreamChunk{Delta: event.Delta.Text, Index: index, Done: false}
+				notifyAdapterStreamChunk(ctx, controls.SemanticsControl(), chunk)
+				ch <- chunk
 				index++
 			}
 		}
@@ -475,7 +501,15 @@ func (a *ClaudeAdapter) Stream(ctx context.Context, prompt string, options *Send
 		}
 		a.AddMessage(assistantMsg)
 
-		ch <- StreamChunk{Delta: "", Index: index, Done: true}
+		finalChunk := StreamChunk{Delta: "", Index: index, Done: true}
+		notifyAdapterStreamChunk(ctx, controls.SemanticsControl(), finalChunk)
+		ch <- finalChunk
+		_ = notifyAdapterPostResponse(ctx, controls.SemanticsControl(), &AIResponse{
+			Content:      assistantMsg.Content,
+			Blocks:       cloneBlocks(assistantMsg.Blocks),
+			Model:        processed.Model,
+			FinishReason: "stop",
+		})
 	}()
 
 	return ch, nil
