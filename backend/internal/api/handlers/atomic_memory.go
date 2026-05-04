@@ -508,7 +508,10 @@ func BoostAtomicHeat(c *gin.Context) {
 	var req struct {
 		Boost float64 `json:"boost"`
 	}
-	c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body")
+		return
+	}
 
 	svc, err := getAtomicMemoryService()
 	if err != nil {

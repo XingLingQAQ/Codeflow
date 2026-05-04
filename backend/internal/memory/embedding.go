@@ -8,6 +8,8 @@ import (
 	"unicode"
 )
 
+var nonTokenPattern = regexp.MustCompile(`[^\w\s\p{Han}]`)
+
 // SimpleEmbeddingProvider 基于 TF-IDF 的本地向量化（无需外部服务）
 type SimpleEmbeddingProvider struct {
 	dimension     int
@@ -82,8 +84,7 @@ func (p *SimpleEmbeddingProvider) Train(documents []string) {
 func (p *SimpleEmbeddingProvider) tokenize(text string) []string {
 	text = strings.ToLower(text)
 	// 移除非字母数字字符（保留中文）
-	re := regexp.MustCompile(`[^\w\s\p{Han}]`)
-	text = re.ReplaceAllString(text, " ")
+	text = nonTokenPattern.ReplaceAllString(text, " ")
 
 	fields := strings.Fields(text)
 	tokens := make([]string, 0, len(fields))
