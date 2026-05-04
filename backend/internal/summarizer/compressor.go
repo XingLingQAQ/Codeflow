@@ -35,6 +35,14 @@ func NewCompressor(summaryAdapter adapters.ICliAdapter, config *CompressionConfi
 
 // Compress 压缩上下文
 func (c *Compressor) Compress(ctx Context, config *CompressionConfig) (*CompressionResult, error) {
+	return c.CompressContext(context.Background(), ctx, config)
+}
+
+// CompressContext 使用调用方上下文压缩上下文。
+func (c *Compressor) CompressContext(parent context.Context, ctx Context, config *CompressionConfig) (*CompressionResult, error) {
+	if parent == nil {
+		parent = context.Background()
+	}
 	mergedConfig := c.config
 	if config != nil {
 		if config.MaxTokens > 0 {
@@ -74,7 +82,7 @@ func (c *Compressor) Compress(ctx Context, config *CompressionConfig) (*Compress
 		messagesToSummarize := ctx.Messages[:len(ctx.Messages)-mergedConfig.PreserveRecentMessages]
 		if len(messagesToSummarize) > 0 {
 			var err error
-			summary, err = c.GenerateSummary(messagesToSummarize, nil)
+			summary, err = c.GenerateSummaryContext(parent, messagesToSummarize, nil)
 			if err != nil {
 				summary = c.generateLocalSummary(messagesToSummarize)
 			}
@@ -178,6 +186,14 @@ func (c *Compressor) ExtractSkeleton(messages []adapters.Message) (*DecisionSkel
 
 // GenerateSummary 生成总结
 func (c *Compressor) GenerateSummary(messages []adapters.Message, config *SummaryAgentConfig) (string, error) {
+	return c.GenerateSummaryContext(context.Background(), messages, config)
+}
+
+// GenerateSummaryContext 使用调用方上下文生成总结。
+func (c *Compressor) GenerateSummaryContext(ctx context.Context, messages []adapters.Message, config *SummaryAgentConfig) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if c.summaryAdapter == nil {
 		return c.generateLocalSummary(messages), nil
 	}
@@ -189,7 +205,7 @@ func (c *Compressor) GenerateSummary(messages []adapters.Message, config *Summar
 		maxTokens = config.MaxSummaryTokens
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	response, err := c.summaryAdapter.Send(ctx, prompt, &adapters.SendOptions{

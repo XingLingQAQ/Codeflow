@@ -1,6 +1,8 @@
 package summarizer
 
 import (
+	"context"
+
 	"github.com/codeflow/backend/internal/adapters"
 )
 
@@ -36,12 +38,12 @@ type Relation struct {
 
 // CompressionResult 压缩结果
 type CompressionResult struct {
-	OriginalTokens     int                `json:"original_tokens"`
-	CompressedTokens   int                `json:"compressed_tokens"`
-	CompressionRatio   float64            `json:"compression_ratio"`
-	PreservedMessages  []adapters.Message `json:"preserved_messages"`
-	Summary            string             `json:"summary,omitempty"`
-	DecisionSkeleton   *DecisionSkeleton  `json:"decision_skeleton,omitempty"`
+	OriginalTokens    int                `json:"original_tokens"`
+	CompressedTokens  int                `json:"compressed_tokens"`
+	CompressionRatio  float64            `json:"compression_ratio"`
+	PreservedMessages []adapters.Message `json:"preserved_messages"`
+	Summary           string             `json:"summary,omitempty"`
+	DecisionSkeleton  *DecisionSkeleton  `json:"decision_skeleton,omitempty"`
 }
 
 // SummaryAgentConfig Summary Agent配置
@@ -82,8 +84,10 @@ type ITokenCounter interface {
 // ICompressor 压缩器接口
 type ICompressor interface {
 	Compress(ctx Context, config *CompressionConfig) (*CompressionResult, error)
+	CompressContext(parent context.Context, ctx Context, config *CompressionConfig) (*CompressionResult, error)
 	ExtractSkeleton(messages []adapters.Message) (*DecisionSkeleton, error)
 	GenerateSummary(messages []adapters.Message, config *SummaryAgentConfig) (string, error)
+	GenerateSummaryContext(ctx context.Context, messages []adapters.Message, config *SummaryAgentConfig) (string, error)
 }
 
 // ISummaryHistory 总结历史接口
@@ -106,9 +110,9 @@ var DefaultCompressionConfig = CompressionConfig{
 
 // TokenEstimation Token估算常量
 var TokenEstimation = struct {
-	CharsPerTokenEN      float64
-	CharsPerTokenZH      float64
-	OverheadPerMessage   int
+	CharsPerTokenEN    float64
+	CharsPerTokenZH    float64
+	OverheadPerMessage int
 }{
 	CharsPerTokenEN:    4.0,
 	CharsPerTokenZH:    1.5,

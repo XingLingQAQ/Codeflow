@@ -34,6 +34,14 @@ func NewSQLiteRawArchive(dbPath string) *SQLiteRawArchive {
 
 // Initialize 初始化数据库连接和表结构。
 func (a *SQLiteRawArchive) Initialize() error {
+	return a.InitializeContext(context.Background())
+}
+
+// InitializeContext 使用调用方上下文初始化数据库连接和表结构。
+func (a *SQLiteRawArchive) InitializeContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -51,12 +59,11 @@ func (a *SQLiteRawArchive) Initialize() error {
 		return fmt.Errorf("open raw archive db: %w", err)
 	}
 
-	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		db.Close()
 		return fmt.Errorf("enable WAL for raw archive: %w", err)
 	}
 
-	ctx := context.Background()
 	if err := EnsureRawArchiveSchema(ctx, db); err != nil {
 		db.Close()
 		return fmt.Errorf("init raw archive schema: %w", err)
@@ -68,15 +75,19 @@ func (a *SQLiteRawArchive) Initialize() error {
 }
 
 func (a *SQLiteRawArchive) ensureInitialized() error {
+	return a.ensureInitializedContext(context.Background())
+}
+
+func (a *SQLiteRawArchive) ensureInitializedContext(ctx context.Context) error {
 	if !a.initialized {
-		return a.Initialize()
+		return a.InitializeContext(ctx)
 	}
 	return nil
 }
 
 // Store 归档一条原始数据，返回生成的 ID。
 func (a *SQLiteRawArchive) Store(ctx context.Context, entry RawEntry) (string, error) {
-	if err := a.ensureInitialized(); err != nil {
+	if err := a.ensureInitializedContext(ctx); err != nil {
 		return "", err
 	}
 
@@ -114,7 +125,7 @@ func (a *SQLiteRawArchive) Store(ctx context.Context, entry RawEntry) (string, e
 
 // Get 按 ID 获取单条归档记录。
 func (a *SQLiteRawArchive) Get(ctx context.Context, id string) (*RawEntry, error) {
-	if err := a.ensureInitialized(); err != nil {
+	if err := a.ensureInitializedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -140,7 +151,7 @@ func (a *SQLiteRawArchive) Get(ctx context.Context, id string) (*RawEntry, error
 
 // Search 全文搜索归档内容（SQLite LIKE）。
 func (a *SQLiteRawArchive) Search(ctx context.Context, query string, limit int) ([]RawEntry, error) {
-	if err := a.ensureInitialized(); err != nil {
+	if err := a.ensureInitializedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -169,7 +180,7 @@ func (a *SQLiteRawArchive) Search(ctx context.Context, query string, limit int) 
 
 // List 按条件列出归档记录。
 func (a *SQLiteRawArchive) List(ctx context.Context, opts *RawArchiveSearchOptions) ([]RawEntry, error) {
-	if err := a.ensureInitialized(); err != nil {
+	if err := a.ensureInitializedContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -226,7 +237,7 @@ func (a *SQLiteRawArchive) List(ctx context.Context, opts *RawArchiveSearchOptio
 
 // Count 返回归档总条数。
 func (a *SQLiteRawArchive) Count(ctx context.Context) (int, error) {
-	if err := a.ensureInitialized(); err != nil {
+	if err := a.ensureInitializedContext(ctx); err != nil {
 		return 0, err
 	}
 
@@ -251,7 +262,9 @@ func (a *SQLiteRawArchive) Close() error {
 
 // --- scan helpers ---
 
-func scanRawEntry(scanner interface{ Scan(dest ...interface{}) error }) (RawEntry, error) {
+func scanRawEntry(scanner interface {
+	Scan(dest ...interface{}) error
+}) (RawEntry, error) {
 	var (
 		entry        RawEntry
 		entryType    string

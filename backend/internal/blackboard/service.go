@@ -195,7 +195,7 @@ func (bb *InMemoryBlackboard) runVoteChecker() {
 	for {
 		select {
 		case <-ticker.C:
-			bb.CheckExpiredVotes()
+			bb.CheckExpiredVotesContext(context.Background())
 		case <-bb.stopChan:
 			return
 		}
@@ -683,6 +683,14 @@ func (bb *InMemoryBlackboard) buildVoteResponse(vote *Vote) *VoteResponse {
 
 // CheckExpiredVotes 检查过期投票
 func (bb *InMemoryBlackboard) CheckExpiredVotes() {
+	bb.CheckExpiredVotesContext(context.Background())
+}
+
+// CheckExpiredVotesContext 使用调用方上下文检查过期投票。
+func (bb *InMemoryBlackboard) CheckExpiredVotesContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	bb.mu.Lock()
 	defer bb.mu.Unlock()
 
@@ -691,7 +699,7 @@ func (bb *InMemoryBlackboard) CheckExpiredVotes() {
 		if vote.Status == VoteStatusPending && now > vote.ExpiresAt {
 			vote.Status = VoteStatusTimeout
 			vote.ResolvedAt = now
-			bb.recordVoteAudit(context.Background(), vote, "vote_timeout", audit.OutcomeFailure, audit.SeverityWarning, nil)
+			bb.recordVoteAudit(ctx, vote, "vote_timeout", audit.OutcomeFailure, audit.SeverityWarning, nil)
 		}
 	}
 }

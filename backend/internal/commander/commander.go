@@ -54,6 +54,14 @@ func (c *Commander) GetAgent(role AgentRole) *AgentConfig {
 
 // CallCoderAgent 调用Coder代理
 func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult, error) {
+	return c.CallCoderAgentContext(context.Background(), params)
+}
+
+// CallCoderAgentContext 使用调用方上下文调用Coder代理。
+func (c *Commander) CallCoderAgentContext(ctx context.Context, params CallCoderAgentParams) (*ToolCallResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	startTime := time.Now()
 	callID := c.generateCallID()
 
@@ -141,7 +149,7 @@ func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult
 		return result, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	sendOptions := buildAgentSendOptions(coderAgent, graftedCtx)
@@ -177,6 +185,14 @@ func (c *Commander) CallCoderAgent(params CallCoderAgentParams) (*ToolCallResult
 
 // ConsultSubExpert 咨询子专家
 func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallResult, error) {
+	return c.ConsultSubExpertContext(context.Background(), params)
+}
+
+// ConsultSubExpertContext 使用调用方上下文咨询子专家。
+func (c *Commander) ConsultSubExpertContext(ctx context.Context, params ConsultSubExpertParams) (*ToolCallResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	startTime := time.Now()
 	callID := c.generateCallID()
 
@@ -267,7 +283,7 @@ func (c *Commander) ConsultSubExpert(params ConsultSubExpertParams) (*ToolCallRe
 		return result, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	sendOptions := buildAgentSendOptions(subExpert, graftedCtx)

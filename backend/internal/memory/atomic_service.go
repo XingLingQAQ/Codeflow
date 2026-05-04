@@ -141,7 +141,9 @@ func (s *AtomicMemoryService) Add(ctx context.Context, mem *AtomicMemory) error 
 	}
 
 	if err := s.indexVector(ctx, mem); err != nil {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM atomic_memories WHERE id = ?`, mem.ID)
+		if cleanupErr := s.deleteAtomicMemoryRow(ctx, mem.ID); cleanupErr != nil {
+			return fmt.Errorf("store vector index: %w; rollback atomic memory: %v", err, cleanupErr)
+		}
 		return fmt.Errorf("store vector index: %w", err)
 	}
 
@@ -612,6 +614,14 @@ func (s *AtomicMemoryService) SearchByTier(ctx context.Context, tier MemoryTier,
 	defer rows.Close()
 
 	return scanAtomicMemories(rows)
+}
+
+func (s *AtomicMemoryService) deleteAtomicMemoryRow(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM atomic_memories WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *AtomicMemoryService) validateDependencies() error {
