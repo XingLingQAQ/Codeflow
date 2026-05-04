@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/codeflow/backend/internal/audit"
@@ -18,9 +19,9 @@ type EncryptRequest struct {
 
 // EncryptResponse represents the encryption response
 type EncryptResponse struct {
-	Method          string                     `json:"method"`
-	EncryptedData   *privacy.EncryptedData     `json:"encrypted_data,omitempty"`
-	ChainEncrypted  *privacy.ChainEncryptedData `json:"chain_encrypted,omitempty"`
+	Method         string                      `json:"method"`
+	EncryptedData  *privacy.EncryptedData      `json:"encrypted_data,omitempty"`
+	ChainEncrypted *privacy.ChainEncryptedData `json:"chain_encrypted,omitempty"`
 }
 
 // DecryptRequest represents a request to decrypt data
@@ -38,10 +39,10 @@ type DecryptResponse struct {
 
 // RedactRequest represents a request to redact PII
 type RedactRequest struct {
-	Text           string             `json:"text" binding:"required"`
-	EnabledTypes   []privacy.PIIType  `json:"enabled_types,omitempty"`
-	RedactionMask  string             `json:"redaction_mask,omitempty"`
-	PreserveLength bool               `json:"preserve_length,omitempty"`
+	Text            string            `json:"text" binding:"required"`
+	EnabledTypes    []privacy.PIIType `json:"enabled_types,omitempty"`
+	RedactionMask   string            `json:"redaction_mask,omitempty"`
+	PreserveLength  bool              `json:"preserve_length,omitempty"`
 	IncludeOriginal bool              `json:"include_original,omitempty"`
 }
 
@@ -52,7 +53,7 @@ type KeyRequest struct {
 
 func recordPrivacyAudit(ctx *gin.Context, action string, outcome audit.AuditOutcome, severity audit.AuditSeverity, details map[string]interface{}) {
 	requestCtx := ctx.Request.Context()
-	_, _ = audit.Record(requestCtx, &audit.AuditLogEntry{
+	if _, err := audit.Record(requestCtx, &audit.AuditLogEntry{
 		EventType: audit.EventPrivacy,
 		Severity:  severity,
 		Actor:     audit.AuditActor{Type: "user"},
@@ -64,7 +65,9 @@ func recordPrivacyAudit(ctx *gin.Context, action string, outcome audit.AuditOutc
 		Action:  action,
 		Outcome: outcome,
 		Details: details,
-	})
+	}); err != nil {
+		log.Printf("[WARN] privacy audit record failed: action=%s outcome=%s err=%v", action, outcome, err)
+	}
 }
 
 func privacyPolicyLevel(policy *privacy.PrivacyPolicy) string {
@@ -366,11 +369,11 @@ func ManageKeys(c *gin.Context) {
 			return
 		}
 		recordPrivacyAudit(c, "rotate_key", audit.OutcomeSuccess, audit.SeverityInfo, map[string]interface{}{
-			"action":                  "rotate",
-			"old_key_id":              event.OldKeyID,
-			"new_key_id":              event.NewKeyID,
-			"documents_re_encrypted":  event.DocumentsReEncrypted,
-			"status":                  event.Status,
+			"action":                 "rotate",
+			"old_key_id":             event.OldKeyID,
+			"new_key_id":             event.NewKeyID,
+			"documents_re_encrypted": event.DocumentsReEncrypted,
+			"status":                 event.Status,
 		})
 		c.JSON(http.StatusOK, gin.H{
 			"action": "rotate",

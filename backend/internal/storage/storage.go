@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,7 +63,6 @@ CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON sessions(updated_at);
 // SessionStorage SQLite 会话存储实现
 type SessionStorage struct {
 	db *sql.DB
-	mu sync.RWMutex
 }
 
 // NewSessionStorage 创建会话存储
@@ -125,9 +123,6 @@ func (s *SessionStorage) initialize() error {
 
 // CreateSession 创建会话
 func (s *SessionStorage) CreateSession(input CreateSessionInput) (*Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	now := time.Now().UnixMilli()
 	session := &Session{
 		ID:        uuid.New().String(),
@@ -162,9 +157,6 @@ func (s *SessionStorage) CreateSession(input CreateSessionInput) (*Session, erro
 
 // GetSession 获取会话
 func (s *SessionStorage) GetSession(id string) (*Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	var session Session
 	var model, config sql.NullString
 
@@ -188,9 +180,6 @@ func (s *SessionStorage) GetSession(id string) (*Session, error) {
 
 // GetAllSessions 获取所有会话
 func (s *SessionStorage) GetAllSessions(options *QueryOptions) ([]Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	opts := normalizeQueryOptions(options, "updated_at", "DESC", 100)
 
 	query := fmt.Sprintf(
@@ -221,9 +210,6 @@ func (s *SessionStorage) GetAllSessions(options *QueryOptions) ([]Session, error
 
 // UpdateSession 更新会话
 func (s *SessionStorage) UpdateSession(id string, updates *Session) (*Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	existing, err := s.getSessionUnlocked(id)
 	if err != nil {
 		return nil, err
@@ -264,9 +250,6 @@ func (s *SessionStorage) UpdateSession(id string, updates *Session) (*Session, e
 
 // DeleteSession 删除会话
 func (s *SessionStorage) DeleteSession(id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	result, err := s.db.Exec("DELETE FROM sessions WHERE id = ?", id)
 	if err != nil {
 		return false, fmt.Errorf("failed to delete session: %w", err)
@@ -278,9 +261,6 @@ func (s *SessionStorage) DeleteSession(id string) (bool, error) {
 
 // CreateMessage 创建消息
 func (s *SessionStorage) CreateMessage(input CreateMessageInput) (*SessionMessage, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	message := &SessionMessage{
 		ID:         uuid.New().String(),
 		SessionID:  input.SessionID,
@@ -302,16 +282,15 @@ func (s *SessionStorage) CreateMessage(input CreateMessageInput) (*SessionMessag
 	}
 
 	// Update session's updated_at
-	_, _ = s.db.Exec("UPDATE sessions SET updated_at = ? WHERE id = ?", time.Now().UnixMilli(), input.SessionID)
+	if _, err := s.db.Exec("UPDATE sessions SET updated_at = ? WHERE id = ?", time.Now().UnixMilli(), input.SessionID); err != nil {
+		return nil, fmt.Errorf("failed to update session timestamp: %w", err)
+	}
 
 	return message, nil
 }
 
 // GetMessage 获取消息
 func (s *SessionStorage) GetMessage(id string) (*SessionMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	return s.getMessageUnlocked(id)
 }
 
@@ -343,9 +322,6 @@ func (s *SessionStorage) getMessageUnlocked(id string) (*SessionMessage, error) 
 
 // GetSessionMessages 获取会话消息
 func (s *SessionStorage) GetSessionMessages(sessionID string, options *QueryOptions) ([]SessionMessage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	opts := normalizeQueryOptions(options, "timestamp", "ASC", 1000)
 
 	query := fmt.Sprintf(
@@ -381,9 +357,6 @@ func (s *SessionStorage) GetSessionMessages(sessionID string, options *QueryOpti
 
 // DeleteMessage 删除消息
 func (s *SessionStorage) DeleteMessage(id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	result, err := s.db.Exec("DELETE FROM messages WHERE id = ?", id)
 	if err != nil {
 		return false, fmt.Errorf("failed to delete message: %w", err)
@@ -395,9 +368,6 @@ func (s *SessionStorage) DeleteMessage(id string) (bool, error) {
 
 // DeleteSessionMessages 删除会话所有消息
 func (s *SessionStorage) DeleteSessionMessages(sessionID string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	result, err := s.db.Exec("DELETE FROM messages WHERE session_id = ?", sessionID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete session messages: %w", err)
@@ -409,9 +379,6 @@ func (s *SessionStorage) DeleteSessionMessages(sessionID string) (int, error) {
 
 // CreateCheckpoint 创建检查点
 func (s *SessionStorage) CreateCheckpoint(input CreateCheckpointInput) (*Checkpoint, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	checkpoint := &Checkpoint{
 		ID:              uuid.New().String(),
 		SessionID:       input.SessionID,
@@ -436,9 +403,6 @@ func (s *SessionStorage) CreateCheckpoint(input CreateCheckpointInput) (*Checkpo
 
 // GetCheckpoint 获取检查点
 func (s *SessionStorage) GetCheckpoint(id string) (*Checkpoint, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	var cp Checkpoint
 	var gitHash, vectorStateHash, description sql.NullString
 
@@ -463,9 +427,6 @@ func (s *SessionStorage) GetCheckpoint(id string) (*Checkpoint, error) {
 
 // GetSessionCheckpoints 获取会话检查点
 func (s *SessionStorage) GetSessionCheckpoints(sessionID string, options *QueryOptions) ([]Checkpoint, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	opts := normalizeQueryOptions(options, "created_at", "DESC", 100)
 
 	query := fmt.Sprintf(
@@ -498,9 +459,6 @@ func (s *SessionStorage) GetSessionCheckpoints(sessionID string, options *QueryO
 
 // DeleteCheckpoint 删除检查点
 func (s *SessionStorage) DeleteCheckpoint(id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	result, err := s.db.Exec("DELETE FROM checkpoints WHERE id = ?", id)
 	if err != nil {
 		return false, fmt.Errorf("failed to delete checkpoint: %w", err)

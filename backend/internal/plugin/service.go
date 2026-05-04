@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -220,7 +221,7 @@ func (s *Service) Toggle(ctx context.Context, pluginID string, req ToggleRequest
 		return nil, err
 	}
 
-	_, _ = audit.Record(ctx, &audit.AuditLogEntry{
+	if _, err := audit.Record(ctx, &audit.AuditLogEntry{
 		EventType: audit.EventModify,
 		Severity:  audit.SeverityInfo,
 		Actor:     req.Actor,
@@ -232,7 +233,9 @@ func (s *Service) Toggle(ctx context.Context, pluginID string, req ToggleRequest
 		Action:  "plugin.toggle",
 		Outcome: audit.OutcomeSuccess,
 		Details: map[string]interface{}{"plugin_id": pluginID, "enabled": req.Enabled},
-	})
+	}); err != nil {
+		log.Printf("[WARN] plugin audit record failed: plugin_id=%s enabled=%t err=%v", pluginID, req.Enabled, err)
+	}
 
 	plugin, err := s.buildInstalledPlugin(item)
 	if err != nil {

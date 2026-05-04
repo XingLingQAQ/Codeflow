@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -16,12 +17,12 @@ import (
 )
 
 var (
-	ErrContainerNotFound  = errors.New("container not found")
-	ErrRoleNotFound       = errors.New("role not found")
-	ErrAccessDenied       = errors.New("access denied")
-	ErrInvalidInput       = errors.New("invalid input")
-	ErrQuotaExceeded      = errors.New("quota exceeded")
-	ErrMaxConcurrent      = errors.New("max concurrent containers exceeded")
+	ErrContainerNotFound = errors.New("container not found")
+	ErrRoleNotFound      = errors.New("role not found")
+	ErrAccessDenied      = errors.New("access denied")
+	ErrInvalidInput      = errors.New("invalid input")
+	ErrQuotaExceeded     = errors.New("quota exceeded")
+	ErrMaxConcurrent     = errors.New("max concurrent containers exceeded")
 )
 
 // RBACManager RBAC权限管理器
@@ -218,7 +219,7 @@ func (m *IsolationManager) recordIsolationAudit(ctx context.Context, container *
 		resource.Name = action
 	}
 
-	entryID, _ := audit.Record(ctx, &audit.AuditLogEntry{
+	entryID, err := audit.Record(ctx, &audit.AuditLogEntry{
 		EventType: audit.EventIsolation,
 		Severity:  severity,
 		Actor:     actor,
@@ -227,6 +228,10 @@ func (m *IsolationManager) recordIsolationAudit(ctx context.Context, container *
 		Outcome:   outcome,
 		Details:   details,
 	})
+	if err != nil {
+		log.Printf("[WARN] isolation audit record failed: action=%s resource_type=%s resource_id=%s err=%v", action, resource.Type, resource.ID, err)
+		return ""
+	}
 	return entryID
 }
 
@@ -550,15 +555,15 @@ func (m *IsolationManager) ValidateIO(ctx context.Context, containerID string, i
 	result.SanitizedInput = sanitized
 
 	details := map[string]interface{}{
-		"container_id":              resolveContainerID(container, containerID),
-		"container_role":            resolveContainerRole(container),
-		"direction":                 direction,
-		"valid":                     result.Valid,
-		"warning_count":             warningCount(result.Warnings),
-		"blocked_pattern_count":     blockedPatternCount(result.BlockedPatterns),
+		"container_id":               resolveContainerID(container, containerID),
+		"container_role":             resolveContainerRole(container),
+		"direction":                  direction,
+		"valid":                      result.Valid,
+		"warning_count":              warningCount(result.Warnings),
+		"blocked_pattern_count":      blockedPatternCount(result.BlockedPatterns),
 		"contains_sensitive_warning": containsSensitiveWarning(result.Warnings),
-		"sanitized_changed":         sanitizedChanged(input, sanitized),
-		"redacted_marker_count":     redactedMarkerCount(sanitized),
+		"sanitized_changed":          sanitizedChanged(input, sanitized),
+		"redacted_marker_count":      redactedMarkerCount(sanitized),
 	}
 	if !ok {
 		details["reason"] = "container not found"

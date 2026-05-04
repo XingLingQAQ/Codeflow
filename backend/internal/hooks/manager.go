@@ -4,6 +4,7 @@ package hooks
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -229,7 +230,7 @@ func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, co
 		details["error"] = event.Error
 	}
 
-	_, _ = audit.Record(ctx, &audit.AuditLogEntry{
+	if _, err := audit.Record(ctx, &audit.AuditLogEntry{
 		EventType: audit.EventHook,
 		Severity:  severity,
 		Actor:     audit.AuditActor{ID: event.HookName, Type: "service", Name: event.HookName},
@@ -241,7 +242,9 @@ func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, co
 		Action:  string(event.HookType),
 		Outcome: outcome,
 		Details: details,
-	})
+	}); err != nil {
+		log.Printf("[WARN] hook audit record failed: hook=%s action=%s err=%v", event.HookName, event.HookType, err)
+	}
 }
 
 func sortedMapKeys(values map[string]interface{}) []string {

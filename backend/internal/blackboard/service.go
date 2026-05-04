@@ -4,6 +4,7 @@ package blackboard
 import (
 	"context"
 	"errors"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -534,7 +535,7 @@ func (bb *InMemoryBlackboard) recordVoteAudit(ctx context.Context, vote *Vote, a
 		payload[key] = value
 	}
 
-	_, _ = audit.Record(ctx, &audit.AuditLogEntry{
+	if _, err := audit.Record(ctx, &audit.AuditLogEntry{
 		EventType: audit.EventApproval,
 		Severity:  severity,
 		Actor: audit.AuditActor{
@@ -550,7 +551,9 @@ func (bb *InMemoryBlackboard) recordVoteAudit(ctx context.Context, vote *Vote, a
 		Action:  action,
 		Outcome: outcome,
 		Details: payload,
-	})
+	}); err != nil {
+		log.Printf("[WARN] blackboard vote audit record failed: vote_id=%s action=%s err=%v", vote.ID, action, err)
+	}
 }
 
 func countApprovals(vote *Vote) int {

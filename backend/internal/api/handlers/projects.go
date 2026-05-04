@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -303,7 +304,7 @@ func recordProjectPlanAudit(c *gin.Context, plan *project.PlanDocument, action s
 	if plan == nil {
 		return
 	}
-	_, _ = audit.Record(c.Request.Context(), &audit.AuditLogEntry{
+	if _, err := audit.Record(c.Request.Context(), &audit.AuditLogEntry{
 		EventType: audit.EventApproval,
 		Severity:  audit.SeverityInfo,
 		Actor: audit.AuditActor{
@@ -323,5 +324,7 @@ func recordProjectPlanAudit(c *gin.Context, plan *project.PlanDocument, action s
 			"revision":   plan.Revision,
 			"status":     string(plan.Status),
 		},
-	})
+	}); err != nil {
+		log.Printf("[WARN] project plan audit record failed: project_id=%s plan_id=%s action=%s err=%v", plan.ProjectID, plan.ID, action, err)
+	}
 }
