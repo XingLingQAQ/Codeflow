@@ -18,6 +18,8 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var ErrPlanNotFound = errors.New("plan not found")
+
 // TaskStatus 任务状态
 type TaskStatus string
 
@@ -77,6 +79,14 @@ type Task struct {
 type PlanCreateRequest struct {
 	Title       string                 `json:"title" binding:"required"`
 	Description string                 `json:"description,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// PlanUpdateRequest 更新计划请求
+type PlanUpdateRequest struct {
+	Title       *string                `json:"title,omitempty"`
+	Description *string                `json:"description,omitempty"`
+	Status      *string                `json:"status,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -157,6 +167,7 @@ type IPlanner interface {
 	CreatePlan(ctx context.Context, req *PlanCreateRequest) (*Plan, error)
 	GetPlan(ctx context.Context, id string) (*Plan, error)
 	ListPlans(ctx context.Context, req *PlanListRequest) (*PlanListResponse, error)
+	UpdatePlan(ctx context.Context, id string, req *PlanUpdateRequest) (*Plan, error)
 	DeletePlan(ctx context.Context, id string) error
 
 	// Task CRUD
@@ -278,13 +289,46 @@ func (p *InMemoryPlanner) ListPlans(ctx context.Context, req *PlanListRequest) (
 	}, nil
 }
 
+// UpdatePlan 更新计划
+func (p *InMemoryPlanner) UpdatePlan(ctx context.Context, id string, req *PlanUpdateRequest) (*Plan, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	plan, ok := p.plans[id]
+	if !ok {
+		return nil, ErrPlanNotFound
+	}
+	if req.Title != nil {
+		title := strings.TrimSpace(*req.Title)
+		if title == "" {
+			return nil, errors.New("title cannot be empty")
+		}
+		plan.Title = title
+	}
+	if req.Description != nil {
+		plan.Description = strings.TrimSpace(*req.Description)
+	}
+	if req.Status != nil {
+		status := strings.TrimSpace(*req.Status)
+		if status == "" {
+			return nil, errors.New("status cannot be empty")
+		}
+		plan.Status = status
+	}
+	if req.Metadata != nil {
+		plan.Metadata = req.Metadata
+	}
+	plan.UpdatedAt = time.Now().Unix()
+	return plan, nil
+}
+
 // DeletePlan 删除计划
 func (p *InMemoryPlanner) DeletePlan(ctx context.Context, id string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if _, ok := p.plans[id]; !ok {
-		return errors.New("plan not found")
+		return ErrPlanNotFound
 	}
 
 	delete(p.plans, id)
@@ -299,7 +343,7 @@ func (p *InMemoryPlanner) CreateTask(ctx context.Context, planID string, req *Ta
 
 	plan, ok := p.plans[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	planTasks := p.tasks[planID]
@@ -362,7 +406,7 @@ func (p *InMemoryPlanner) GetTask(ctx context.Context, planID, taskID string) (*
 
 	planTasks, ok := p.tasks[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	task, ok := planTasks[taskID]
@@ -379,7 +423,7 @@ func (p *InMemoryPlanner) ListTasks(ctx context.Context, planID string, req *Tas
 
 	planTasks, ok := p.tasks[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	var filtered []*Task
@@ -437,7 +481,7 @@ func (p *InMemoryPlanner) UpdateTask(ctx context.Context, planID, taskID string,
 
 	plan, ok := p.plans[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	planTasks := p.tasks[planID]
@@ -547,7 +591,7 @@ func (p *InMemoryPlanner) DeleteTask(ctx context.Context, planID, taskID string)
 
 	plan, ok := p.plans[planID]
 	if !ok {
-		return errors.New("plan not found")
+		return ErrPlanNotFound
 	}
 
 	planTasks := p.tasks[planID]
@@ -582,7 +626,7 @@ func (p *InMemoryPlanner) ReorderTask(ctx context.Context, planID, taskID string
 
 	plan, ok := p.plans[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	planTasks := p.tasks[planID]
@@ -637,7 +681,7 @@ func (p *InMemoryPlanner) BatchUpdateModel(ctx context.Context, planID string, r
 
 	plan, ok := p.plans[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	planTasks := p.tasks[planID]
@@ -672,7 +716,7 @@ func (p *InMemoryPlanner) ValidateDependencies(planID string, taskID string, dep
 
 	planTasks, ok := p.tasks[planID]
 	if !ok {
-		return errors.New("plan not found")
+		return ErrPlanNotFound
 	}
 
 	// 检查循环依赖
@@ -720,7 +764,7 @@ func (p *InMemoryPlanner) GetBlockedTasks(ctx context.Context, planID string) ([
 
 	planTasks, ok := p.tasks[planID]
 	if !ok {
-		return nil, errors.New("plan not found")
+		return nil, ErrPlanNotFound
 	}
 
 	var blocked []Task
@@ -904,6 +948,22 @@ func (p *SQLitePlanner) CreatePlan(ctx context.Context, req *PlanCreateRequest) 
 
 	before := p.snapshotState()
 	plan, err := p.InMemoryPlanner.CreatePlan(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.persistCurrentState(); err != nil {
+		p.restoreState(before)
+		return nil, err
+	}
+	return plan, nil
+}
+
+func (p *SQLitePlanner) UpdatePlan(ctx context.Context, id string, req *PlanUpdateRequest) (*Plan, error) {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+
+	before := p.snapshotState()
+	plan, err := p.InMemoryPlanner.UpdatePlan(ctx, id, req)
 	if err != nil {
 		return nil, err
 	}

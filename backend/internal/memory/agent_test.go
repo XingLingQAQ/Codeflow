@@ -79,7 +79,7 @@ func ingestTraceableMemory(t *testing.T, agent *MemoryAgent, sessionID string) (
 		},
 	}
 
-	result, err := agent.Ingest(t.Context(), req)
+	result, err := agent.Ingest(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Ingest failed: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestMemoryAgentIngestStoresAcrossLayers(t *testing.T) {
 		t.Fatalf("expected positive SAMG triple count, got %d", result.SAMGTripleCount)
 	}
 
-	entry, err := deps.archive.Get(t.Context(), result.RawArchiveID)
+	entry, err := deps.archive.Get(context.Background(), result.RawArchiveID)
 	if err != nil {
 		t.Fatalf("archive Get failed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestMemoryAgentIngestStoresAcrossLayers(t *testing.T) {
 		t.Fatalf("unexpected archived session id: %s", entry.SessionID)
 	}
 
-	memories, err := deps.atomic.GetBySession(t.Context(), req.SessionID, 10, 0)
+	memories, err := deps.atomic.GetBySession(context.Background(), req.SessionID, 10, 0)
 	if err != nil {
 		t.Fatalf("GetBySession failed: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestMemoryAgentIngestStoresAcrossLayers(t *testing.T) {
 		t.Fatalf("unexpected atomic memory id: %s", memories[0].ID)
 	}
 
-	queryResult, err := deps.samg.QueryMemory(t.Context(), samg.QueryMemoryRequest{
+	queryResult, err := deps.samg.QueryMemory(context.Background(), samg.QueryMemoryRequest{
 		Topic:           "UserService",
 		MaxResults:      10,
 		ResolvePointers: true,
@@ -162,7 +162,7 @@ func TestMemoryAgentRetrieveReturnsTraceableSources(t *testing.T) {
 
 	ingested, req := ingestTraceableMemory(t, deps.agent, "session-retrieve")
 
-	retrieved, err := deps.agent.Retrieve(t.Context(), RetrieveRequest{
+	retrieved, err := deps.agent.Retrieve(context.Background(), RetrieveRequest{
 		Query:      "UserService",
 		SessionID:  req.SessionID,
 		MaxResults: 10,
@@ -226,7 +226,7 @@ func TestMemoryAgentRetrieveFallsBackToRawArchive(t *testing.T) {
 	defer archive.Close()
 
 	agent := NewMemoryAgent(archive, nil, nil)
-	result, err := agent.Ingest(t.Context(), IngestRequest{
+	result, err := agent.Ingest(context.Background(), IngestRequest{
 		Content:   "fallback retrieval should return raw archive source",
 		Type:      RawEntryDocument,
 		SessionID: "session-raw-fallback",
@@ -239,7 +239,7 @@ func TestMemoryAgentRetrieveFallsBackToRawArchive(t *testing.T) {
 		t.Fatal("expected raw archive id for fallback test")
 	}
 
-	retrieved, err := agent.Retrieve(t.Context(), RetrieveRequest{
+	retrieved, err := agent.Retrieve(context.Background(), RetrieveRequest{
 		Query:      "raw archive source",
 		SessionID:  "session-raw-fallback",
 		MaxResults: 5,
@@ -281,7 +281,7 @@ func TestMemoryAgentAssembleContextIncludesRecentHotMemories(t *testing.T) {
 	defer deps.cleanup()
 
 	_, req := ingestTraceableMemory(t, deps.agent, "session-context")
-	contextResult, err := deps.agent.AssembleContext(t.Context(), ContextRequest{
+	contextResult, err := deps.agent.AssembleContext(context.Background(), ContextRequest{
 		SessionID: req.SessionID,
 		MaxTokens: 200,
 	})

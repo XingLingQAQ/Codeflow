@@ -262,7 +262,7 @@ func TestAgentAPI(t *testing.T) {
 
 	t.Run("GET /api/v1/agents/:id/logs", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1/agents/test-agent/logs", nil)
+		req, _ := http.NewRequest("GET", "/api/v1/agents/33333333-3333-3333-3333-333333333333/logs", nil)
 		server.Router().ServeHTTP(w, req)
 
 		if w.Code != http.StatusOK {

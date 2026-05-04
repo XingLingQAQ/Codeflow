@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -77,7 +78,7 @@ func TestWorkflowEndpoints(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, createProjectResp.Code)
 	createdProject := decodeContextResponseData[project.Project](t, createProjectResp.Body.Bytes())
 
-	plan, err := plannerSvc.CreatePlan(t.Context(), &planner.PlanCreateRequest{
+	plan, err := plannerSvc.CreatePlan(context.Background(), &planner.PlanCreateRequest{
 		Title: "Plan A",
 		Metadata: map[string]any{
 			"session_id": "sess-1",
@@ -86,9 +87,9 @@ func TestWorkflowEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
-	assert.NoError(t, projectSvc.AddPlanToProject(t.Context(), createdProject.ID, plan.ID))
+	assert.NoError(t, projectSvc.AddPlanToProject(context.Background(), createdProject.ID, plan.ID))
 
-	task, err := plannerSvc.CreateTask(t.Context(), plan.ID, &planner.TaskCreateRequest{
+	task, err := plannerSvc.CreateTask(context.Background(), plan.ID, &planner.TaskCreateRequest{
 		Title:       "Task A",
 		Description: "Deliver minimal replay",
 		Metadata: map[string]any{
@@ -98,7 +99,7 @@ func TestWorkflowEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
-	_, err = plannerSvc.UpdateTask(t.Context(), plan.ID, task.ID, &planner.TaskUpdateRequest{Status: planner.TaskStatusInProgress})
+	_, err = plannerSvc.UpdateTask(context.Background(), plan.ID, task.ID, &planner.TaskUpdateRequest{Status: planner.TaskStatusInProgress})
 	assert.NoError(t, err)
 
 	agentSvc.RegisterAgent(&agent.Agent{
@@ -116,7 +117,7 @@ func TestWorkflowEndpoints(t *testing.T) {
 	})
 	agentSvc.EndTrace(traceID, "workflow trace completed", "completed")
 
-	assert.NoError(t, auditSvc.Log(audit.ContextWithTrace(t.Context(), &audit.AuditTrace{
+	assert.NoError(t, auditSvc.Log(audit.ContextWithTrace(context.Background(), &audit.AuditTrace{
 		SessionID: "sess-1",
 		ProjectID: createdProject.ID,
 		PlanID:    plan.ID,

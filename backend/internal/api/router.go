@@ -2,8 +2,12 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
+	nethttp "net/http"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -191,6 +195,10 @@ func (s *Server) setupRoutes() {
 		agents := v1.Group("/agents")
 		{
 			agents.GET("", handlers.GetAgents)
+			agents.POST("", handlers.CreateAgent)
+			agents.GET("/:id", handlers.GetAgent)
+			agents.PUT("/:id", handlers.UpdateAgent)
+			agents.DELETE("/:id", handlers.DeleteAgent)
 			agents.GET("/:id/logs", handlers.GetAgentLogs)
 		}
 
@@ -260,6 +268,7 @@ func (s *Server) setupRoutes() {
 			debates.GET("/:id", handlers.GetDebate)
 			debates.POST("/:id/next-round", handlers.NextDebateRound)
 			debates.POST("/:id/conflicts/:cid/resolve", handlers.ResolveConflict)
+			debates.POST("/:id/solutions", handlers.ProposeSolution)
 			debates.POST("/:id/select-solution", handlers.SelectSolution)
 			debates.GET("/:id/export", handlers.ExportDebateReport)
 			debates.GET("/:id/stream", handlers.StreamDebate) // WebSocket
@@ -276,6 +285,11 @@ func (s *Server) setupRoutes() {
 			projects.GET("/:id/plans", handlers.GetProjectPlans)
 			projects.POST("/:id/plans", handlers.AddPlanToProject)
 			projects.DELETE("/:id/plans/:planId", handlers.RemovePlanFromProject)
+			projects.POST("/:id/plan", handlers.GenerateProjectPlan)
+			projects.GET("/:id/plan", handlers.GetProjectPlan)
+			projects.POST("/:id/plan/revise", handlers.ReviseProjectPlan)
+			projects.POST("/:id/plan/approve", handlers.ApproveProjectPlan)
+			projects.POST("/:id/plan/execute", handlers.ExecuteProjectPlan)
 		}
 
 		// Plan routes
@@ -283,6 +297,9 @@ func (s *Server) setupRoutes() {
 		{
 			plans.GET("", handlers.GetPlans)
 			plans.POST("", handlers.CreatePlan)
+			plans.GET("/:id", handlers.GetPlan)
+			plans.PUT("/:id", handlers.UpdatePlan)
+			plans.DELETE("/:id", handlers.DeletePlan)
 			plans.GET("/:id/tasks", handlers.GetPlanTasks)
 			plans.POST("/:id/tasks", handlers.CreatePlanTask)
 			plans.PATCH("/:id/tasks/:tid", handlers.UpdatePlanTask)
@@ -400,6 +417,11 @@ func (s *Server) setupRoutes() {
 // Run starts the API server.
 // If port is "0", it binds to a random available port and prints the actual port to stdout.
 func (s *Server) Run() error {
+	return s.RunContext(context.Background())
+}
+
+// RunContext starts the API server and shuts it down when ctx is canceled.
+func (s *Server) RunContext(ctx context.Context) error {
 	addr := ":" + s.config.Port
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -418,7 +440,30 @@ func (s *Server) Run() error {
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 	fmt.Printf("CODEFLOW_PORT:%d\n", actualPort)
 
-	return s.router.RunListener(listener)
+	server := &nethttp.Server{Handler: s.router}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.Serve(listener)
+	}()
+
+	select {
+	case err := <-errCh:
+		if errors.Is(err, nethttp.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		err := <-errCh
+		if errors.Is(err, nethttp.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
 }
 
 // Router returns the underlying gin router for testing.

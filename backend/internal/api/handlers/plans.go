@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -38,11 +39,79 @@ func CreatePlan(c *gin.Context) {
 	svc := planner.GetPlanner()
 	result, err := svc.CreatePlan(c.Request.Context(), &req)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to create plan: "+err.Error())
+		respondInternalError(c, "create plan", err)
 		return
 	}
 
 	respondCreated(c, result)
+}
+
+// GetPlan handles GET /api/v1/plans/:id
+func GetPlan(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "plan ID")
+	if !ok {
+		return
+	}
+
+	svc := planner.GetPlanner()
+	result, err := svc.GetPlan(c.Request.Context(), id)
+	if err != nil {
+		respondInternalError(c, "get plan", err)
+		return
+	}
+	if result == nil {
+		respondError(c, http.StatusNotFound, "Plan not found")
+		return
+	}
+
+	respondOK(c, result)
+}
+
+// UpdatePlan handles PUT /api/v1/plans/:id
+func UpdatePlan(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "plan ID")
+	if !ok {
+		return
+	}
+
+	var req planner.PlanUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	svc := planner.GetPlanner()
+	result, err := svc.UpdatePlan(c.Request.Context(), id, &req)
+	if err != nil {
+		if errors.Is(err, planner.ErrPlanNotFound) {
+			respondError(c, http.StatusNotFound, "Plan not found")
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondOK(c, result)
+}
+
+// DeletePlan handles DELETE /api/v1/plans/:id
+func DeletePlan(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "plan ID")
+	if !ok {
+		return
+	}
+
+	svc := planner.GetPlanner()
+	if err := svc.DeletePlan(c.Request.Context(), id); err != nil {
+		if errors.Is(err, planner.ErrPlanNotFound) {
+			respondError(c, http.StatusNotFound, "Plan not found")
+			return
+		}
+		respondInternalError(c, "delete plan", err)
+		return
+	}
+
+	respondOK(c, gin.H{"deleted": true, "id": id})
 }
 
 // GetPlanTasks handles GET /api/v1/plans/:id/tasks

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api"
@@ -107,7 +110,9 @@ func run() error {
 	fmt.Println("  GET  /api/v1/plans/*      - Plan management")
 	fmt.Printf("\nListening on http://localhost:%s\n", port)
 
-	return server.Run()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return server.RunContext(ctx)
 }
 
 type closer interface {

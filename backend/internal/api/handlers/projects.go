@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/project"
 )
 
@@ -150,6 +151,8 @@ func AddPlanToProject(c *gin.Context) {
 }
 
 // RemovePlanFromProject handles DELETE /api/v1/projects/:id/plans/:planId
+
+// RemovePlanFromProject handles DELETE /api/v1/projects/:id/plans/:planId
 func RemovePlanFromProject(c *gin.Context) {
 	id := c.Param("id")
 	planID := c.Param("planId")
@@ -165,4 +168,168 @@ func RemovePlanFromProject(c *gin.Context) {
 	}
 
 	respondOK(c, gin.H{"project_id": id, "plan_id": planID, "removed": true})
+}
+
+// GenerateProjectPlan handles POST /api/v1/projects/:id/plan
+func GenerateProjectPlan(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		respondError(c, http.StatusBadRequest, "Missing project ID")
+		return
+	}
+
+	var req project.PlanGenerateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	svc := project.GetProjectService()
+	result, err := svc.GeneratePlanDocument(c.Request.Context(), id, &req)
+	if err != nil {
+		respondProjectPlanError(c, "generate project plan", err)
+		return
+	}
+	recordProjectPlanAudit(c, result, "plan_generated")
+	respondCreated(c, result)
+}
+
+// GetProjectPlan handles GET /api/v1/projects/:id/plan
+func GetProjectPlan(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		respondError(c, http.StatusBadRequest, "Missing project ID")
+		return
+	}
+
+	svc := project.GetProjectService()
+	result, err := svc.GetPlanDocument(c.Request.Context(), id)
+	if err != nil {
+		respondProjectPlanError(c, "get project plan", err)
+		return
+	}
+	if result == nil {
+		respondError(c, http.StatusNotFound, "Project plan not found")
+		return
+	}
+	respondOK(c, result)
+}
+
+// ReviseProjectPlan handles POST /api/v1/projects/:id/plan/revise
+func ReviseProjectPlan(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		respondError(c, http.StatusBadRequest, "Missing project ID")
+		return
+	}
+
+	var req project.PlanReviseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	svc := project.GetProjectService()
+	result, err := svc.RevisePlanDocument(c.Request.Context(), id, &req)
+	if err != nil {
+		respondProjectPlanError(c, "revise project plan", err)
+		return
+	}
+	recordProjectPlanAudit(c, result, "plan_revised")
+	respondOK(c, result)
+}
+
+// ApproveProjectPlan handles POST /api/v1/projects/:id/plan/approve
+func ApproveProjectPlan(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		respondError(c, http.StatusBadRequest, "Missing project ID")
+		return
+	}
+
+	var req project.PlanApproveRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	svc := project.GetProjectService()
+	result, err := svc.ApprovePlanDocument(c.Request.Context(), id, &req)
+	if err != nil {
+		respondProjectPlanError(c, "approve project plan", err)
+		return
+	}
+	recordProjectPlanAudit(c, result, "plan_approved")
+	respondOK(c, result)
+}
+
+// ExecuteProjectPlan handles POST /api/v1/projects/:id/plan/execute
+func ExecuteProjectPlan(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		respondError(c, http.StatusBadRequest, "Missing project ID")
+		return
+	}
+
+	svc := project.GetProjectService()
+	plan, err := svc.GetPlanDocument(c.Request.Context(), id)
+	if err != nil {
+		respondProjectPlanError(c, "execute project plan", err)
+		return
+	}
+	if plan == nil {
+		respondError(c, http.StatusNotFound, "Project plan not found")
+		return
+	}
+	if plan.Status != project.PlanDocumentStatusApproved {
+		respondError(c, http.StatusBadRequest, "Project plan must be approved before execution")
+		return
+	}
+
+	sessionID := c.GetHeader("X-Session-ID")
+	if sessionID == "" {
+		sessionID = c.GetHeader("X-Session-Id")
+	}
+	recordProjectPlanAudit(c, plan, "plan_execute")
+	respondOK(c, gin.H{
+		"started":    true,
+		"status":     string(plan.Status),
+		"session_id": sessionID,
+	})
+}
+
+func respondProjectPlanError(c *gin.Context, context string, err error) {
+	switch err.Error() {
+	case "project not found", "plan document not found":
+		respondError(c, http.StatusNotFound, err.Error())
+	default:
+		respondError(c, http.StatusBadRequest, err.Error())
+	}
+}
+
+func recordProjectPlanAudit(c *gin.Context, plan *project.PlanDocument, action string) {
+	if plan == nil {
+		return
+	}
+	_, _ = audit.Record(c.Request.Context(), &audit.AuditLogEntry{
+		EventType: audit.EventApproval,
+		Severity:  audit.SeverityInfo,
+		Actor: audit.AuditActor{
+			ID:   plan.ApprovedBy,
+			Type: "user",
+			Name: plan.ApprovedBy,
+		},
+		Resource: audit.AuditResource{
+			Type: "project_plan",
+			ID:   plan.ID,
+			Name: plan.Title,
+		},
+		Action:  action,
+		Outcome: audit.OutcomeSuccess,
+		Details: map[string]interface{}{
+			"project_id": plan.ProjectID,
+			"revision":   plan.Revision,
+			"status":     string(plan.Status),
+		},
+	})
 }

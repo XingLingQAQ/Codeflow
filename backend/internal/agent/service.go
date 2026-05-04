@@ -3,7 +3,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,28 +34,30 @@ const (
 	RolePlanner   AgentRole = "planner"
 )
 
+var ErrAgentNotFound = errors.New("agent not found")
+
 // Agent 智能体
 type Agent struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Role        AgentRole   `json:"role"`
-	Status      AgentStatus `json:"status"`
-	Model       string      `json:"model"`
-	SessionID   string      `json:"session_id,omitempty"`
-	StartedAt   int64       `json:"started_at"`
-	LastActiveAt int64      `json:"last_active_at"`
-	TokensUsed  int         `json:"tokens_used"`
-	TaskCount   int         `json:"task_count"`
-	ErrorCount  int         `json:"error_count"`
+	ID           string      `json:"id"`
+	Name         string      `json:"name"`
+	Role         AgentRole   `json:"role"`
+	Status       AgentStatus `json:"status"`
+	Model        string      `json:"model"`
+	SessionID    string      `json:"session_id,omitempty"`
+	StartedAt    int64       `json:"started_at"`
+	LastActiveAt int64       `json:"last_active_at"`
+	TokensUsed   int         `json:"tokens_used"`
+	TaskCount    int         `json:"task_count"`
+	ErrorCount   int         `json:"error_count"`
 }
 
 // AgentLog 智能体日志
 type AgentLog struct {
-	ID        string `json:"id"`
-	AgentID   string `json:"agent_id"`
-	Level     string `json:"level"` // debug, info, warn, error
-	Message   string `json:"message"`
-	Timestamp int64  `json:"timestamp"`
+	ID        string                 `json:"id"`
+	AgentID   string                 `json:"agent_id"`
+	Level     string                 `json:"level"` // debug, info, warn, error
+	Message   string                 `json:"message"`
+	Timestamp int64                  `json:"timestamp"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -79,14 +83,14 @@ type CallTrace struct {
 
 // Conversation 对话
 type Conversation struct {
-	ID          string       `json:"id"`
-	SessionID   string       `json:"session_id"`
-	Status      string       `json:"status"` // active, paused, stopped, completed
-	StartedAt   int64        `json:"started_at"`
-	UpdatedAt   int64        `json:"updated_at"`
-	AgentIDs    []string     `json:"agent_ids"`
-	TraceRoot   *CallTrace   `json:"trace_root,omitempty"`
-	MessageCount int         `json:"message_count"`
+	ID           string     `json:"id"`
+	SessionID    string     `json:"session_id"`
+	Status       string     `json:"status"` // active, paused, stopped, completed
+	StartedAt    int64      `json:"started_at"`
+	UpdatedAt    int64      `json:"updated_at"`
+	AgentIDs     []string   `json:"agent_ids"`
+	TraceRoot    *CallTrace `json:"trace_root,omitempty"`
+	MessageCount int        `json:"message_count"`
 }
 
 // AgentListResponse 智能体列表响应
@@ -102,18 +106,38 @@ type AgentLogsResponse struct {
 	HasMore bool       `json:"has_more"`
 }
 
+// AgentCreateRequest 创建智能体请求
+type AgentCreateRequest struct {
+	Name      string    `json:"name" binding:"required"`
+	Role      AgentRole `json:"role" binding:"required"`
+	Model     string    `json:"model,omitempty"`
+	SessionID string    `json:"session_id,omitempty"`
+}
+
+// AgentUpdateRequest 更新智能体请求
+type AgentUpdateRequest struct {
+	Name      *string      `json:"name,omitempty"`
+	Role      *AgentRole   `json:"role,omitempty"`
+	Status    *AgentStatus `json:"status,omitempty"`
+	Model     *string      `json:"model,omitempty"`
+	SessionID *string      `json:"session_id,omitempty"`
+}
+
 // ConversationTraceResponse 对话追踪响应
 type ConversationTraceResponse struct {
-	SessionID string       `json:"session_id"`
-	Trace     *CallTrace   `json:"trace"`
-	Agents    []Agent      `json:"agents"`
-	Duration  int64        `json:"duration_ms"`
+	SessionID string     `json:"session_id"`
+	Trace     *CallTrace `json:"trace"`
+	Agents    []Agent    `json:"agents"`
+	Duration  int64      `json:"duration_ms"`
 }
 
 // IAgentService 智能体服务接口
 type IAgentService interface {
 	ListAgents(ctx context.Context) (*AgentListResponse, error)
 	GetAgent(ctx context.Context, id string) (*Agent, error)
+	CreateAgent(ctx context.Context, req *AgentCreateRequest) (*Agent, error)
+	UpdateAgent(ctx context.Context, id string, req *AgentUpdateRequest) (*Agent, error)
+	DeleteAgent(ctx context.Context, id string) error
 	GetAgentLogs(ctx context.Context, agentID string, limit int) (*AgentLogsResponse, error)
 	GetConversationTrace(ctx context.Context, sessionID string) (*ConversationTraceResponse, error)
 	StopConversation(ctx context.Context, sessionID string) error
@@ -176,6 +200,82 @@ func (s *InMemoryAgentService) GetAgent(ctx context.Context, id string) (*Agent,
 		return nil, nil
 	}
 	return agent, nil
+}
+
+// CreateAgent 创建智能体
+func (s *InMemoryAgentService) CreateAgent(ctx context.Context, req *AgentCreateRequest) (*Agent, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+	role := req.Role
+	if role == "" {
+		role = RoleSubExpert
+	}
+	if !isValidAgentRole(role) {
+		return nil, errors.New("role must be one of: main, coder, sub_expert, reviewer, planner")
+	}
+
+	agent := &Agent{
+		Name:      name,
+		Role:      role,
+		Status:    AgentStatusIdle,
+		Model:     strings.TrimSpace(req.Model),
+		SessionID: strings.TrimSpace(req.SessionID),
+	}
+	s.RegisterAgent(agent)
+	return agent, nil
+}
+
+// UpdateAgent 更新智能体
+func (s *InMemoryAgentService) UpdateAgent(ctx context.Context, id string, req *AgentUpdateRequest) (*Agent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	agent, ok := s.agents[id]
+	if !ok {
+		return nil, ErrAgentNotFound
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return nil, errors.New("name cannot be empty")
+		}
+		agent.Name = name
+	}
+	if req.Role != nil {
+		if !isValidAgentRole(*req.Role) {
+			return nil, errors.New("role must be one of: main, coder, sub_expert, reviewer, planner")
+		}
+		agent.Role = *req.Role
+	}
+	if req.Status != nil {
+		if !isValidAgentStatus(*req.Status) {
+			return nil, errors.New("status must be one of: idle, running, paused, stopped, error")
+		}
+		agent.Status = *req.Status
+	}
+	if req.Model != nil {
+		agent.Model = strings.TrimSpace(*req.Model)
+	}
+	if req.SessionID != nil {
+		agent.SessionID = strings.TrimSpace(*req.SessionID)
+	}
+	agent.LastActiveAt = time.Now().Unix()
+	return agent, nil
+}
+
+// DeleteAgent 删除智能体
+func (s *InMemoryAgentService) DeleteAgent(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.agents[id]; !ok {
+		return ErrAgentNotFound
+	}
+	delete(s.agents, id)
+	delete(s.logs, id)
+	return nil
 }
 
 // GetAgentLogs 获取智能体日志
@@ -429,4 +529,22 @@ func GetAgentService() IAgentService {
 // SetAgentService 设置智能体服务实例
 func SetAgentService(svc IAgentService) {
 	defaultAgentService = svc
+}
+
+func isValidAgentRole(role AgentRole) bool {
+	switch role {
+	case RoleMain, RoleCoder, RoleSubExpert, RoleReviewer, RolePlanner:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidAgentStatus(status AgentStatus) bool {
+	switch status {
+	case AgentStatusIdle, AgentStatusRunning, AgentStatusPaused, AgentStatusStopped, AgentStatusError:
+		return true
+	default:
+		return false
+	}
 }

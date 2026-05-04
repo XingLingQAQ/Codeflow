@@ -2,7 +2,11 @@
 package handlers
 
 import (
+	"fmt"
+	"log"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/codeflow/backend/internal/api/middleware"
 	"github.com/codeflow/backend/internal/audit"
@@ -13,6 +17,7 @@ import (
 	"github.com/codeflow/backend/internal/privacy"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const backendVersion = "0.1.0"
@@ -40,12 +45,12 @@ func HealthCheck(c *gin.Context) {
 // ReadinessCheck handles GET /ready.
 func ReadinessCheck(c *gin.Context) {
 	components := gin.H{
-		"planner": readinessComponent{Ready: planner.HasPlanner(), Required: true},
-		"project": readinessComponent{Ready: project.HasProjectService(), Required: true},
-		"context": readinessComponent{Ready: ctxsvc.HasContextService(), Required: true},
-		"audit": readinessComponent{Ready: audit.HasAuditService(), Required: false},
-		"hooks": readinessComponent{Ready: hooks.HasHookManager(), Required: false},
-		"privacy": readinessComponent{Ready: privacy.HasPrivacyService(), Required: false},
+		"planner":   readinessComponent{Ready: planner.HasPlanner(), Required: true},
+		"project":   readinessComponent{Ready: project.HasProjectService(), Required: true},
+		"context":   readinessComponent{Ready: ctxsvc.HasContextService(), Required: true},
+		"audit":     readinessComponent{Ready: audit.HasAuditService(), Required: false},
+		"hooks":     readinessComponent{Ready: hooks.HasHookManager(), Required: false},
+		"privacy":   readinessComponent{Ready: privacy.HasPrivacyService(), Required: false},
 		"isolation": readinessComponent{Ready: isolation.HasIsolationService(), Required: false},
 	}
 
@@ -114,4 +119,61 @@ func respondNotImplemented(c *gin.Context) {
 		Success: false,
 		Error:   "Not implemented yet",
 	})
+}
+
+func respondInternalError(c *gin.Context, context string, err error) {
+	trace := middleware.GetTrace(c)
+	requestID := ""
+	if trace != nil {
+		requestID = trace.RequestID
+	}
+	log.Printf("[ERROR] [%s] %s: %v", requestID, context, err)
+	c.JSON(http.StatusInternalServerError, Response{
+		Success: false,
+		Error:   "Internal server error",
+	})
+}
+
+func requireUUIDParam(c *gin.Context, name, label string) (string, bool) {
+	value := strings.TrimSpace(c.Param(name))
+	if value == "" {
+		respondError(c, http.StatusBadRequest, fmt.Sprintf("Missing %s", label))
+		return "", false
+	}
+	if _, err := uuid.Parse(value); err != nil {
+		respondError(c, http.StatusBadRequest, fmt.Sprintf("Invalid %s", label))
+		return "", false
+	}
+	return value, true
+}
+
+func parsePositiveQueryInt(c *gin.Context, name string, defaultValue, maxValue int) (int, bool) {
+	value := defaultValue
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return value, true
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 1 {
+		respondError(c, http.StatusBadRequest, fmt.Sprintf("%s must be a positive integer", name))
+		return 0, false
+	}
+	if maxValue > 0 && parsed > maxValue {
+		parsed = maxValue
+	}
+	return parsed, true
+}
+
+func parseNonNegativeQueryInt(c *gin.Context, name string, defaultValue int) (int, bool) {
+	value := defaultValue
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return value, true
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil || parsed < 0 {
+		respondError(c, http.StatusBadRequest, fmt.Sprintf("%s must be a non-negative integer", name))
+		return 0, false
+	}
+	return parsed, true
 }

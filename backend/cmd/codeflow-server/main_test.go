@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,7 @@ func TestRegisterConfiguredAgents(t *testing.T) {
 		t.Fatalf("registerConfiguredAgents() error = %v", err)
 	}
 
-	result, err := agentSvc.ListAgents(t.Context())
+	result, err := agentSvc.ListAgents(context.Background())
 	if err != nil {
 		t.Fatalf("ListAgents() error = %v", err)
 	}
@@ -69,7 +70,7 @@ func TestRegisterConfiguredAgentsSkipsMissingAPIChannel(t *testing.T) {
 		t.Fatalf("registerConfiguredAgents() error = %v", err)
 	}
 
-	result, err := agentSvc.ListAgents(t.Context())
+	result, err := agentSvc.ListAgents(context.Background())
 	if err != nil {
 		t.Fatalf("ListAgents() error = %v", err)
 	}

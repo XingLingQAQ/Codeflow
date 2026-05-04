@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -111,7 +112,7 @@ func TestProjectsLifecycleAPIWithSQLite(t *testing.T) {
 		_ = auditSvc.Close()
 	}()
 
-	plan, err := plannerSvc.CreatePlan(t.Context(), &planner.PlanCreateRequest{Title: "plan-for-project"})
+	plan, err := plannerSvc.CreatePlan(context.Background(), &planner.PlanCreateRequest{Title: "plan-for-project"})
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestProjectsLifecycleAPIWithSQLite(t *testing.T) {
 	assert.Equal(t, string(project.PlanDocumentStatusApproved), executeResult["status"])
 	assert.Equal(t, "sess-project-plan-execute", executeResult["session_id"])
 
-	auditResult, err := auditSvc.Query(t.Context(), &audit.AuditQuery{Limit: 20})
+	auditResult, err := auditSvc.Query(context.Background(), &audit.AuditQuery{Limit: 20})
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, auditResult.Total, 3)
 	var actions []string

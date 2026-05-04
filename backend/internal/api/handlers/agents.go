@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,32 +16,115 @@ func GetAgents(c *gin.Context) {
 	svc := agent.GetAgentService()
 	result, err := svc.ListAgents(c.Request.Context())
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to list agents: "+err.Error())
+		respondInternalError(c, "list agents", err)
 		return
 	}
 
 	respondOK(c, result)
 }
 
-// GetAgentLogs handles GET /api/v1/agents/:id/logs
-func GetAgentLogs(c *gin.Context) {
-	id := c.Param("id")
-	if id == "" {
-		respondError(c, http.StatusBadRequest, "Missing agent ID")
+// GetAgent handles GET /api/v1/agents/:id
+func GetAgent(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "agent ID")
+	if !ok {
 		return
 	}
 
-	limit := 100
-	if l := c.Query("limit"); l != "" {
-		if _, err := c.GetQuery("limit"); err {
-			// 使用默认值
+	svc := agent.GetAgentService()
+	result, err := svc.GetAgent(c.Request.Context(), id)
+	if err != nil {
+		respondInternalError(c, "get agent", err)
+		return
+	}
+	if result == nil {
+		respondError(c, http.StatusNotFound, "Agent not found")
+		return
+	}
+
+	respondOK(c, result)
+}
+
+// CreateAgent handles POST /api/v1/agents
+func CreateAgent(c *gin.Context) {
+	var req agent.AgentCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	svc := agent.GetAgentService()
+	result, err := svc.CreateAgent(c.Request.Context(), &req)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondCreated(c, result)
+}
+
+// UpdateAgent handles PUT /api/v1/agents/:id
+func UpdateAgent(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "agent ID")
+	if !ok {
+		return
+	}
+
+	var req agent.AgentUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+
+	svc := agent.GetAgentService()
+	result, err := svc.UpdateAgent(c.Request.Context(), id, &req)
+	if err != nil {
+		if errors.Is(err, agent.ErrAgentNotFound) {
+			respondError(c, http.StatusNotFound, "Agent not found")
+			return
 		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	respondOK(c, result)
+}
+
+// DeleteAgent handles DELETE /api/v1/agents/:id
+func DeleteAgent(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "agent ID")
+	if !ok {
+		return
+	}
+
+	svc := agent.GetAgentService()
+	if err := svc.DeleteAgent(c.Request.Context(), id); err != nil {
+		if errors.Is(err, agent.ErrAgentNotFound) {
+			respondError(c, http.StatusNotFound, "Agent not found")
+			return
+		}
+		respondInternalError(c, "delete agent", err)
+		return
+	}
+
+	respondOK(c, gin.H{"deleted": true, "id": id})
+}
+
+// GetAgentLogs handles GET /api/v1/agents/:id/logs
+func GetAgentLogs(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "agent ID")
+	if !ok {
+		return
+	}
+
+	limit, ok := parsePositiveQueryInt(c, "limit", 100, 1000)
+	if !ok {
+		return
 	}
 
 	svc := agent.GetAgentService()
 	result, err := svc.GetAgentLogs(c.Request.Context(), id, limit)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to get agent logs: "+err.Error())
+		respondInternalError(c, "get agent logs", err)
 		return
 	}
 
@@ -58,7 +142,7 @@ func GetConversationTrace(c *gin.Context) {
 	svc := agent.GetAgentService()
 	result, err := svc.GetConversationTrace(c.Request.Context(), sessionID)
 	if err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to get conversation trace: "+err.Error())
+		respondInternalError(c, "get conversation trace", err)
 		return
 	}
 	if result == nil {
@@ -79,7 +163,7 @@ func StopConversation(c *gin.Context) {
 
 	svc := agent.GetAgentService()
 	if err := svc.StopConversation(c.Request.Context(), sessionID); err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to stop conversation: "+err.Error())
+		respondInternalError(c, "stop conversation", err)
 		return
 	}
 
@@ -104,7 +188,7 @@ func RetryConversation(c *gin.Context) {
 
 	svc := agent.GetAgentService()
 	if err := svc.RetryConversation(c.Request.Context(), sessionID); err != nil {
-		respondError(c, http.StatusInternalServerError, "Failed to retry conversation: "+err.Error())
+		respondInternalError(c, "retry conversation", err)
 		return
 	}
 

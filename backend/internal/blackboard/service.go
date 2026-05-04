@@ -24,19 +24,19 @@ const (
 
 // Entry 黑板条目
 type Entry struct {
-	ID          string                 `json:"id"`
-	Type        EntryType              `json:"type"`
-	Title       string                 `json:"title"`
-	Content     string                 `json:"content"`
-	Author      string                 `json:"author"`
-	AgentID     string                 `json:"agent_id,omitempty"`
-	Version     int                    `json:"version"`
-	CreatedAt   int64                  `json:"created_at"`
-	UpdatedAt   int64                  `json:"updated_at"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	ParentID    string                 `json:"parent_id,omitempty"`
-	IsArchived  bool                   `json:"is_archived"`
+	ID         string                 `json:"id"`
+	Type       EntryType              `json:"type"`
+	Title      string                 `json:"title"`
+	Content    string                 `json:"content"`
+	Author     string                 `json:"author"`
+	AgentID    string                 `json:"agent_id,omitempty"`
+	Version    int                    `json:"version"`
+	CreatedAt  int64                  `json:"created_at"`
+	UpdatedAt  int64                  `json:"updated_at"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Tags       []string               `json:"tags,omitempty"`
+	ParentID   string                 `json:"parent_id,omitempty"`
+	IsArchived bool                   `json:"is_archived"`
 }
 
 // EntryHistory 条目历史版本
@@ -122,7 +122,7 @@ type VoteCreateRequest struct {
 	Title       string                 `json:"title" binding:"required"`
 	Description string                 `json:"description,omitempty"`
 	Initiator   string                 `json:"initiator" binding:"required"`
-	Threshold   float64                `json:"threshold,omitempty"` // 默认 2/3
+	Threshold   float64                `json:"threshold,omitempty"`   // 默认 2/3
 	TimeoutSec  int                    `json:"timeout_sec,omitempty"` // 默认 300秒
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -172,6 +172,7 @@ type InMemoryBlackboard struct {
 	history  map[string][]*EntryHistory // entryID -> history
 	votes    map[string]*Vote
 	stopChan chan struct{}
+	stopOnce sync.Once
 }
 
 // NewInMemoryBlackboard 创建内存黑板服务
@@ -199,6 +200,13 @@ func (bb *InMemoryBlackboard) runVoteChecker() {
 			return
 		}
 	}
+}
+
+// Close 停止后台投票检查器。
+func (bb *InMemoryBlackboard) Close() {
+	bb.stopOnce.Do(func() {
+		close(bb.stopChan)
+	})
 }
 
 // ListEntries 列出条目
@@ -503,8 +511,8 @@ func (bb *InMemoryBlackboard) CreateVote(ctx context.Context, req *VoteCreateReq
 
 	bb.votes[vote.ID] = vote
 	bb.recordVoteAudit(ctx, vote, "vote_created", audit.OutcomeSuccess, audit.SeverityInfo, map[string]interface{}{
-		"threshold":    vote.Threshold,
-		"timeout_sec":  timeoutSec,
+		"threshold":     vote.Threshold,
+		"timeout_sec":   timeoutSec,
 		"metadata_keys": mapKeys(req.Metadata),
 	})
 	return vote, nil

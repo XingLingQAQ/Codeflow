@@ -67,7 +67,7 @@ func (s *MemoryPreflightService) Preflight(req *PreflightRequest) (*PreflightRes
 	// Sort by score (descending)
 	for i := 0; i < len(matches)-1; i++ {
 		for j := i + 1; j < len(matches); j++ {
-			if matches[i].Score < matches[j].Score {
+			if matches[i].Score < matches[j].Score || (matches[i].Score == matches[j].Score && matches[i].Strength != MatchStrong && matches[j].Strength == MatchStrong) {
 				matches[i], matches[j] = matches[j], matches[i]
 			}
 		}
