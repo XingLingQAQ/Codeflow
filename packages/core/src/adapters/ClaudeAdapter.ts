@@ -8,8 +8,9 @@ import {
   AdapterPayloadContext,
   toHookPayload,
   applyHookPayload,
+  cloneMessages,
 } from './types.js';
-import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
+import { Message, AIResponse, StreamChunk, getMessageText } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
 /**
@@ -179,7 +180,7 @@ export class ClaudeAdapter implements ICliAdapter {
       )
       .map((message) => ({
         role: message.role,
-        content: message.content,
+        content: getMessageText(message.content),
       })) as Anthropic.MessageParam[];
   }
 
@@ -189,7 +190,7 @@ export class ClaudeAdapter implements ICliAdapter {
       return undefined;
     }
 
-    return systemMessages.map((message) => message.content).join('\n\n');
+    return systemMessages.map((message) => getMessageText(message.content)).join('\n\n');
   }
 
   private async applyBeforeSendHooks(context: AdapterPayloadContext): Promise<AdapterPayloadContext> {
@@ -202,14 +203,14 @@ export class ClaudeAdapter implements ICliAdapter {
   }
 
   getHistory(): Message[] {
-    return [...this.history];
+    return cloneMessages(this.history);
   }
 
   /**
    * 设置对话历史
    */
   setHistory(messages: Message[]): void {
-    this.history = [...messages];
+    this.history = cloneMessages(messages);
   }
 
   /**
@@ -245,18 +246,19 @@ export class ClaudeAdapter implements ICliAdapter {
         tokenCount: this.estimateTokens(this.history),
       });
 
-      // 保留最近 20% 的对话 + 决策骨架
       const keepCount = Math.ceil(this.history.length * 0.2);
       const recentMessages = this.history.slice(-keepCount);
+      const preservedSystemMessages = this.history.filter(
+        (message) => message.role === 'system' && !getMessageText(message.content).startsWith('[Compressed Context]')
+      );
 
-      // 构建压缩后的历史
       const summaryMessage: Message = {
         role: 'system',
         content: `[Compressed Context]\nEntities: ${skeleton.entities.join(', ')}\nDecisions: ${skeleton.decisions.join('; ')}\nRelations: ${skeleton.relations.map((r) => `${r.from} ${r.type} ${r.to}`).join(', ')}`,
         timestamp: Date.now(),
       };
 
-      this.history = [summaryMessage, ...recentMessages];
+      this.history = [summaryMessage, ...preservedSystemMessages, ...recentMessages];
     }
   }
 
@@ -435,7 +437,7 @@ export class ClaudeAdapter implements ICliAdapter {
    * 使用改进的启发式算法，考虑不同语言和内容类型
    */
   private estimateTokens(messages: Message[]): number {
-    return messages.reduce((sum, msg) => sum + this.estimateContentTokens(msg.content), 0);
+    return messages.reduce((sum, msg) => sum + this.estimateContentTokens(getMessageText(msg.content)), 0);
   }
 
   /**

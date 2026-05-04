@@ -16,7 +16,7 @@ import {
   rewindHistoryByTurns,
   compactHistoryWithSummary,
 } from './types.js';
-import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
+import { Message, AIResponse, StreamChunk, getMessageText } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
 export class CodexAdapter implements ICliAdapter {
@@ -93,7 +93,7 @@ export class CodexAdapter implements ICliAdapter {
     const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
     const messages = payload.messages.map((msg) => ({
       role: msg.role,
-      content: msg.content,
+      content: getMessageText(msg.content),
     }));
 
     try {
@@ -144,7 +144,7 @@ export class CodexAdapter implements ICliAdapter {
     const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
     const messages = payload.messages.map((msg) => ({
       role: msg.role,
-      content: msg.content,
+      content: getMessageText(msg.content),
     }));
 
     const streamGenerator = this.createStreamGenerator({

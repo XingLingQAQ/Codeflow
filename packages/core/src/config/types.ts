@@ -1,3 +1,5 @@
+import type { AdapterConfig } from '../adapters/types.js';
+
 /**
  * 配置系统类型定义
  * 支持三级配置继承：Global → Session → Role
@@ -96,6 +98,25 @@ export interface ResolvedConfig {
   systemPrompt?: string;
   timeout?: number;
   maxRetries?: number;
+}
+
+export function toAdapterConfigPatch(config: ResolvedConfig): Partial<AdapterConfig> {
+  const patch: Partial<AdapterConfig> = {
+    model: config.model,
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    timeout: config.timeout,
+    maxRetries: config.maxRetries,
+  };
+
+  if (config.apiChannel) {
+    patch.apiKey = config.apiChannel.apiKey;
+    patch.baseURL = config.apiChannel.baseURL;
+  }
+
+  return Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined)
+  ) as Partial<AdapterConfig>;
 }
 
 export interface IConfigManager {

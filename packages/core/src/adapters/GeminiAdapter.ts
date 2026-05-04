@@ -17,7 +17,7 @@ import {
   compactHistoryWithSummary,
   splitHistoryForGovernance,
 } from './types.js';
-import { Message, AIResponse, StreamChunk } from '../hooks/types.js';
+import { Message, AIResponse, StreamChunk, getMessageText } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 
 export interface MultimodalInput {
@@ -78,7 +78,7 @@ export class GeminiAdapter implements ICliAdapter {
 
     for (const [key, value] of Object.entries(config)) {
       if (value !== undefined) {
-        (nextConfig as Record<string, unknown>)[key] = value;
+        (nextConfig as unknown as Record<string, unknown>)[key] = value;
       }
     }
 
@@ -282,7 +282,7 @@ export class GeminiAdapter implements ICliAdapter {
     messages: Message[],
   ): string | MultimodalInput {
     const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
-    const text = latestUserMessage?.content ?? (typeof originalPrompt === 'string' ? originalPrompt : originalPrompt.text || '');
+    const text = latestUserMessage ? getMessageText(latestUserMessage.content) : (typeof originalPrompt === 'string' ? originalPrompt : originalPrompt.text || '');
 
     if (typeof originalPrompt === 'string') {
       return text;
@@ -338,21 +338,21 @@ export class GeminiAdapter implements ICliAdapter {
 
     for (const [index, message] of dialogueMessages.entries()) {
       if (message.role === 'assistant') {
-        contents.push({ role: 'model', parts: [{ text: message.content }] });
+        contents.push({ role: 'model', parts: [{ text: getMessageText(message.content) }] });
         continue;
       }
 
       if (index === latestUserIndex) {
-        const prompt = typeof latestPrompt === 'string' ? latestPrompt : { ...latestPrompt, text: message.content };
+        const prompt = typeof latestPrompt === 'string' ? latestPrompt : { ...latestPrompt, text: getMessageText(message.content) };
         contents.push(...this.convertToGeminiFormat(prompt));
         continue;
       }
 
-      contents.push({ role: 'user', parts: [{ text: message.content }] });
+      contents.push({ role: 'user', parts: [{ text: getMessageText(message.content) }] });
     }
 
     const systemInstruction = systemMessages.length > 0
-      ? systemMessages.map((message) => message.content).join('\n\n')
+      ? systemMessages.map((message) => getMessageText(message.content)).join('\n\n')
       : undefined;
 
     return { contents, systemInstruction };

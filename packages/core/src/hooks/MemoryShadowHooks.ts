@@ -8,7 +8,7 @@
  */
 
 import { HookManager } from './HookManager.js';
-import { HookEvent, AIResponse, Message } from './types.js';
+import { HookEvent, AIResponse, Message, getMessageText } from './types.js';
 import { MemoryExtractor } from '../memory/MemoryExtractor.js';
 import { UserProfileService } from '../memory/UserProfileService.js';
 import { ShadowScaffold } from '../shadow/ShadowScaffold.js';
@@ -154,7 +154,7 @@ export class MemoryShadowHooks {
   private async onMessageComplete(message: Message): Promise<void> {
     // 记录最后的用户消息（用于记忆提取）
     if (message.role === 'user') {
-      this.lastUserMessage = message.content;
+      this.lastUserMessage = getMessageText(message.content);
     }
 
     this.messageCount++;

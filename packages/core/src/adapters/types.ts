@@ -116,11 +116,18 @@ export function applyHookPayload(
   context: AdapterPayloadContext,
   payload: RequestPayload
 ): AdapterPayloadContext {
+  const hasMessageOverride = Array.isArray(payload.messages) && payload.messages.length > 0;
+  const shouldApplyScalarOverrides = hasMessageOverride || !Array.isArray(payload.messages);
+
   return {
-    messages: cloneMessages(payload.messages ?? context.messages),
-    model: typeof payload.model === 'string' && payload.model.length > 0 ? payload.model : context.model,
-    temperature: payload.temperature ?? context.temperature,
-    maxTokens: payload.maxTokens ?? context.maxTokens,
+    messages: hasMessageOverride
+      ? cloneMessages(payload.messages)
+      : cloneMessages(context.messages),
+    model: shouldApplyScalarOverrides && typeof payload.model === 'string' && payload.model.length > 0
+      ? payload.model
+      : context.model,
+    temperature: shouldApplyScalarOverrides ? payload.temperature ?? context.temperature : context.temperature,
+    maxTokens: shouldApplyScalarOverrides ? payload.maxTokens ?? context.maxTokens : context.maxTokens,
   };
 }
 

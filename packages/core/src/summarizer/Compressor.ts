@@ -3,7 +3,7 @@
  * 80/20 压缩策略 + 决策骨架提取
  */
 
-import { Message, Context, DecisionSkeleton } from '../hooks/types.js';
+import { Message, Context, DecisionSkeleton, getMessageText } from '../hooks/types.js';
 import { ICliAdapter } from '../adapters/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 import {
@@ -134,7 +134,7 @@ export class Compressor implements ICompressor {
     ]);
 
     for (const msg of messages) {
-      const content = msg.content;
+      const content = getMessageText(msg.content);
 
       // 提取实体
       for (const pattern of entityPatterns) {
@@ -188,7 +188,8 @@ export class Compressor implements ICompressor {
     // 基于实体共现补充关系
     const entitySet = new Set(entities.slice(0, 30));
     for (const msg of messages) {
-      const foundEntities = entities.filter((e) => msg.content.includes(e));
+      const content = getMessageText(msg.content);
+      const foundEntities = entities.filter((e) => content.includes(e));
       if (foundEntities.length >= 2) {
         for (let i = 0; i < foundEntities.length - 1; i++) {
           for (let j = i + 1; j < foundEntities.length; j++) {
@@ -269,7 +270,7 @@ export class Compressor implements ICompressor {
         const selectedHistorical: Message[] = [];
 
         for (const { msg } of scored) {
-          const msgTokens = this.tokenCounter.count(msg.content);
+          const msgTokens = this.tokenCounter.count(getMessageText(msg.content));
           if (currentTokens + msgTokens <= targetHistoricalTokens) {
             selectedHistorical.push(msg);
             currentTokens += msgTokens;
@@ -292,7 +293,7 @@ export class Compressor implements ICompressor {
 
   private calculateImportance(msg: Message, index: number, totalMessages: number): number {
     let score = 0;
-    const content = msg.content;
+    const content = getMessageText(msg.content);
     const lowerContent = content.toLowerCase();
 
     // 1. 长度因素（较长的消息可能更重要，但有上限）
@@ -363,14 +364,13 @@ export class Compressor implements ICompressor {
     const keyPhrases: string[] = [];
 
     for (const msg of userMessages.slice(-5)) {
-      // 提取第一句话作为主题
-      const firstSentence = msg.content.split(/[.。!！?？\n]/)[0]?.trim();
+      const content = getMessageText(msg.content);
+      const firstSentence = content.split(/[.。!！?？\n]/)[0]?.trim();
       if (firstSentence && firstSentence.length >= 5 && firstSentence.length <= 100) {
         topics.push(firstSentence);
-      } else if (msg.content.length > 0) {
-        // 如果第一句太长或太短，取前 80 个字符
-        const topic = msg.content.slice(0, 80).replace(/\n/g, ' ').trim();
-        if (topic) topics.push(topic + (msg.content.length > 80 ? '...' : ''));
+      } else if (content.length > 0) {
+        const topic = content.slice(0, 80).replace(/\n/g, ' ').trim();
+        if (topic) topics.push(topic + (content.length > 80 ? '...' : ''));
       }
     }
 
@@ -383,7 +383,7 @@ export class Compressor implements ICompressor {
       ];
 
       for (const pattern of actionPatterns) {
-        const matches = msg.content.match(pattern);
+        const matches = getMessageText(msg.content).match(pattern);
         if (matches) {
           for (const match of matches.slice(0, 2)) {
             const phrase = match.trim();
@@ -416,7 +416,7 @@ export class Compressor implements ICompressor {
   }
 
   private buildSummaryPrompt(messages: Message[], config?: SummaryAgentConfig): string {
-    const content = messages.map((m) => `[${m.role}]: ${m.content.slice(0, 500)}`).join('\n\n');
+    const content = messages.map((m) => `[${m.role}]: ${getMessageText(m.content).slice(0, 500)}`).join('\n\n');
 
     let prompt = `Summarize the following conversation concisely:\n\n${content}\n\n`;
 

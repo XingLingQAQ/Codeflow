@@ -3,7 +3,7 @@
  * 支持 hook_post_response → Chunking → Embedding 流程
  */
 
-import { AIResponse, Message } from '../hooks/types.js';
+import { AIResponse, Message, getMessageText } from '../hooks/types.js';
 import { HookManager } from '../hooks/HookManager.js';
 import {
   IVectorStore,
@@ -55,7 +55,7 @@ export class StreamWriter {
   }
 
   async writeMessage(message: Message, sessionId: string, gitCommitHash?: string): Promise<void> {
-    await this.write(message.content, {
+    await this.write(getMessageText(message.content), {
       sessionId,
       agentRole: 'main',
       gitCommitHash,

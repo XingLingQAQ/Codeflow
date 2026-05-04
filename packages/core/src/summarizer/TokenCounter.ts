@@ -3,7 +3,7 @@
  * 支持中英文混合文本的 Token 估算
  */
 
-import { Message } from '../hooks/types.js';
+import { Message, getMessageText } from '../hooks/types.js';
 import { ITokenCounter, TokenCount, TOKEN_ESTIMATION } from './types.js';
 
 export class TokenCounter implements ITokenCounter {
@@ -31,7 +31,7 @@ export class TokenCounter implements ITokenCounter {
     let total = 0;
 
     for (const msg of messages) {
-      const tokens = this.count(msg.content) + this.overheadPerMessage;
+      const tokens = this.count(getMessageText(msg.content)) + this.overheadPerMessage;
       byMessage.push(tokens);
       byRole[msg.role] += tokens;
       total += tokens;

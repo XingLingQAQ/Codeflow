@@ -3,7 +3,7 @@
  * 决策骨架提取与导图构建
  */
 
-import { Message, DecisionSkeleton } from '../hooks/types.js';
+import { Message, DecisionSkeleton, getMessageText } from '../hooks/types.js';
 import { ICliAdapter } from '../adapters/types.js';
 import {
   IMapAgent,
@@ -207,7 +207,7 @@ export class MapAgent implements IMapAgent {
     const decisionSet = new Set<string>();
 
     for (const msg of messages) {
-      const content = msg.content;
+      const content = getMessageText(msg.content);
 
       // 提取实体（大写开头的词、代码标识符）
       const entityMatches = content.match(/\b[A-Z][a-zA-Z]+\b/g) || [];
@@ -278,8 +278,9 @@ export class MapAgent implements IMapAgent {
         const e2 = entityList[j];
 
         for (const msg of messages) {
-          if (msg.content.includes(e1) && msg.content.includes(e2)) {
-            const relationType = this.inferRelationType(msg.content, e1, e2);
+          const content = getMessageText(msg.content);
+          if (content.includes(e1) && content.includes(e2)) {
+            const relationType = this.inferRelationType(content, e1, e2);
             relations.push({
               from: e1,
               to: e2,
@@ -303,7 +304,7 @@ export class MapAgent implements IMapAgent {
   private buildExtractionPrompt(messages: Message[]): string {
     const content = messages
       .slice(-10)
-      .map((m) => `[${m.role}]: ${m.content.slice(0, 300)}`)
+      .map((m) => `[${m.role}]: ${getMessageText(m.content).slice(0, 300)}`)
       .join('\n\n');
 
     return `Analyze the following conversation and extract:
@@ -358,7 +359,7 @@ Respond in JSON format:
   private calculateImportance(entity: string, messages: Message[]): number {
     let count = 0;
     for (const msg of messages) {
-      const matches = msg.content.match(new RegExp(entity, 'gi'));
+      const matches = getMessageText(msg.content).match(new RegExp(entity, 'gi'));
       if (matches) count += matches.length;
     }
     return Math.min(count / messages.length, 1);

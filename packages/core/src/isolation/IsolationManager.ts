@@ -19,7 +19,7 @@ import {
   DEFAULT_ROLES,
   PERMISSION_PRIORITY,
 } from './types.js';
-import { Message } from '../hooks/types.js';
+import { Message, getMessageText } from '../hooks/types.js';
 
 export class IsolationManager implements IIsolationManager {
   private containers: Map<string, ContextContainer> = new Map();
@@ -182,7 +182,7 @@ export class IsolationManager implements IIsolationManager {
 
     // 合并消息（过滤敏感内容）
     const filteredMessages = source.messages.filter(m =>
-      !this.containsSensitiveData(m.content)
+      !this.containsSensitiveData(getMessageText(m.content))
     );
 
     target.messages.push(...filteredMessages);
@@ -375,7 +375,7 @@ export class IsolationManager implements IIsolationManager {
   }
 
   private estimateTokens(messages: Message[]): number {
-    return messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
+    return messages.reduce((sum, m) => sum + Math.ceil(getMessageText(m.content).length / 4), 0);
   }
 }
 

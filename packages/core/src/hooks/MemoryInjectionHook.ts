@@ -10,7 +10,7 @@
  */
 
 import { HookManager } from './HookManager.js';
-import { HookEvent, RequestPayload } from './types.js';
+import { HookEvent, RequestPayload, getMessageText } from './types.js';
 import { PassiveRAGService } from '../memory/PassiveRAG.js';
 import { MemoryAgentClient } from '../memory/MemoryAgentClient.js';
 
@@ -163,7 +163,7 @@ export class MemoryInjectionHook {
   private extractLastUserMessage(payload: RequestPayload): string | null {
     for (let i = payload.messages.length - 1; i >= 0; i--) {
       if (payload.messages[i].role === 'user') {
-        return payload.messages[i].content;
+        return getMessageText(payload.messages[i].content);
       }
     }
     return null;
