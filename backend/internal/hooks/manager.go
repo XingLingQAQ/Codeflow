@@ -17,15 +17,68 @@ import (
 type HookManager struct {
 	hooks  map[string]*Hook
 	events []*HookEvent
-	mu     sync.RWMutex
+	controls struct {
+		enabled              bool
+		allowedHooks         map[HookType]struct{}
+		hasExplicitAllowlist bool
+	}
+	mu sync.RWMutex
 }
 
 // NewHookManager creates a new hook manager.
 func NewHookManager() *HookManager {
-	return &HookManager{
+	manager := &HookManager{
 		hooks:  make(map[string]*Hook),
 		events: make([]*HookEvent, 0),
 	}
+	manager.controls.enabled = true
+	manager.controls.allowedHooks = make(map[HookType]struct{})
+	return manager
+}
+
+// SetControls updates global hook runtime controls.
+func (m *HookManager) SetControls(controls HookRuntimeControls) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if controls.Enabled != nil {
+		m.controls.enabled = *controls.Enabled
+	}
+	m.controls.allowedHooks = make(map[HookType]struct{}, len(controls.AllowedHooks))
+	for _, hookType := range controls.AllowedHooks {
+		if hookType == "" {
+			continue
+		}
+		m.controls.allowedHooks[hookType] = struct{}{}
+	}
+	m.controls.hasExplicitAllowlist = controls.AllowedHooks != nil
+}
+
+// GetControls returns global hook runtime controls.
+func (m *HookManager) GetControls() HookRuntimeControls {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	allowedHooks := make([]HookType, 0, len(m.controls.allowedHooks))
+	for hookType := range m.controls.allowedHooks {
+		allowedHooks = append(allowedHooks, hookType)
+	}
+	sort.Slice(allowedHooks, func(i, j int) bool {
+		return allowedHooks[i] < allowedHooks[j]
+	})
+	enabled := m.controls.enabled
+	return HookRuntimeControls{Enabled: &enabled, AllowedHooks: allowedHooks}
+}
+
+func (m *HookManager) isHookAllowedLocked(hookType HookType) bool {
+	if !m.controls.enabled {
+		return false
+	}
+	if !m.controls.hasExplicitAllowlist {
+		return true
+	}
+	_, ok := m.controls.allowedHooks[hookType]
+	return ok
 }
 
 // Register registers a new hook.
@@ -104,6 +157,10 @@ func (m *HookManager) Disable(name string) error {
 // Trigger triggers all hooks of a specific type.
 func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload interface{}) (interface{}, error) {
 	m.mu.RLock()
+	if !m.isHookAllowedLocked(hookType) {
+		m.mu.RUnlock()
+		return payload, nil
+	}
 	hooks := m.getHooksByType(hookType)
 	m.mu.RUnlock()
 
@@ -170,6 +227,12 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload inte
 	if !hook.Config.Enabled {
 		return payload, nil
 	}
+	m.mu.RLock()
+	if !m.isHookAllowedLocked(hook.Config.Type) {
+		m.mu.RUnlock()
+		return payload, nil
+	}
+	m.mu.RUnlock()
 
 	event := &HookEvent{
 		ID:        uuid.New().String(),
@@ -265,6 +328,45 @@ func (m *HookManager) TriggerAsync(ctx context.Context, hookType HookType, paylo
 		_, _ = m.Trigger(ctx, hookType, payload)
 	}()
 	return nil
+}
+
+// HookAfterExec triggers after-exec hooks.
+func (m *HookManager) HookAfterExec(ctx context.Context, payload interface{}) (interface{}, error) {
+	return m.Trigger(ctx, HookAfterExec, payload)
+}
+
+// HookRestoreState triggers restore-state hooks.
+func (m *HookManager) HookRestoreState(ctx context.Context, payload interface{}) (interface{}, error) {
+	return m.Trigger(ctx, HookRestoreState, payload)
+}
+
+// HookOnUserInputSubmitted triggers user-input-submitted hooks.
+func (m *HookManager) HookOnUserInputSubmitted(ctx context.Context, payload interface{}) (interface{}, error) {
+	return m.Trigger(ctx, HookOnUserInputSubmitted, payload)
+}
+
+// HookBeforeTaskExecute triggers before-task-execute hooks.
+func (m *HookManager) HookBeforeTaskExecute(ctx context.Context, payload interface{}) error {
+	_, err := m.Trigger(ctx, HookBeforeTaskExecute, payload)
+	return err
+}
+
+// HookAfterTaskExecute triggers after-task-execute hooks.
+func (m *HookManager) HookAfterTaskExecute(ctx context.Context, payload interface{}) error {
+	_, err := m.Trigger(ctx, HookAfterTaskExecute, payload)
+	return err
+}
+
+// HookOnTaskFailure triggers task-failure hooks.
+func (m *HookManager) HookOnTaskFailure(ctx context.Context, payload interface{}) error {
+	_, err := m.Trigger(ctx, HookOnTaskFailure, payload)
+	return err
+}
+
+// HookOnTaskComplete triggers task-complete hooks.
+func (m *HookManager) HookOnTaskComplete(ctx context.Context, payload interface{}) error {
+	_, err := m.Trigger(ctx, HookOnTaskComplete, payload)
+	return err
 }
 
 // executeWithRetry executes a hook with retry logic.

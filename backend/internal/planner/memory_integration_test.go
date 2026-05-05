@@ -3,6 +3,8 @@ package planner
 import (
 	"context"
 	"testing"
+
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 func TestNewMemoryIntegration(t *testing.T) {
@@ -37,6 +39,36 @@ func TestMemoryIntegration_EmitUnknownEvent(t *testing.T) {
 	err := mi.Emit(context.Background(), TaskHookEvent("unknown"), nil)
 	if err != nil {
 		t.Fatalf("Emit for unknown event should not error, got: %v", err)
+	}
+}
+
+func TestMemoryIntegration_EmitTriggersGlobalHookManager(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	called := false
+	err := mgr.Register(backendhooks.HookConfig{Name: "global-before-task", Type: backendhooks.HookBeforeTaskExecute, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		called = true
+		if taskCtx, ok := payload.(*TaskExecutionContext); !ok || taskCtx.TaskID != "task-1" {
+			t.Fatalf("expected task execution context, got %#v", payload)
+		}
+		return payload, nil
+	})
+	if err != nil {
+		t.Fatalf("register global hook: %v", err)
+	}
+
+	mi := NewMemoryIntegration()
+	err = mi.Emit(context.Background(), HookBeforeTaskExecute, &TaskExecutionContext{TaskID: "task-1", PlanID: "plan-1"})
+	if err != nil {
+		t.Fatalf("Emit returned error: %v", err)
+	}
+	if !called {
+		t.Fatal("global hook was not called")
 	}
 }
 
