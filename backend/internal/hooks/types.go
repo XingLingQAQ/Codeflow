@@ -144,4 +144,3 @@ type IHookManager interface {
 	// HookOnTaskComplete triggers task-complete hooks.
 	HookOnTaskComplete(ctx context.Context, payload interface{}) error
 }
-
