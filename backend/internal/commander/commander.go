@@ -3,12 +3,14 @@ package commander
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
 	"github.com/codeflow/backend/internal/config"
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 // Commander 指挥官模式实现
@@ -172,6 +174,10 @@ func (c *Commander) CallCoderAgentContext(ctx context.Context, params CallCoderA
 		AgentRole: RoleCoder,
 		Duration:  time.Since(startTime).Milliseconds(),
 	}
+	notifyAfterExecHook(ctx, "call_coder_agent", RoleCoder, result, map[string]interface{}{
+		"language": params.Language,
+		"task":     params.Task,
+	})
 	// Usage总是存在的（值类型）
 	result.TokenUsage = &TokenUsage{
 		PromptTokens:     response.Usage.PromptTokens,
@@ -306,6 +312,10 @@ func (c *Commander) ConsultSubExpertContext(ctx context.Context, params ConsultS
 		AgentRole: RoleSubExpert,
 		Duration:  time.Since(startTime).Milliseconds(),
 	}
+	notifyAfterExecHook(ctx, "consult_sub_expert", RoleSubExpert, result, map[string]interface{}{
+		"domain":   params.Domain,
+		"question": params.Question,
+	})
 	// Usage总是存在的（值类型）
 	result.TokenUsage = &TokenUsage{
 		PromptTokens:     response.Usage.PromptTokens,
@@ -736,6 +746,31 @@ func (c *Commander) emitUnsafe(event CommanderEvent, data interface{}) {
 			}()
 			handler(data)
 		}()
+	}
+}
+
+func notifyAfterExecHook(ctx context.Context, command string, role AgentRole, result *ToolCallResult, metadata map[string]interface{}) {
+	if result == nil || !backendhooks.HasHookManager() {
+		return
+	}
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["agent_role"] = string(role)
+
+	payload := &backendhooks.ExecResult{
+		Command:   command,
+		ExitCode:  0,
+		Stdout:    result.Output,
+		Timestamp: time.Now().UnixMilli(),
+		Metadata:  metadata,
+	}
+	if !result.Success {
+		payload.ExitCode = 1
+		payload.Stderr = result.Error
+	}
+	if _, err := backendhooks.GetHookManager().HookAfterExec(ctx, payload); err != nil {
+		log.Printf("[WARN] commander after-exec hook failed: command=%s err=%v", command, err)
 	}
 }
 

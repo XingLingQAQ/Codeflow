@@ -9,6 +9,7 @@ import (
 
 	"github.com/codeflow/backend/internal/adapters"
 	"github.com/codeflow/backend/internal/config"
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 // MockAdapter 测试用模拟适配器
@@ -334,6 +335,48 @@ func TestCommander_ConsultSubExpertPassesAdapterSendOptions(t *testing.T) {
 	}
 	if expertAdapter.lastOptions.Semantics.Controls != nil {
 		t.Fatalf("expected no controls, got %#v", expertAdapter.lastOptions.Semantics.Controls)
+	}
+}
+
+func TestCommander_CallCoderAgentTriggersAfterExecHook(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	var payload *backendhooks.ExecResult
+	err := mgr.Register(backendhooks.HookConfig{Name: "after-exec-coder", Type: backendhooks.HookAfterExec, Enabled: true}, func(ctx context.Context, value interface{}) (interface{}, error) {
+		result, ok := value.(*backendhooks.ExecResult)
+		if !ok {
+			t.Fatalf("expected ExecResult payload, got %#v", value)
+		}
+		payload = result
+		return "snapshot-coder", nil
+	})
+	if err != nil {
+		t.Fatalf("register hook: %v", err)
+	}
+
+	cmd := NewCommander(5)
+	cmd.RegisterAgent(AgentConfig{Role: RoleCoder, Adapter: NewMockAdapter("generated")})
+
+	result, err := cmd.CallCoderAgentContext(context.Background(), CallCoderAgentParams{Task: "Write code", Language: "go"})
+	if err != nil {
+		t.Fatalf("CallCoderAgentContext error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got %s", result.Error)
+	}
+	if payload == nil {
+		t.Fatal("expected hook_after_exec payload")
+	}
+	if payload.Command != "call_coder_agent" || payload.ExitCode != 0 || payload.Stdout != "generated" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	if payload.Metadata["agent_role"] != string(RoleCoder) {
+		t.Fatalf("expected coder role metadata, got %#v", payload.Metadata)
 	}
 }
 

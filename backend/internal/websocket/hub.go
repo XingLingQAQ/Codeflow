@@ -2,12 +2,14 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -16,14 +18,14 @@ import (
 type MessageType string
 
 const (
-	MsgTypeText       MessageType = "text"
-	MsgTypeToolCall   MessageType = "tool_call"
-	MsgTypeToolResult MessageType = "tool_result"
-	MsgTypeThinking   MessageType = "thinking"
-	MsgTypeError      MessageType = "error"
-	MsgTypePing       MessageType = "ping"
-	MsgTypePong       MessageType = "pong"
-	MsgTypeSubscribe  MessageType = "subscribe"
+	MsgTypeText        MessageType = "text"
+	MsgTypeToolCall    MessageType = "tool_call"
+	MsgTypeToolResult  MessageType = "tool_result"
+	MsgTypeThinking    MessageType = "thinking"
+	MsgTypeError       MessageType = "error"
+	MsgTypePing        MessageType = "ping"
+	MsgTypePong        MessageType = "pong"
+	MsgTypeSubscribe   MessageType = "subscribe"
 	MsgTypeUnsubscribe MessageType = "unsubscribe"
 )
 
@@ -297,6 +299,12 @@ func (c *Client) writePump() {
 // handleMessage 处理客户端消息
 func (c *Client) handleMessage(msg *Message) {
 	switch msg.Type {
+	case MsgTypeText:
+		if backendhooks.HasHookManager() {
+			if _, err := backendhooks.GetHookManager().HookOnUserInputSubmitted(context.Background(), msg.Content); err != nil {
+				log.Printf("[WARN] websocket user-input-submitted hook failed: session=%s err=%v", msg.SessionID, err)
+			}
+		}
 	case MsgTypePong:
 		// 心跳响应，不需要处理
 	case MsgTypeSubscribe:

@@ -5,6 +5,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 func TestSnapshotCreate(t *testing.T) {
@@ -184,6 +186,43 @@ func TestSnapshotRestore(t *testing.T) {
 
 	if len(result.Errors) > 0 {
 		t.Errorf("Restore should not have errors: %v", result.Errors)
+	}
+}
+
+func TestSnapshotRestoreTriggersRestoreStateHook(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	var snapshotID string
+	err := mgr.Register(backendhooks.HookConfig{Name: "restore-state", Type: backendhooks.HookRestoreState, Enabled: true}, func(ctx context.Context, value interface{}) (interface{}, error) {
+		id, ok := value.(string)
+		if !ok {
+			t.Fatalf("expected snapshot id payload, got %#v", value)
+		}
+		snapshotID = id
+		return value, nil
+	})
+	if err != nil {
+		t.Fatalf("register hook: %v", err)
+	}
+
+	svc := NewInMemorySnapshotService()
+	ctx := context.Background()
+	snapshot, err := svc.Create(ctx, &SnapshotCreateRequest{Description: "restore hook"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	_, err = svc.Restore(ctx, snapshot.ID)
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+	if snapshotID != snapshot.ID {
+		t.Fatalf("expected restore hook for %s, got %s", snapshot.ID, snapshotID)
 	}
 }
 

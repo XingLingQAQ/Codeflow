@@ -4,10 +4,12 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
 
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/google/uuid"
 )
 
@@ -181,6 +183,12 @@ func (s *InMemorySnapshotService) Restore(ctx context.Context, id string) (*Rest
 		result.Errors = append(result.Errors, fmt.Sprintf("memory graph restore failed: %v", err))
 	} else {
 		result.MemoryGraphRestored = true
+	}
+
+	if backendhooks.HasHookManager() {
+		if _, err := backendhooks.GetHookManager().HookRestoreState(ctx, id); err != nil {
+			log.Printf("[WARN] snapshot restore-state hook failed: snapshot=%s err=%v", id, err)
+		}
 	}
 
 	return result, nil

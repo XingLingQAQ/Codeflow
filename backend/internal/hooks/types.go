@@ -33,6 +33,28 @@ const (
 	HookOnTaskComplete    HookType = "hook_on_task_complete"
 )
 
+// ExecResult describes command or tool execution output for after-exec hooks.
+type ExecResult struct {
+	Command       string                 `json:"command"`
+	ExitCode      int                    `json:"exit_code"`
+	Stdout        string                 `json:"stdout,omitempty"`
+	Stderr        string                 `json:"stderr,omitempty"`
+	Timestamp     int64                  `json:"timestamp"`
+	SessionID     string                 `json:"session_id,omitempty"`
+	TaskID        string                 `json:"task_id,omitempty"`
+	AgentID       string                 `json:"agent_id,omitempty"`
+	FilesModified []string               `json:"files_modified,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// MemoryMatch describes memory retrieval results from user-input hooks.
+type MemoryMatch struct {
+	Content    string                 `json:"content"`
+	Similarity float64                `json:"similarity"`
+	Source     string                 `json:"source"`
+	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+}
+
 // HookRuntimeControls controls global hook execution.
 type HookRuntimeControls struct {
 	Enabled      *bool      `json:"enabled,omitempty"`
