@@ -336,6 +336,21 @@ func TestSemanticRetrieverHighlights(t *testing.T) {
 	}
 }
 
+func TestSemanticRetrieverPartialConfigKeepsDefaultWeights(t *testing.T) {
+	retriever := NewSemanticRetriever(nil, &HybridSearchConfig{
+		TopK:      10,
+		MinScore:  0.1,
+		Reranking: true,
+	})
+
+	if retriever.config.VectorWeight != DefaultHybridConfig.VectorWeight {
+		t.Fatalf("expected default vector weight, got %f", retriever.config.VectorWeight)
+	}
+	if retriever.config.KeywordWeight != DefaultHybridConfig.KeywordWeight {
+		t.Fatalf("expected default keyword weight, got %f", retriever.config.KeywordWeight)
+	}
+}
+
 func TestSemanticRetrieverReranking(t *testing.T) {
 	retriever := NewSemanticRetriever(nil, &HybridSearchConfig{
 		TopK:      10,

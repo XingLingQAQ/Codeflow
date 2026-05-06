@@ -27,10 +27,7 @@ type cachedContent struct {
 
 // NewSemanticRetriever 创建语义检索器
 func NewSemanticRetriever(vectorStore IVectorStore, config *HybridSearchConfig) *SemanticRetriever {
-	cfg := DefaultHybridConfig
-	if config != nil {
-		cfg = *config
-	}
+	cfg := mergeHybridSearchConfig(DefaultHybridConfig, config)
 
 	return &SemanticRetriever{
 		vectorStore:  vectorStore,
@@ -38,6 +35,27 @@ func NewSemanticRetriever(vectorStore IVectorStore, config *HybridSearchConfig) 
 		keywordIndex: make(map[string]map[string]struct{}),
 		contentCache: make(map[string]*cachedContent),
 	}
+}
+
+func mergeHybridSearchConfig(base HybridSearchConfig, override *HybridSearchConfig) HybridSearchConfig {
+	if override == nil {
+		return base
+	}
+	cfg := base
+	if override.VectorWeight > 0 {
+		cfg.VectorWeight = override.VectorWeight
+	}
+	if override.KeywordWeight > 0 {
+		cfg.KeywordWeight = override.KeywordWeight
+	}
+	if override.TopK > 0 {
+		cfg.TopK = override.TopK
+	}
+	if override.MinScore > 0 {
+		cfg.MinScore = override.MinScore
+	}
+	cfg.Reranking = override.Reranking
+	return cfg
 }
 
 // SearchHistoricalContext 搜索历史上下文
