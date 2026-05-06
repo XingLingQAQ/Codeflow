@@ -4,20 +4,22 @@ package planner
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/google/uuid"
 )
 
 // TaskHookEvent 任务级 Hook 事件类型
-type TaskHookEvent string
+type TaskHookEvent = backendhooks.HookType
 
 const (
-	HookBeforeTaskExecute TaskHookEvent = "before_task_execute"
-	HookAfterTaskExecute  TaskHookEvent = "after_task_execute"
-	HookOnTaskFailure     TaskHookEvent = "on_task_failure"
-	HookOnTaskComplete    TaskHookEvent = "on_task_complete"
+	HookBeforeTaskExecute TaskHookEvent = backendhooks.HookBeforeTaskExecute
+	HookAfterTaskExecute  TaskHookEvent = backendhooks.HookAfterTaskExecute
+	HookOnTaskFailure     TaskHookEvent = backendhooks.HookOnTaskFailure
+	HookOnTaskComplete    TaskHookEvent = backendhooks.HookOnTaskComplete
 )
 
 // TaskExecutionContext 任务执行上下文
@@ -96,18 +98,34 @@ func (mi *MemoryIntegration) Register(event TaskHookEvent, handler TaskHookHandl
 // Emit 触发 Hook 事件
 func (mi *MemoryIntegration) Emit(ctx context.Context, event TaskHookEvent, data interface{}) error {
 	handlers, ok := mi.handlers[event]
-	if !ok {
-		return nil
-	}
-
-	for _, handler := range handlers {
-		if err := handler(ctx, data); err != nil {
-			// Hook 处理失败不阻塞主流程，仅记录
-			continue
+	if ok {
+		for _, handler := range handlers {
+			if err := handler(ctx, data); err != nil {
+				log.Printf("[WARN] planner task hook handler failed: event=%s err=%v", event, err)
+			}
 		}
 	}
 
-	return nil
+	if !backendhooks.HasHookManager() {
+		return nil
+	}
+	return emitGlobalTaskHook(ctx, event, data)
+}
+
+func emitGlobalTaskHook(ctx context.Context, event TaskHookEvent, data interface{}) error {
+	manager := backendhooks.GetHookManager()
+	switch event {
+	case HookBeforeTaskExecute:
+		return manager.HookBeforeTaskExecute(ctx, data)
+	case HookAfterTaskExecute:
+		return manager.HookAfterTaskExecute(ctx, data)
+	case HookOnTaskFailure:
+		return manager.HookOnTaskFailure(ctx, data)
+	case HookOnTaskComplete:
+		return manager.HookOnTaskComplete(ctx, data)
+	default:
+		return nil
+	}
 }
 
 // BuildTaskMemory 从任务执行结果构建记忆记录

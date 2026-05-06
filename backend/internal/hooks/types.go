@@ -11,9 +11,9 @@ type HookType string
 
 const (
 	// Lifecycle hooks
-	HookBeforeSend     HookType = "hook_before_send"
-	HookPostResponse   HookType = "hook_post_response"
-	HookOnStream       HookType = "hook_on_stream"
+	HookBeforeSend   HookType = "hook_before_send"
+	HookPostResponse HookType = "hook_post_response"
+	HookOnStream     HookType = "hook_on_stream"
 
 	// Context management hooks
 	HookBeforeCompress    HookType = "hook_before_compress"
@@ -25,7 +25,19 @@ const (
 
 	// Memory retrieval hooks
 	HookOnUserInputSubmitted HookType = "hook_on_user_input_submitted"
+
+	// Task lifecycle hooks
+	HookBeforeTaskExecute HookType = "hook_before_task_execute"
+	HookAfterTaskExecute  HookType = "hook_after_task_execute"
+	HookOnTaskFailure     HookType = "hook_on_task_failure"
+	HookOnTaskComplete    HookType = "hook_on_task_complete"
 )
+
+// HookRuntimeControls controls global hook execution.
+type HookRuntimeControls struct {
+	Enabled      *bool      `json:"enabled,omitempty"`
+	AllowedHooks []HookType `json:"allowed_hooks,omitempty"`
+}
 
 // HookFunc is the function signature for hook handlers.
 type HookFunc func(ctx context.Context, payload interface{}) (interface{}, error)
@@ -104,4 +116,31 @@ type IHookManager interface {
 
 	// UpdateConfig updates hook configuration.
 	UpdateConfig(name string, config HookConfig) error
+
+	// SetControls updates global hook runtime controls.
+	SetControls(controls HookRuntimeControls)
+
+	// GetControls returns global hook runtime controls.
+	GetControls() HookRuntimeControls
+
+	// HookAfterExec triggers after-exec hooks.
+	HookAfterExec(ctx context.Context, payload interface{}) (interface{}, error)
+
+	// HookRestoreState triggers restore-state hooks.
+	HookRestoreState(ctx context.Context, payload interface{}) (interface{}, error)
+
+	// HookOnUserInputSubmitted triggers user-input-submitted hooks.
+	HookOnUserInputSubmitted(ctx context.Context, payload interface{}) (interface{}, error)
+
+	// HookBeforeTaskExecute triggers before-task-execute hooks.
+	HookBeforeTaskExecute(ctx context.Context, payload interface{}) error
+
+	// HookAfterTaskExecute triggers after-task-execute hooks.
+	HookAfterTaskExecute(ctx context.Context, payload interface{}) error
+
+	// HookOnTaskFailure triggers task-failure hooks.
+	HookOnTaskFailure(ctx context.Context, payload interface{}) error
+
+	// HookOnTaskComplete triggers task-complete hooks.
+	HookOnTaskComplete(ctx context.Context, payload interface{}) error
 }

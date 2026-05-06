@@ -558,6 +558,98 @@ func TestHookManager_Trigger_AuditFailure(t *testing.T) {
 	assertHookAuditTrace(t, entry)
 }
 
+func TestHookManager_ControlsDisableAllHooks(t *testing.T) {
+	mgr := NewHookManager()
+
+	called := false
+	err := mgr.Register(HookConfig{Name: "controlled", Type: HookBeforeSend, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		called = true
+		return "changed", nil
+	})
+	assert.NoError(t, err)
+
+	disabled := false
+	mgr.SetControls(HookRuntimeControls{Enabled: &disabled})
+	result, err := mgr.Trigger(context.Background(), HookBeforeSend, "payload")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "payload", result)
+	assert.False(t, called)
+	assert.Len(t, mgr.GetEvents(10, 0), 0)
+}
+
+func TestHookManager_ControlsAllowedHooks(t *testing.T) {
+	mgr := NewHookManager()
+
+	beforeSendCalled := false
+	err := mgr.Register(HookConfig{Name: "before", Type: HookBeforeSend, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		beforeSendCalled = true
+		return payload, nil
+	})
+	assert.NoError(t, err)
+
+	postResponseCalled := false
+	err = mgr.Register(HookConfig{Name: "post", Type: HookPostResponse, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+		postResponseCalled = true
+		return "post-result", nil
+	})
+	assert.NoError(t, err)
+
+	mgr.SetControls(HookRuntimeControls{AllowedHooks: []HookType{HookPostResponse}})
+
+	result, err := mgr.Trigger(context.Background(), HookBeforeSend, "before-payload")
+	assert.NoError(t, err)
+	assert.Equal(t, "before-payload", result)
+	assert.False(t, beforeSendCalled)
+
+	result, err = mgr.Trigger(context.Background(), HookPostResponse, "post-payload")
+	assert.NoError(t, err)
+	assert.Equal(t, "post-result", result)
+	assert.True(t, postResponseCalled)
+}
+
+func TestHookManager_GlobalHookEntries(t *testing.T) {
+	mgr := NewHookManager()
+
+	called := make([]HookType, 0)
+	register := func(hookType HookType) {
+		err := mgr.Register(HookConfig{Name: string(hookType), Type: hookType, Enabled: true}, func(ctx context.Context, payload interface{}) (interface{}, error) {
+			called = append(called, hookType)
+			return payload, nil
+		})
+		assert.NoError(t, err)
+	}
+
+	register(HookAfterExec)
+	register(HookRestoreState)
+	register(HookOnUserInputSubmitted)
+	register(HookBeforeTaskExecute)
+	register(HookAfterTaskExecute)
+	register(HookOnTaskFailure)
+	register(HookOnTaskComplete)
+
+	_, err := mgr.HookAfterExec(context.Background(), "after-exec")
+	assert.NoError(t, err)
+	_, err = mgr.HookRestoreState(context.Background(), "restore")
+	assert.NoError(t, err)
+	_, err = mgr.HookOnUserInputSubmitted(context.Background(), "input")
+	assert.NoError(t, err)
+	assert.NoError(t, mgr.HookBeforeTaskExecute(context.Background(), "before-task"))
+	assert.NoError(t, mgr.HookAfterTaskExecute(context.Background(), "after-task"))
+	assert.NoError(t, mgr.HookOnTaskFailure(context.Background(), "failure"))
+	assert.NoError(t, mgr.HookOnTaskComplete(context.Background(), "complete"))
+
+	assert.Equal(t, []HookType{
+		HookAfterExec,
+		HookRestoreState,
+		HookOnUserInputSubmitted,
+		HookBeforeTaskExecute,
+		HookAfterTaskExecute,
+		HookOnTaskFailure,
+		HookOnTaskComplete,
+	}, called)
+}
+
 func TestHookTypes(t *testing.T) {
 	// Test all hook types are defined
 	types := []HookType{
@@ -569,7 +661,15 @@ func TestHookTypes(t *testing.T) {
 		HookAfterExec,
 		HookRestoreState,
 		HookOnUserInputSubmitted,
+		HookBeforeTaskExecute,
+		HookAfterTaskExecute,
+		HookOnTaskFailure,
+		HookOnTaskComplete,
 	}
 
-	assert.Len(t, types, 8)
+	assert.Len(t, types, 12)
+	assert.Equal(t, HookType("hook_before_task_execute"), HookBeforeTaskExecute)
+	assert.Equal(t, HookType("hook_after_task_execute"), HookAfterTaskExecute)
+	assert.Equal(t, HookType("hook_on_task_failure"), HookOnTaskFailure)
+	assert.Equal(t, HookType("hook_on_task_complete"), HookOnTaskComplete)
 }
