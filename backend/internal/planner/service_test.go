@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 func TestSQLitePlannerPersistenceAndOrdering(t *testing.T) {
@@ -148,6 +151,147 @@ func TestSQLitePlannerListPlansStableOrder(t *testing.T) {
 	wantIDs := []string{"c", "b", "a"}
 	if !reflect.DeepEqual(gotIDs, wantIDs) {
 		t.Fatalf("stable order mismatch: got %v want %v", gotIDs, wantIDs)
+	}
+}
+
+func TestInMemoryPlannerUpdateTaskTriggersLifecycleHooks(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	var events []backendhooks.HookType
+	register := func(name string, hookType backendhooks.HookType) {
+		t.Helper()
+		err := mgr.Register(backendhooks.HookConfig{Name: name, Type: hookType, Enabled: true}, func(ctx stdcontext.Context, value interface{}) (interface{}, error) {
+			taskCtx, ok := value.(*TaskExecutionContext)
+			if !ok {
+				t.Fatalf("expected TaskExecutionContext payload, got %#v", value)
+			}
+			if taskCtx.TaskID == "" || taskCtx.PlanID == "" || taskCtx.Title == "" {
+				t.Fatalf("unexpected task context: %#v", taskCtx)
+			}
+			events = append(events, hookType)
+			return value, nil
+		})
+		if err != nil {
+			t.Fatalf("register hook %s: %v", name, err)
+		}
+	}
+	register("before-task", backendhooks.HookBeforeTaskExecute)
+	register("after-task", backendhooks.HookAfterTaskExecute)
+	register("complete-task", backendhooks.HookOnTaskComplete)
+
+	svc := NewInMemoryPlanner()
+	plan, err := svc.CreatePlan(stdcontext.Background(), &PlanCreateRequest{Title: "hook plan"})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+	task, err := svc.CreateTask(stdcontext.Background(), plan.ID, &TaskCreateRequest{Title: "hook task"})
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	_, err = svc.UpdateTask(stdcontext.Background(), plan.ID, task.ID, &TaskUpdateRequest{Status: TaskStatusInProgress})
+	if err != nil {
+		t.Fatalf("UpdateTask in_progress failed: %v", err)
+	}
+	_, err = svc.UpdateTask(stdcontext.Background(), plan.ID, task.ID, &TaskUpdateRequest{Status: TaskStatusCompleted})
+	if err != nil {
+		t.Fatalf("UpdateTask completed failed: %v", err)
+	}
+
+	want := []backendhooks.HookType{backendhooks.HookBeforeTaskExecute, backendhooks.HookAfterTaskExecute, backendhooks.HookOnTaskComplete}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("hook events mismatch: got %v want %v", events, want)
+	}
+}
+
+func TestInMemoryPlannerUpdateTaskLifecycleHookCanReadPlanner(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	svc := NewInMemoryPlanner()
+	plan, err := svc.CreatePlan(stdcontext.Background(), &PlanCreateRequest{Title: "hook plan"})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+	task, err := svc.CreateTask(stdcontext.Background(), plan.ID, &TaskCreateRequest{Title: "hook task"})
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	err = mgr.Register(backendhooks.HookConfig{Name: "before-task-read", Type: backendhooks.HookBeforeTaskExecute, Enabled: true}, func(ctx stdcontext.Context, value interface{}) (interface{}, error) {
+		if _, err := svc.GetTask(ctx, plan.ID, task.ID); err != nil {
+			t.Fatalf("GetTask inside hook failed: %v", err)
+		}
+		return value, nil
+	})
+	if err != nil {
+		t.Fatalf("register hook: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.UpdateTask(stdcontext.Background(), plan.ID, task.ID, &TaskUpdateRequest{Status: TaskStatusInProgress})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("UpdateTask failed: %v", err)
+		}
+	case <-stdcontext.Background().Done():
+		t.Fatal("unreachable")
+	case <-time.After(time.Second):
+		t.Fatal("UpdateTask deadlocked while emitting task lifecycle hook")
+	}
+}
+
+func TestInMemoryPlannerUpdateTaskTriggersFailureHook(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	var failure *TaskFailureContext
+	err := mgr.Register(backendhooks.HookConfig{Name: "failure-task", Type: backendhooks.HookOnTaskFailure, Enabled: true}, func(ctx stdcontext.Context, value interface{}) (interface{}, error) {
+		payload, ok := value.(*TaskFailureContext)
+		if !ok {
+			t.Fatalf("expected TaskFailureContext payload, got %#v", value)
+		}
+		failure = payload
+		return value, nil
+	})
+	if err != nil {
+		t.Fatalf("register failure hook: %v", err)
+	}
+
+	svc := NewInMemoryPlanner()
+	plan, err := svc.CreatePlan(stdcontext.Background(), &PlanCreateRequest{Title: "hook plan"})
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+	task, err := svc.CreateTask(stdcontext.Background(), plan.ID, &TaskCreateRequest{Title: "hook task"})
+	if err != nil {
+		t.Fatalf("CreateTask failed: %v", err)
+	}
+
+	_, err = svc.UpdateTask(stdcontext.Background(), plan.ID, task.ID, &TaskUpdateRequest{Status: TaskStatusCancelled})
+	if err != nil {
+		t.Fatalf("UpdateTask cancelled failed: %v", err)
+	}
+	if failure == nil || failure.TaskID != task.ID || failure.Phase != string(TaskStatusCancelled) {
+		t.Fatalf("unexpected failure hook payload: %#v", failure)
 	}
 }
 

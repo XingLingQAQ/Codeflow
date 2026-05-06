@@ -7,6 +7,35 @@ import (
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
+func TestClientHandleMessageTriggersMessageCompleteHook(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	var payload *Message
+	err := mgr.Register(backendhooks.HookConfig{Name: "message-complete", Type: backendhooks.HookOnMessageComplete, Enabled: true}, func(ctx context.Context, value interface{}) (interface{}, error) {
+		msg, ok := value.(*Message)
+		if !ok {
+			t.Fatalf("expected Message payload, got %#v", value)
+		}
+		payload = msg
+		return value, nil
+	})
+	if err != nil {
+		t.Fatalf("register hook: %v", err)
+	}
+
+	client := &Client{ID: "client-1", Hub: NewHub(), SessionID: "session-1"}
+	client.handleMessage(&Message{Type: MsgTypeText, Content: "done", SessionID: "session-1"})
+
+	if payload == nil || payload.Content != "done" || payload.SessionID != "session-1" {
+		t.Fatalf("unexpected complete payload: %#v", payload)
+	}
+}
+
 func TestClientHandleMessageTriggersUserInputSubmittedHook(t *testing.T) {
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()

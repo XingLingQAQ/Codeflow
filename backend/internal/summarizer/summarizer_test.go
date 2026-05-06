@@ -1,10 +1,12 @@
 package summarizer
 
 import (
+	stdcontext "context"
 	"testing"
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 func TestTokenCounter_Count(t *testing.T) {
@@ -85,6 +87,49 @@ func TestCompressor_ExtractSkeleton(t *testing.T) {
 	}
 	if !foundAuthService {
 		t.Error("Expected to find 'AuthService' in entities")
+	}
+}
+
+func TestCompressorTriggersBeforeCompressHook(t *testing.T) {
+	mgr := backendhooks.NewHookManager()
+	previous := backendhooks.GetHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	var received Context
+	err := mgr.Register(backendhooks.HookConfig{Name: "before-compress", Type: backendhooks.HookBeforeCompress, Enabled: true}, func(ctx stdcontext.Context, value interface{}) (interface{}, error) {
+		payload, ok := value.(Context)
+		if !ok {
+			t.Fatalf("expected summarizer Context payload, got %#v", value)
+		}
+		received = payload
+		payload.Messages = append(payload.Messages, adapters.Message{Role: adapters.RoleSystem, Content: "hook-added", Timestamp: time.Now()})
+		return payload, nil
+	})
+	if err != nil {
+		t.Fatalf("register before-compress hook: %v", err)
+	}
+
+	c := NewCompressor(nil, nil)
+	input := Context{Messages: []adapters.Message{{Role: adapters.RoleUser, Content: "compress me", Timestamp: time.Now()}}}
+	result, err := c.CompressContext(stdcontext.Background(), input, nil)
+	if err != nil {
+		t.Fatalf("CompressContext error: %v", err)
+	}
+	if len(received.Messages) != 1 || received.Messages[0].Content != "compress me" {
+		t.Fatalf("unexpected hook payload: %#v", received)
+	}
+	found := false
+	for _, msg := range result.PreservedMessages {
+		if msg.Content == "hook-added" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected compressed result to include hook-modified context, got %#v", result.PreservedMessages)
 	}
 }
 

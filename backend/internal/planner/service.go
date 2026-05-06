@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -476,17 +478,21 @@ func (p *InMemoryPlanner) ListTasks(ctx context.Context, planID string, req *Tas
 
 // UpdateTask 更新任务
 func (p *InMemoryPlanner) UpdateTask(ctx context.Context, planID, taskID string, req *TaskUpdateRequest) (*Task, error) {
+	var lifecycleHooks []pendingTaskLifecycleHook
+	var failureHooks []pendingTaskFailureHook
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	plan, ok := p.plans[planID]
 	if !ok {
+		p.mu.Unlock()
 		return nil, ErrPlanNotFound
 	}
 
 	planTasks := p.tasks[planID]
 	task, ok := planTasks[taskID]
 	if !ok {
+		p.mu.Unlock()
 		return nil, errors.New("task not found")
 	}
 
@@ -506,6 +512,7 @@ func (p *InMemoryPlanner) UpdateTask(ctx context.Context, planID, taskID string,
 		// 状态变更处理
 		if req.Status == TaskStatusInProgress && oldStatus != TaskStatusInProgress {
 			task.StartedAt = now
+			lifecycleHooks = append(lifecycleHooks, captureTaskLifecycleHook(HookBeforeTaskExecute, task))
 		}
 		if req.Status == TaskStatusCompleted && oldStatus != TaskStatusCompleted {
 			task.CompletedAt = now
@@ -513,9 +520,14 @@ func (p *InMemoryPlanner) UpdateTask(ctx context.Context, planID, taskID string,
 				task.ActualMs = (now - task.StartedAt) * 1000
 			}
 			plan.CompletedCount++
+			lifecycleHooks = append(lifecycleHooks, captureTaskLifecycleHook(HookAfterTaskExecute, task))
+			lifecycleHooks = append(lifecycleHooks, captureTaskLifecycleHook(HookOnTaskComplete, task))
 
 			// 解除依赖此任务的其他任务的阻塞
 			p.unblockDependentTasks(planID, taskID)
+		}
+		if req.Status == TaskStatusCancelled && oldStatus != TaskStatusCancelled {
+			failureHooks = append(failureHooks, captureTaskFailureHook(task, string(req.Status), "task cancelled"))
 		}
 		if oldStatus == TaskStatusCompleted && req.Status != TaskStatusCompleted {
 			plan.CompletedCount--
@@ -531,9 +543,11 @@ func (p *InMemoryPlanner) UpdateTask(ctx context.Context, planID, taskID string,
 		// 验证依赖
 		for _, depID := range req.Dependencies {
 			if depID == taskID {
+				p.mu.Unlock()
 				return nil, errors.New("task cannot depend on itself")
 			}
 			if _, ok := planTasks[depID]; !ok {
+				p.mu.Unlock()
 				return nil, errors.New("dependency task not found: " + depID)
 			}
 		}
@@ -557,7 +571,87 @@ func (p *InMemoryPlanner) UpdateTask(ctx context.Context, planID, taskID string,
 		plan.Status = "completed"
 	}
 
+	p.mu.Unlock()
+	emitTaskLifecycleHooks(ctx, lifecycleHooks)
+	emitTaskFailureHooks(ctx, failureHooks)
 	return task, nil
+}
+
+type pendingTaskLifecycleHook struct {
+	event   TaskHookEvent
+	taskID  string
+	payload *TaskExecutionContext
+}
+
+type pendingTaskFailureHook struct {
+	taskID  string
+	payload *TaskFailureContext
+}
+
+func captureTaskLifecycleHook(event TaskHookEvent, task *Task) pendingTaskLifecycleHook {
+	return pendingTaskLifecycleHook{
+		event:   event,
+		taskID:  task.ID,
+		payload: taskExecutionContextFromTask(task),
+	}
+}
+
+func captureTaskFailureHook(task *Task, phase string, message string) pendingTaskFailureHook {
+	return pendingTaskFailureHook{
+		taskID: task.ID,
+		payload: &TaskFailureContext{
+			TaskID:    task.ID,
+			PlanID:    task.PlanID,
+			Title:     task.Title,
+			Error:     message,
+			Phase:     phase,
+			SessionID: taskSessionID(task),
+			Metadata:  task.Metadata,
+		},
+	}
+}
+
+func emitTaskLifecycleHooks(ctx context.Context, hooks []pendingTaskLifecycleHook) {
+	if len(hooks) == 0 || !backendhooks.HasHookManager() {
+		return
+	}
+	for _, hook := range hooks {
+		if err := emitGlobalTaskHook(ctx, hook.event, hook.payload); err != nil {
+			log.Printf("[WARN] planner task lifecycle hook failed: event=%s task=%s err=%v", hook.event, hook.taskID, err)
+		}
+	}
+}
+
+func emitTaskFailureHooks(ctx context.Context, hooks []pendingTaskFailureHook) {
+	if len(hooks) == 0 || !backendhooks.HasHookManager() {
+		return
+	}
+	for _, hook := range hooks {
+		if err := emitGlobalTaskHook(ctx, HookOnTaskFailure, hook.payload); err != nil {
+			log.Printf("[WARN] planner task failure hook failed: task=%s err=%v", hook.taskID, err)
+		}
+	}
+}
+
+func taskExecutionContextFromTask(task *Task) *TaskExecutionContext {
+	return &TaskExecutionContext{
+		TaskID:      task.ID,
+		PlanID:      task.PlanID,
+		Title:       task.Title,
+		Description: task.Description,
+		SessionID:   taskSessionID(task),
+		Metadata:    task.Metadata,
+	}
+}
+
+func taskSessionID(task *Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	if value, ok := task.Metadata["session_id"].(string); ok {
+		return value
+	}
+	return ""
 }
 
 // unblockDependentTasks 解除依赖任务的阻塞

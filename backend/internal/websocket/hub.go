@@ -336,6 +336,16 @@ func (c *Client) handleMessage(msg *Message) {
 		}
 		c.Hub.mu.Unlock()
 	}
+	notifyMessageCompleteHook(msg)
+}
+
+func notifyMessageCompleteHook(msg *Message) {
+	if msg == nil || !backendhooks.HasHookManager() {
+		return
+	}
+	if _, err := backendhooks.GetHookManager().Trigger(context.Background(), backendhooks.HookOnMessageComplete, msg); err != nil {
+		log.Printf("[WARN] websocket message-complete hook failed: session=%s err=%v", msg.SessionID, err)
+	}
 }
 
 // SendMessage 发送消息给客户端

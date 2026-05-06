@@ -15,6 +15,7 @@ import (
 	"github.com/codeflow/backend/internal/commander"
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
 )
@@ -49,6 +50,8 @@ func run() error {
 
 	// Check if debug mode is enabled
 	debugMode := os.Getenv("DEBUG") == "true"
+
+	configureHookRuntimeControls()
 
 	configSvc, configClose, err := initConfigService()
 	if err != nil {
@@ -117,6 +120,27 @@ func run() error {
 
 type closer interface {
 	Close() error
+}
+
+func configureHookRuntimeControls() {
+	enabled := true
+	backendhooks.GetHookManager().SetControls(backendhooks.HookRuntimeControls{
+		Enabled: &enabled,
+		AllowedHooks: []backendhooks.HookType{
+			backendhooks.HookBeforeSend,
+			backendhooks.HookPostResponse,
+			backendhooks.HookOnStream,
+			backendhooks.HookBeforeCompress,
+			backendhooks.HookOnMessageComplete,
+			backendhooks.HookAfterExec,
+			backendhooks.HookRestoreState,
+			backendhooks.HookOnUserInputSubmitted,
+			backendhooks.HookBeforeTaskExecute,
+			backendhooks.HookAfterTaskExecute,
+			backendhooks.HookOnTaskFailure,
+			backendhooks.HookOnTaskComplete,
+		},
+	})
 }
 
 func initPlannerService() (planner.IPlanner, func(), error) {

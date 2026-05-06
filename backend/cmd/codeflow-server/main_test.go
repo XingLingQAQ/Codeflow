@@ -8,7 +8,45 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/config"
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
+
+func TestConfigureHookRuntimeControls(t *testing.T) {
+	previous := backendhooks.GetHookManager()
+	mgr := backendhooks.NewHookManager()
+	backendhooks.SetHookManager(mgr)
+	t.Cleanup(func() {
+		backendhooks.SetHookManager(previous)
+	})
+
+	configureHookRuntimeControls()
+	controls := mgr.GetControls()
+	if controls.Enabled == nil || !*controls.Enabled {
+		t.Fatalf("expected hooks to be enabled by default, got %#v", controls.Enabled)
+	}
+	allowed := map[backendhooks.HookType]bool{}
+	for _, hookType := range controls.AllowedHooks {
+		allowed[hookType] = true
+	}
+	for _, hookType := range []backendhooks.HookType{
+		backendhooks.HookBeforeSend,
+		backendhooks.HookPostResponse,
+		backendhooks.HookOnStream,
+		backendhooks.HookBeforeCompress,
+		backendhooks.HookOnMessageComplete,
+		backendhooks.HookAfterExec,
+		backendhooks.HookRestoreState,
+		backendhooks.HookOnUserInputSubmitted,
+		backendhooks.HookBeforeTaskExecute,
+		backendhooks.HookAfterTaskExecute,
+		backendhooks.HookOnTaskFailure,
+		backendhooks.HookOnTaskComplete,
+	} {
+		if !allowed[hookType] {
+			t.Fatalf("expected hook %s to be allowed by default, got %v", hookType, controls.AllowedHooks)
+		}
+	}
+}
 
 func TestRegisterConfiguredAgents(t *testing.T) {
 	tmpDir := t.TempDir()

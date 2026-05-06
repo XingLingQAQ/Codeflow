@@ -3,12 +3,14 @@ package summarizer
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/codeflow/backend/internal/adapters"
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 // Compressor 压缩器实现
@@ -43,6 +45,7 @@ func (c *Compressor) CompressContext(parent context.Context, ctx Context, config
 	if parent == nil {
 		parent = context.Background()
 	}
+	ctx = notifyBeforeCompressHook(parent, ctx)
 	mergedConfig := c.config
 	if config != nil {
 		if config.MaxTokens > 0 {
@@ -99,6 +102,26 @@ func (c *Compressor) CompressContext(parent context.Context, ctx Context, config
 		Summary:           summary,
 		DecisionSkeleton:  skeleton,
 	}, nil
+}
+
+func notifyBeforeCompressHook(ctx context.Context, payload Context) Context {
+	if !backendhooks.HasHookManager() {
+		return payload
+	}
+	result, err := backendhooks.GetHookManager().Trigger(ctx, backendhooks.HookBeforeCompress, payload)
+	if err != nil {
+		log.Printf("[WARN] summarizer before-compress hook failed: err=%v", err)
+		return payload
+	}
+	switch converted := result.(type) {
+	case Context:
+		return converted
+	case *Context:
+		if converted != nil {
+			return *converted
+		}
+	}
+	return payload
 }
 
 // ExtractSkeleton 提取决策骨架
