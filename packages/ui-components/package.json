@@ -1,0 +1,23 @@
+{
+  "name": "@codeflow/ui-components",
+  "version": "0.1.0",
+  "description": "CodeFlow UI 组件库（历史资产）",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "keywords": ["codeflow", "gui", "react"],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.20.0",
+  "dependencies": {
+    "@codeflow/core": "workspace:*",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.8",
+    "@types/react-dom": "^19.2.3"
+  }
+}
