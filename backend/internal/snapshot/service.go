@@ -17,27 +17,52 @@ import (
 type InMemorySnapshotService struct {
 	mu        sync.RWMutex
 	snapshots map[string]*Snapshot
+	provider  StateProvider
 }
 
 // NewInMemorySnapshotService creates a new in-memory snapshot service.
 func NewInMemorySnapshotService() *InMemorySnapshotService {
+	return NewInMemorySnapshotServiceWithProvider(nil)
+}
+
+// NewInMemorySnapshotServiceWithProvider creates a new in-memory snapshot service with a custom state provider.
+func NewInMemorySnapshotServiceWithProvider(provider StateProvider) *InMemorySnapshotService {
+	if provider == nil {
+		provider = NewDefaultStateProvider()
+	}
 	return &InMemorySnapshotService{
 		snapshots: make(map[string]*Snapshot),
+		provider:  provider,
 	}
 }
 
 // Create creates a new atomic snapshot.
 func (s *InMemorySnapshotService) Create(ctx context.Context, req *SnapshotCreateRequest) (*Snapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	startTime := time.Now()
 
-	// Capture current state (simplified implementation)
-	gitHash := s.captureGitState()
-	conversationState := s.captureConversationState(req.SessionID)
-	vectorPointer := s.captureVectorState()
-	memoryGraphVersion := s.captureMemoryGraphState()
+	// Capture current state
+	gitHash, err := s.captureGitState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	conversationState, err := s.captureConversationState(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	vectorPointer, err := s.captureVectorState(ctx, req.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	memoryGraphVersion, err := s.captureMemoryGraphState(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	snapshot := &Snapshot{
 		ID:                 uuid.New().String(),
@@ -144,6 +169,9 @@ func (s *InMemorySnapshotService) Get(ctx context.Context, id string) (*Snapshot
 
 // Restore restores the system state from a snapshot.
 func (s *InMemorySnapshotService) Restore(ctx context.Context, id string) (*RestoreResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.mu.RLock()
 	snap, ok := s.snapshots[id]
 	s.mu.RUnlock()
@@ -158,28 +186,28 @@ func (s *InMemorySnapshotService) Restore(ctx context.Context, id string) (*Rest
 	}
 
 	// Restore Git state
-	if err := s.restoreGitState(snap.GitHash); err != nil {
+	if err := s.restoreGitState(ctx, snap.GitHash); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("git restore failed: %v", err))
 	} else {
 		result.GitRestored = true
 	}
 
 	// Restore conversation state
-	if err := s.restoreConversationState(snap.ConversationState); err != nil {
+	if err := s.restoreConversationState(ctx, snap.ConversationState); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("conversation restore failed: %v", err))
 	} else {
 		result.ConversationRestored = true
 	}
 
 	// Restore vector state
-	if err := s.restoreVectorState(snap.VectorPointer); err != nil {
+	if err := s.restoreVectorState(ctx, snap.VectorPointer); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("vector restore failed: %v", err))
 	} else {
 		result.VectorRestored = true
 	}
 
 	// Restore memory graph state
-	if err := s.restoreMemoryGraphState(snap.MemoryGraphVersion); err != nil {
+	if err := s.restoreMemoryGraphState(ctx, snap.MemoryGraphVersion); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("memory graph restore failed: %v", err))
 	} else {
 		result.MemoryGraphRestored = true
@@ -209,44 +237,36 @@ func (s *InMemorySnapshotService) Delete(ctx context.Context, id string) error {
 
 // Helper methods for state capture and restore
 
-func (s *InMemorySnapshotService) captureGitState() string {
-	// TODO: Integrate with git module to get current commit hash
-	return "git-" + uuid.New().String()[:8]
+func (s *InMemorySnapshotService) captureGitState(ctx context.Context) (string, error) {
+	return s.provider.CaptureGitState(ctx)
 }
 
-func (s *InMemorySnapshotService) captureConversationState(sessionID string) string {
-	// TODO: Integrate with conversation/session module to serialize state
-	return "conv-" + uuid.New().String()[:8]
+func (s *InMemorySnapshotService) captureConversationState(ctx context.Context, sessionID string) (string, error) {
+	return s.provider.CaptureConversationState(ctx, sessionID)
 }
 
-func (s *InMemorySnapshotService) captureVectorState() string {
-	// TODO: Integrate with vector store to get current pointer/version
-	return "vec-" + uuid.New().String()[:8]
+func (s *InMemorySnapshotService) captureVectorState(ctx context.Context, sessionID string) (string, error) {
+	return s.provider.CaptureVectorState(ctx, sessionID)
 }
 
-func (s *InMemorySnapshotService) captureMemoryGraphState() string {
-	// TODO: Integrate with SAMG module to get graph version
-	return "graph-" + uuid.New().String()[:8]
+func (s *InMemorySnapshotService) captureMemoryGraphState(ctx context.Context) (string, error) {
+	return s.provider.CaptureMemoryGraphState(ctx)
 }
 
-func (s *InMemorySnapshotService) restoreGitState(gitHash string) error {
-	// TODO: Integrate with git module to checkout specific commit
-	return nil
+func (s *InMemorySnapshotService) restoreGitState(ctx context.Context, gitHash string) error {
+	return s.provider.RestoreGitState(ctx, gitHash)
 }
 
-func (s *InMemorySnapshotService) restoreConversationState(state string) error {
-	// TODO: Integrate with conversation module to restore state
-	return nil
+func (s *InMemorySnapshotService) restoreConversationState(ctx context.Context, state string) error {
+	return s.provider.RestoreConversationState(ctx, state)
 }
 
-func (s *InMemorySnapshotService) restoreVectorState(pointer string) error {
-	// TODO: Integrate with vector store to restore state
-	return nil
+func (s *InMemorySnapshotService) restoreVectorState(ctx context.Context, pointer string) error {
+	return s.provider.RestoreVectorState(ctx, pointer)
 }
 
-func (s *InMemorySnapshotService) restoreMemoryGraphState(version string) error {
-	// TODO: Integrate with SAMG module to restore graph state
-	return nil
+func (s *InMemorySnapshotService) restoreMemoryGraphState(ctx context.Context, version string) error {
+	return s.provider.RestoreMemoryGraphState(ctx, version)
 }
 
 func (s *InMemorySnapshotService) hasAnyTag(snapshotTags, filterTags []string) bool {

@@ -3,9 +3,11 @@ package snapshot
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	backendgit "github.com/codeflow/backend/internal/git"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
@@ -344,5 +346,124 @@ func TestSnapshotFilterByTags(t *testing.T) {
 
 	if len(resp.Items[0].Tags) == 0 || resp.Items[0].Tags[0] != "prod" {
 		t.Error("Filtered snapshot should have 'prod' tag")
+	}
+}
+
+func TestSnapshotCreateUsesRealGitHash(t *testing.T) {
+	svc := NewInMemorySnapshotService()
+	ctx := context.Background()
+
+	req := &SnapshotCreateRequest{
+		Description: "Real git hash snapshot",
+		SessionID:   "session-123",
+	}
+
+	snapshot, err := svc.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	gitManager := backendgit.NewGitManager(".")
+	head, err := gitManager.GetCurrentHash(ctx)
+	if err != nil {
+		t.Fatalf("GetCurrentHash failed: %v", err)
+	}
+	if snapshot.GitHash != head {
+		t.Fatalf("expected git hash %s, got %s", head, snapshot.GitHash)
+	}
+	if !strings.HasPrefix(snapshot.ConversationState, "conversation:") {
+		t.Fatalf("expected conversation digest prefix, got %s", snapshot.ConversationState)
+	}
+	if !strings.HasPrefix(snapshot.VectorPointer, "vector:") {
+		t.Fatalf("expected vector digest prefix, got %s", snapshot.VectorPointer)
+	}
+	if !strings.HasPrefix(snapshot.MemoryGraphVersion, "graph:") {
+		t.Fatalf("expected graph digest prefix, got %s", snapshot.MemoryGraphVersion)
+	}
+}
+
+type fakeSnapshotStateProvider struct {
+	gitHash       string
+	conversation  string
+	vector        string
+	graph         string
+	restoreGit    string
+	restoreConv   string
+	restoreVector string
+	restoreGraph  string
+}
+
+func (f *fakeSnapshotStateProvider) CaptureGitState(ctx context.Context) (string, error) {
+	return f.gitHash, nil
+}
+
+func (f *fakeSnapshotStateProvider) CaptureConversationState(ctx context.Context, sessionID string) (string, error) {
+	return f.conversation, nil
+}
+
+func (f *fakeSnapshotStateProvider) CaptureVectorState(ctx context.Context, sessionID string) (string, error) {
+	return f.vector, nil
+}
+
+func (f *fakeSnapshotStateProvider) CaptureMemoryGraphState(ctx context.Context) (string, error) {
+	return f.graph, nil
+}
+
+func (f *fakeSnapshotStateProvider) RestoreGitState(ctx context.Context, gitHash string) error {
+	f.restoreGit = gitHash
+	return nil
+}
+
+func (f *fakeSnapshotStateProvider) RestoreConversationState(ctx context.Context, state string) error {
+	f.restoreConv = state
+	return nil
+}
+
+func (f *fakeSnapshotStateProvider) RestoreVectorState(ctx context.Context, pointer string) error {
+	f.restoreVector = pointer
+	return nil
+}
+
+func (f *fakeSnapshotStateProvider) RestoreMemoryGraphState(ctx context.Context, version string) error {
+	f.restoreGraph = version
+	return nil
+}
+
+func TestSnapshotRestoreDelegatesToProvider(t *testing.T) {
+	provider := &fakeSnapshotStateProvider{
+		gitHash:      "git:abc123",
+		conversation: "conversation:def456",
+		vector:       "vector:ghi789",
+		graph:        "graph:jkl012",
+	}
+	svc := NewInMemorySnapshotServiceWithProvider(provider)
+	ctx := context.Background()
+
+	snap, err := svc.Create(ctx, &SnapshotCreateRequest{Description: "provider snapshot", SessionID: "session-x"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	result, err := svc.Restore(ctx, snap.ID)
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+	if !result.GitRestored || !result.ConversationRestored || !result.VectorRestored || !result.MemoryGraphRestored {
+		t.Fatalf("expected all restore flags true, got %+v", result)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("expected no restore errors, got %+v", result.Errors)
+	}
+	if provider.restoreGit != provider.gitHash {
+		t.Fatalf("expected git restore hash %s, got %s", provider.gitHash, provider.restoreGit)
+	}
+	if provider.restoreConv != provider.conversation {
+		t.Fatalf("expected conversation restore state %s, got %s", provider.conversation, provider.restoreConv)
+	}
+	if provider.restoreVector != provider.vector {
+		t.Fatalf("expected vector restore state %s, got %s", provider.vector, provider.restoreVector)
+	}
+	if provider.restoreGraph != provider.graph {
+		t.Fatalf("expected graph restore state %s, got %s", provider.graph, provider.restoreGraph)
 	}
 }
