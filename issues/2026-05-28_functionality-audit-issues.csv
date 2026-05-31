@@ -53,14 +53,14 @@ P1-002,清理零使用接口,13 个接口从未被使用（IConfigManager/IGitMa
 2. 代码简化，可读性提升
 3. 遵循 YAGNI 原则","1. 所有现有测试通过
 2. 不破坏现有功能",AUTOSERVER,backend/internal/config/interfaces.go:1;backend/internal/git/interfaces.go:1;backend/internal/hotswap/interfaces.go:1;backend/internal/privacy/interfaces.go:1;backend/internal/context/interfaces.go:1;backend/internal/search/interfaces.go:1,medium_refactor: 需要审查每个接口的使用情况，确保真的零使用。,未开始,未开始,未开始,未提交
-P1-003,审查并修复所有 API 错误处理,审查所有 API handlers 的错误处理，确保 ShouldBindJSON、ShouldBindQuery、ShouldBindUri 等绑定方法的返回值都被正确处理。,P1,backend/api,未开始,"1. 使用 grep 查找所有 ShouldBind* 调用
+P1-003,审查并修复所有 API 错误处理,审查所有 API handlers 的错误处理，确保 ShouldBindJSON、ShouldBindQuery、ShouldBindUri 等绑定方法的返回值都被正确处理。,P1,backend/api,已完成,"1. 使用 grep 查找所有 ShouldBind* 调用
 2. 审查每个调用，确保返回值被检查
 3. 修复所有错误处理缺失的地方
 4. 添加单元测试覆盖错误场景
 5. 生成审查报告","1. 所有绑定方法的返回值都被检查
 2. 错误响应格式统一
 3. 错误信息对用户友好","1. 现有有效请求仍然正常处理
-2. 不影响其他 API 功能",AUTOSERVER,backend/internal/api/handlers/:1,systematic_review: 需要系统性审查所有 API handlers。,未开始,未开始,未开始,未提交
+2. 不影响其他 API 功能",AUTOSERVER,backend/internal/api/handlers/:1;backend/internal/api/handlers/binding_error_test.go:1,systematic_review: 需要系统性审查所有 API handlers。; picked_reason:P1 中可独立交付的静态回归问题，扫描边界明确且不需改接口契约; done_at:2026-06-01; evidence:go test ./internal/api/handlers -run TestAllHandlerShouldBindCallsCheckErrors -v -count=1 passed; grep scan found all ShouldBind* calls in handlers are checked with if err := ...; review:all handlers ShouldBindJSON/Query calls already check and route through error responses; risk:low static regression test only,已完成,已完成,已完成,已提交
 P1-004,审查并修复所有数据库资源泄漏风险,审查所有数据库操作，确保 rows.Close()、stmt.Close() 等资源释放都使用 defer，避免 panic 导致的资源泄漏。,P1,backend/database,未开始,"1. 使用 grep 查找所有 rows.Close()、stmt.Close()、tx.Rollback() 调用
 2. 审查每个调用，确保使用 defer
 3. 修复所有资源管理不一致的地方
