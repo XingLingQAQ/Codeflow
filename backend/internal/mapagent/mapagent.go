@@ -148,22 +148,6 @@ const (
 	RelationModifies   = "modifies"
 )
 
-// IMapAgent 接口
-type IMapAgent interface {
-	Extract(messages []adapters.Message) (*ExtractionResult, error)
-	BuildMap(messages []adapters.Message, sessionID string) (*CompressionMap, error)
-	MergeMap(existing, newMap *CompressionMap) *CompressionMap
-}
-
-// IMapStorage 存储接口
-type IMapStorage interface {
-	Save(m *CompressionMap) error
-	Load(id string) (*CompressionMap, error)
-	LoadBySession(sessionID string) ([]*CompressionMap, error)
-	Delete(id string) error
-	List() ([]MapSummary, error)
-}
-
 // MapSummary 导图摘要
 type MapSummary struct {
 	ID        string `json:"id"`

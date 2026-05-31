@@ -135,18 +135,6 @@ type IASTParser interface {
 	GetSupportedLanguages() []SupportedLanguage
 }
 
-// IContextBuilder 上下文构建器接口
-type IContextBuilder interface {
-	// BuildContext 构建上下文窗口
-	BuildContext(ctx context.Context, filePath string, targetLine int, windowSize int) (*ContextWindow, error)
-
-	// BuildSymbolContext 基于符号构建上下文
-	BuildSymbolContext(ctx context.Context, filePath string, symbolName string) (*ContextWindow, error)
-
-	// TruncateToTokenLimit 截断到Token限制
-	TruncateToTokenLimit(content string, maxTokens int) string
-}
-
 // ParserConfig 解析器配置
 type ParserConfig struct {
 	MaxFileSize      int64    `json:"max_file_size"`

@@ -93,13 +93,13 @@ type TimeRange struct {
 
 // SearchHistoricalContextParams 历史上下文搜索参数
 type SearchHistoricalContextParams struct {
-	Query         string      `json:"query"`
-	SessionID     string      `json:"session_id,omitempty"`
-	AgentRole     string      `json:"agent_role,omitempty"`
-	GitCommitHash string      `json:"git_commit_hash,omitempty"`
-	TimeRange     *TimeRange  `json:"time_range,omitempty"`
-	Limit         int         `json:"limit,omitempty"`
-	SearchType    SearchType  `json:"search_type,omitempty"`
+	Query         string     `json:"query"`
+	SessionID     string     `json:"session_id,omitempty"`
+	AgentRole     string     `json:"agent_role,omitempty"`
+	GitCommitHash string     `json:"git_commit_hash,omitempty"`
+	TimeRange     *TimeRange `json:"time_range,omitempty"`
+	Limit         int        `json:"limit,omitempty"`
+	SearchType    SearchType `json:"search_type,omitempty"`
 }
 
 // SearchHistoricalContextResult 历史上下文搜索结果
@@ -113,27 +113,6 @@ type SearchHistoricalContextResult struct {
 // IVectorStore 向量存储接口（简化版，用于retriever依赖）
 type IVectorStore interface {
 	Search(ctx context.Context, query string, topK int, minScore float64) ([]VectorSearchResult, error)
-}
-
-// ISemanticRetriever 语义检索器接口
-type ISemanticRetriever interface {
-	// SearchHistoricalContext 搜索历史上下文
-	SearchHistoricalContext(ctx context.Context, params SearchHistoricalContextParams) (*SearchHistoricalContextResult, error)
-
-	// VectorSearch 向量搜索
-	VectorSearch(ctx context.Context, query string, options *HybridSearchConfig) ([]VectorSearchResult, error)
-
-	// KeywordSearch 关键词搜索
-	KeywordSearch(ctx context.Context, query string, options *HybridSearchConfig) ([]KeywordSearchResult, error)
-
-	// HybridSearch 混合搜索
-	HybridSearch(ctx context.Context, query string, options *HybridSearchConfig) ([]HybridSearchResult, error)
-
-	// IndexContent 索引内容
-	IndexContent(id string, content string, metadata ChunkMetadata)
-
-	// ClearIndex 清除索引
-	ClearIndex()
 }
 
 // SearchHistoricalContextTool 工具定义

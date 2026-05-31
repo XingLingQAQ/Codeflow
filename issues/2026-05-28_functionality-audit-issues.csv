@@ -46,13 +46,13 @@ P1-001,重构全局单例为依赖注入,22 个包使用全局单例模式（age
 4. 代码可读性提升","1. 所有现有功能测试通过
 2. 不破坏现有 API 行为
 3. 性能无明显退化",AUTOSERVER,backend/cmd/codeflow-server/main.go:1,large_refactor: 影响 22 个包，需要分阶段实施。建议先重构 1-2 个包作为示例，再推广到其他包。,未开始,未开始,未开始,未提交
-P1-002,清理零使用接口,13 个接口从未被使用（IConfigManager/IGitManager/IHotSwapManager/IPrivacyManager/IPrivacyService/IPrefixCache/IContextBudgetManager/IASTParser/IContextBuilder/IMapAgent/IMapStorage/ISearcher/ISemanticRetriever），违反 YAGNI 原则，增加代码复杂度。,P1,backend/architecture,未开始,"1. 删除 13 个零使用接口
-2. 将对应的实现类型直接暴露（如果需要）
-3. 更新相关文档
-4. 确保删除后所有测试通过","1. 删除接口不影响现有功能
+P1-002,清理零使用接口,原审查列出的 13 个疑似零使用接口中，现实检查发现 IConfigManager/IGitManager/IASTParser/ISearcher 当前已有真实引用；本 issue 删除其余 9 个定义外零使用接口，避免前置抽象继续扩散。,P1,backend/architecture,已完成,"1. 删除 IHotSwapManager、IPrefixCache、IContextBudgetManager、IContextBuilder、IMapAgent、IMapStorage、ISemanticRetriever、IPrivacyManager、IPrivacyService
+2. 保留并记录当前已有真实引用的 IConfigManager、IGitManager、IASTParser、ISearcher
+3. 精确搜索确认被删除接口在 backend/internal 下无残留引用
+4. 后端 build 与受影响包测试通过","1. 删除接口不影响现有功能
 2. 代码简化，可读性提升
 3. 遵循 YAGNI 原则","1. 所有现有测试通过
-2. 不破坏现有功能",AUTOSERVER,backend/internal/config/interfaces.go:1;backend/internal/git/interfaces.go:1;backend/internal/hotswap/interfaces.go:1;backend/internal/privacy/interfaces.go:1;backend/internal/context/interfaces.go:1;backend/internal/search/interfaces.go:1,medium_refactor: 需要审查每个接口的使用情况，确保真的零使用。,未开始,未开始,未开始,未提交
+2. 不破坏现有功能",AUTOSERVER,backend/internal/hotswap/types.go:106;backend/internal/cache/cache.go:104;backend/internal/ast/types.go:138;backend/internal/mapagent/mapagent.go:151;backend/internal/retriever/types.go:118;backend/internal/privacy/types.go:154;backend/internal/privacy/service.go:9,medium_refactor: 原审查列表存在误判，已按代码现实收敛范围; picked_reason:P1 中清理零使用接口可通过精确符号搜索验证，风险低于全局 DI 重构; done_at:2026-06-01; evidence:go build ./... passed; go test ./internal/ast ./internal/cache ./internal/hotswap ./internal/mapagent ./internal/retriever ./internal/privacy -count=1 passed; grep found no remaining references to removed interfaces; review:kept IConfigManager/IGitManager/IASTParser/ISearcher because they have current real type usage; risk:low deleted interfaces had definition-only usage,已完成,已完成,已完成,已提交
 P1-003,审查并修复所有 API 错误处理,审查所有 API handlers 的错误处理，确保 ShouldBindJSON、ShouldBindQuery、ShouldBindUri 等绑定方法的返回值都被正确处理。,P1,backend/api,已完成,"1. 使用 grep 查找所有 ShouldBind* 调用
 2. 审查每个调用，确保返回值被检查
 3. 修复所有错误处理缺失的地方

@@ -103,34 +103,6 @@ type HotSwapConfig struct {
 	MaxContextTokens        int           `json:"max_context_tokens"`
 }
 
-// IHotSwapManager 热切换管理器接口
-type IHotSwapManager interface {
-	// 模型管理
-	GetAvailableModels() []ModelInfo
-	GetCurrentModel() *ModelInfo
-	GetModelInfo(modelID string) *ModelInfo
-	RegisterModel(model *ModelInfo)
-
-	// 适配器管理
-	RegisterAdapter(modelID string, adapter adapters.ICliAdapter)
-	GetCurrentAdapter() adapters.ICliAdapter
-
-	// 切换操作
-	SwitchModel(modelID string, options *SwitchOptions) (*SwitchResult, error)
-	CanSwitch(modelID string) bool
-
-	// 重试/接力
-	Retry(strategy *RetryStrategy) (*SwitchResult, error)
-	Relay(fallbackChain []string) (*SwitchResult, error)
-
-	// 上下文迁移
-	MigrateContext(targetModel string) (*ContextMigrationResult, error)
-
-	// 配置
-	Configure(config *HotSwapConfig)
-	SetRelayConfig(config *RelayConfig)
-}
-
 // DefaultHotSwapConfig 默认配置
 var DefaultHotSwapConfig = HotSwapConfig{
 	DefaultModel: "claude-3-opus",

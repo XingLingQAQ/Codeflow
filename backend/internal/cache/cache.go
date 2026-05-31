@@ -101,28 +101,6 @@ type ObservationMaskConfig struct {
 	ReplacementToken  string   `json:"replacement_token"`
 }
 
-// IPrefixCache 前缀缓存接口
-type IPrefixCache interface {
-	Get(prefix string) PrefixMatchResult
-	Set(prefix string, value interface{}, tokenCount int, ttl int64)
-	Has(prefix string) bool
-	Delete(prefix string) bool
-	Clear()
-	GetStats() CacheStats
-	Prune() int
-	Configure(config PrefixCacheConfig)
-}
-
-// IContextBudgetManager 上下文预算管理器接口
-type IContextBudgetManager interface {
-	Allocate(category BudgetCategory, tokens int) bool
-	Release(category BudgetCategory, tokens int)
-	GetBudget() ContextBudget
-	CanAllocate(tokens int) bool
-	Compress(targetTokens int) int
-	Reset()
-}
-
 // DefaultPrefixCacheConfig 默认前缀缓存配置
 var DefaultPrefixCacheConfig = PrefixCacheConfig{
 	MaxEntries:           1000,

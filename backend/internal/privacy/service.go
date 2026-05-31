@@ -6,12 +6,12 @@ import (
 	"sync"
 )
 
-// PrivacyService implements IPrivacyService interface
+// PrivacyService coordinates encryption, chain-key cryptography, and PII redaction.
 type PrivacyService struct {
-	manager   *PrivacyManager
-	chainKey  *ChainKeyDerivation
-	redactor  *PIIRedactor
-	mu        sync.RWMutex
+	manager  *PrivacyManager
+	chainKey *ChainKeyDerivation
+	redactor *PIIRedactor
+	mu       sync.RWMutex
 }
 
 var (

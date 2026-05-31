@@ -1,7 +1,5 @@
 package privacy
 
-import "context"
-
 // EncryptionAlgorithm 加密算法类型
 type EncryptionAlgorithm string
 
@@ -149,64 +147,6 @@ type EncryptionMetrics struct {
 	DecryptionTimeMs      float64 `json:"decryption_time_ms"`
 	ThroughputBytesPerSec float64 `json:"throughput_bytes_per_sec"`
 	OperationCount        int64   `json:"operation_count"`
-}
-
-// IPrivacyManager 隐私管理器接口
-type IPrivacyManager interface {
-	// 加密操作
-	Encrypt(ctx context.Context, plaintext string, policy *PrivacyPolicy) (*EncryptedData, error)
-	Decrypt(ctx context.Context, encrypted *EncryptedData) (*DecryptedData, error)
-
-	// 密钥管理
-	GenerateKey(ctx context.Context) (*KeyInfo, error)
-	RotateKey(ctx context.Context) (*KeyRotationEvent, error)
-	GetActiveKey() *KeyInfo
-
-	// 文档操作
-	EncryptDocument(ctx context.Context, doc *PrivacyAwareDocument) (*PrivacyAwareDocument, error)
-	DecryptDocument(ctx context.Context, doc *PrivacyAwareDocument) (*PrivacyAwareDocument, error)
-
-	// 隐私检索
-	Search(ctx context.Context, request *EncryptedSearchRequest) ([]EncryptedSearchResult, error)
-
-	// 性能监控
-	GetMetrics() EncryptionMetrics
-	ResetMetrics()
-}
-
-// IPrivacyService 完整隐私服务接口（整合加密、脱敏、链式密钥）
-type IPrivacyService interface {
-	// 基础加密（Method A: AES-CBC）
-	Encrypt(ctx context.Context, plaintext string, policy *PrivacyPolicy) (*EncryptedData, error)
-	Decrypt(ctx context.Context, encrypted *EncryptedData) (*DecryptedData, error)
-
-	// 链式密钥加密（Method B: Chain Key Derivation）
-	ChainEncrypt(ctx context.Context, plaintext string) (*ChainEncryptedData, error)
-	ChainDecrypt(ctx context.Context, encrypted *ChainEncryptedData) (string, error)
-	RotateChainKey() (*ChainNode, error)
-	GetChainInfo() *ChainInfo
-	VerifyChain() (*ChainVerificationResult, error)
-
-	// PII脱敏
-	DetectPII(ctx context.Context, text string) []PIIMatch
-	RedactPII(ctx context.Context, text string) *RedactionResult
-
-	// 密钥管理
-	GenerateKey(ctx context.Context) (*KeyInfo, error)
-	RotateKey(ctx context.Context) (*KeyRotationEvent, error)
-	GetActiveKey() *KeyInfo
-	GetKeys() []KeyInfo
-
-	// 文档操作
-	EncryptDocument(ctx context.Context, doc *PrivacyAwareDocument) (*PrivacyAwareDocument, error)
-	DecryptDocument(ctx context.Context, doc *PrivacyAwareDocument) (*PrivacyAwareDocument, error)
-
-	// 隐私检索
-	Search(ctx context.Context, request *EncryptedSearchRequest) ([]EncryptedSearchResult, error)
-
-	// 性能监控
-	GetMetrics() EncryptionMetrics
-	ResetMetrics()
 }
 
 // ChainEncryptedData 链式加密数据（在chain_key.go中定义，这里声明类型别名）
