@@ -15,16 +15,16 @@ import (
 )
 
 type atomicMemoryServiceMock struct {
-	addFn              func(ctx context.Context, mem *memory.AtomicMemory) error
-	searchFn           func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
-	getBySessionFn     func(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
-	getByIDFn          func(ctx context.Context, id string) (*memory.AtomicMemory, error)
-	updateFn           func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
-	deleteFn           func(ctx context.Context, id string) error
-	applyHeatDecayFn   func(ctx context.Context) (int, error)
-	recomputeTiersFn   func(ctx context.Context) (int, error)
-	boostHeatFn        func(ctx context.Context, id string, boost float64) error
-	searchByTierFn     func(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error)
+	addFn            func(ctx context.Context, mem *memory.AtomicMemory) error
+	searchFn         func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
+	getBySessionFn   func(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
+	getByIDFn        func(ctx context.Context, id string) (*memory.AtomicMemory, error)
+	updateFn         func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
+	deleteFn         func(ctx context.Context, id string) error
+	applyHeatDecayFn func(ctx context.Context) (int, error)
+	recomputeTiersFn func(ctx context.Context) (int, error)
+	boostHeatFn      func(ctx context.Context, id string, boost float64) error
+	searchByTierFn   func(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error)
 }
 
 func (m *atomicMemoryServiceMock) Add(ctx context.Context, mem *memory.AtomicMemory) error {
@@ -108,6 +108,7 @@ func setupAtomicMemoryHandlerTest(t *testing.T) *gin.Engine {
 	router.GET("/api/v1/memory/atomic/session/:id", GetAtomicMemoriesBySession)
 	router.PUT("/api/v1/memory/atomic/:id", UpdateAtomicMemory)
 	router.DELETE("/api/v1/memory/atomic/:id", DeleteAtomicMemory)
+	router.POST("/api/v1/memory/atomic/:id/boost", BoostAtomicHeat)
 	return router
 }
 
@@ -369,6 +370,31 @@ func TestSearchAtomicMemoryInvalidTimeRange(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestBoostAtomicHeatRejectsInvalidJSON(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	called := false
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		boostHeatFn: func(_ context.Context, _ string, _ float64) error {
+			called = true
+			return nil
+		},
+	})
+
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/memory/atomic/m1/boost", bytes.NewBufferString(`{`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+	if called {
+		t.Fatalf("BoostHeat should not be called for invalid JSON")
 	}
 }
 
