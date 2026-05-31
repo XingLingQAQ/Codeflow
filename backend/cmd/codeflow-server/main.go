@@ -12,6 +12,7 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api"
+	"github.com/codeflow/backend/internal/bootstrap"
 	"github.com/codeflow/backend/internal/commander"
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
@@ -58,12 +59,8 @@ func run() error {
 		return err
 	}
 	defer configClose()
-	cfgsvc.SetConfigService(configSvc)
-	defer cfgsvc.SetConfigService(nil)
 
 	agentSvc := agent.NewInMemoryAgentService()
-	agent.SetAgentService(agentSvc)
-	defer agent.SetAgentService(nil)
 
 	if err := registerConfiguredAgents(configSvc, agentSvc); err != nil {
 		return err
@@ -74,21 +71,30 @@ func run() error {
 		return err
 	}
 	defer plannerClose()
-	planner.SetPlanner(plannerSvc)
 
 	projectSvc, projectClose, err := initProjectService()
 	if err != nil {
 		return err
 	}
 	defer projectClose()
-	project.SetProjectService(projectSvc)
 
 	contextSvc, contextClose, err := initContextService()
 	if err != nil {
 		return err
 	}
 	defer contextClose()
-	ctxsvc.SetContextService(contextSvc)
+
+	services := bootstrap.Services{
+		Config:  configSvc,
+		Agent:   agentSvc,
+		Planner: plannerSvc,
+		Project: projectSvc,
+		Context: contextSvc,
+	}
+	if err := services.Apply(); err != nil {
+		return err
+	}
+	defer services.Reset()
 
 	// Create API server
 	config := &api.Config{

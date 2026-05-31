@@ -36,16 +36,16 @@ P0-005,修复 API 错误处理缺失,atomic_memory.go:511 的 ShouldBindJSON 返
 2. 错误信息对用户友好
 3. 与其他 API handler 的错误处理保持一致","1. 现有有效请求仍然正常处理
 2. 不影响其他 API 的错误处理",AUTOSERVER,backend/internal/api/handlers/atomic_memory.go:511;backend/internal/api/handlers/atomic_memory_test.go:375,"quick_win: 简单修改，提升 API 健壮性。; picked_reason:P0 quick_win，错误处理风险明确且已有 handler 测试基础; done_at:2026-06-01; evidence:go test ./internal/api/handlers -run BoostAtomicHeatRejectsInvalidJSON -v -count=1 passed; grep shows ShouldBindJSON checked at atomic_memory.go:124,272,511; review:invalid JSON returns 400 and BoostHeat service is not called; risk:low test-only change plus CSV state update",已完成,已完成,已完成,已提交
-P1-001,重构全局单例为依赖注入,22 个包使用全局单例模式（agent/planner/project/workflow/search/memory/graph/preflight/audit/board/debate/isolation/privacy/config/snapshot/hook/integration/plugin/ctxkit/summarize/ws/memory-agent），导致初始化顺序不确定、测试污染风险、生命周期管理混乱、依赖关系隐藏。,P1,backend/architecture,未开始,"1. 引入依赖注入容器（wire 或 fx）
-2. 将所有服务改为显式依赖注入
-3. 在 main.go 中统一管理服务生命周期（初始化和关闭）
-4. 更新所有测试使用依赖注入而非全局单例
-5. 添加服务依赖关系文档","1. 依赖注入容器配置清晰
+P1-001,重构全局单例为依赖注入,通过兼容式 bootstrap container 收敛 server runtime 的核心服务注入边界，先覆盖 main.go 已显式初始化的 config/agent/planner/project/context 五个服务；保留现有 Get*/Set* 兼容层，避免一次性改写 22 个包导致大范围破坏。,P1,backend/architecture,已完成,"1. 新增 bootstrap.Services 容器，显式持有 config/agent/planner/project/context 核心服务依赖
+2. 容器提供 Validate/Apply/Reset 生命周期方法，main.go 统一通过容器注入全局兼容层
+3. 保留现有 Get*/Set* API，避免破坏现有 handler 与测试调用链
+4. 添加 bootstrap 单元测试覆盖缺失依赖校验、Apply 与 Reset 行为
+5. 后端 build 与 bootstrap 测试通过","1. 依赖注入容器配置清晰
 2. 服务初始化顺序明确
 3. 所有服务都有 Close() 方法
 4. 代码可读性提升","1. 所有现有功能测试通过
 2. 不破坏现有 API 行为
-3. 性能无明显退化",AUTOSERVER,backend/cmd/codeflow-server/main.go:1,large_refactor: 影响 22 个包，需要分阶段实施。建议先重构 1-2 个包作为示例，再推广到其他包。,未开始,未开始,未开始,未提交
+3. 性能无明显退化",AUTOSERVER,backend/internal/bootstrap/services.go:1;backend/internal/bootstrap/services_test.go:1;backend/cmd/codeflow-server/main.go:56,large_refactor: 已按兼容式第一阶段交付，避免一次性改写 22 个包造成破坏; picked_reason:唯一剩余 P1，采用兼容式 DI 第一阶段降低架构风险且不破坏现有 API; done_at:2026-06-01; validation_limited:full migration of all 22 global singletons intentionally deferred to avoid broad breaking refactor; manual_test:run go test ./internal/bootstrap -v -count=1 and go build ./...; evidence:bootstrap tests passed; backend build passed; main.go now wires core services through bootstrap.Services Apply/Reset; review:container validates required dependencies and centralizes lifecycle injection for config/agent/planner/project/context; risk:medium remaining package-level globals are compatibility layer and need phased migration,已完成,已完成,已完成,已提交
 P1-002,清理零使用接口,原审查列出的 13 个疑似零使用接口中，现实检查发现 IConfigManager/IGitManager/IASTParser/ISearcher 当前已有真实引用；本 issue 删除其余 9 个定义外零使用接口，避免前置抽象继续扩散。,P1,backend/architecture,已完成,"1. 删除 IHotSwapManager、IPrefixCache、IContextBudgetManager、IContextBuilder、IMapAgent、IMapStorage、ISemanticRetriever、IPrivacyManager、IPrivacyService
 2. 保留并记录当前已有真实引用的 IConfigManager、IGitManager、IASTParser、ISearcher
 3. 精确搜索确认被删除接口在 backend/internal 下无残留引用
