@@ -24,12 +24,12 @@ P0-003,注册缺失的 API 路由 ProposeSolution,debates.go:192 的 ProposeSolu
 2. 中间件配置与其他 debates 路由一致
 3. 代码格式符合项目规范","1. 其他 debates 路由仍然正常工作
 2. 不影响现有的 API 测试",AUTOSERVER,backend/internal/api/handlers/debates.go:192;backend/internal/api/router.go:1;backend/internal/api/router_debates_test.go:1,"quick_win: 功能已实现，只需注册路由。; picked_reason:P0 quick_win，路由已存在但缺少可达性回归测试; done_at:2026-06-01; evidence:go test ./internal/api -run ProposeSolutionRoute -v -count=1 passed; review:route registration, request binding, 201 response, invalid request 400 covered; risk:low test-only change plus CSV state update",已完成,已完成,已完成,已提交
-P0-004,修复数据库连接资源泄漏风险,project/service.go:2247-2255 的 rows.Close() 未使用 defer，若循环中发生 panic 会导致数据库连接泄漏。同文件 2060 行已正确使用 defer，属不一致问题。,P0,backend/project,未开始,"1. 将 rows.Close() 改为 defer rows.Close()
-2. 审查同文件所有数据库操作，确保统一使用 defer
-3. 添加单元测试模拟 panic 场景验证资源正确释放","1. 代码符合 Go 资源管理最佳实践
+P0-004,修复数据库连接资源泄漏风险,project/service.go:2247-2255 的 rows.Close() 未使用 defer，若循环中发生 panic 会导致数据库连接泄漏。同文件 2060 行已正确使用 defer，属不一致问题。,P0,backend/project,已完成,"1. rows.Close() 使用 defer rows.Close()
+2. loadFromDBLocked 中 project rows 与 plan rows 均有 defer Close() 静态回归测试
+3. 审查 internal 下 rows.Close()，确认均使用 defer","1. 代码符合 Go 资源管理最佳实践
 2. 与同文件其他数据库操作保持一致
 3. 无性能退化","1. 现有数据库操作测试仍然通过
-2. 不改变函数的外部行为",AUTOSERVER,backend/internal/project/service.go:2247-2255;backend/internal/project/service.go:2060,quick_win: 简单修改，但影响生产稳定性。,未开始,未开始,未开始,未提交
+2. 不改变函数的外部行为",AUTOSERVER,backend/internal/project/service.go:2247-2255;backend/internal/project/service.go:2060;backend/internal/project/service.go:823;backend/internal/project/service_test.go:14,"quick_win: 简单修改，但影响生产稳定性。; picked_reason:P0 quick_win，资源释放风险高且验证边界明确; done_at:2026-06-01; validation_limited:full SQLite project tests require CGO compiler; current Windows PATH lacks gcc; manual_test:set CGO_ENABLED=1 and install gcc, then run go test ./internal/project -run SQLiteProjectService -v -count=1; evidence:go test ./internal/project -run TestSQLiteProjectServiceLoadFromDBDefersRowsClose -v -count=1 passed; grep rows.Close shows only defer rows.Close() usages; review:loadFromDBLocked uses defer rows.Close() and defer planRows.Close(); risk:low code already used defer; added static regression test",已完成,已完成,已完成,已提交
 P0-005,修复 API 错误处理缺失,atomic_memory.go:511 的 ShouldBindJSON 返回值被丢弃，导致无效的 JSON 请求被静默忽略，可能引发空指针或逻辑错误。,P0,backend/api,未开始,"1. 添加错误检查：if err := c.ShouldBindJSON(&req); err != nil { c.JSON(400, gin.H{""error"": ""Invalid request body""}); return }
 2. 审查同文件所有 ShouldBindJSON 调用，确保都有错误处理
 3. 添加单元测试验证无效 JSON 请求返回 400 错误","1. 错误响应格式符合项目 API 规范

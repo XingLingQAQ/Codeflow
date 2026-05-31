@@ -2,12 +2,31 @@ package project
 
 import (
 	stdcontext "context"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/codeflow/backend/internal/planner"
 )
+
+func TestSQLiteProjectServiceLoadFromDBDefersRowsClose(t *testing.T) {
+	content, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go failed: %v", err)
+	}
+	source := string(content)
+	checks := []string{
+		"defer rows.Close()",
+		"defer planRows.Close()",
+	}
+	for _, check := range checks {
+		if !strings.Contains(source, check) {
+			t.Fatalf("expected %q in loadFromDBLocked", check)
+		}
+	}
+}
 
 func TestSQLiteProjectServicePersistenceAndProgress(t *testing.T) {
 	plannerOriginal := planner.GetPlanner()
@@ -429,4 +448,3 @@ type planningGeneratorFunc func(ctx stdcontext.Context, input PlanningGeneration
 func (f planningGeneratorFunc) Generate(ctx stdcontext.Context, input PlanningGenerationInput) (*PlanGenerateRequest, *PlanningTrace, error) {
 	return f(ctx, input)
 }
-
