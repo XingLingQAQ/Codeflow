@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,24 @@ import (
 
 	"github.com/codeflow/backend/internal/snapshot"
 )
+
+const snapshotWarning = "Snapshot module is experimental: capture functions return placeholder data, restore functions are no-op. See P0-001 for implementation status."
+
+// experimentalSnapshotResponse adds experimental metadata without wrapping the original payload.
+func experimentalSnapshotResponse(c *gin.Context, status int, data interface{}) {
+	body := gin.H{}
+	raw, err := json.Marshal(data)
+	if err == nil {
+		_ = json.Unmarshal(raw, &body)
+	}
+	if len(body) == 0 {
+		body["payload"] = data
+	}
+
+	body["warning"] = snapshotWarning
+	body["status"] = "experimental"
+	c.JSON(status, body)
+}
 
 // CreateSnapshot creates a new snapshot.
 // POST /api/v1/snapshots
@@ -27,7 +46,7 @@ func CreateSnapshot(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, snap)
+	experimentalSnapshotResponse(c, http.StatusCreated, snap)
 }
 
 // GetSnapshots returns a paginated list of snapshots.
@@ -75,7 +94,7 @@ func GetSnapshots(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	experimentalSnapshotResponse(c, http.StatusOK, resp)
 }
 
 // GetSnapshot retrieves a snapshot by ID.
@@ -93,7 +112,7 @@ func GetSnapshot(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, snap)
+	experimentalSnapshotResponse(c, http.StatusOK, snap)
 }
 
 // RestoreSnapshot restores the system state from a snapshot.
@@ -119,7 +138,7 @@ func RestoreSnapshot(c *gin.Context) {
 		result.Errors = append(result.Errors, "restore operation exceeded 2 second threshold")
 	}
 
-	c.JSON(http.StatusOK, result)
+	experimentalSnapshotResponse(c, http.StatusOK, result)
 }
 
 // DeleteSnapshot deletes a snapshot by ID.
@@ -136,5 +155,5 @@ func DeleteSnapshot(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "snapshot deleted successfully"})
+	experimentalSnapshotResponse(c, http.StatusOK, gin.H{"message": "snapshot deleted successfully"})
 }

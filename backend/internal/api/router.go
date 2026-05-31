@@ -100,8 +100,9 @@ func (s *Server) setupRoutes() {
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
 	{
-		// Snapshot routes
+		// Snapshot routes (experimental: core capture/restore functions are placeholder implementations)
 		snapshots := v1.Group("/snapshots")
+		snapshots.Use(middleware.Experimental("snapshot"))
 		{
 			snapshots.POST("", handlers.CreateSnapshot)
 			snapshots.GET("", handlers.GetSnapshots)

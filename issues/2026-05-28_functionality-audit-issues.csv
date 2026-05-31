@@ -1,0 +1,124 @@
+﻿id,title,description,priority,area,status,acceptance_criteria,review_initial_requirements,review_regression_requirements,test_mcp,refs,notes,dev_state,review_initial_state,review_regression_state,git_state
+P0-001,补齐 Snapshot 模块核心功能,"Snapshot 模块的所有核心功能（captureGitState、captureConversationState、captureVectorState、captureMemoryGraphState）都是 TODO 占位符，返回随机 UUID 而非真实数据。所有 restore* 方法都是空实现。这导致文档宣称的""代码-对话-向量三位一体快照""功能完全不可用。",P0,backend/snapshot,未开始,"1. captureGitState() 返回真实的 git commit hash（通过集成 git 模块）
+2. captureConversationState() 能够序列化对话状态（集成 conversation/session 模块）
+3. captureVectorState() 返回向量存储的真实指针/版本（集成 vector store）
+4. captureMemoryGraphState() 返回 SAMG 图谱的真实版本（集成 SAMG 模块）
+5. 所有 restore* 方法能够正确恢复对应状态
+6. 添加集成测试验证快照创建和恢复的完整性","1. 代码实现符合 Go 最佳实践
+2. 错误处理完整（所有集成点都有错误处理）
+3. 日志记录关键操作
+4. 无硬编码配置","1. 现有 Snapshot API 测试仍然通过
+2. 不破坏现有的 API 契约
+3. 向后兼容：旧的快照数据能够被识别（即使无法完全恢复）",AUTOSERVER,backend/internal/snapshot/service.go:212-249,critical: 核心卖点功能失效，影响用户信任度。需要协调 git/conversation/vector/samg 四个模块的集成。,未开始,未开始,未开始,未提交
+P0-002,标记 Snapshot API 为 experimental,在 P0-001 完成前，需要在 API 文档和响应中明确标记 Snapshot 功能为 experimental 或 not-implemented，避免用户误用。,P0,backend/snapshot,已完成,"1. API 响应头添加 X-Feature-Status: experimental
+2. 若仓库存在 OpenAPI/Swagger 文档，则标记该 API 为 experimental；当前仓库无 docs/openapi.yaml 时，在用户文档标记并在 notes 记录
+3. API 响应 body 包含 warning 字段说明当前为占位符实现
+4. README 或用户文档明确说明 Snapshot 功能状态","1. API 响应格式符合 RESTful 规范
+2. 文档更新准确
+3. 不影响其他 API 的正常使用","1. 现有调用 Snapshot API 的客户端能够识别 experimental 标记
+2. 不破坏现有的 API 测试",AUTOSERVER,backend/internal/api/handlers/snapshots.go:1;backend/internal/api/middleware/experimental.go:1;docs/PROJECT_OVERVIEW.md:63,"quick_win: 可快速完成，降低用户误用风险。; picked_reason:P0 quick_win，降低 Snapshot 占位实现误用风险; done_at:2026-05-31; validation_limited:no docs/openapi.yaml found, so OpenAPI/Swagger marker could not be updated; manual_test:GET/POST /api/v1/snapshots should include X-Feature-Status=experimental and JSON warning/status fields; evidence:go build ./... passed; go test ./internal/api/handlers/ -run Snapshot -v -count=1 passed; docs/PROJECT_OVERVIEW.md marks Snapshot as experimental; risk:low response keeps original JSON fields at top level and only appends warning/status",已完成,已完成,已完成,已提交
+P0-003,注册缺失的 API 路由 ProposeSolution,debates.go:192 的 ProposeSolution handler 已完整实现但未在 router.go 中注册，导致用户无法通过 API 提交解决方案。,P0,backend/api,未开始,"1. 在 router.go 中注册路由：debates.POST(""/:id/solutions"", handler.ProposeSolution)
+2. 添加 E2E 测试验证路由可达性
+3. 测试验证请求参数绑定正确
+4. 测试验证响应格式正确","1. 路由注册位置符合现有 router.go 的组织结构
+2. 中间件配置与其他 debates 路由一致
+3. 代码格式符合项目规范","1. 其他 debates 路由仍然正常工作
+2. 不影响现有的 API 测试",AUTOSERVER,backend/internal/api/handlers/debates.go:192;backend/internal/api/router.go:1,quick_win: 功能已实现，只需注册路由。,未开始,未开始,未开始,未提交
+P0-004,修复数据库连接资源泄漏风险,project/service.go:2247-2255 的 rows.Close() 未使用 defer，若循环中发生 panic 会导致数据库连接泄漏。同文件 2060 行已正确使用 defer，属不一致问题。,P0,backend/project,未开始,"1. 将 rows.Close() 改为 defer rows.Close()
+2. 审查同文件所有数据库操作，确保统一使用 defer
+3. 添加单元测试模拟 panic 场景验证资源正确释放","1. 代码符合 Go 资源管理最佳实践
+2. 与同文件其他数据库操作保持一致
+3. 无性能退化","1. 现有数据库操作测试仍然通过
+2. 不改变函数的外部行为",AUTOSERVER,backend/internal/project/service.go:2247-2255;backend/internal/project/service.go:2060,quick_win: 简单修改，但影响生产稳定性。,未开始,未开始,未开始,未提交
+P0-005,修复 API 错误处理缺失,atomic_memory.go:511 的 ShouldBindJSON 返回值被丢弃，导致无效的 JSON 请求被静默忽略，可能引发空指针或逻辑错误。,P0,backend/api,未开始,"1. 添加错误检查：if err := c.ShouldBindJSON(&req); err != nil { c.JSON(400, gin.H{""error"": ""Invalid request body""}); return }
+2. 审查同文件所有 ShouldBindJSON 调用，确保都有错误处理
+3. 添加单元测试验证无效 JSON 请求返回 400 错误","1. 错误响应格式符合项目 API 规范
+2. 错误信息对用户友好
+3. 与其他 API handler 的错误处理保持一致","1. 现有有效请求仍然正常处理
+2. 不影响其他 API 的错误处理",AUTOSERVER,backend/internal/api/handlers/atomic_memory.go:511,quick_win: 简单修改，提升 API 健壮性。,未开始,未开始,未开始,未提交
+P1-001,重构全局单例为依赖注入,22 个包使用全局单例模式（agent/planner/project/workflow/search/memory/graph/preflight/audit/board/debate/isolation/privacy/config/snapshot/hook/integration/plugin/ctxkit/summarize/ws/memory-agent），导致初始化顺序不确定、测试污染风险、生命周期管理混乱、依赖关系隐藏。,P1,backend/architecture,未开始,"1. 引入依赖注入容器（wire 或 fx）
+2. 将所有服务改为显式依赖注入
+3. 在 main.go 中统一管理服务生命周期（初始化和关闭）
+4. 更新所有测试使用依赖注入而非全局单例
+5. 添加服务依赖关系文档","1. 依赖注入容器配置清晰
+2. 服务初始化顺序明确
+3. 所有服务都有 Close() 方法
+4. 代码可读性提升","1. 所有现有功能测试通过
+2. 不破坏现有 API 行为
+3. 性能无明显退化",AUTOSERVER,backend/cmd/codeflow-server/main.go:1,large_refactor: 影响 22 个包，需要分阶段实施。建议先重构 1-2 个包作为示例，再推广到其他包。,未开始,未开始,未开始,未提交
+P1-002,清理零使用接口,13 个接口从未被使用（IConfigManager/IGitManager/IHotSwapManager/IPrivacyManager/IPrivacyService/IPrefixCache/IContextBudgetManager/IASTParser/IContextBuilder/IMapAgent/IMapStorage/ISearcher/ISemanticRetriever），违反 YAGNI 原则，增加代码复杂度。,P1,backend/architecture,未开始,"1. 删除 13 个零使用接口
+2. 将对应的实现类型直接暴露（如果需要）
+3. 更新相关文档
+4. 确保删除后所有测试通过","1. 删除接口不影响现有功能
+2. 代码简化，可读性提升
+3. 遵循 YAGNI 原则","1. 所有现有测试通过
+2. 不破坏现有功能",AUTOSERVER,backend/internal/config/interfaces.go:1;backend/internal/git/interfaces.go:1;backend/internal/hotswap/interfaces.go:1;backend/internal/privacy/interfaces.go:1;backend/internal/context/interfaces.go:1;backend/internal/search/interfaces.go:1,medium_refactor: 需要审查每个接口的使用情况，确保真的零使用。,未开始,未开始,未开始,未提交
+P1-003,审查并修复所有 API 错误处理,审查所有 API handlers 的错误处理，确保 ShouldBindJSON、ShouldBindQuery、ShouldBindUri 等绑定方法的返回值都被正确处理。,P1,backend/api,未开始,"1. 使用 grep 查找所有 ShouldBind* 调用
+2. 审查每个调用，确保返回值被检查
+3. 修复所有错误处理缺失的地方
+4. 添加单元测试覆盖错误场景
+5. 生成审查报告","1. 所有绑定方法的返回值都被检查
+2. 错误响应格式统一
+3. 错误信息对用户友好","1. 现有有效请求仍然正常处理
+2. 不影响其他 API 功能",AUTOSERVER,backend/internal/api/handlers/:1,systematic_review: 需要系统性审查所有 API handlers。,未开始,未开始,未开始,未提交
+P1-004,审查并修复所有数据库资源泄漏风险,审查所有数据库操作，确保 rows.Close()、stmt.Close() 等资源释放都使用 defer，避免 panic 导致的资源泄漏。,P1,backend/database,未开始,"1. 使用 grep 查找所有 rows.Close()、stmt.Close()、tx.Rollback() 调用
+2. 审查每个调用，确保使用 defer
+3. 修复所有资源管理不一致的地方
+4. 添加单元测试模拟 panic 场景
+5. 生成审查报告","1. 所有资源释放都使用 defer
+2. 代码风格统一
+3. 符合 Go 最佳实践","1. 现有数据库操作测试通过
+2. 不改变函数的外部行为",AUTOSERVER,backend/internal/project/service.go:1;backend/internal/memory/service.go:1,systematic_review: 需要系统性审查所有数据库操作。,未开始,未开始,未开始,未提交
+P2-001,减少 TypeScript any/unknown 使用,96 个 TS 文件使用 any 或 unknown 类型，降低类型安全性，编译时无法捕获类型错误，代码可维护性下降。,P2,frontend/types,未开始,"1. 使用 grep 统计所有 any/unknown 使用
+2. 按优先级分类（核心模块优先）
+3. 逐步替换 any 为具体类型或泛型
+4. 使用 unknown 替代 any，强制类型检查
+5. 启用 tsconfig.json 的 strict 模式和 noImplicitAny
+6. 确保所有测试通过","1. 类型定义准确
+2. 不使用 any（除非有充分理由）
+3. 代码可读性提升","1. 所有现有测试通过
+2. 不破坏现有功能
+3. 编译无错误",AUTOFRONTEND,packages/core/src/:1;apps/desktop/src/:1,gradual_improvement: 需要逐步改进，优先处理核心模块。,未开始,未开始,未开始,未提交
+P2-002,减少 Go interface{} 使用,Go 代码中 interface{} 使用 503 次，降低类型安全性，建议使用泛型或具体类型替代。,P2,backend/types,未开始,"1. 使用 grep 统计所有 interface{} 使用
+2. 按优先级分类（核心模块优先）
+3. 使用 Go 1.18+ 泛型替代 interface{}（如果适用）
+4. 使用具体类型替代 interface{}（如果类型已知）
+5. 保留必要的 interface{} 使用（如 JSON 解析）
+6. 确保所有测试通过","1. 类型定义准确
+2. 优先使用泛型或具体类型
+3. 代码可读性提升","1. 所有现有测试通过
+2. 不破坏现有功能
+3. 编译无错误",AUTOSERVER,backend/internal/:1,gradual_improvement: 需要逐步改进，优先处理核心模块。Go 1.18+ 泛型可以替代大部分 interface{} 使用。,未开始,未开始,未开始,未提交
+P2-003,配置测试覆盖率报告,Go 和 TypeScript 都有测试文件，但未配置覆盖率报告，无法量化测试覆盖率，关键路径可能缺少测试。,P2,testing,未开始,"1. 配置 Go 覆盖率：在 Makefile 添加 test-coverage 目标，运行 go test -coverprofile=coverage.out ./...
+2. 配置 TS 覆盖率：在 package.json 添加 test:coverage 脚本，运行 vitest run --coverage
+3. 配置 CI 自动生成覆盖率报告
+4. 设置覆盖率目标：核心模块 ≥ 80%
+5. 生成覆盖率徽章","1. 覆盖率报告准确
+2. CI 集成成功
+3. 覆盖率报告易于查看","1. 不影响现有测试执行
+2. 测试运行时间无明显增加",AUTOSERVER;AUTOFRONTEND,backend/Makefile:1;package.json:1,infrastructure: 基础设施改进，有助于后续测试补充。,未开始,未开始,未开始,未提交
+P2-004,补充核心模块测试,根据覆盖率报告，补充核心模块的测试用例，目标：核心模块覆盖率 ≥ 80%。,P2,testing,未开始,"1. 运行覆盖率报告，识别覆盖率低的核心模块
+2. 按优先级排序（Snapshot/Commander/Memory/SAMG 等）
+3. 为每个模块补充单元测试和集成测试
+4. 确保测试覆盖关键路径和边界条件
+5. 达到覆盖率目标：核心模块 ≥ 80%","1. 测试用例质量高（不是为了覆盖率而测试）
+2. 测试可读性好
+3. 测试运行速度快","1. 所有新增测试通过
+2. 不影响现有测试",AUTOSERVER;AUTOFRONTEND,backend/internal/snapshot/:1;backend/internal/commander/:1;backend/internal/memory/:1;packages/core/src/samg/:1,depends_on: P2-003（需要先配置覆盖率报告）。large_effort: 需要大量时间补充测试。,未开始,未开始,未开始,未提交
+P2-005,生成 OpenAPI/Swagger 文档,前后端 API 契约一致性未验证，缺少自动化的契约测试。建议使用 OpenAPI/Swagger 生成统一的 API 定义，并从 OpenAPI 自动生成前端 TypeScript 类型。,P2,api/documentation,未开始,"1. 为所有 API handlers 添加 Swagger 注解
+2. 配置 swaggo/swag 生成 OpenAPI 文档
+3. 配置前端从 OpenAPI 自动生成 TypeScript 类型（使用 openapi-typescript 或类似工具）
+4. 添加契约测试验证前后端类型一致性
+5. 配置 CI 自动更新 API 文档","1. OpenAPI 文档准确完整
+2. 前端类型自动生成成功
+3. 契约测试通过","1. 不影响现有 API 功能
+2. 不破坏现有前端代码",AUTOSERVER;AUTOFRONTEND,backend/internal/api/handlers/:1;backend/cmd/codeflow-server/main.go:1,infrastructure: 基础设施改进，有助于前后端协作。需要学习 swaggo/swag 和 openapi-typescript。,未开始,未开始,未开始,未提交
+P2-006,配置系统添加 context 支持,config/service.go:349 有 TODO 注释，配置加载无超时控制，无法取消长时间运行的配置操作。,P2,backend/config,未开始,"1. 为配置加载方法添加 context.Context 参数
+2. 实现超时控制（使用 context.WithTimeout）
+3. 实现取消机制（监听 context.Done()）
+4. 更新所有调用配置加载的地方传入 context
+5. 添加单元测试验证超时和取消功能","1. context 使用符合 Go 最佳实践
+2. 超时时间合理（可配置）
+3. 取消机制响应及时","1. 现有配置加载功能正常
+2. 不破坏现有调用方
+3. 向后兼容（可选：保留无 context 的旧方法）",AUTOSERVER,backend/internal/config/service.go:349,enhancement: 功能增强，提升配置系统健壮性。,未开始,未开始,未开始,未提交

@@ -12,8 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/codeflow/backend/internal/api/middleware"
 	"github.com/codeflow/backend/internal/snapshot"
 )
+
+// experimentalFields represents experimental metadata appended to snapshot responses.
+type experimentalFields struct {
+	Warning string `json:"warning"`
+	Status  string `json:"status"`
+}
 
 func setupSnapshotRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -22,6 +29,7 @@ func setupSnapshotRouter() *gin.Engine {
 	v1 := router.Group("/api/v1")
 	{
 		snapshots := v1.Group("/snapshots")
+		snapshots.Use(middleware.Experimental("snapshot"))
 		{
 			snapshots.POST("", CreateSnapshot)
 			snapshots.GET("", GetSnapshots)
@@ -32,6 +40,22 @@ func setupSnapshotRouter() *gin.Engine {
 	}
 
 	return router
+}
+
+func assertExperimentalResponse(t *testing.T, w *httptest.ResponseRecorder, target interface{}) {
+	t.Helper()
+	assert.Equal(t, "experimental", w.Header().Get("X-Feature-Status"))
+	assert.Contains(t, w.Header().Get("X-Feature-Warning"), "snapshot functionality is experimental")
+
+	var fields experimentalFields
+	err := json.Unmarshal(w.Body.Bytes(), &fields)
+	assert.NoError(t, err)
+	assert.Equal(t, "experimental", fields.Status)
+	assert.Contains(t, fields.Warning, "experimental")
+	if target != nil {
+		err = json.Unmarshal(w.Body.Bytes(), target)
+		assert.NoError(t, err)
+	}
 }
 
 func TestCreateSnapshotAPI(t *testing.T) {
@@ -54,8 +78,7 @@ func TestCreateSnapshotAPI(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code)
 
 	var resp snapshot.Snapshot
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	assertExperimentalResponse(t, w, &resp)
 	assert.NotEmpty(t, resp.ID)
 	assert.Equal(t, "Test snapshot", resp.Description)
 	assert.Equal(t, "session-123", resp.SessionID)
@@ -83,8 +106,7 @@ func TestGetSnapshotsAPI(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp snapshot.SnapshotListResponse
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	assertExperimentalResponse(t, w, &resp)
 	assert.Equal(t, 3, resp.Total)
 	assert.Len(t, resp.Items, 3)
 }
@@ -116,8 +138,7 @@ func TestGetSnapshotsWithFiltersAPI(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp snapshot.SnapshotListResponse
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	assertExperimentalResponse(t, w, &resp)
 	assert.Equal(t, 1, resp.Total)
 	assert.Equal(t, "session-1", resp.Items[0].SessionID)
 }
@@ -142,8 +163,7 @@ func TestGetSnapshotAPI(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp snapshot.Snapshot
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	assertExperimentalResponse(t, w, &resp)
 	assert.Equal(t, created.ID, resp.ID)
 }
 
@@ -169,8 +189,7 @@ func TestRestoreSnapshotAPI(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp snapshot.RestoreResult
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	assertExperimentalResponse(t, w, &resp)
 	assert.Equal(t, created.ID, resp.SnapshotID)
 	assert.True(t, resp.GitRestored)
 	assert.True(t, resp.ConversationRestored)
@@ -231,8 +250,7 @@ func TestGetSnapshotsPaginationAPI(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp snapshot.SnapshotListResponse
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
+	assertExperimentalResponse(t, w, &resp)
 	assert.Equal(t, 5, resp.Total)
 	assert.Len(t, resp.Items, 2)
 	assert.True(t, resp.HasMore)
