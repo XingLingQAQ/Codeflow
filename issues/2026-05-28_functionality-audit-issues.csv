@@ -17,13 +17,13 @@ P0-002,标记 Snapshot API 为 experimental,在 P0-001 完成前，需要在 API
 2. 文档更新准确
 3. 不影响其他 API 的正常使用","1. 现有调用 Snapshot API 的客户端能够识别 experimental 标记
 2. 不破坏现有的 API 测试",AUTOSERVER,backend/internal/api/handlers/snapshots.go:1;backend/internal/api/middleware/experimental.go:1;docs/PROJECT_OVERVIEW.md:63,"quick_win: 可快速完成，降低用户误用风险。; picked_reason:P0 quick_win，降低 Snapshot 占位实现误用风险; done_at:2026-05-31; validation_limited:no docs/openapi.yaml found, so OpenAPI/Swagger marker could not be updated; manual_test:GET/POST /api/v1/snapshots should include X-Feature-Status=experimental and JSON warning/status fields; evidence:go build ./... passed; go test ./internal/api/handlers/ -run Snapshot -v -count=1 passed; docs/PROJECT_OVERVIEW.md marks Snapshot as experimental; risk:low response keeps original JSON fields at top level and only appends warning/status",已完成,已完成,已完成,已提交
-P0-003,注册缺失的 API 路由 ProposeSolution,debates.go:192 的 ProposeSolution handler 已完整实现但未在 router.go 中注册，导致用户无法通过 API 提交解决方案。,P0,backend/api,未开始,"1. 在 router.go 中注册路由：debates.POST(""/:id/solutions"", handler.ProposeSolution)
+P0-003,注册缺失的 API 路由 ProposeSolution,debates.go:192 的 ProposeSolution handler 已完整实现但未在 router.go 中注册，导致用户无法通过 API 提交解决方案。,P0,backend/api,已完成,"1. 在 router.go 中注册路由：debates.POST(""/:id/solutions"", handler.ProposeSolution)
 2. 添加 E2E 测试验证路由可达性
 3. 测试验证请求参数绑定正确
 4. 测试验证响应格式正确","1. 路由注册位置符合现有 router.go 的组织结构
 2. 中间件配置与其他 debates 路由一致
 3. 代码格式符合项目规范","1. 其他 debates 路由仍然正常工作
-2. 不影响现有的 API 测试",AUTOSERVER,backend/internal/api/handlers/debates.go:192;backend/internal/api/router.go:1,quick_win: 功能已实现，只需注册路由。,未开始,未开始,未开始,未提交
+2. 不影响现有的 API 测试",AUTOSERVER,backend/internal/api/handlers/debates.go:192;backend/internal/api/router.go:1;backend/internal/api/router_debates_test.go:1,"quick_win: 功能已实现，只需注册路由。; picked_reason:P0 quick_win，路由已存在但缺少可达性回归测试; done_at:2026-06-01; evidence:go test ./internal/api -run ProposeSolutionRoute -v -count=1 passed; review:route registration, request binding, 201 response, invalid request 400 covered; risk:low test-only change plus CSV state update",已完成,已完成,已完成,已提交
 P0-004,修复数据库连接资源泄漏风险,project/service.go:2247-2255 的 rows.Close() 未使用 defer，若循环中发生 panic 会导致数据库连接泄漏。同文件 2060 行已正确使用 defer，属不一致问题。,P0,backend/project,未开始,"1. 将 rows.Close() 改为 defer rows.Close()
 2. 审查同文件所有数据库操作，确保统一使用 defer
 3. 添加单元测试模拟 panic 场景验证资源正确释放","1. 代码符合 Go 资源管理最佳实践
