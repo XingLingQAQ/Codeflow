@@ -6,6 +6,9 @@ BUILD_DIR=build
 MAIN_PATH=./cmd/codeflow-server
 GO=go
 GOFLAGS=-v
+COVERAGE_OUT?=coverage.out
+COVERAGE_HTML?=coverage.html
+COVERAGE_PKGS?=./...
 LDFLAGS=-ldflags "-s -w"
 FRONTEND_DIR=../codeflow_template
 WEB_DIST_DIR=./internal/web/dist
@@ -23,13 +26,15 @@ build:
 # Run tests
 test:
 	@echo "Running tests..."
-	$(GO) test -race -coverprofile=coverage.out ./...
+	$(GO) test -race -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PKGS)
 	@echo "Tests complete"
 
 # Run tests with coverage report
 test-coverage: test
-	$(GO) tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report: coverage.html"
+	$(GO) tool cover -html=$(COVERAGE_OUT) -o $(COVERAGE_HTML)
+	$(GO) tool cover -func=$(COVERAGE_OUT) > coverage.txt
+	@echo "Coverage report: $(COVERAGE_HTML)"
+	@echo "Coverage summary: coverage.txt"
 
 # Run linter
 lint:
@@ -61,7 +66,7 @@ tidy:
 clean:
 	@echo "Cleaning..."
 	@rm -rf $(BUILD_DIR)
-	@rm -f coverage.out coverage.html
+	@rm -f $(COVERAGE_OUT) $(COVERAGE_HTML) coverage.txt
 	@echo "Clean complete"
 
 # Run the application
