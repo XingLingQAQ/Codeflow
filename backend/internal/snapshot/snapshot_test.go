@@ -3,6 +3,7 @@ package snapshot
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -391,6 +392,7 @@ type fakeSnapshotStateProvider struct {
 	restoreConv   string
 	restoreVector string
 	restoreGraph  string
+	restoreErrs   map[string]error
 }
 
 func (f *fakeSnapshotStateProvider) CaptureGitState(ctx context.Context) (string, error) {
@@ -411,21 +413,33 @@ func (f *fakeSnapshotStateProvider) CaptureMemoryGraphState(ctx context.Context)
 
 func (f *fakeSnapshotStateProvider) RestoreGitState(ctx context.Context, gitHash string) error {
 	f.restoreGit = gitHash
+	if f.restoreErrs != nil {
+		return f.restoreErrs["git"]
+	}
 	return nil
 }
 
 func (f *fakeSnapshotStateProvider) RestoreConversationState(ctx context.Context, state string) error {
 	f.restoreConv = state
+	if f.restoreErrs != nil {
+		return f.restoreErrs["conversation"]
+	}
 	return nil
 }
 
 func (f *fakeSnapshotStateProvider) RestoreVectorState(ctx context.Context, pointer string) error {
 	f.restoreVector = pointer
+	if f.restoreErrs != nil {
+		return f.restoreErrs["vector"]
+	}
 	return nil
 }
 
 func (f *fakeSnapshotStateProvider) RestoreMemoryGraphState(ctx context.Context, version string) error {
 	f.restoreGraph = version
+	if f.restoreErrs != nil {
+		return f.restoreErrs["graph"]
+	}
 	return nil
 }
 
@@ -465,5 +479,70 @@ func TestSnapshotRestoreDelegatesToProvider(t *testing.T) {
 	}
 	if provider.restoreGraph != provider.graph {
 		t.Fatalf("expected graph restore state %s, got %s", provider.graph, provider.restoreGraph)
+	}
+}
+
+func TestSnapshotRestoreCollectsProviderErrors(t *testing.T) {
+	provider := &fakeSnapshotStateProvider{
+		gitHash:      "git:abc123",
+		conversation: "conversation:def456",
+		vector:       "vector:ghi789",
+		graph:        "graph:jkl012",
+		restoreErrs: map[string]error{
+			"git":    errors.New("reset denied"),
+			"vector": errors.New("vector pointer stale"),
+		},
+	}
+	svc := NewInMemorySnapshotServiceWithProvider(provider)
+	ctx := context.Background()
+
+	snap, err := svc.Create(ctx, &SnapshotCreateRequest{Description: "partial restore"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	result, err := svc.Restore(ctx, snap.ID)
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+
+	if result.GitRestored || result.VectorRestored {
+		t.Fatalf("expected failed restore flags false, got %+v", result)
+	}
+	if !result.ConversationRestored || !result.MemoryGraphRestored {
+		t.Fatalf("expected successful restore flags true, got %+v", result)
+	}
+	if len(result.Errors) != 2 {
+		t.Fatalf("expected two restore errors, got %+v", result.Errors)
+	}
+	joined := strings.Join(result.Errors, ";")
+	if !strings.Contains(joined, "git restore failed") || !strings.Contains(joined, "vector restore failed") {
+		t.Fatalf("expected git and vector errors, got %+v", result.Errors)
+	}
+}
+
+func TestSnapshotGlobalServiceCompatibility(t *testing.T) {
+	previous := defaultSnapshotService
+	t.Cleanup(func() {
+		SetSnapshotService(previous)
+	})
+
+	SetSnapshotService(nil)
+	created := GetSnapshotService()
+	if created == nil {
+		t.Fatal("expected default snapshot service")
+	}
+	if GetSnapshotService() != created {
+		t.Fatal("expected GetSnapshotService to reuse default service")
+	}
+
+	custom := NewInMemorySnapshotServiceWithProvider(&fakeSnapshotStateProvider{
+		gitHash:      "git:custom",
+		conversation: "conversation:custom",
+		vector:       "vector:custom",
+		graph:        "graph:custom",
+	})
+	SetSnapshotService(custom)
+	if GetSnapshotService() != custom {
+		t.Fatal("expected injected snapshot service")
 	}
 }
