@@ -48,6 +48,17 @@ jobs:
         run: pnpm exec nx run-many -t lint --exclude=backend
         continue-on-error: true
 
+      - name: Frontend Coverage
+        run: pnpm run test:coverage
+
+      - name: Upload Frontend Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: coverage/
+          if-no-files-found: warn
+
   nx-backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -78,6 +89,28 @@ jobs:
         working-directory: backend
         run: go test -race -coverprofile=coverage.out ./...
         continue-on-error: true
+
+      - name: Backend Coverage Report
+        if: always()
+        working-directory: backend
+        run: |
+          if [ -f coverage.out ]; then
+            go tool cover -html=coverage.out -o coverage.html
+            go tool cover -func=coverage.out > coverage.txt
+          else
+            echo "coverage.out not found; backend tests likely failed before coverage was written" > coverage.txt
+          fi
+
+      - name: Upload Backend Coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.out
+            backend/coverage.html
+            backend/coverage.txt
+          if-no-files-found: warn
 
       - name: Backend Build
         working-directory: backend
