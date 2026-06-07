@@ -21,6 +21,20 @@
         "cwd": "."
       }
     },
+    "generate-api-types": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/generate-openapi-types.mjs",
+        "cwd": "."
+      }
+    },
+    "check-api-types": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node scripts/generate-openapi-types.mjs --check",
+        "cwd": "."
+      }
+    },
     "check-garbled-comments": {
       "executor": "nx:run-commands",
       "options": {

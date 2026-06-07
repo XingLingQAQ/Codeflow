@@ -48,6 +48,12 @@ jobs:
         run: pnpm exec nx run-many -t lint --exclude=backend
         continue-on-error: true
 
+      - name: API Contract Check
+        run: pnpm run check:api-contracts
+
+      - name: Generated API Types Check
+        run: pnpm run check:api-types
+
       - name: Frontend Coverage
         run: pnpm run test:coverage
 

@@ -67,6 +67,16 @@ make lint
 
 The backend provides a RESTful API on port 8080. Full OpenAPI documentation is available at `docs/openapi.yaml`.
 
+Root-level scripts keep the API contract and generated frontend types in sync:
+
+```bash
+pnpm check:api-contracts
+pnpm generate:api-types
+pnpm check:api-types
+```
+
+Generated TypeScript contract types are written to `apps/desktop/generated/openapi-types.ts` and are checked in CI.
+
 ### Quick API Examples
 
 #### Health Check

@@ -67,7 +67,8 @@ CodeFlow/
 ├── scripts/                   # 构建与工具脚本
 │   ├── test-all-e2e.mjs
 │   ├── check-garbled-comments.mjs
-│   └── check-api-contracts.mjs
+│   ├── check-api-contracts.mjs
+│   └── generate-openapi-types.mjs
 │
 ├── issues/                    # Issue 管理（CSV 格式）
 ├── outputs/                   # 构建输出

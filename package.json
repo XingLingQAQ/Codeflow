@@ -14,6 +14,8 @@
     "test:coverage:backend": "cd backend && go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out -o=coverage.html && go tool cover -func=coverage.out > coverage.txt",
     "test:coverage:all": "pnpm test:coverage && pnpm test:coverage:backend",
     "test:e2e:all": "node scripts/test-all-e2e.mjs",
+    "generate:api-types": "node scripts/generate-openapi-types.mjs",
+    "check:api-types": "node scripts/generate-openapi-types.mjs --check",
     "check:garbled-comments": "node scripts/check-garbled-comments.mjs",
     "check:api-contracts": "node scripts/check-api-contracts.mjs",
     "nx:build": "nx run-many -t build",

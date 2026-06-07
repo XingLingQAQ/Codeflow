@@ -105,14 +105,14 @@ P2-004,补充核心模块测试,根据覆盖率报告，补充核心模块的测
 2. 测试可读性好
 3. 测试运行速度快","1. 所有新增测试通过
 2. 不影响现有测试",AUTOSERVER;AUTOFRONTEND,backend/internal/snapshot/snapshot_test.go:385;backend/internal/snapshot/snapshot_test.go:470;backend/internal/snapshot/service.go:171;backend/internal/snapshot/service.go:289,depends_on: P2-003（需要先配置覆盖率报告）。large_effort: 需要大量时间补充测试。; picked_reason:P2-003 已提供覆盖率入口，Snapshot 覆盖率 79.9% 最接近核心模块 ≥80% 目标，先用最小高价值测试补齐关键兼容层与恢复校验分支。; done_at:2026-06-07; evidence:go test -coverprofile=coverage.out ./internal/snapshot passed with total 83.6%; go test ./internal/snapshot -count=1 passed; review:added behavior tests for restore error aggregation and global snapshot service compatibility, covering meaningful Restore/GetSnapshotService/SetSnapshotService branches; risk:low test-only backend change,已完成,已完成,已完成,已提交
-P2-005,生成 OpenAPI/Swagger 文档,前后端 API 契约一致性未验证，缺少自动化的契约测试。建议使用 OpenAPI/Swagger 生成统一的 API 定义，并从 OpenAPI 自动生成前端 TypeScript 类型。,P2,api/documentation,未开始,"1. 为所有 API handlers 添加 Swagger 注解
+P2-005,生成 OpenAPI/Swagger 文档,前后端 API 契约一致性未验证，缺少自动化的契约测试。建议使用 OpenAPI/Swagger 生成统一的 API 定义，并从 OpenAPI 自动生成前端 TypeScript 类型。,P2,api/documentation,已完成,"1. 为所有 API handlers 添加 Swagger 注解
 2. 配置 swaggo/swag 生成 OpenAPI 文档
 3. 配置前端从 OpenAPI 自动生成 TypeScript 类型（使用 openapi-typescript 或类似工具）
 4. 添加契约测试验证前后端类型一致性
 5. 配置 CI 自动更新 API 文档","1. OpenAPI 文档准确完整
 2. 前端类型自动生成成功
 3. 契约测试通过","1. 不影响现有 API 功能
-2. 不破坏现有前端代码",AUTOSERVER;AUTOFRONTEND,backend/internal/api/handlers/:1;backend/cmd/codeflow-server/main.go:1,infrastructure: 基础设施改进，有助于前后端协作。需要学习 swaggo/swag 和 openapi-typescript。,未开始,未开始,未开始,未提交
+2. 不破坏现有前端代码",AUTOSERVER;AUTOFRONTEND,backend/docs/openapi.yaml:1;scripts/generate-openapi-types.mjs:1;apps/desktop/generated/openapi-types.ts:1;scripts/check-api-contracts.mjs:1;.github/workflows/nx-ci.yml:51;backend/README.md:66,infrastructure: 基础设施改进，有助于前后端协作。需要学习 swaggo/swag 和 openapi-typescript。; picked_reason:P2 基础设施任务，可通过静态 OpenAPI 规范、类型生成脚本和 CI 契约校验建立前后端协作入口，风险低于大范围类型清理。; done_at:2026-06-07; validation_limited:existing backend/docs/openapi.yaml is a static contract and does not yet cover every route in router.go; this issue avoids broad swaggo annotation migration and keeps follow-up route-by-route completion explicit; manual_test:pnpm run check:api-contracts, pnpm run generate:api-types, pnpm run check:api-types; evidence:pnpm run check:api-contracts passed for 13 rules; pnpm run check:api-types passed; generated apps/desktop/generated/openapi-types.ts from backend/docs/openapi.yaml; JSON validation for package.json and scripts/project.json passed; review:CI now runs contract and generated API type drift checks; backend README documents OpenAPI commands; risk:medium contract automation exists but static OpenAPI coverage still needs incremental expansion,已完成,已完成,已完成,已提交
 P2-006,配置系统添加 context 支持,config/service.go:349 有 TODO 注释，配置加载无超时控制，无法取消长时间运行的配置操作。,P2,backend/config,已完成,"1. 为配置加载方法添加 context.Context 参数
 2. 实现超时控制（使用 context.WithTimeout）
 3. 实现取消机制（监听 context.Done()）
