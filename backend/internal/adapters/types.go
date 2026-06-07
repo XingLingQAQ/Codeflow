@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+// JSONValue 表示可 JSON 编码的动态值边界。
+type JSONValue any
+
+// JSONObject 表示 JSON object payload，避免在适配器边界散落 map[string]interface{}。
+type JSONObject map[string]JSONValue
+
 // Role 消息角色
 type Role string
 
@@ -19,14 +25,14 @@ const (
 
 // ContentBlock 结构化消息块
 type ContentBlock struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Result    string         `json:"result,omitempty"`
-	IsError   bool           `json:"is_error,omitempty"`
+	Type      string     `json:"type"`
+	Text      string     `json:"text,omitempty"`
+	ID        string     `json:"id,omitempty"`
+	Name      string     `json:"name,omitempty"`
+	Input     JSONObject `json:"input,omitempty"`
+	ToolUseID string     `json:"tool_use_id,omitempty"`
+	Result    string     `json:"result,omitempty"`
+	IsError   bool       `json:"is_error,omitempty"`
 }
 
 // Message 消息
@@ -122,7 +128,7 @@ type SendOptions struct {
 	MaxTokens   int               `json:"max_tokens,omitempty"`
 	Stream      bool              `json:"stream,omitempty"`
 	Timeout     time.Duration     `json:"timeout,omitempty"`
-	Extra       map[string]any    `json:"extra,omitempty"`
+	Extra       JSONObject        `json:"extra,omitempty"`
 }
 
 // ToolDefinition 工具定义

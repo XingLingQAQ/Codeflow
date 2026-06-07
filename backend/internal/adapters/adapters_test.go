@@ -425,7 +425,7 @@ func TestClaudeAdapterSendToolTurnForwardsSystemAndTools(t *testing.T) {
 		if req.Tools[0]["name"] != "call_coder_agent" {
 			t.Fatalf("expected tool name call_coder_agent, got %v", req.Tools[0]["name"])
 		}
-		inputSchema, ok := req.Tools[0]["input_schema"].(map[string]interface{})
+		inputSchema, ok := req.Tools[0]["input_schema"].(map[string]any)
 		if !ok {
 			t.Fatalf("expected input_schema map, got %T", req.Tools[0]["input_schema"])
 		}
@@ -760,9 +760,9 @@ func TestGetMessageTextProjectsStructuredBlocks(t *testing.T) {
 		Content: "fallback",
 		Blocks: []ContentBlock{
 			{Type: "text", Text: "hello"},
-			{Type: "tool_use", ID: "tool-1", Name: "read_file", Input: map[string]any{"path": "README.md"}},
+			{Type: "tool_use", ID: "tool-1", Name: "read_file", Input: JSONObject{"path": "README.md"}},
 			{Type: "tool_result", ToolUseID: "tool-1", Result: "ok"},
-			{Type: "json", Input: map[string]any{"done": true}},
+			{Type: "json", Input: JSONObject{"done": true}},
 		},
 	}
 

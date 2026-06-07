@@ -137,7 +137,7 @@ func (a *BaseAdapter) Close() error {
 }
 
 // DoRequest 执行HTTP请求（带重试）
-func (a *BaseAdapter) DoRequest(ctx context.Context, method, url string, body interface{}, headers map[string]string) (*http.Response, error) {
+func (a *BaseAdapter) DoRequest(ctx context.Context, method, url string, body JSONValue, headers map[string]string) (*http.Response, error) {
 	var lastErr error
 
 	for i := 0; i <= a.config.MaxRetries; i++ {
@@ -201,7 +201,7 @@ func resolveToolTurnControls(config AdapterConfig, req *ToolTurnRequest) request
 	}
 }
 
-func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, body interface{}, headers map[string]string) (*http.Response, error) {
+func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, body JSONValue, headers map[string]string) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
@@ -262,25 +262,25 @@ func NewClaudeAdapter(config *AdapterConfig) *ClaudeAdapter {
 }
 
 type claudeContentBlock struct {
-	Type      string         `json:"type"`
-	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Input     map[string]any `json:"input,omitempty"`
-	ToolUseID string         `json:"tool_use_id,omitempty"`
-	Content   any            `json:"content,omitempty"`
-	IsError   bool           `json:"is_error,omitempty"`
+	Type      string     `json:"type"`
+	Text      string     `json:"text,omitempty"`
+	ID        string     `json:"id,omitempty"`
+	Name      string     `json:"name,omitempty"`
+	Input     JSONObject `json:"input,omitempty"`
+	ToolUseID string     `json:"tool_use_id,omitempty"`
+	Content   any        `json:"content,omitempty"`
+	IsError   bool       `json:"is_error,omitempty"`
 }
 
 // claudeRequest Claude API请求
 type claudeRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []map[string]interface{} `json:"messages"`
-	System      string                   `json:"system,omitempty"`
-	Tools       []map[string]interface{} `json:"tools,omitempty"`
-	MaxTokens   int                      `json:"max_tokens"`
-	Temperature float64                  `json:"temperature,omitempty"`
-	Stream      bool                     `json:"stream,omitempty"`
+	Model       string       `json:"model"`
+	Messages    []JSONObject `json:"messages"`
+	System      string       `json:"system,omitempty"`
+	Tools       []JSONObject `json:"tools,omitempty"`
+	MaxTokens   int          `json:"max_tokens"`
+	Temperature float64      `json:"temperature,omitempty"`
+	Stream      bool         `json:"stream,omitempty"`
 }
 
 // claudeResponse Claude API响应
@@ -526,10 +526,10 @@ func (a *ClaudeAdapter) Compact(ctx context.Context) error {
 	return nil
 }
 
-func buildClaudeMessages(messages []Message) []map[string]interface{} {
-	out := make([]map[string]interface{}, 0, len(messages))
+func buildClaudeMessages(messages []Message) []JSONObject {
+	out := make([]JSONObject, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, map[string]interface{}{
+		out = append(out, JSONObject{
 			"role":    string(msg.Role),
 			"content": buildClaudeMessageContent(msg),
 		})
@@ -541,15 +541,15 @@ func buildClaudeMessageContent(msg Message) any {
 	if len(msg.Blocks) == 0 {
 		return msg.Content
 	}
-	blocks := make([]map[string]interface{}, 0, len(msg.Blocks))
+	blocks := make([]JSONObject, 0, len(msg.Blocks))
 	for _, block := range msg.Blocks {
 		blocks = append(blocks, toClaudeBlock(block))
 	}
 	return blocks
 }
 
-func toClaudeBlock(block ContentBlock) map[string]interface{} {
-	out := map[string]interface{}{"type": block.Type}
+func toClaudeBlock(block ContentBlock) JSONObject {
+	out := JSONObject{"type": block.Type}
 	switch block.Type {
 	case "text":
 		out["text"] = block.Text
@@ -557,7 +557,7 @@ func toClaudeBlock(block ContentBlock) map[string]interface{} {
 		out["id"] = block.ID
 		out["name"] = block.Name
 		if block.Input == nil {
-			out["input"] = map[string]any{}
+			out["input"] = JSONObject{}
 		} else {
 			out["input"] = block.Input
 		}
@@ -573,16 +573,16 @@ func toClaudeBlock(block ContentBlock) map[string]interface{} {
 	return out
 }
 
-func buildClaudeTools(tools []ToolDefinition) []map[string]interface{} {
+func buildClaudeTools(tools []ToolDefinition) []JSONObject {
 	if len(tools) == 0 {
 		return nil
 	}
-	out := make([]map[string]interface{}, 0, len(tools))
+	out := make([]JSONObject, 0, len(tools))
 	for _, tool := range tools {
-		out = append(out, map[string]interface{}{
+		out = append(out, JSONObject{
 			"name":        tool.Name,
 			"description": tool.Description,
-			"input_schema": map[string]interface{}{
+			"input_schema": JSONObject{
 				"type":       tool.Parameters.Type,
 				"properties": tool.Parameters.Properties,
 				"required":   tool.Parameters.Required,
@@ -663,11 +663,11 @@ func cloneBlocks(blocks []ContentBlock) []ContentBlock {
 	return out
 }
 
-func cloneMap(input map[string]any) map[string]any {
+func cloneMap(input JSONObject) JSONObject {
 	if input == nil {
 		return nil
 	}
-	out := make(map[string]any, len(input))
+	out := make(JSONObject, len(input))
 	for k, v := range input {
 		out[k] = v
 	}
