@@ -1089,6 +1089,680 @@ paths:
               schema:
                 $ref: '#/components/schemas/RestoreResult'
 
+  # ==================== Memory Atomic ====================
+  /api/v1/memory/atomic:
+    post:
+      tags: [Memory]
+      summary: Create atomic memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AtomicMemoryCreateRequest'
+      responses:
+        '201':
+          description: Atomic memory created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMemoryEnvelope'
+
+  /api/v1/memory/atomic/search:
+    get:
+      tags: [Memory]
+      summary: Search atomic memories
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Atomic memory search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMemoryListEnvelope'
+
+  /api/v1/memory/atomic/session/{id}:
+    get:
+      tags: [Memory]
+      summary: Get atomic memories by session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Atomic memories for session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMemoryListEnvelope'
+
+  /api/v1/memory/atomic/{id}:
+    put:
+      tags: [Memory]
+      summary: Update atomic memory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AtomicMemoryUpdateRequest'
+      responses:
+        '200':
+          description: Atomic memory updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMemoryEnvelope'
+    delete:
+      tags: [Memory]
+      summary: Delete atomic memory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Atomic memory deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
+
+  /api/v1/memory/atomic/decay:
+    post:
+      tags: [Memory]
+      summary: Apply atomic heat decay
+      responses:
+        '200':
+          description: Heat decay applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMaintenanceEnvelope'
+
+  /api/v1/memory/atomic/recompute-tiers:
+    post:
+      tags: [Memory]
+      summary: Recompute atomic memory tiers
+      responses:
+        '200':
+          description: Tiers recomputed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMaintenanceEnvelope'
+
+  /api/v1/memory/atomic/{id}/boost:
+    post:
+      tags: [Memory]
+      summary: Boost atomic memory heat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AtomicBoostRequest'
+      responses:
+        '200':
+          description: Heat boosted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
+
+  /api/v1/memory/atomic/tier/{tier}:
+    get:
+      tags: [Memory]
+      summary: Get atomic memories by tier
+      parameters:
+        - name: tier
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Atomic memories for tier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AtomicMemoryListEnvelope'
+
+  # ==================== Raw Archive ====================
+  /api/v1/memory/archive:
+    post:
+      tags: [Memory]
+      summary: Store raw archive entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RawArchiveStoreRequest'
+      responses:
+        '201':
+          description: Archive entry stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawArchiveCreateEnvelope'
+    get:
+      tags: [Memory]
+      summary: List raw archive entries
+      responses:
+        '200':
+          description: Raw archive entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawArchiveListEnvelope'
+
+  /api/v1/memory/archive/search:
+    get:
+      tags: [Memory]
+      summary: Search raw archive entries
+      responses:
+        '200':
+          description: Raw archive search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawArchiveSearchEnvelope'
+
+  /api/v1/memory/archive/stats:
+    get:
+      tags: [Memory]
+      summary: Get raw archive statistics
+      responses:
+        '200':
+          description: Raw archive statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawArchiveStatsEnvelope'
+
+  /api/v1/memory/archive/{id}:
+    get:
+      tags: [Memory]
+      summary: Get raw archive entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Raw archive entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RawArchiveEntryEnvelope'
+
+  # ==================== Memory Agent ====================
+  /api/v1/memory/agent/ingest:
+    post:
+      tags: [Memory]
+      summary: Ingest memory through MemoryAgent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryAgentIngestRequest'
+      responses:
+        '201':
+          description: Ingest result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAgentIngestEnvelope'
+
+  /api/v1/memory/agent/retrieve:
+    post:
+      tags: [Memory]
+      summary: Retrieve memory through MemoryAgent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryAgentRetrieveRequest'
+      responses:
+        '200':
+          description: Retrieve result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAgentRetrieveEnvelope'
+
+  /api/v1/memory/agent/context:
+    post:
+      tags: [Memory]
+      summary: Build context through MemoryAgent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryAgentContextRequest'
+      responses:
+        '200':
+          description: Context result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAgentContextEnvelope'
+
+  # ==================== Projects ====================
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListEnvelope'
+    post:
+      tags: [Projects]
+      summary: Create project
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateRequest'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEnvelope'
+
+  /api/v1/projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEnvelope'
+    put:
+      tags: [Projects]
+      summary: Update project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectEnvelope'
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
+
+  /api/v1/projects/{id}/plans:
+    get:
+      tags: [Projects]
+      summary: List project plans
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project plans
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPlansEnvelope'
+    post:
+      tags: [Projects]
+      summary: Add plan to project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPlanRequest'
+      responses:
+        '200':
+          description: Plan added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
+
+  /api/v1/projects/{id}/plans/{planId}:
+    delete:
+      tags: [Projects]
+      summary: Remove plan from project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plan removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericMessageEnvelope'
+
+  /api/v1/projects/{id}/plan:
+    post:
+      tags: [Projects]
+      summary: Generate project plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanGenerateRequest'
+      responses:
+        '201':
+          description: Plan generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDocumentEnvelope'
+    get:
+      tags: [Projects]
+      summary: Get generated project plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Generated project plan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDocumentEnvelope'
+
+  /api/v1/projects/{id}/plan/revise:
+    post:
+      tags: [Projects]
+      summary: Revise project plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanReviseRequest'
+      responses:
+        '200':
+          description: Plan revised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDocumentEnvelope'
+
+  /api/v1/projects/{id}/plan/approve:
+    post:
+      tags: [Projects]
+      summary: Approve project plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlanApproveRequest'
+      responses:
+        '200':
+          description: Plan approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDocumentEnvelope'
+
+  /api/v1/projects/{id}/plan/execute:
+    post:
+      tags: [Projects]
+      summary: Execute project plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plan execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectPlanExecuteEnvelope'
+
+  # ==================== Plugins ====================
+  /api/v1/plugins:
+    get:
+      tags: [Plugins]
+      summary: List installed plugins
+      responses:
+        '200':
+          description: Plugin list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginListEnvelope'
+
+  /api/v1/plugins/marketplace:
+    get:
+      tags: [Plugins]
+      summary: List marketplace plugins
+      responses:
+        '200':
+          description: Marketplace plugins
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginCatalogEnvelope'
+
+  /api/v1/plugins/{id}:
+    get:
+      tags: [Plugins]
+      summary: Get plugin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginDetailEnvelope'
+    patch:
+      tags: [Plugins]
+      summary: Toggle plugin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PluginToggleRequest'
+      responses:
+        '200':
+          description: Plugin toggled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginDetailEnvelope'
+
+  /api/v1/plugins/{id}/install:
+    post:
+      tags: [Plugins]
+      summary: Install plugin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plugin installed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PluginDetailEnvelope'
+
+  # ==================== Workflows ====================
+  /api/v1/workflows/{projectId}/overview:
+    get:
+      tags: [Plans]
+      summary: Get workflow overview
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowOverviewEnvelope'
+
+  /api/v1/workflows/{projectId}/timeline:
+    get:
+      tags: [Plans]
+      summary: Get workflow timeline
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow timeline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowTimelineEnvelope'
+
+  /api/v1/workflows/{projectId}/replay:
+    get:
+      tags: [Plans]
+      summary: Get workflow replay
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Workflow replay
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowReplayEnvelope'
+
   # ==================== Memory Preflight ====================
   /api/v1/memory/preflight:
     post:
@@ -4589,6 +5263,773 @@ components:
         extractor_info:
           type: object
           additionalProperties: true
+
+    AtomicMemory:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: integer
+        content:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        session_id:
+          type: string
+        folder_id:
+          type: string
+        source:
+          type: string
+          enum: [user, assistant, system]
+        importance:
+          type: number
+        tier:
+          type: string
+          enum: [hot, warm, cold]
+        heat:
+          type: number
+        surprise:
+          type: number
+
+    AtomicMemoryCreateRequest:
+      type: object
+      required: [content, session_id, source]
+      properties:
+        content:
+          type: string
+        session_id:
+          type: string
+        source:
+          type: string
+          enum: [user, assistant, system]
+        importance:
+          type: number
+          minimum: 0
+          maximum: 1
+        tags:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: integer
+        folder_id:
+          type: string
+        embedding:
+          type: array
+          items:
+            type: number
+
+    AtomicMemoryUpdateRequest:
+      type: object
+      properties:
+        content:
+          type: string
+        session_id:
+          type: string
+        source:
+          type: string
+          enum: [user, assistant, system]
+        importance:
+          type: number
+          minimum: 0
+          maximum: 1
+        tags:
+          type: array
+          items:
+            type: string
+        timestamp:
+          type: integer
+        folder_id:
+          type: string
+        clear_folder_id:
+          type: boolean
+        embedding:
+          type: array
+          items:
+            type: number
+
+    AtomicBoostRequest:
+      type: object
+      properties:
+        boost:
+          type: number
+          exclusiveMinimum: 0
+
+    AtomicMemoryListResponse:
+      type: object
+      properties:
+        memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/AtomicMemory'
+        count:
+          type: integer
+        tier:
+          type: string
+          enum: [hot, warm, cold]
+
+    AtomicMemoryListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/AtomicMemoryListResponse'
+        error:
+          type: string
+
+    AtomicMemoryEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/AtomicMemory'
+        error:
+          type: string
+
+    AtomicMaintenanceEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+
+    RawArchiveEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [conversation, code_diff, document]
+        content:
+          type: string
+        session_id:
+          type: string
+        timestamp:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+
+    RawArchiveStoreRequest:
+      type: object
+      required: [content, type]
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+          enum: [conversation, code_diff, document]
+        session_id:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    RawArchiveListResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/RawArchiveEntry'
+        count:
+          type: integer
+        total:
+          type: integer
+
+    RawArchiveSearchResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/RawArchiveEntry'
+        count:
+          type: integer
+
+    RawArchiveCreateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+
+    RawArchiveListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RawArchiveListResponse'
+        error:
+          type: string
+
+    RawArchiveSearchEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RawArchiveSearchResponse'
+        error:
+          type: string
+
+    RawArchiveEntryEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RawArchiveEntry'
+        error:
+          type: string
+
+    RawArchiveCreateEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RawArchiveCreateResponse'
+        error:
+          type: string
+
+    RawArchiveStatsResponse:
+      type: object
+      properties:
+        total_entries:
+          type: integer
+
+    RawArchiveStatsEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/RawArchiveStatsResponse'
+        error:
+          type: string
+
+    MemoryAgentIngestRequest:
+      type: object
+      required: [content, type, session_id, source]
+      properties:
+        content:
+          type: string
+        type:
+          type: string
+          enum: [conversation, code_diff, document]
+        session_id:
+          type: string
+        source:
+          type: string
+          enum: [user, assistant, system]
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    MemoryAgentRetrieveRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        session_id:
+          type: string
+        max_results:
+          type: integer
+        min_heat:
+          type: number
+        tier:
+          type: string
+
+    MemoryAgentContextRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        query:
+          type: string
+        max_tokens:
+          type: integer
+
+    MemoryAgentIngestResponse:
+      type: object
+      properties:
+        raw_archive_id:
+          type: string
+        atomic_memory_id:
+          type: string
+        samg_triples_count:
+          type: integer
+
+    MemoryAgentRetrieveResponse:
+      type: object
+      properties:
+        atomic_memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/AtomicMemory'
+        samg_nodes:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        sources:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        total_found:
+          type: integer
+
+    MemoryAgentContextResponse:
+      type: object
+      properties:
+        context_block:
+          type: string
+        source_count:
+          type: integer
+        atomic_memories:
+          type: array
+          items:
+            $ref: '#/components/schemas/AtomicMemory'
+        samg_nodes:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        sources:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    MemoryAgentIngestEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemoryAgentIngestResponse'
+        error:
+          type: string
+
+    MemoryAgentRetrieveEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemoryAgentRetrieveResponse'
+        error:
+          type: string
+
+    MemoryAgentContextEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/MemoryAgentContextResponse'
+        error:
+          type: string
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        progress:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        git_branch:
+          type: string
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+        last_active:
+          type: integer
+        plan_ids:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProjectCreateRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        git_branch:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProjectUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        git_branch:
+          type: string
+        progress:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ProjectListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            projects:
+              type: array
+              items:
+                $ref: '#/components/schemas/Project'
+            total:
+              type: integer
+            has_more:
+              type: boolean
+        error:
+          type: string
+
+    ProjectEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/Project'
+        error:
+          type: string
+
+    AddPlanRequest:
+      type: object
+      required: [plan_id]
+      properties:
+        plan_id:
+          type: string
+
+    PlanGenerateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        summary:
+          type: string
+        prompt:
+          type: string
+        goal:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PlanReviseRequest:
+      type: object
+      properties:
+        goal:
+          type: string
+        summary:
+          type: string
+        feedback:
+          type: string
+        change_request:
+          type: object
+          additionalProperties: true
+        feedback_resolution:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    PlanApproveRequest:
+      type: object
+      properties:
+        approved_by:
+          type: string
+
+    PlanDocument:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        title:
+          type: string
+        summary:
+          type: string
+        goal:
+          type: string
+        status:
+          type: string
+        revision:
+          type: integer
+        based_on_revision:
+          type: integer
+        approved_by:
+          type: string
+        created_at:
+          type: integer
+        updated_at:
+          type: integer
+
+    PlanDocumentEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/PlanDocument'
+        error:
+          type: string
+
+    ProjectPlansResponse:
+      type: object
+      properties:
+        plans:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+        total:
+          type: integer
+
+    ProjectPlansEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/ProjectPlansResponse'
+        error:
+          type: string
+
+    ProjectPlanExecuteEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            started:
+              type: boolean
+            status:
+              type: string
+            session_id:
+              type: string
+        error:
+          type: string
+
+    PluginManifest:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        display_name:
+          type: string
+        summary:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        author:
+          type: string
+        vendor:
+          type: string
+        category:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        source:
+          type: string
+        scope:
+          type: string
+        enabled:
+          type: boolean
+        installed:
+          type: boolean
+        featured:
+          type: boolean
+        verified:
+          type: boolean
+        health:
+          type: string
+        homepage:
+          type: string
+        repository:
+          type: string
+        icon:
+          type: string
+        updated_at:
+          type: integer
+        installed_at:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+
+    PluginToggleRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+
+    PluginListEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/PluginListResponse'
+        error:
+          type: string
+
+    PluginCatalogEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/PluginCatalogResponse'
+        error:
+          type: string
+
+    PluginDetailEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/PluginDetailResponse'
+        error:
+          type: string
+
+    WorkflowOverview:
+      type: object
+      properties:
+        project_id:
+          type: string
+        summary:
+          type: object
+          additionalProperties: true
+
+    WorkflowTimeline:
+      type: object
+      properties:
+        project_id:
+          type: string
+        session_ids:
+          type: array
+          items:
+            type: string
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        summary:
+          type: object
+          additionalProperties: true
+
+    WorkflowReplay:
+      type: object
+      properties:
+        project_id:
+          type: string
+        session_id:
+          type: string
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        summary:
+          type: object
+          additionalProperties: true
+
+    WorkflowOverviewEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/WorkflowOverview'
+        error:
+          type: string
+
+    WorkflowTimelineEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/WorkflowTimeline'
+        error:
+          type: string
+
+    WorkflowReplayEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/WorkflowReplay'
+        error:
+          type: string
 
     GenericMessage:
       type: object
