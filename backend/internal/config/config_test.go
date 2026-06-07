@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,6 +130,58 @@ func TestConfigManagerRoleConfig(t *testing.T) {
 	}
 	if loaded.Temperature != 0.5 {
 		t.Errorf("expected temperature 0.5, got %f", loaded.Temperature)
+	}
+}
+
+func TestConfigServiceWithContextResolveConfig(t *testing.T) {
+	manager := NewConfigManager(&GlobalConfig{DefaultModel: "global-model"})
+	wrapped := NewConfigServiceWithContextTimeout(manager, 50*time.Millisecond)
+
+	resolved, err := wrapped.ResolveConfigWithContext(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ResolveConfigWithContext failed: %v", err)
+	}
+	if resolved.Model != "global-model" {
+		t.Fatalf("expected global-model, got %s", resolved.Model)
+	}
+
+	global, err := wrapped.LoadGlobalConfigWithContext(nil)
+	if err != nil {
+		t.Fatalf("LoadGlobalConfigWithContext failed: %v", err)
+	}
+	if global.DefaultModel != "global-model" {
+		t.Fatalf("expected global-model, got %s", global.DefaultModel)
+	}
+}
+
+func TestConfigServiceWithContextCancellation(t *testing.T) {
+	wrapped := NewConfigServiceWithContext(NewConfigManager(nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := wrapped.ResolveConfigWithContext(ctx, "", ""); err != context.Canceled {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if _, err := wrapped.LoadSessionConfigWithContext(ctx, "session-001"); err != context.Canceled {
+		t.Fatalf("expected context.Canceled for session load, got %v", err)
+	}
+}
+
+func TestConfigServiceWithContextTimeout(t *testing.T) {
+	wrapped := NewConfigServiceWithContextTimeout(NewConfigManager(nil), time.Nanosecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+
+	if _, err := wrapped.LoadRoleConfigWithContext(ctx, RoleMain); err != context.DeadlineExceeded {
+		t.Fatalf("expected context deadline exceeded, got %v", err)
+	}
+}
+
+func TestConfigServiceWithContextRejectsNilService(t *testing.T) {
+	wrapped := NewConfigServiceWithContext(nil)
+	if _, err := wrapped.ResolveConfigWithContext(context.Background(), "", ""); err == nil || !strings.Contains(err.Error(), "config service is nil") {
+		t.Fatalf("expected nil service error, got %v", err)
 	}
 }
 

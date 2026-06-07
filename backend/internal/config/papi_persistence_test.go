@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSQLiteConfigService_PAPIPersistence(t *testing.T) {
@@ -13,7 +14,7 @@ func TestSQLiteConfigService_PAPIPersistence(t *testing.T) {
 	defer os.Remove(dbPath)
 
 	svc, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc.Close()
 
 	// Define a PAPI variable
@@ -32,7 +33,7 @@ func TestSQLiteConfigService_PAPIPersistence(t *testing.T) {
 
 	// Reload from database
 	svc2, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc2.Close()
 
 	// Verify variable was persisted
@@ -49,7 +50,7 @@ func TestSQLiteConfigService_PAPIHotSwap(t *testing.T) {
 	defer os.Remove(dbPath)
 
 	svc, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc.Close()
 
 	// Define original variable
@@ -71,7 +72,7 @@ func TestSQLiteConfigService_PAPIHotSwap(t *testing.T) {
 
 	// Reload and verify
 	svc2, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc2.Close()
 
 	loaded, err := svc2.GetPAPIManager().GetVariable("BACKEND_EXPERT")
@@ -86,7 +87,7 @@ func TestSQLiteConfigService_PAPIDelete(t *testing.T) {
 	defer os.Remove(dbPath)
 
 	svc, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc.Close()
 
 	// Define variable
@@ -103,7 +104,7 @@ func TestSQLiteConfigService_PAPIDelete(t *testing.T) {
 
 	// Reload and verify deletion
 	svc2, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc2.Close()
 
 	_, err = svc2.GetPAPIManager().GetVariable("TO_DELETE")
@@ -115,7 +116,7 @@ func TestSQLiteConfigService_PAPIMultipleVariables(t *testing.T) {
 	defer os.Remove(dbPath)
 
 	svc, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc.Close()
 
 	// Define multiple variables
@@ -132,7 +133,7 @@ func TestSQLiteConfigService_PAPIMultipleVariables(t *testing.T) {
 
 	// Reload and verify all variables
 	svc2, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc2.Close()
 
 	loadedVars := svc2.GetPAPIManager().ListVariables()
@@ -152,7 +153,7 @@ func TestSQLiteConfigService_PAPIResolveByCategory(t *testing.T) {
 	defer os.Remove(dbPath)
 
 	svc, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc.Close()
 
 	// Define variables with categories
@@ -174,7 +175,7 @@ func TestSQLiteConfigService_PAPIResolveByCategory(t *testing.T) {
 
 	// Reload and test category resolution
 	svc2, err := NewSQLiteConfigService(dbPath)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	defer svc2.Close()
 
 	resolved, err := svc2.GetPAPIManager().ResolveByCategory("backend")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -334,20 +335,91 @@ func SetConfigService(svc IConfigService) {
 	defaultConfigService = svc
 }
 
-// WithContext wraps the service with context support (for future use).
+const defaultConfigContextTimeout = 5 * time.Second
+
+// WithContext wraps the service with context support while preserving IConfigService compatibility.
 type ConfigServiceWithContext struct {
 	IConfigService
+	timeout time.Duration
 }
 
 // NewConfigServiceWithContext creates a context-aware config service.
 func NewConfigServiceWithContext(svc IConfigService) *ConfigServiceWithContext {
-	return &ConfigServiceWithContext{IConfigService: svc}
+	return NewConfigServiceWithContextTimeout(svc, defaultConfigContextTimeout)
 }
 
-// ResolveConfigWithContext resolves config with context (placeholder for future enhancements).
-func (s *ConfigServiceWithContext) ResolveConfigWithContext(ctx context.Context, sessionID string, role RoleType) *ResolvedConfig {
-	// TODO: Add context-aware features (timeout, cancellation, etc.)
-	return s.ResolveConfig(sessionID, role)
+// NewConfigServiceWithContextTimeout creates a context-aware config service with a custom timeout.
+func NewConfigServiceWithContextTimeout(svc IConfigService, timeout time.Duration) *ConfigServiceWithContext {
+	if timeout <= 0 {
+		timeout = defaultConfigContextTimeout
+	}
+	return &ConfigServiceWithContext{IConfigService: svc, timeout: timeout}
+}
+
+// LoadGlobalConfigWithContext loads global config with cancellation and timeout support.
+func (s *ConfigServiceWithContext) LoadGlobalConfigWithContext(ctx context.Context) (*GlobalConfig, error) {
+	ctx, cancel, err := s.contextWithTimeout(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.LoadGlobalConfig(), nil
+}
+
+// LoadSessionConfigWithContext loads session config with cancellation and timeout support.
+func (s *ConfigServiceWithContext) LoadSessionConfigWithContext(ctx context.Context, sessionID string) (*SessionConfig, error) {
+	ctx, cancel, err := s.contextWithTimeout(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.LoadSessionConfig(sessionID), nil
+}
+
+// LoadRoleConfigWithContext loads role config with cancellation and timeout support.
+func (s *ConfigServiceWithContext) LoadRoleConfigWithContext(ctx context.Context, role RoleType) (*RoleConfig, error) {
+	ctx, cancel, err := s.contextWithTimeout(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.LoadRoleConfig(role), nil
+}
+
+// ResolveConfigWithContext resolves config with cancellation and timeout support.
+func (s *ConfigServiceWithContext) ResolveConfigWithContext(ctx context.Context, sessionID string, role RoleType) (*ResolvedConfig, error) {
+	ctx, cancel, err := s.contextWithTimeout(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.ResolveConfig(sessionID, role), nil
+}
+
+func (s *ConfigServiceWithContext) contextWithTimeout(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if s == nil || s.IConfigService == nil {
+		return nil, nil, fmt.Errorf("config service is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return ctx, func() {}, err
+	}
+	timedCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	return timedCtx, cancel, nil
 }
 
 // PAPI methods for SQLiteConfigService
