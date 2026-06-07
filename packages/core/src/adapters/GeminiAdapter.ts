@@ -3,7 +3,7 @@
  * 支持多模态输入（文本、图片）
  */
 
-import { GoogleGenerativeAI, GenerativeModel, Content, Part } from '@google/generative-ai';
+import { GoogleGenerativeAI, GenerativeModel, Content, Part, GenerateContentResult } from '@google/generative-ai';
 import {
   ICliAdapter,
   AdapterConfig,
@@ -362,8 +362,7 @@ export class GeminiAdapter implements ICliAdapter {
     model: GenerativeModel,
     request: { contents: Content[]; systemInstruction?: string },
     options: SendOptions & AdapterConfig
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ): Promise<{ response: { text: () => string; usageMetadata?: any; candidates?: any[] } }> {
+  ): Promise<GenerateContentResult> {
     const timeout = options.timeout ?? 60000;
 
     return Promise.race([

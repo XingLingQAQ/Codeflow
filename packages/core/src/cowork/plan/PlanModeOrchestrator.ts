@@ -30,6 +30,8 @@ const DEFAULT_CONFIG: PlanConfig = {
   language: 'en',
 };
 
+type EventEmitterListener = (...args: unknown[]) => void;
+
 /**
  * PlanModeOrchestrator - Plan 模式编排器
  */
@@ -449,11 +451,11 @@ export class PlanModeOrchestrator extends EventEmitter {
   /**
    * 添加事件监听器
    */
-  addListener<E extends string | symbol>(eventName: E, listener: (...args: any[]) => void): this;
+  addListener<E extends string | symbol>(eventName: E, listener: EventEmitterListener): this;
   addListener(listener: PlanEventListener): this;
   addListener<E extends string | symbol>(
     eventNameOrListener: E | PlanEventListener,
-    listener?: (...args: any[]) => void
+    listener?: EventEmitterListener
   ): this {
     if (typeof eventNameOrListener === 'function') {
       return super.addListener('event', eventNameOrListener);
@@ -467,11 +469,11 @@ export class PlanModeOrchestrator extends EventEmitter {
   /**
    * 移除事件监听器
    */
-  removeListener<E extends string | symbol>(eventName: E, listener: (...args: any[]) => void): this;
+  removeListener<E extends string | symbol>(eventName: E, listener: EventEmitterListener): this;
   removeListener(listener: PlanEventListener): this;
   removeListener<E extends string | symbol>(
     eventNameOrListener: E | PlanEventListener,
-    listener?: (...args: any[]) => void
+    listener?: EventEmitterListener
   ): this {
     if (typeof eventNameOrListener === 'function') {
       return super.removeListener('event', eventNameOrListener);

@@ -280,6 +280,14 @@ export class AiderCodeEditor implements ICodeEditor {
     this.backupStack = [];
   }
 
+  getAdapter(): AiderAdapter {
+    return this.adapter;
+  }
+
+  getConfig(): AiderEditorConfig {
+    return { ...this.config };
+  }
+
   // ==================== 私有方法 ====================
 
   private resolvePath(file: string): string {

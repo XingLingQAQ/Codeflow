@@ -280,6 +280,14 @@ export class ClaudeCodeEditor implements ICodeEditor {
     this.backupStack = [];
   }
 
+  getAdapter(): ClaudeAdapter {
+    return this.adapter;
+  }
+
+  getConfig(): ClaudeEditorConfig {
+    return { ...this.config };
+  }
+
   // ==================== 私有方法 ====================
 
   private resolvePath(file: string): string {

@@ -118,15 +118,15 @@ export class ParallelExecutor extends EventEmitter {
 
   private cloneEditorForCwd(editor: ICodeEditor, cwd: string): ICodeEditor {
     if (editor instanceof AiderCodeEditor) {
-      return new AiderCodeEditor((editor as any).adapter as AiderAdapter, {
-        ...(editor as any).config,
+      return new AiderCodeEditor(editor.getAdapter(), {
+        ...editor.getConfig(),
         cwd,
       });
     }
 
     if (editor instanceof ClaudeCodeEditor) {
-      return new ClaudeCodeEditor((editor as any).adapter as ClaudeAdapter, {
-        ...(editor as any).config,
+      return new ClaudeCodeEditor(editor.getAdapter(), {
+        ...editor.getConfig(),
         cwd,
       });
     }
