@@ -15,8 +15,8 @@ import (
 
 // HookManager implements IHookManager.
 type HookManager struct {
-	hooks  map[string]*Hook
-	events []*HookEvent
+	hooks    map[string]*Hook
+	events   []*HookEvent
 	controls struct {
 		enabled              bool
 		allowedHooks         map[HookType]struct{}
@@ -102,7 +102,7 @@ func (m *HookManager) Register(config HookConfig, handler HookFunc) error {
 		config.Timeout = 30 * time.Second
 	}
 	if config.Metadata == nil {
-		config.Metadata = make(map[string]interface{})
+		config.Metadata = make(HookMetadata)
 	}
 
 	m.hooks[config.Name] = &Hook{
@@ -155,7 +155,7 @@ func (m *HookManager) Disable(name string) error {
 }
 
 // Trigger triggers all hooks of a specific type.
-func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload interface{}) (interface{}, error) {
+func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload HookPayload) (HookResult, error) {
 	m.mu.RLock()
 	if !m.isHookAllowedLocked(hookType) {
 		m.mu.RUnlock()
@@ -184,7 +184,7 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload in
 			HookName:  hook.Config.Name,
 			HookType:  hookType,
 			Timestamp: time.Now(),
-			Metadata: map[string]interface{}{
+			Metadata: HookMetadata{
 				"priority":    hook.Config.Priority,
 				"retry_count": hook.Config.RetryCount,
 			},
@@ -216,7 +216,7 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload in
 }
 
 // TriggerHook triggers a specific hook by name.
-func (m *HookManager) TriggerHook(ctx context.Context, name string, payload interface{}) (interface{}, error) {
+func (m *HookManager) TriggerHook(ctx context.Context, name string, payload HookPayload) (HookResult, error) {
 	m.mu.RLock()
 	hook, exists := m.hooks[name]
 	m.mu.RUnlock()
@@ -239,7 +239,7 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload inte
 		HookName:  hook.Config.Name,
 		HookType:  hook.Config.Type,
 		Timestamp: time.Now(),
-		Metadata: map[string]interface{}{
+		Metadata: HookMetadata{
 			"priority":    hook.Config.Priority,
 			"retry_count": hook.Config.RetryCount,
 		},
@@ -278,7 +278,7 @@ func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, co
 		outcome = audit.OutcomeFailure
 	}
 
-	details := map[string]interface{}{
+	details := HookMetadata{
 		"hook_name":     event.HookName,
 		"hook_type":     string(event.HookType),
 		"duration_ms":   float64(event.Duration.Microseconds()) / 1000.0,
@@ -310,7 +310,7 @@ func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, co
 	}
 }
 
-func sortedMapKeys(values map[string]interface{}) []string {
+func sortedMapKeys(values HookMetadata) []string {
 	if len(values) == 0 {
 		return nil
 	}
@@ -323,7 +323,7 @@ func sortedMapKeys(values map[string]interface{}) []string {
 }
 
 // TriggerAsync triggers hooks asynchronously.
-func (m *HookManager) TriggerAsync(ctx context.Context, hookType HookType, payload interface{}) error {
+func (m *HookManager) TriggerAsync(ctx context.Context, hookType HookType, payload HookPayload) error {
 	go func() {
 		_, _ = m.Trigger(ctx, hookType, payload)
 	}()
@@ -331,46 +331,46 @@ func (m *HookManager) TriggerAsync(ctx context.Context, hookType HookType, paylo
 }
 
 // HookAfterExec triggers after-exec hooks.
-func (m *HookManager) HookAfterExec(ctx context.Context, payload interface{}) (interface{}, error) {
+func (m *HookManager) HookAfterExec(ctx context.Context, payload HookPayload) (HookResult, error) {
 	return m.Trigger(ctx, HookAfterExec, payload)
 }
 
 // HookRestoreState triggers restore-state hooks.
-func (m *HookManager) HookRestoreState(ctx context.Context, payload interface{}) (interface{}, error) {
+func (m *HookManager) HookRestoreState(ctx context.Context, payload HookPayload) (HookResult, error) {
 	return m.Trigger(ctx, HookRestoreState, payload)
 }
 
 // HookOnUserInputSubmitted triggers user-input-submitted hooks.
-func (m *HookManager) HookOnUserInputSubmitted(ctx context.Context, payload interface{}) (interface{}, error) {
+func (m *HookManager) HookOnUserInputSubmitted(ctx context.Context, payload HookPayload) (HookResult, error) {
 	return m.Trigger(ctx, HookOnUserInputSubmitted, payload)
 }
 
 // HookBeforeTaskExecute triggers before-task-execute hooks.
-func (m *HookManager) HookBeforeTaskExecute(ctx context.Context, payload interface{}) error {
+func (m *HookManager) HookBeforeTaskExecute(ctx context.Context, payload HookPayload) error {
 	_, err := m.Trigger(ctx, HookBeforeTaskExecute, payload)
 	return err
 }
 
 // HookAfterTaskExecute triggers after-task-execute hooks.
-func (m *HookManager) HookAfterTaskExecute(ctx context.Context, payload interface{}) error {
+func (m *HookManager) HookAfterTaskExecute(ctx context.Context, payload HookPayload) error {
 	_, err := m.Trigger(ctx, HookAfterTaskExecute, payload)
 	return err
 }
 
 // HookOnTaskFailure triggers task-failure hooks.
-func (m *HookManager) HookOnTaskFailure(ctx context.Context, payload interface{}) error {
+func (m *HookManager) HookOnTaskFailure(ctx context.Context, payload HookPayload) error {
 	_, err := m.Trigger(ctx, HookOnTaskFailure, payload)
 	return err
 }
 
 // HookOnTaskComplete triggers task-complete hooks.
-func (m *HookManager) HookOnTaskComplete(ctx context.Context, payload interface{}) error {
+func (m *HookManager) HookOnTaskComplete(ctx context.Context, payload HookPayload) error {
 	_, err := m.Trigger(ctx, HookOnTaskComplete, payload)
 	return err
 }
 
 // executeWithRetry executes a hook with retry logic.
-func (m *HookManager) executeWithRetry(ctx context.Context, hook *Hook, payload interface{}) (interface{}, error) {
+func (m *HookManager) executeWithRetry(ctx context.Context, hook *Hook, payload HookPayload) (HookResult, error) {
 	var lastErr error
 	maxRetries := hook.Config.RetryCount
 	if maxRetries < 0 {

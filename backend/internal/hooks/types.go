@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+// HookPayload 表示 Hook 处理的动态输入边界。
+type HookPayload = any
+
+// HookResult 表示 Hook 处理的动态输出边界。
+type HookResult = any
+
+// HookMetadata 表示 Hook 相关元数据。
+type HookMetadata = map[string]any
+
+// HookDetails 表示 Hook 审计/事件详情。
+type HookDetails = map[string]any
+
 // HookType represents the type of hook.
 type HookType string
 
@@ -35,24 +47,24 @@ const (
 
 // ExecResult describes command or tool execution output for after-exec hooks.
 type ExecResult struct {
-	Command       string                 `json:"command"`
-	ExitCode      int                    `json:"exit_code"`
-	Stdout        string                 `json:"stdout,omitempty"`
-	Stderr        string                 `json:"stderr,omitempty"`
-	Timestamp     int64                  `json:"timestamp"`
-	SessionID     string                 `json:"session_id,omitempty"`
-	TaskID        string                 `json:"task_id,omitempty"`
-	AgentID       string                 `json:"agent_id,omitempty"`
-	FilesModified []string               `json:"files_modified,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	Command       string       `json:"command"`
+	ExitCode      int          `json:"exit_code"`
+	Stdout        string       `json:"stdout,omitempty"`
+	Stderr        string       `json:"stderr,omitempty"`
+	Timestamp     int64        `json:"timestamp"`
+	SessionID     string       `json:"session_id,omitempty"`
+	TaskID        string       `json:"task_id,omitempty"`
+	AgentID       string       `json:"agent_id,omitempty"`
+	FilesModified []string     `json:"files_modified,omitempty"`
+	Metadata      HookMetadata `json:"metadata,omitempty"`
 }
 
 // MemoryMatch describes memory retrieval results from user-input hooks.
 type MemoryMatch struct {
-	Content    string                 `json:"content"`
-	Similarity float64                `json:"similarity"`
-	Source     string                 `json:"source"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Content    string       `json:"content"`
+	Similarity float64      `json:"similarity"`
+	Source     string       `json:"source"`
+	Metadata   HookMetadata `json:"metadata,omitempty"`
 }
 
 // HookRuntimeControls controls global hook execution.
@@ -62,31 +74,31 @@ type HookRuntimeControls struct {
 }
 
 // HookFunc is the function signature for hook handlers.
-type HookFunc func(ctx context.Context, payload interface{}) (interface{}, error)
+type HookFunc func(ctx context.Context, payload HookPayload) (HookResult, error)
 
 // HookConfig represents the configuration for a hook.
 type HookConfig struct {
-	Name       string                 `json:"name"`
-	Type       HookType               `json:"type"`
-	Enabled    bool                   `json:"enabled"`
-	Priority   int                    `json:"priority"` // Lower number = higher priority
-	Timeout    time.Duration          `json:"timeout"`
-	RetryCount int                    `json:"retry_count"`
-	Metadata   map[string]interface{} `json:"metadata"`
+	Name       string        `json:"name"`
+	Type       HookType      `json:"type"`
+	Enabled    bool          `json:"enabled"`
+	Priority   int           `json:"priority"` // Lower number = higher priority
+	Timeout    time.Duration `json:"timeout"`
+	RetryCount int           `json:"retry_count"`
+	Metadata   HookMetadata  `json:"metadata"`
 }
 
 // HookEvent represents a hook execution event.
 type HookEvent struct {
-	ID         string                 `json:"id"`
-	HookName   string                 `json:"hook_name"`
-	HookType   HookType               `json:"hook_type"`
-	Timestamp  time.Time              `json:"timestamp"`
-	Duration   time.Duration          `json:"duration"`
-	Success    bool                   `json:"success"`
-	Error      string                 `json:"error,omitempty"`
-	InputSize  int                    `json:"input_size"`
-	OutputSize int                    `json:"output_size"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	ID         string        `json:"id"`
+	HookName   string        `json:"hook_name"`
+	HookType   HookType      `json:"hook_type"`
+	Timestamp  time.Time     `json:"timestamp"`
+	Duration   time.Duration `json:"duration"`
+	Success    bool          `json:"success"`
+	Error      string        `json:"error,omitempty"`
+	InputSize  int           `json:"input_size"`
+	OutputSize int           `json:"output_size"`
+	Metadata   HookMetadata  `json:"metadata,omitempty"`
 }
 
 // Hook represents a registered hook.
@@ -110,13 +122,13 @@ type IHookManager interface {
 	Disable(name string) error
 
 	// Trigger triggers all hooks of a specific type.
-	Trigger(ctx context.Context, hookType HookType, payload interface{}) (interface{}, error)
+	Trigger(ctx context.Context, hookType HookType, payload HookPayload) (HookResult, error)
 
 	// TriggerHook triggers a specific hook by name.
-	TriggerHook(ctx context.Context, name string, payload interface{}) (interface{}, error)
+	TriggerHook(ctx context.Context, name string, payload HookPayload) (HookResult, error)
 
 	// TriggerAsync triggers hooks asynchronously.
-	TriggerAsync(ctx context.Context, hookType HookType, payload interface{}) error
+	TriggerAsync(ctx context.Context, hookType HookType, payload HookPayload) error
 
 	// GetHook returns a hook by name.
 	GetHook(name string) (*Hook, error)
@@ -146,23 +158,23 @@ type IHookManager interface {
 	GetControls() HookRuntimeControls
 
 	// HookAfterExec triggers after-exec hooks.
-	HookAfterExec(ctx context.Context, payload interface{}) (interface{}, error)
+	HookAfterExec(ctx context.Context, payload HookPayload) (HookResult, error)
 
 	// HookRestoreState triggers restore-state hooks.
-	HookRestoreState(ctx context.Context, payload interface{}) (interface{}, error)
+	HookRestoreState(ctx context.Context, payload HookPayload) (HookResult, error)
 
 	// HookOnUserInputSubmitted triggers user-input-submitted hooks.
-	HookOnUserInputSubmitted(ctx context.Context, payload interface{}) (interface{}, error)
+	HookOnUserInputSubmitted(ctx context.Context, payload HookPayload) (HookResult, error)
 
 	// HookBeforeTaskExecute triggers before-task-execute hooks.
-	HookBeforeTaskExecute(ctx context.Context, payload interface{}) error
+	HookBeforeTaskExecute(ctx context.Context, payload HookPayload) error
 
 	// HookAfterTaskExecute triggers after-task-execute hooks.
-	HookAfterTaskExecute(ctx context.Context, payload interface{}) error
+	HookAfterTaskExecute(ctx context.Context, payload HookPayload) error
 
 	// HookOnTaskFailure triggers task-failure hooks.
-	HookOnTaskFailure(ctx context.Context, payload interface{}) error
+	HookOnTaskFailure(ctx context.Context, payload HookPayload) error
 
 	// HookOnTaskComplete triggers task-complete hooks.
-	HookOnTaskComplete(ctx context.Context, payload interface{}) error
+	HookOnTaskComplete(ctx context.Context, payload HookPayload) error
 }
