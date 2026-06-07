@@ -1,5 +1,7 @@
 // --- API Configuration (dynamic port for browser + Tauri sidecar) ---
 
+type TauriWindow = Window & { __TAURI_INTERNALS__?: unknown };
+
 const DEFAULT_PORT = 8080;
 const FALLBACK_PORT = 18080;
 
@@ -95,7 +97,7 @@ export async function initApiBase(): Promise<void> {
   _initialized = true;
 
   // Not in Tauri: auto-detect backend in browser mode.
-  if (typeof window === 'undefined' || !(window as any).__TAURI_INTERNALS__) {
+  if (typeof window === 'undefined' || !(window as TauriWindow).__TAURI_INTERNALS__) {
     await resolveBrowserApiBase();
     return;
   }

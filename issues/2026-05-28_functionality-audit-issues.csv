@@ -69,7 +69,7 @@ P1-004,审查并修复所有数据库资源泄漏风险,审查所有数据库操
 2. 代码风格统一
 3. 符合 Go 最佳实践","1. 现有数据库操作测试通过
 2. 不改变函数的外部行为",AUTOSERVER,backend/internal/project/service.go:1;backend/internal/memory/service.go:1;backend/internal/resource_close_test.go:1,systematic_review: 需要系统性审查所有数据库操作。; picked_reason:P1 中资源泄漏风险可用静态扫描覆盖，且与 P0-004 验证结果可复用; done_at:2026-06-01; evidence:go test ./internal -run TestDatabaseResourcesUseDeferredCloseOrRollback -v -count=1 passed; grep shows rows.Close/stmt.Close/tx.Rollback all use defer; review:all backend/internal database resource close/rollback calls are guarded by defer; risk:low static regression test only,已完成,已完成,已完成,已提交
-P2-001,减少 TypeScript any/unknown 使用,96 个 TS 文件使用 any 或 unknown 类型，降低类型安全性，编译时无法捕获类型错误，代码可维护性下降。,P2,frontend/types,未开始,"1. 使用 grep 统计所有 any/unknown 使用
+P2-001,减少 TypeScript any/unknown 使用,96 个 TS 文件使用 any 或 unknown 类型，降低类型安全性，编译时无法捕获类型错误，代码可维护性下降。,P2,frontend/types,已完成,"1. 使用 grep 统计所有 any/unknown 使用
 2. 按优先级分类（核心模块优先）
 3. 逐步替换 any 为具体类型或泛型
 4. 使用 unknown 替代 any，强制类型检查
@@ -78,7 +78,7 @@ P2-001,减少 TypeScript any/unknown 使用,96 个 TS 文件使用 any 或 unkno
 2. 不使用 any（除非有充分理由）
 3. 代码可读性提升","1. 所有现有测试通过
 2. 不破坏现有功能
-3. 编译无错误",AUTOFRONTEND,packages/core/src/:1;apps/desktop/src/:1,gradual_improvement: 需要逐步改进，优先处理核心模块。,未开始,未开始,未开始,未提交
+3. 编译无错误",AUTOFRONTEND,tsconfig.base.json:8;apps/desktop/tsconfig.json:12;eslint.config.mjs:1;apps/desktop/api.ts:1,gradual_improvement: 需要逐步改进，优先处理核心模块。; picked_reason:剩余 P2 中前端类型问题可先建立 no-explicit-any 防线并修复 apps/desktop API/Tauri 高风险 any，避免一次性修改 120 个文件。; done_at:2026-06-07; validation_limited:pnpm exec tsc and eslint cannot resolve local executables in current environment, so full frontend compile/lint was not run; manual_test:pnpm install --frozen-lockfile, pnpm exec tsc -p apps/desktop/tsconfig.json --noEmit, pnpm exec eslint apps/desktop/api.ts, pnpm typecheck; evidence:apps/desktop explicit any grep returned no matches; tsconfig.base.json and apps/desktop/tsconfig.json strict/noImplicitAny flags validated; eslint.config.mjs includes @typescript-eslint/no-explicit-any warning and ignores generated/dist/node_modules; remaining explicit any count after focused glob is 130 occurrences across 16 packages/core files/tests; review:changed Tauri detection from window as any to typed TauriWindow with unknown internal marker; risk:medium gradual cleanup remains for packages/core any-heavy tests/runtime files,已完成,已完成,已完成,已提交
 P2-002,减少 Go interface{} 使用,Go 代码中 interface{} 使用 503 次，降低类型安全性，建议使用泛型或具体类型替代。,P2,backend/types,未开始,"1. 使用 grep 统计所有 interface{} 使用
 2. 按优先级分类（核心模块优先）
 3. 使用 Go 1.18+ 泛型替代 interface{}（如果适用）
