@@ -10,7 +10,7 @@ COVERAGE_OUT?=coverage.out
 COVERAGE_HTML?=coverage.html
 COVERAGE_PKGS?=./...
 LDFLAGS=-ldflags "-s -w"
-FRONTEND_DIR=../codeflow_template
+FRONTEND_DIR=../apps/desktop
 WEB_DIST_DIR=./internal/web/dist
 
 # Default target
@@ -40,9 +40,9 @@ test-coverage: test
 lint:
 	@echo "Running linter..."
 	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
+	golangci-lint run ./...; \
 	else \
-		echo "golangci-lint not installed. Run: make install-lint"; \
+	echo "golangci-lint not installed. Run: make install-lint"; \
 	fi
 
 # Install golangci-lint
@@ -99,10 +99,16 @@ help:
 	@echo "  dev            - Run in development mode"
 	@echo "  help           - Show this help message"
 
-# Build frontend
+# Build frontend (prefer monorepo pnpm from repo root)
 build-frontend:
 	@echo "Building frontend..."
-	@cd $(FRONTEND_DIR) && npm install && npm run build
+	@if [ -f ../pnpm-workspace.yaml ]; then \
+		cd .. && \
+		if [ ! -d node_modules ]; then pnpm install; fi && \
+		pnpm --filter @codeflow/desktop build; \
+	else \
+		cd $(FRONTEND_DIR) && npm install && npm run build; \
+	fi
 	@echo "Frontend build complete: $(WEB_DIST_DIR)"
 
 # Build all (frontend + backend)

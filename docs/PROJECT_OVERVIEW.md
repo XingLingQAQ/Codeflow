@@ -17,7 +17,7 @@
 
 ## 系统架构
 
-> 当前默认主前端为 `codeflow_template`（React + Tauri 双模式）。`packages/gui` 为历史 GUI 组件资产，`codeflow_extracted` 为迁移中遗留前端，不再作为默认交付入口。
+> 当前默认主前端为 `apps/desktop`（React + Tauri 双模式；历史 `codeflow_template` 已删除）。`packages/gui` 为历史 GUI 组件资产，`codeflow_extracted` 为迁移中遗留前端，不再作为默认交付入口。
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -39,7 +39,7 @@
 
 ### 技术栈
 
-- **前端**：React + TypeScript（默认主前端为 `codeflow_template`，支持浏览器与 Tauri/sidecar 双模式）
+- **前端**：React + TypeScript（默认主前端为 `apps/desktop`，支持浏览器与 Tauri/sidecar 双模式）
 - **后端**：Go 1.23+ (Gin Web Framework)
 - **向量存储**：Chroma / Milvus + SQLite
 - **图谱可视化**：Cytoscape.js + JSON-LD

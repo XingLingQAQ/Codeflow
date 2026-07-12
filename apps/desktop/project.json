@@ -1,23 +1,23 @@
-{
+﻿{
   "name": "desktop",
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "sourceRoot": "codeflow_template",
+  "sourceRoot": "apps/desktop",
   "tags": ["scope:apps", "lang:ts", "platform:desktop"],
   "targets": {
     "dev": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run dev",
-        "cwd": "codeflow_template"
+        "command": "pnpm dev",
+        "cwd": "apps/desktop"
       }
     },
     "build": {
       "executor": "nx:run-commands",
       "dependsOn": ["core:build"],
       "options": {
-        "command": "npm run build",
-        "cwd": "codeflow_template"
+        "command": "pnpm build",
+        "cwd": "apps/desktop"
       },
       "inputs": ["production"],
       "outputs": ["{projectRoot}/dist"]
@@ -25,16 +25,16 @@
     "tauri-dev": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npm run tauri:dev",
-        "cwd": "codeflow_template"
+        "command": "pnpm tauri:dev",
+        "cwd": "apps/desktop"
       }
     },
     "tauri-build": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],
       "options": {
-        "command": "npm run tauri:build",
-        "cwd": "codeflow_template"
+        "command": "pnpm tauri:build",
+        "cwd": "apps/desktop"
       },
       "outputs": ["{projectRoot}/src-tauri/target/release"]
     }

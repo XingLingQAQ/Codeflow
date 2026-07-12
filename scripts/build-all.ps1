@@ -25,19 +25,85 @@ function Copy-DirectoryContents {
 }
 
 function Invoke-FrontendInstall {
-    param([Parameter(Mandatory = $true)][string]$FrontendDir)
+    param(
+        [Parameter(Mandatory = $true)][string]$FrontendDir,
+        [Parameter(Mandatory = $true)][string]$RootDir
+    )
 
-    if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
-        if (Test-Path (Join-Path $FrontendDir 'package-lock.json')) {
-            npm ci
-        }
-        else {
-            npm install
-        }
+    $workspaceYaml = Join-Path $RootDir 'pnpm-workspace.yaml'
+    $rootPkg = Join-Path $RootDir 'package.json'
+    $localNodeModules = Join-Path $FrontendDir 'node_modules'
+    $rootNodeModules = Join-Path $RootDir 'node_modules'
 
+    # Prefer monorepo pnpm install at repo root for apps/desktop
+    if ((Test-Path $workspaceYaml) -and (Test-Path $rootPkg)) {
+        if (-not (Test-Path $rootNodeModules)) {
+            Push-Location $RootDir
+            try {
+                Write-Host "Installing monorepo dependencies via pnpm..."
+                pnpm install
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'Frontend dependency installation failed (pnpm install)'
+                }
+            }
+            finally {
+                Pop-Location
+            }
+        }
+        return
+    }
+
+    if (-not (Test-Path $localNodeModules)) {
+        Push-Location $FrontendDir
+        try {
+            if (Test-Path (Join-Path $FrontendDir 'package-lock.json')) {
+                npm ci
+            }
+            else {
+                npm install
+            }
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Frontend dependency installation failed'
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+}
+
+function Invoke-FrontendBuild {
+    param(
+        [Parameter(Mandatory = $true)][string]$FrontendDir,
+        [Parameter(Mandatory = $true)][string]$RootDir
+    )
+
+    $workspaceYaml = Join-Path $RootDir 'pnpm-workspace.yaml'
+    if (Test-Path $workspaceYaml) {
+        Push-Location $RootDir
+        try {
+            Write-Host "Building frontend with pnpm --filter @codeflow/desktop..."
+            pnpm --filter @codeflow/desktop build
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Frontend build failed'
+            }
+        }
+        finally {
+            Pop-Location
+        }
+        return
+    }
+
+    Push-Location $FrontendDir
+    try {
+        Write-Host "Building frontend with Vite..."
+        npm run build
         if ($LASTEXITCODE -ne 0) {
-            throw 'Frontend dependency installation failed'
+            throw 'Frontend build failed'
         }
+    }
+    finally {
+        Pop-Location
     }
 }
 
@@ -52,33 +118,25 @@ Write-Host "Root directory: $RootDir"
 if (-not $SkipFrontend) {
     Write-Host "`n[1/3] Building frontend..." -ForegroundColor Yellow
 
-    $FrontendDir = Join-Path $RootDir "codeflow_template"
+    $FrontendDir = Join-Path $RootDir "apps\desktop"
     if (-not (Test-Path $FrontendDir)) {
         Write-Error "Frontend directory not found: $FrontendDir"
         exit 1
     }
 
-    Push-Location $FrontendDir
     try {
         Write-Host "Installing frontend dependencies if needed..."
-        Invoke-FrontendInstall -FrontendDir $FrontendDir
-
-        # Build frontend
-        Write-Host "Building frontend with Vite..."
-        npm run build
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Frontend build failed"
-            exit 1
-        }
+        Invoke-FrontendInstall -FrontendDir $FrontendDir -RootDir $RootDir
+        Invoke-FrontendBuild -FrontendDir $FrontendDir -RootDir $RootDir
 
         $FrontendDistDir = Join-Path $FrontendDir "dist"
         $EmbeddedDistDir = Join-Path $RootDir "backend\internal\web\dist"
         Write-Host "Syncing frontend dist to embedded backend assets..."
         Copy-DirectoryContents -Source $FrontendDistDir -Destination $EmbeddedDistDir
     }
-    finally {
-        Pop-Location
+    catch {
+        Write-Error $_
+        exit 1
     }
 
     Write-Host "Frontend build complete!" -ForegroundColor Green

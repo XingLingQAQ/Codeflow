@@ -1,7 +1,0 @@
-{
-  "name": "CodeFlow",
-  "description": "An AI-powered software development workspace featuring chat, semantic memory visualization, agent swarms, and detailed execution planning.",
-  "requestFramePermissions": [
-    "microphone"
-  ]
-}

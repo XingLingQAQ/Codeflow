@@ -33,9 +33,8 @@ jobs:
       - name: Install Root Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Frontend Dependencies
-        working-directory: codeflow_template
-        run: npm ci
+      - name: Verify Desktop App Package
+        run: pnpm --filter @codeflow/desktop exec node -e "console.log('desktop package ready')"
 
       - name: Nx Build (all TS projects)
         run: pnpm exec nx run-many -t build --exclude=backend

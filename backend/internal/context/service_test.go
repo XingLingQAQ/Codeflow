@@ -19,7 +19,7 @@ func TestSQLiteContextServicePresetPersistence(t *testing.T) {
 	req := &PresetCreateRequest{
 		Name:        "frontend core",
 		Description: "主前端上下文",
-		Paths:       []string{"/workspace/codeflow_template", "/workspace/backend"},
+		Paths:       []string{"/workspace/apps/desktop", "/workspace/backend"},
 		Extensions:  []string{"ts", "go"},
 		MaxTokens:   4096,
 	}
@@ -31,7 +31,7 @@ func TestSQLiteContextServicePresetPersistence(t *testing.T) {
 
 	req.Paths[0] = "/mutated"
 	req.Extensions[0] = "md"
-	if created.Paths[0] != "/workspace/codeflow_template" {
+	if created.Paths[0] != "/workspace/apps/desktop" {
 		t.Fatalf("CreatePreset should clone paths, got %v", created.Paths)
 	}
 	if created.Extensions[0] != "ts" {
@@ -71,7 +71,7 @@ func TestSQLiteContextServicePresetPersistence(t *testing.T) {
 	if got.Name != created.Name || got.Description != created.Description || got.MaxTokens != created.MaxTokens {
 		t.Fatalf("preset metadata mismatch: got %+v want %+v", got, *created)
 	}
-	if !reflect.DeepEqual(got.Paths, []string{"/workspace/codeflow_template", "/workspace/backend"}) {
+	if !reflect.DeepEqual(got.Paths, []string{"/workspace/apps/desktop", "/workspace/backend"}) {
 		t.Fatalf("preset paths mismatch: got %v", got.Paths)
 	}
 	if !reflect.DeepEqual(got.Extensions, []string{"ts", "go"}) {

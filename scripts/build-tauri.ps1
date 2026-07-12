@@ -9,22 +9,52 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BackendDir = Join-Path $ProjectRoot "backend"
-$FrontendDir = Join-Path $ProjectRoot "codeflow_template"
+$FrontendDir = Join-Path $ProjectRoot "apps\desktop"
 $BinariesDir = Join-Path $FrontendDir "src-tauri\binaries"
 
 function Invoke-FrontendInstall {
-    param([Parameter(Mandatory = $true)][string]$FrontendDir)
+    param(
+        [Parameter(Mandatory = $true)][string]$FrontendDir,
+        [Parameter(Mandatory = $true)][string]$RootDir
+    )
+
+    $workspaceYaml = Join-Path $RootDir 'pnpm-workspace.yaml'
+    $rootPkg = Join-Path $RootDir 'package.json'
+    $rootNodeModules = Join-Path $RootDir 'node_modules'
+
+    if ((Test-Path $workspaceYaml) -and (Test-Path $rootPkg)) {
+        if (-not (Test-Path $rootNodeModules)) {
+            Push-Location $RootDir
+            try {
+                Write-Host "  Installing monorepo dependencies via pnpm..."
+                pnpm install
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'Frontend dependency installation failed (pnpm install)'
+                }
+            }
+            finally {
+                Pop-Location
+            }
+        }
+        return
+    }
 
     if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
-        if (Test-Path (Join-Path $FrontendDir 'package-lock.json')) {
-            npm ci
-        }
-        else {
-            npm install
-        }
+        Push-Location $FrontendDir
+        try {
+            if (Test-Path (Join-Path $FrontendDir 'package-lock.json')) {
+                npm ci
+            }
+            else {
+                npm install
+            }
 
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Frontend dependency installation failed'
+            if ($LASTEXITCODE -ne 0) {
+                throw 'Frontend dependency installation failed'
+            }
+        }
+        finally {
+            Pop-Location
         }
     }
 }
@@ -201,7 +231,7 @@ try {
     # Step 2: Install frontend dependencies
     Write-Host "`n[2/3] Installing frontend dependencies..." -ForegroundColor Yellow
     Set-Location $FrontendDir
-    Invoke-FrontendInstall -FrontendDir $FrontendDir
+    Invoke-FrontendInstall -FrontendDir $FrontendDir -RootDir $ProjectRoot
     Write-Host "  [OK] Frontend dependencies ready" -ForegroundColor Green
 
     # Step 3: Build Tauri Application
@@ -210,11 +240,18 @@ try {
         exit 1
     }
 
-    npm run tauri:build
+    if (Test-Path (Join-Path $ProjectRoot 'pnpm-workspace.yaml')) {
+        Set-Location $ProjectRoot
+        pnpm --filter @codeflow/desktop tauri:build
+    }
+    else {
+        Set-Location $FrontendDir
+        npm run tauri:build
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [ERROR] Tauri build failed!" -ForegroundColor Red
         Write-Host '  If the failure still mentions vswhom-sys or LNK1143, the previous build may have mixed GNU and MSVC artifacts.' -ForegroundColor Yellow
-        Write-Host '  Retry after cleaning Rust build artifacts: cargo clean --manifest-path codeflow_template/src-tauri/Cargo.toml' -ForegroundColor Yellow
+        Write-Host '  Retry after cleaning Rust build artifacts: cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml' -ForegroundColor Yellow
         exit 1
     }
     Write-Host "  [OK] Tauri application built successfully" -ForegroundColor Green

@@ -7,7 +7,7 @@
 | Nx 项目名 | 物理路径 | 逻辑归类 | 类型 | 状态 |
 |-----------|---------|---------|------|------|
 | `backend` | `backend/` | `apps/backend` | application | Active |
-| `desktop` | `codeflow_template/` | `apps/desktop` | application | Active |
+| `desktop` | `apps/desktop/` | `apps/desktop` | application | Active |
 | `core` | `packages/core/` | `libs/core` | library | Active |
 | `shared` | `packages/shared/` | `libs/shared` | library | Active |
 | `cli` | `packages/cli/` | `apps/cli` | application | Active |
@@ -19,7 +19,7 @@
 ### Active（继续主线维护）
 
 - `backend` — Go 后端，含 embed 嵌入式构建
-- `codeflow_template` — 唯一默认主前端（React + Tauri）
+- `apps/desktop` — 唯一默认主前端（React + Tauri；`codeflow_template` 已于 PR-3 删除）
 - `packages/core` — 核心库，被 E2E 和 desktop 依赖
 - `packages/shared` — 共享类型
 - `packages/cli` — CLI 工具
@@ -29,7 +29,7 @@
 
 - `packages/gui` — 标记为 `gui-legacy`，不再作为默认产品前端或主入口
 - `backend/internal/web/dist` — embed 输入路径，禁止在前期迁移
-- `codeflow_template/src-tauri/binaries` — sidecar 输出/输入路径，禁止在前期迁移
+- `apps/desktop/src-tauri/binaries` — sidecar 输出/输入路径，禁止在前期迁移
 
 ### Freeze → Archive（已完成）
 
@@ -42,12 +42,12 @@
 
 | 绑定点 | 文件 | 当前值 |
 |--------|------|--------|
-| Go embed | `backend/internal/web/embed.go:6` | `//go:embed dist/*` |
-| Tauri frontendDist | `codeflow_template/src-tauri/tauri.conf.json:10` | `"../dist"` |
-| Tauri sidecar | `codeflow_template/src-tauri/tauri.conf.json:27` | `"binaries/codeflow-server"` |
-| Makefile frontend dir | `backend/Makefile:7` | `FRONTEND_DIR=../codeflow_template` |
+| Go embed | `backend/internal/web/static.go` | `//go:embed all:dist` |
+| Tauri frontendDist | `apps/desktop/src-tauri/tauri.conf.json` | `"../dist"` |
+| Tauri sidecar | `apps/desktop/src-tauri/tauri.conf.json` | `"binaries/codeflow-server"` |
+| Makefile frontend dir | `backend/Makefile` | `FRONTEND_DIR=../apps/desktop` |
 | Makefile web dist | `backend/Makefile:8` | `WEB_DIST_DIR=./internal/web/dist` |
-| E2E dev cwd | `scripts/test-all-e2e.mjs:11` | `path.resolve(repoRoot, 'codeflow_template')` |
+| E2E dev cwd | `scripts/test-all-e2e.mjs` | 默认 `CODEFLOW_DEV_CWD=apps/desktop` |
 
 ## CGO 语义差异
 

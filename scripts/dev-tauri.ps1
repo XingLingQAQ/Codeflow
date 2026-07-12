@@ -9,7 +9,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BackendDir = Join-Path $ProjectRoot "backend"
-$FrontendDir = Join-Path $ProjectRoot "codeflow_template"
+$FrontendDir = Join-Path $ProjectRoot "apps\desktop"
 $BinariesDir = Join-Path $FrontendDir "src-tauri\binaries"
 
 # Step 1: Build Go Backend (dev mode)
@@ -29,8 +29,34 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  [OK] Go backend built" -ForegroundColor Green
 
-# Step 2: Start Tauri dev mode
+# Step 2: Ensure monorepo deps, then start Tauri dev mode
 Write-Host "`n[2/2] Starting Tauri dev mode..." -ForegroundColor Yellow
-Set-Location $FrontendDir
-
-npm run tauri dev
+if (Test-Path (Join-Path $ProjectRoot 'pnpm-workspace.yaml')) {
+    if (-not (Test-Path (Join-Path $ProjectRoot 'node_modules'))) {
+        Set-Location $ProjectRoot
+        Write-Host "  Installing monorepo dependencies via pnpm..."
+        pnpm install
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [ERROR] pnpm install failed!" -ForegroundColor Red
+            exit 1
+        }
+    }
+    Set-Location $ProjectRoot
+    pnpm --filter @codeflow/desktop tauri:dev
+}
+else {
+    Set-Location $FrontendDir
+    if (-not (Test-Path (Join-Path $FrontendDir 'node_modules'))) {
+        if (Test-Path (Join-Path $FrontendDir 'package-lock.json')) {
+            npm ci
+        }
+        else {
+            npm install
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [ERROR] npm install failed!" -ForegroundColor Red
+            exit 1
+        }
+    }
+    npm run tauri dev
+}

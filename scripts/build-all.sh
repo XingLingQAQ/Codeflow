@@ -9,17 +9,6 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 OUTPUT_DIR="${1:-./dist}"
 SKIP_FRONTEND="${2:-false}"
 
-install_frontend_deps() {
-    local frontend_dir="$1"
-    if [ ! -d "$frontend_dir/node_modules" ]; then
-        if [ -f "$frontend_dir/package-lock.json" ]; then
-            npm ci
-        else
-            npm install
-        fi
-    fi
-}
-
 sync_frontend_dist() {
     local source_dir="$1"
     local target_dir="$2"
@@ -34,6 +23,45 @@ sync_frontend_dist() {
     cp -R "$source_dir"/. "$target_dir"/
 }
 
+install_frontend_deps() {
+    local root_dir="$1"
+    local frontend_dir="$2"
+
+    # Prefer monorepo pnpm install at repo root for apps/desktop
+    if [ -f "$root_dir/pnpm-workspace.yaml" ] && [ -f "$root_dir/package.json" ]; then
+        if [ ! -d "$root_dir/node_modules" ]; then
+            echo "Installing monorepo dependencies via pnpm..."
+            (cd "$root_dir" && pnpm install)
+        fi
+        return 0
+    fi
+
+    if [ ! -d "$frontend_dir/node_modules" ]; then
+        (
+            cd "$frontend_dir"
+            if [ -f package-lock.json ]; then
+                npm ci
+            else
+                npm install
+            fi
+        )
+    fi
+}
+
+build_frontend() {
+    local root_dir="$1"
+    local frontend_dir="$2"
+
+    if [ -f "$root_dir/pnpm-workspace.yaml" ]; then
+        echo "Building frontend with pnpm --filter @codeflow/desktop..."
+        (cd "$root_dir" && pnpm --filter @codeflow/desktop build)
+        return 0
+    fi
+
+    echo "Building frontend with Vite..."
+    (cd "$frontend_dir" && npm run build)
+}
+
 echo "=== CodeFlow Build Script ==="
 echo "Root directory: $ROOT_DIR"
 
@@ -41,20 +69,15 @@ echo "Root directory: $ROOT_DIR"
 if [ "$SKIP_FRONTEND" != "true" ]; then
     echo -e "\n[1/3] Building frontend..."
 
-    FRONTEND_DIR="$ROOT_DIR/codeflow_template"
+    FRONTEND_DIR="$ROOT_DIR/apps/desktop"
     if [ ! -d "$FRONTEND_DIR" ]; then
         echo "Error: Frontend directory not found: $FRONTEND_DIR"
         exit 1
     fi
 
-    cd "$FRONTEND_DIR"
-
     echo "Installing frontend dependencies if needed..."
-    install_frontend_deps "$FRONTEND_DIR"
-
-    # Build frontend
-    echo "Building frontend with Vite..."
-    npm run build
+    install_frontend_deps "$ROOT_DIR" "$FRONTEND_DIR"
+    build_frontend "$ROOT_DIR" "$FRONTEND_DIR"
 
     FRONTEND_DIST_DIR="$FRONTEND_DIR/dist"
     EMBEDDED_DIST_DIR="$ROOT_DIR/backend/internal/web/dist"

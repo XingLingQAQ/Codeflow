@@ -31,10 +31,6 @@ jobs:
       - name: Install Root Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Frontend Dependencies
-        working-directory: codeflow_template
-        run: npm ci
-
       - name: Build @codeflow/core dist
         run: pnpm --filter @codeflow/core build
 
@@ -47,8 +43,8 @@ jobs:
           CODEFLOW_AUTOSTART_DEV_SERVER: "true"
           CODEFLOW_RUN_REAL_USER: "false"
           CODEFLOW_HEADLESS: "true"
-          CODEFLOW_DEV_PM: "npm"
-          CODEFLOW_DEV_CWD: codeflow_template
+          CODEFLOW_DEV_PM: "pnpm"
+          CODEFLOW_DEV_CWD: apps/desktop
         run: pnpm run test:e2e:all
 
       - name: Upload Artifacts
