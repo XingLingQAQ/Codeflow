@@ -27,6 +27,8 @@
     "build:workbench": "pnpm --filter @codeflow/workbench build",
     "dev:desktop": "pnpm --filter @codeflow/workbench dev",
     "build:desktop": "pnpm --filter @codeflow/workbench build",
+    "smoke:embed": "node scripts/smoke-embed.mjs",
+    "smoke:embed:build": "node scripts/smoke-embed.mjs --build",
     "tauri:dev": "pnpm --filter @codeflow/workbench tauri:dev",
     "tauri:build": "pnpm --filter @codeflow/workbench tauri:build"
   },

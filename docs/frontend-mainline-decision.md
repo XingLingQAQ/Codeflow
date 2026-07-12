@@ -50,7 +50,7 @@
 
 - 不重命名 Tauri `productName` / identifier / sidecar `codeflow-server`
 - 不重组为 `apps/workbench/src/{shell,stages,...}`（M1）
-- 不启动 PR-4 Snapshot 真 restore / M0.3 embed smoke（可并行后续）
+- 不启动 PR-4 Snapshot 真 restore（可并行后续）
 
 ---
 
@@ -95,7 +95,7 @@
 - [x] `.github/workflows/e2e-smoke.yml`、`nx-ci.yml` → `apps/workbench` / `@codeflow/workbench`
 - [x] 文档与主线裁决中 template「默认入口」描述已清零/改绑（PR-2）；**`codeflow_template` 物理目录已删除（PR-3）**
 - [x] **G01 rename**：`apps/desktop` → `apps/workbench`，`@codeflow/workbench`，Nx `workbench`
-- [ ] 嵌入同步：`apps/workbench/dist` → `backend/internal/web/dist`，与 `static.go` 一致（M0.3）
+- [x] **M0.3 嵌入同步 smoke**：`apps/workbench/dist` → `backend/internal/web/dist`，与 `static.go` 一致；`pnpm smoke:embed` / `scripts/smoke-embed.mjs`；`Makefile` `build-frontend` 同步 dist
 
 ### 已与 monorepo 一致（保持）
 
@@ -135,6 +135,8 @@ pnpm build:workbench
 # 兼容别名（等同 workbench）
 pnpm dev:desktop
 pnpm build:desktop
+pnpm smoke:embed
+pnpm smoke:embed:build   # optional rebuild + sync
 pnpm tauri:dev
 pnpm tauri:build
 # E2E 默认 cwd = apps/workbench
@@ -168,10 +170,20 @@ pnpm tauri:build
 - Go 单测 fixture 路径字符串已中性化（后随 G01 更新为 `apps/workbench`）
 - 回滚 template：远程 `origin/master` 提交 `44fa821`
 
-### 残留（至 M0.3+）
+### 已完成（M0.3，2026-07-12）
 
-- embed 同步 smoke（`apps/workbench/dist` → `backend/internal/web/dist`，`static.go`）仍待 M0.3
+- `backend/Makefile` `build-frontend`：构建 `@codeflow/workbench` 后同步 `apps/workbench/dist` → `backend/internal/web/dist`，并校验 `index.html`
+- `build-all` 在 Go 编译前校验 embed dist 存在
+- Node smoke：`scripts/smoke-embed.mjs`（`pnpm smoke:embed` / `smoke:embed:build`）——**不依赖本机 Go**
+- PowerShell smoke：`scripts/smoke-embed.ps1`（可选 `go build ./internal/web`）
+- 嵌入入口仍为 `backend/internal/web/static.go`（`//go:embed all:dist`）；`backend/internal/web/dist` 为生成物（gitignore）
+
+### 残留（M0 后续）
+
+- M0.8：summarize 单包方案
+- M0.9：CGO/SQLite ADR
 - M1：`src/` 目录重组（shell/workbench/stages/ui 等）
+- PR-4：Snapshot 真 restore（与 M1 可并行设计）
 
 ---
 
@@ -179,7 +191,7 @@ pnpm tauri:build
 
 | 里程碑 | 前端主线动作 |
 | --- | --- |
-| M0 | 修订本裁决；路径重绑；删除 template；G01 rename → workbench；建立 feature-parity-matrix |
+| M0 | 修订本裁决；路径重绑；删除 template；G01 rename → workbench；M0.3 embed smoke；建立 feature-parity-matrix |
 | M1 | `apps/workbench/src/` 重组（shell/workbench/stages/ui）；App Shell + Flow Rail |
 | M2+ | 阶段画布与 floweng 对接；禁止再引入第二产品前端树 |
 
@@ -212,3 +224,4 @@ pnpm tauri:build
 | 2026-07-11 | **PR-2 收尾**：本地 `pnpm --filter @codeflow/desktop build` 通过；pnpm 11 `allowBuilds`；失效 `onlyBuiltDependencies` 移除；embed 仍待 M0.3 |
 | 2026-07-12 | **PR-3**：删除 `codeflow_template` 物理双树；Go fixture 改 `apps/desktop`；残留段改为已删除；回滚依赖远程 `44fa821` 历史（无本地 pre-delete tag） |
 | 2026-07-12 | **G01**：`apps/desktop` → `apps/workbench`，`@codeflow/workbench`，Nx `workbench`；兼容 `dev:desktop`/`build:desktop` 别名；本文件结论与证据全面同步；残留仅 M0.3 embed |
+| 2026-07-12 | **M0.3**：Makefile `build-frontend` 同步 embed dist；新增 `scripts/smoke-embed.mjs` / `.ps1` 与 `pnpm smoke:embed`；Node 路径 smoke 通过（本机无 Go 时跳过 compile smoke）；清单勾选 M0.3；残留改为 M0.8/M0.9/M1/PR-4 |

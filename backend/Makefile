@@ -87,7 +87,7 @@ help:
 	@echo "  all            - Run lint, test, and build (default)"
 	@echo "  build          - Build the application"
 	@echo "  build-all      - Build frontend + backend (single exe)"
-	@echo "  build-frontend - Build frontend only"
+	@echo "  build-frontend - Build frontend and sync embed dist"
 	@echo "  test           - Run tests"
 	@echo "  test-coverage  - Run tests with coverage report"
 	@echo "  lint           - Run golangci-lint"
@@ -99,7 +99,7 @@ help:
 	@echo "  dev            - Run in development mode"
 	@echo "  help           - Show this help message"
 
-# Build frontend (prefer monorepo pnpm from repo root)
+# Build frontend (prefer monorepo pnpm from repo root) and sync to embed path
 build-frontend:
 	@echo "Building frontend..."
 	@if [ -f ../pnpm-workspace.yaml ]; then \
@@ -109,12 +109,25 @@ build-frontend:
 	else \
 		cd $(FRONTEND_DIR) && npm install && npm run build; \
 	fi
+	@echo "Syncing frontend dist to $(WEB_DIST_DIR)..."
+	@if [ ! -d $(FRONTEND_DIR)/dist ]; then \
+		echo "Error: Frontend dist not found: $(FRONTEND_DIR)/dist"; \
+		exit 1; \
+	fi
+	@rm -rf $(WEB_DIST_DIR)
+	@mkdir -p $(WEB_DIST_DIR)
+	@cp -R $(FRONTEND_DIR)/dist/. $(WEB_DIST_DIR)/
+	@test -f $(WEB_DIST_DIR)/index.html
 	@echo "Frontend build complete: $(WEB_DIST_DIR)"
 
-# Build all (frontend + backend)
+# Build all (frontend + backend with embedded assets)
 build-all: build-frontend
 	@echo "Building $(BINARY_NAME) with embedded frontend..."
 	@mkdir -p $(BUILD_DIR)
+	@if [ ! -d $(WEB_DIST_DIR) ] || [ ! -f $(WEB_DIST_DIR)/index.html ]; then \
+		echo "Error: Embed dist missing at $(WEB_DIST_DIR). Run make build-frontend first."; \
+		exit 1; \
+	fi
 	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME).exe $(MAIN_PATH)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME).exe"
 	@echo "Run with: $(BUILD_DIR)/$(BINARY_NAME).exe"
