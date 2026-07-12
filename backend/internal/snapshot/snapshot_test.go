@@ -707,3 +707,319 @@ func TestSnapshotEmptyRecoverableRestoreSucceeds(t *testing.T) {
 		}
 	}
 }
+
+
+func TestSnapshotTrueRestoreConversation(t *testing.T) {
+	ctx := context.Background()
+	prevAgent := agent.GetAgentService()
+	agentSvc := agent.NewInMemoryAgentService()
+	agent.SetAgentService(agentSvc)
+	t.Cleanup(func() { agent.SetAgentService(prevAgent) })
+
+	sessionID := "snap-restore-conversation"
+	created, err := agentSvc.CreateAgent(ctx, &agent.AgentCreateRequest{
+		Name:      "main-restore",
+		Role:      agent.RoleMain,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent failed: %v", err)
+	}
+	traceID := agentSvc.StartTrace(sessionID, created.ID, "seed_tool", map[string]interface{}{"q": "seed"})
+	agentSvc.EndTrace(traceID, "seed-output", "completed")
+
+	provider := NewDefaultStateProvider()
+	token, err := provider.CaptureConversationState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("CaptureConversationState failed: %v", err)
+	}
+	assertRecoverableToken(t, "conversation", token)
+
+	// Mutate conversation away from seed.
+	mutated, err := agentSvc.CreateAgent(ctx, &agent.AgentCreateRequest{
+		Name:      "mutated-agent",
+		Role:      agent.RoleCoder,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("mutate CreateAgent failed: %v", err)
+	}
+	mutTraceID := agentSvc.StartTrace(sessionID, mutated.ID, "mut_tool", map[string]interface{}{"q": "mutated"})
+	agentSvc.EndTrace(mutTraceID, "mutated-output", "completed")
+
+	if err := provider.RestoreConversationState(ctx, token); err != nil {
+		t.Fatalf("RestoreConversationState failed: %v", err)
+	}
+
+	restored, err := agentSvc.GetConversationTrace(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetConversationTrace after restore failed: %v", err)
+	}
+	if restored == nil {
+		t.Fatal("expected restored conversation trace, got nil")
+	}
+	if restored.SessionID != sessionID {
+		t.Fatalf("session id mismatch: got %s, want %s", restored.SessionID, sessionID)
+	}
+	if restored.Trace == nil {
+		t.Fatal("expected restored root trace")
+	}
+	if restored.Trace.ToolName != "seed_tool" {
+		t.Fatalf("expected seed_tool, got %q", restored.Trace.ToolName)
+	}
+	if restored.Trace.Output != "seed-output" {
+		t.Fatalf("expected seed-output, got %q", restored.Trace.Output)
+	}
+
+	foundMain := false
+	for _, a := range restored.Agents {
+		if a.Name == "mutated-agent" {
+			t.Fatalf("mutated agent should not remain after restore: %+v", restored.Agents)
+		}
+		if a.Name == "main-restore" || a.Role == agent.RoleMain {
+			foundMain = true
+		}
+	}
+	if !foundMain {
+		t.Fatalf("expected seed main agent after restore, got %+v", restored.Agents)
+	}
+}
+
+func TestSnapshotTrueRestoreVector(t *testing.T) {
+	ctx := context.Background()
+	prevMem := memory.GetMemoryService()
+	memSvc := memory.NewInMemoryService()
+	memory.SetMemoryService(memSvc)
+	t.Cleanup(func() { memory.SetMemoryService(prevMem) })
+
+	sessionID := "snap-restore-vector"
+	seed, err := memSvc.Create(ctx, &memory.MemoryItemCreateRequest{
+		Content:   "seed memory content",
+		Type:      memory.MemoryTypeSTM,
+		SessionID: sessionID,
+		Source:    memory.SourceUser,
+		Tags:      []string{"seed"},
+	})
+	if err != nil {
+		t.Fatalf("seed Create failed: %v", err)
+	}
+
+	provider := NewDefaultStateProvider()
+	token, err := provider.CaptureVectorState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("CaptureVectorState failed: %v", err)
+	}
+	assertRecoverableToken(t, "vector", token)
+
+	// Mutate session memory away from seed.
+	if _, err := memSvc.Create(ctx, &memory.MemoryItemCreateRequest{
+		Content:   "mutated memory content",
+		Type:      memory.MemoryTypeSTM,
+		SessionID: sessionID,
+		Source:    memory.SourceAssistant,
+		Tags:      []string{"mutated"},
+	}); err != nil {
+		t.Fatalf("mutate Create failed: %v", err)
+	}
+
+	if err := provider.RestoreVectorState(ctx, token); err != nil {
+		t.Fatalf("RestoreVectorState failed: %v", err)
+	}
+
+	listed, err := memSvc.List(ctx, &memory.MemoryListOptions{SessionID: sessionID, Limit: 100})
+	if err != nil {
+		t.Fatalf("List after restore failed: %v", err)
+	}
+	if listed == nil || listed.Total != 1 || len(listed.Items) != 1 {
+		t.Fatalf("expected exactly one restored item, got total=%d items=%+v", listed.Total, listed.Items)
+	}
+	item := listed.Items[0]
+	if item.ID != seed.ID {
+		t.Fatalf("expected seed id %s, got %s", seed.ID, item.ID)
+	}
+	if item.Content != "seed memory content" {
+		t.Fatalf("expected seed content restored, got %q", item.Content)
+	}
+	if strings.Contains(item.Content, "mutated") {
+		t.Fatalf("mutated content should not remain: %q", item.Content)
+	}
+	for _, tag := range item.Tags {
+		if tag == "mutated" {
+			t.Fatalf("mutated tag should not remain: %+v", item.Tags)
+		}
+	}
+}
+
+func TestSnapshotTrueRestoreMultiKindE2E(t *testing.T) {
+	ctx := context.Background()
+
+	prevAgent := agent.GetAgentService()
+	prevMem := memory.GetMemoryService()
+	prevGraph := samg.GetSAMGService()
+	agentSvc := agent.NewInMemoryAgentService()
+	memSvc := memory.NewInMemoryService()
+	graphSvc := samg.NewSAMGService(nil)
+	agent.SetAgentService(agentSvc)
+	memory.SetMemoryService(memSvc)
+	samg.SetSAMGService(graphSvc)
+	t.Cleanup(func() {
+		agent.SetAgentService(prevAgent)
+		memory.SetMemoryService(prevMem)
+		samg.SetSAMGService(prevGraph)
+	})
+
+	sessionID := "snap-restore-e2e"
+
+	// Seed conversation.
+	ag, err := agentSvc.CreateAgent(ctx, &agent.AgentCreateRequest{
+		Name:      "e2e-main",
+		Role:      agent.RoleMain,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent failed: %v", err)
+	}
+	tid := agentSvc.StartTrace(sessionID, ag.ID, "e2e_seed", map[string]interface{}{"k": "v"})
+	agentSvc.EndTrace(tid, "e2e-seed-out", "completed")
+
+	// Seed vector/memory.
+	if _, err := memSvc.Create(ctx, &memory.MemoryItemCreateRequest{
+		Content:   "e2e seed memory",
+		Type:      memory.MemoryTypeSTM,
+		SessionID: sessionID,
+		Source:    memory.SourceUser,
+		Tags:      []string{"e2e-seed"},
+	}); err != nil {
+		t.Fatalf("memory Create failed: %v", err)
+	}
+
+	// Seed graph.
+	seedTriple := samg.Triple{
+		ID:         samg.GenerateTripleID("entity:e2e-a", samg.Predicates.RelatedTo, "entity:e2e-b"),
+		Subject:    samg.CreateNode("entity:e2e-a", samg.EntityTypes.Concept, "E2E-A"),
+		Predicate:  samg.Predicates.RelatedTo,
+		Object:     samg.CreateNodeObject(samg.CreateNode("entity:e2e-b", samg.EntityTypes.Concept, "E2E-B")),
+		Confidence: 0.95,
+		Timestamp:  time.Now().UnixMilli(),
+		Source: samg.TripleSource{
+			SessionID:        sessionID,
+			ExtractionMethod: samg.ExtractionUser,
+		},
+	}
+	if _, err := graphSvc.ImportGraph(ctx, &samg.JsonLdGraph{
+		Context: samg.JsonLdContext{Vocab: "https://codeflow.ai/vocab/"},
+		ID:      "codeflow:samg",
+		Type:    "Graph",
+		Graph:   []samg.Triple{seedTriple},
+	}); err != nil {
+		t.Fatalf("ImportGraph failed: %v", err)
+	}
+
+	// Capture full snapshot via service (uses default provider → real modules).
+	snapSvc := NewInMemorySnapshotService()
+	snap, err := snapSvc.Create(ctx, &SnapshotCreateRequest{
+		Description: "multi-kind e2e",
+		SessionID:   sessionID,
+		Tags:        []string{"pr-5", "e2e"},
+	})
+	if err != nil {
+		t.Fatalf("Create snapshot failed: %v", err)
+	}
+	assertRecoverableToken(t, "conversation", snap.ConversationState)
+	assertRecoverableToken(t, "vector", snap.VectorPointer)
+	assertRecoverableToken(t, "graph", snap.MemoryGraphVersion)
+
+	// Mutate all three kinds.
+	mutAg, err := agentSvc.CreateAgent(ctx, &agent.AgentCreateRequest{
+		Name:      "e2e-mutated",
+		Role:      agent.RoleCoder,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatalf("mutate CreateAgent failed: %v", err)
+	}
+	mutTid := agentSvc.StartTrace(sessionID, mutAg.ID, "e2e_mut", map[string]interface{}{"k": "mut"})
+	agentSvc.EndTrace(mutTid, "e2e-mut-out", "completed")
+
+	if _, err := memSvc.Create(ctx, &memory.MemoryItemCreateRequest{
+		Content:   "e2e mutated memory",
+		Type:      memory.MemoryTypeSTM,
+		SessionID: sessionID,
+		Source:    memory.SourceAssistant,
+		Tags:      []string{"e2e-mut"},
+	}); err != nil {
+		t.Fatalf("mutate memory Create failed: %v", err)
+	}
+
+	mutTriple := samg.Triple{
+		ID:         samg.GenerateTripleID("entity:e2e-mut", samg.Predicates.RelatedTo, "entity:e2e-other"),
+		Subject:    samg.CreateNode("entity:e2e-mut", samg.EntityTypes.Concept, "E2E-Mut"),
+		Predicate:  samg.Predicates.RelatedTo,
+		Object:     samg.CreateNodeObject(samg.CreateNode("entity:e2e-other", samg.EntityTypes.Concept, "E2E-Other")),
+		Confidence: 0.4,
+		Timestamp:  time.Now().UnixMilli(),
+		Source: samg.TripleSource{
+			SessionID:        sessionID,
+			ExtractionMethod: samg.ExtractionUser,
+		},
+	}
+	if _, err := graphSvc.ReplaceGraph(ctx, &samg.JsonLdGraph{
+		Context: samg.JsonLdContext{Vocab: "https://codeflow.ai/vocab/"},
+		ID:      "codeflow:samg",
+		Type:    "Graph",
+		Graph:   []samg.Triple{mutTriple},
+	}); err != nil {
+		t.Fatalf("mutate ReplaceGraph failed: %v", err)
+	}
+
+	// Full service restore.
+	result, err := snapSvc.Restore(ctx, snap.ID)
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+	if !result.ConversationRestored || !result.VectorRestored || !result.MemoryGraphRestored {
+		t.Fatalf("expected conversation/vector/graph restored, got %+v", result)
+	}
+	for _, e := range result.Errors {
+		if strings.Contains(e, "conversation") || strings.Contains(e, "vector") || strings.Contains(e, "memory graph") {
+			t.Fatalf("unexpected state restore errors: %v", result.Errors)
+		}
+	}
+
+	// Assert conversation restored.
+	conv, err := agentSvc.GetConversationTrace(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetConversationTrace failed: %v", err)
+	}
+	if conv == nil || conv.Trace == nil || conv.Trace.ToolName != "e2e_seed" {
+		t.Fatalf("conversation not restored to seed: %+v", conv)
+	}
+	for _, a := range conv.Agents {
+		if a.Name == "e2e-mutated" {
+			t.Fatalf("mutated conversation agent still present: %+v", conv.Agents)
+		}
+	}
+
+	// Assert vector restored.
+	memList, err := memSvc.List(ctx, &memory.MemoryListOptions{SessionID: sessionID, Limit: 100})
+	if err != nil {
+		t.Fatalf("memory List failed: %v", err)
+	}
+	if memList.Total != 1 || len(memList.Items) != 1 || memList.Items[0].Content != "e2e seed memory" {
+		t.Fatalf("vector not restored to seed: %+v", memList)
+	}
+
+	// Assert graph restored.
+	graph, err := graphSvc.ExportGraph(ctx)
+	if err != nil {
+		t.Fatalf("ExportGraph failed: %v", err)
+	}
+	raw, _ := json.Marshal(graph)
+	body := string(raw)
+	if !strings.Contains(body, "entity:e2e-a") {
+		t.Fatalf("graph missing seed entity: %s", body)
+	}
+	if strings.Contains(body, "entity:e2e-mut") {
+		t.Fatalf("mutated graph entity still present: %s", body)
+	}
+}
