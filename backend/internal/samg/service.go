@@ -39,6 +39,8 @@ type ISAMGService interface {
 	// 图谱操作
 	ExportGraph(ctx context.Context) (*JsonLdGraph, error)
 	ImportGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error)
+	// ReplaceGraph clears the current graph and imports the provided snapshot payload (true restore).
+	ReplaceGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error)
 	GetStats(ctx context.Context) (*SAMGStats, error)
 
 	// 指针操作
@@ -256,6 +258,18 @@ func (s *SAMGService) ImportGraph(ctx context.Context, graph *JsonLdGraph) (*Imp
 	return s.store.ImportGraph(ctx, graph)
 }
 
+// ReplaceGraph clears the current graph and imports the provided snapshot payload.
+// Empty/nil graph is treated as a successful clear (true restore to empty).
+func (s *SAMGService) ReplaceGraph(ctx context.Context, graph *JsonLdGraph) (*ImportGraphResult, error) {
+	if err := s.store.Clear(ctx); err != nil {
+		return nil, fmt.Errorf("clear graph before restore: %w", err)
+	}
+	if graph == nil {
+		return &ImportGraphResult{}, nil
+	}
+	return s.store.ImportGraph(ctx, graph)
+}
+
 // GetStats 获取统计信息
 func (s *SAMGService) GetStats(ctx context.Context) (*SAMGStats, error) {
 	graphStats, err := s.store.GetStats(ctx)
@@ -267,9 +281,9 @@ func (s *SAMGService) GetStats(ctx context.Context) (*SAMGStats, error) {
 		GraphStats: graphStats,
 		DecayStats: s.decay.GetStats(),
 		ExtractorInfo: map[string]interface{}{
-			"min_confidence":   s.extractor.config.MinConfidence,
-			"max_triples":      s.extractor.config.MaxTriplesPerExtraction,
-			"rule_based":       s.extractor.config.EnableRuleBasedExtraction,
+			"min_confidence": s.extractor.config.MinConfidence,
+			"max_triples":    s.extractor.config.MaxTriplesPerExtraction,
+			"rule_based":     s.extractor.config.EnableRuleBasedExtraction,
 		},
 	}, nil
 }

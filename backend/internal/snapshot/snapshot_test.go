@@ -3,13 +3,17 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/codeflow/backend/internal/agent"
 	backendgit "github.com/codeflow/backend/internal/git"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/memory"
+	"github.com/codeflow/backend/internal/samg"
 )
 
 func TestSnapshotCreate(t *testing.T) {
@@ -372,14 +376,27 @@ func TestSnapshotCreateUsesRealGitHash(t *testing.T) {
 	if snapshot.GitHash != head {
 		t.Fatalf("expected git hash %s, got %s", head, snapshot.GitHash)
 	}
-	if !strings.HasPrefix(snapshot.ConversationState, "conversation:") {
-		t.Fatalf("expected conversation digest prefix, got %s", snapshot.ConversationState)
+	assertRecoverableToken(t, "conversation", snapshot.ConversationState)
+	assertRecoverableToken(t, "vector", snapshot.VectorPointer)
+	assertRecoverableToken(t, "graph", snapshot.MemoryGraphVersion)
+}
+
+func assertRecoverableToken(t *testing.T, kind, raw string) {
+	t.Helper()
+	if strings.TrimSpace(raw) == "" {
+		t.Fatalf("expected non-empty %s state token", kind)
 	}
-	if !strings.HasPrefix(snapshot.VectorPointer, "vector:") {
-		t.Fatalf("expected vector digest prefix, got %s", snapshot.VectorPointer)
+	if strings.HasPrefix(raw, kind+":") && !strings.HasPrefix(strings.TrimSpace(raw), "{") {
+		t.Fatalf("expected recoverable JSON token for %s, got legacy digest %s", kind, raw)
 	}
-	if !strings.HasPrefix(snapshot.MemoryGraphVersion, "graph:") {
-		t.Fatalf("expected graph digest prefix, got %s", snapshot.MemoryGraphVersion)
+	if !strings.Contains(raw, `"schema_version"`) {
+		t.Fatalf("expected schema_version in %s token, got %s", kind, raw)
+	}
+	if !strings.Contains(raw, `"kind":"`+kind+`"`) && !strings.Contains(raw, `"kind": "`+kind+`"`) {
+		// encodeRecoverable always sets kind without spaces
+		if !strings.Contains(raw, `"kind":"`+kind+`"`) {
+			t.Fatalf("expected kind=%s in token, got %s", kind, raw)
+		}
 	}
 }
 
@@ -544,5 +561,149 @@ func TestSnapshotGlobalServiceCompatibility(t *testing.T) {
 	SetSnapshotService(custom)
 	if GetSnapshotService() != custom {
 		t.Fatal("expected injected snapshot service")
+	}
+}
+
+func TestSnapshotTrueRestoreGraph(t *testing.T) {
+	ctx := context.Background()
+
+	// Isolate SAMG global service for this test.
+	prev := samg.GetSAMGService()
+	svcGraph := samg.NewSAMGService(nil)
+	samg.SetSAMGService(svcGraph)
+	t.Cleanup(func() { samg.SetSAMGService(prev) })
+
+	// Seed graph via real Triple types (ImportGraph expects []Triple).
+	seedTriple := samg.Triple{
+		ID:         samg.GenerateTripleID("entity:alice", samg.Predicates.RelatedTo, "entity:bob"),
+		Subject:    samg.CreateNode("entity:alice", samg.EntityTypes.Concept, "Alice"),
+		Predicate:  samg.Predicates.RelatedTo,
+		Object:     samg.CreateNodeObject(samg.CreateNode("entity:bob", samg.EntityTypes.Concept, "Bob")),
+		Confidence: 0.9,
+		Timestamp:  time.Now().UnixMilli(),
+		Source: samg.TripleSource{
+			SessionID:        "snap-restore-graph",
+			ExtractionMethod: samg.ExtractionUser,
+		},
+	}
+	seed := &samg.JsonLdGraph{
+		Context: samg.JsonLdContext{Vocab: "https://codeflow.ai/vocab/"},
+		ID:      "codeflow:samg",
+		Type:    "Graph",
+		Graph:   []samg.Triple{seedTriple},
+	}
+	if _, err := svcGraph.ImportGraph(ctx, seed); err != nil {
+		t.Fatalf("seed ImportGraph failed: %v", err)
+	}
+
+	provider := NewDefaultStateProvider()
+	token, err := provider.CaptureMemoryGraphState(ctx)
+	if err != nil {
+		t.Fatalf("CaptureMemoryGraphState failed: %v", err)
+	}
+	assertRecoverableToken(t, "graph", token)
+
+	// Mutate graph away from seed.
+	mutatedTriple := samg.Triple{
+		ID:         samg.GenerateTripleID("entity:mutated", samg.Predicates.RelatedTo, "entity:other"),
+		Subject:    samg.CreateNode("entity:mutated", samg.EntityTypes.Concept, "Mutated"),
+		Predicate:  samg.Predicates.RelatedTo,
+		Object:     samg.CreateNodeObject(samg.CreateNode("entity:other", samg.EntityTypes.Concept, "Other")),
+		Confidence: 0.5,
+		Timestamp:  time.Now().UnixMilli(),
+		Source: samg.TripleSource{
+			SessionID:        "snap-restore-graph",
+			ExtractionMethod: samg.ExtractionUser,
+		},
+	}
+	mutated := &samg.JsonLdGraph{
+		Context: samg.JsonLdContext{Vocab: "https://codeflow.ai/vocab/"},
+		ID:      "codeflow:samg",
+		Type:    "Graph",
+		Graph:   []samg.Triple{mutatedTriple},
+	}
+	if _, err := svcGraph.ReplaceGraph(ctx, mutated); err != nil {
+		t.Fatalf("mutate ReplaceGraph failed: %v", err)
+	}
+
+	// Restore from captured token.
+	if err := provider.RestoreMemoryGraphState(ctx, token); err != nil {
+		t.Fatalf("RestoreMemoryGraphState failed: %v", err)
+	}
+
+	restored, err := svcGraph.ExportGraph(ctx)
+	if err != nil {
+		t.Fatalf("ExportGraph after restore failed: %v", err)
+	}
+	if restored == nil || len(restored.Graph) == 0 {
+		t.Fatalf("expected restored graph non-empty, got %#v", restored)
+	}
+
+	// Ensure seed entity is back and mutated entity is gone.
+	raw, _ := json.Marshal(restored)
+	body := string(raw)
+	if !strings.Contains(body, "entity:alice") {
+		t.Fatalf("restored graph missing seed content: %s", body)
+	}
+	if strings.Contains(body, "entity:mutated") {
+		t.Fatalf("mutated entity should not remain after restore: %s", body)
+	}
+}
+
+func TestSnapshotLegacyDigestNotRestorable(t *testing.T) {
+	ctx := context.Background()
+	provider := NewDefaultStateProvider()
+
+	cases := []struct {
+		name string
+		fn   func() error
+	}{
+		{"conversation", func() error { return provider.RestoreConversationState(ctx, "conversation:deadbeef") }},
+		{"vector", func() error { return provider.RestoreVectorState(ctx, "vector:cafebabe") }},
+		{"graph", func() error { return provider.RestoreMemoryGraphState(ctx, "graph:0123456789abcdef") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.fn()
+			if err == nil {
+				t.Fatalf("expected error for legacy %s digest token", tc.name)
+			}
+			if !errors.Is(err, ErrNotRestorable) && !strings.Contains(err.Error(), "not restorable") {
+				t.Fatalf("expected ErrNotRestorable for %s, got %v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestSnapshotEmptyRecoverableRestoreSucceeds(t *testing.T) {
+	ctx := context.Background()
+	// Fresh isolated services so empty capture is truly empty.
+	agent.SetAgentService(agent.NewInMemoryAgentService())
+	memory.SetMemoryService(memory.NewInMemoryService())
+	samg.SetSAMGService(samg.NewSAMGService(nil))
+
+	svc := NewInMemorySnapshotService()
+	snap, err := svc.Create(ctx, &SnapshotCreateRequest{Description: "empty recoverable", SessionID: "s-empty"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	assertRecoverableToken(t, "conversation", snap.ConversationState)
+	assertRecoverableToken(t, "vector", snap.VectorPointer)
+	assertRecoverableToken(t, "graph", snap.MemoryGraphVersion)
+
+	result, err := svc.Restore(ctx, snap.ID)
+	if err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+	if !result.ConversationRestored || !result.VectorRestored || !result.MemoryGraphRestored {
+		t.Fatalf("expected conversation/vector/graph restored true, got %+v", result)
+	}
+	if len(result.Errors) != 0 {
+		// Git may still succeed (no-op without env); other errors not expected.
+		for _, e := range result.Errors {
+			if strings.Contains(e, "conversation") || strings.Contains(e, "vector") || strings.Contains(e, "memory graph") {
+				t.Fatalf("unexpected state restore errors: %v", result.Errors)
+			}
+		}
 	}
 }

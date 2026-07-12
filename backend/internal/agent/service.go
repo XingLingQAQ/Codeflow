@@ -4,6 +4,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -142,6 +143,8 @@ type IAgentService interface {
 	GetConversationTrace(ctx context.Context, sessionID string) (*ConversationTraceResponse, error)
 	StopConversation(ctx context.Context, sessionID string) error
 	RetryConversation(ctx context.Context, sessionID string) error
+	// RestoreConversationTrace replaces session conversation + agents + traces from a captured snapshot.
+	RestoreConversationTrace(ctx context.Context, sessionID string, trace *ConversationTraceResponse) error
 
 	// 内部方法
 	RegisterAgent(agent *Agent)
@@ -512,6 +515,103 @@ func (s *InMemoryAgentService) EndTrace(traceID string, output string, status st
 		trace.Status = status
 		trace.EndTime = time.Now().UnixMilli()
 		trace.Duration = trace.EndTime - trace.StartTime
+	}
+}
+
+// RestoreConversationTrace restores agents, conversation, and traces for a session from a snapshot payload.
+func (s *InMemoryAgentService) RestoreConversationTrace(ctx context.Context, sessionID string, trace *ConversationTraceResponse) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" && trace != nil {
+		sessionID = strings.TrimSpace(trace.SessionID)
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id is empty")
+	}
+
+	// Drop prior session-scoped agents/logs/conversations that belong to this session.
+	if old, ok := s.conversations[sessionID]; ok {
+		for _, agentID := range old.AgentIDs {
+			delete(s.agents, agentID)
+			delete(s.logs, agentID)
+		}
+		delete(s.conversations, sessionID)
+	}
+	for id, a := range s.agents {
+		if a != nil && a.SessionID == sessionID {
+			delete(s.agents, id)
+			delete(s.logs, id)
+		}
+	}
+	for id, tr := range s.traces {
+		if tr != nil && tr.SessionID == sessionID {
+			delete(s.traces, id)
+		}
+	}
+
+	if trace == nil {
+		return nil
+	}
+
+	now := time.Now().Unix()
+	agentIDs := make([]string, 0, len(trace.Agents))
+	for _, a := range trace.Agents {
+		ag := a
+		if strings.TrimSpace(ag.ID) == "" {
+			ag.ID = uuid.New().String()
+		}
+		ag.SessionID = sessionID
+		if ag.StartedAt == 0 {
+			ag.StartedAt = now
+		}
+		if ag.LastActiveAt == 0 {
+			ag.LastActiveAt = now
+		}
+		s.agents[ag.ID] = &ag
+		if _, ok := s.logs[ag.ID]; !ok {
+			s.logs[ag.ID] = make([]*AgentLog, 0)
+		}
+		agentIDs = append(agentIDs, ag.ID)
+	}
+
+	var root *CallTrace
+	if trace.Trace != nil {
+		copied := *trace.Trace
+		copied.SessionID = sessionID
+		root = &copied
+		registerTraceTree(s.traces, root, sessionID)
+	}
+
+	s.conversations[sessionID] = &Conversation{
+		ID:           uuid.New().String(),
+		SessionID:    sessionID,
+		Status:       "active",
+		StartedAt:    now,
+		UpdatedAt:    now,
+		AgentIDs:     agentIDs,
+		TraceRoot:    root,
+		MessageCount: 0,
+	}
+	return nil
+}
+
+func registerTraceTree(traces map[string]*CallTrace, node *CallTrace, sessionID string) {
+	if node == nil {
+		return
+	}
+	if strings.TrimSpace(node.ID) == "" {
+		node.ID = uuid.New().String()
+	}
+	node.SessionID = sessionID
+	traces[node.ID] = node
+	for _, child := range node.Children {
+		if child == nil {
+			continue
+		}
+		child.ParentID = node.ID
+		registerTraceTree(traces, child, sessionID)
 	}
 }
 

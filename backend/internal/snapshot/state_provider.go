@@ -2,8 +2,6 @@ package snapshot
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -15,8 +13,9 @@ import (
 )
 
 // StateProvider captures and restores the external state that composes a snapshot.
-// The default provider captures real observable state and keeps restore non-destructive
-// unless a safer module-specific restore implementation is injected.
+// Capture produces recoverable JSON tokens (schema_version=1). Restore performs true
+// module-specific recovery. Legacy digest-only tokens are rejected with ErrNotRestorable.
+// Git hard reset remains opt-in via CODEFLOW_SNAPSHOT_ENABLE_GIT_RESTORE=true.
 type StateProvider interface {
 	CaptureGitState(ctx context.Context) (string, error)
 	CaptureConversationState(ctx context.Context, sessionID string) (string, error)
@@ -37,6 +36,20 @@ func NewDefaultStateProvider() StateProvider {
 	return &defaultStateProvider{gitManager: backendgit.NewGitManager(".")}
 }
 
+type conversationStatePayload struct {
+	SessionID string                           `json:"session_id"`
+	Trace     *agent.ConversationTraceResponse `json:"trace,omitempty"`
+}
+
+type vectorStatePayload struct {
+	SessionID string              `json:"session_id"`
+	Items     []memory.MemoryItem `json:"items"`
+}
+
+type graphStatePayload struct {
+	Graph *samg.JsonLdGraph `json:"graph"`
+}
+
 func (p *defaultStateProvider) CaptureGitState(ctx context.Context) (string, error) {
 	hash, err := p.gitManager.GetCurrentHash(ctx)
 	if err != nil {
@@ -46,14 +59,15 @@ func (p *defaultStateProvider) CaptureGitState(ctx context.Context) (string, err
 }
 
 func (p *defaultStateProvider) CaptureConversationState(ctx context.Context, sessionID string) (string, error) {
-	if strings.TrimSpace(sessionID) == "" {
-		return digestState("conversation", map[string]string{"session_id": ""}), nil
+	payload := conversationStatePayload{SessionID: strings.TrimSpace(sessionID)}
+	if payload.SessionID != "" {
+		trace, err := agent.GetAgentService().GetConversationTrace(ctx, payload.SessionID)
+		if err != nil {
+			return "", fmt.Errorf("capture conversation trace: %w", err)
+		}
+		payload.Trace = trace
 	}
-	trace, err := agent.GetAgentService().GetConversationTrace(ctx, sessionID)
-	if err != nil {
-		return "", fmt.Errorf("capture conversation trace: %w", err)
-	}
-	return digestState("conversation", trace), nil
+	return encodeRecoverable("conversation", payload)
 }
 
 func (p *defaultStateProvider) CaptureVectorState(ctx context.Context, sessionID string) (string, error) {
@@ -61,23 +75,24 @@ func (p *defaultStateProvider) CaptureVectorState(ctx context.Context, sessionID
 	if err != nil {
 		return "", fmt.Errorf("capture memory vector pointer: %w", err)
 	}
-	return digestState("vector", resp), nil
+	items := []memory.MemoryItem{}
+	if resp != nil {
+		items = resp.Items
+	}
+	payload := vectorStatePayload{
+		SessionID: strings.TrimSpace(sessionID),
+		Items:     items,
+	}
+	return encodeRecoverable("vector", payload)
 }
 
 func (p *defaultStateProvider) CaptureMemoryGraphState(ctx context.Context) (string, error) {
 	svc := samg.GetSAMGService()
-	stats, err := svc.GetStats(ctx)
-	if err != nil {
-		return "", fmt.Errorf("capture samg stats: %w", err)
-	}
 	graph, err := svc.ExportGraph(ctx)
 	if err != nil {
 		return "", fmt.Errorf("capture samg graph: %w", err)
 	}
-	return digestState("graph", struct {
-		Stats interface{} `json:"stats"`
-		Graph interface{} `json:"graph"`
-	}{Stats: stats, Graph: graph}), nil
+	return encodeRecoverable("graph", graphStatePayload{Graph: graph})
 }
 
 func (p *defaultStateProvider) RestoreGitState(ctx context.Context, gitHash string) error {
@@ -91,32 +106,49 @@ func (p *defaultStateProvider) RestoreGitState(ctx context.Context, gitHash stri
 }
 
 func (p *defaultStateProvider) RestoreConversationState(ctx context.Context, state string) error {
-	return validateStateToken("conversation", state)
+	rec, err := parseRecoverableState("conversation", state)
+	if err != nil {
+		return err
+	}
+	payload, err := decodePayload[conversationStatePayload](rec)
+	if err != nil {
+		return err
+	}
+	// Empty capture (no session / no trace) is a successful no-op restore.
+	if payload.Trace == nil && strings.TrimSpace(payload.SessionID) == "" {
+		return nil
+	}
+	trace := payload.Trace
+	if trace == nil {
+		trace = &agent.ConversationTraceResponse{SessionID: payload.SessionID}
+	}
+	if strings.TrimSpace(trace.SessionID) == "" {
+		trace.SessionID = payload.SessionID
+	}
+	return agent.GetAgentService().RestoreConversationTrace(ctx, trace.SessionID, trace)
 }
 
 func (p *defaultStateProvider) RestoreVectorState(ctx context.Context, pointer string) error {
-	return validateStateToken("vector", pointer)
+	rec, err := parseRecoverableState("vector", pointer)
+	if err != nil {
+		return err
+	}
+	payload, err := decodePayload[vectorStatePayload](rec)
+	if err != nil {
+		return err
+	}
+	return memory.GetMemoryService().ReplaceItems(ctx, payload.SessionID, payload.Items)
 }
 
 func (p *defaultStateProvider) RestoreMemoryGraphState(ctx context.Context, version string) error {
-	return validateStateToken("graph", version)
-}
-
-func digestState(prefix string, data interface{}) string {
-	raw, err := json.Marshal(data)
+	rec, err := parseRecoverableState("graph", version)
 	if err != nil {
-		raw = []byte(fmt.Sprintf("%#v", data))
+		return err
 	}
-	sum := sha256.Sum256(raw)
-	return fmt.Sprintf("%s:%x", prefix, sum[:12])
-}
-
-func validateStateToken(prefix, value string) error {
-	if strings.TrimSpace(value) == "" {
-		return fmt.Errorf("%s state is empty", prefix)
+	payload, err := decodePayload[graphStatePayload](rec)
+	if err != nil {
+		return err
 	}
-	if !strings.HasPrefix(value, prefix+":") {
-		return fmt.Errorf("invalid %s state token", prefix)
-	}
-	return nil
+	_, err = samg.GetSAMGService().ReplaceGraph(ctx, payload.Graph)
+	return err
 }

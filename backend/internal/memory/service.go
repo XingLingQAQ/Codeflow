@@ -4,6 +4,7 @@ package memory
 import (
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,9 @@ type IMemoryService interface {
 
 	// Batch operations
 	RefreshHeatScores(ctx context.Context) error
+
+	// ReplaceItems replaces session-scoped (or all, if sessionID empty) memory items with the provided set.
+	ReplaceItems(ctx context.Context, sessionID string, items []MemoryItem) error
 }
 
 // InMemoryService 内存实现的记忆服务 (用于开发/测试)
@@ -247,6 +251,47 @@ func (s *InMemoryService) RefreshHeatScores(ctx context.Context) error {
 }
 
 // 全局服务实例
+
+// ReplaceItems replaces memory items for a session (or all items if sessionID is empty).
+// Used by snapshot true restore for vector/memory state.
+func (s *InMemoryService) ReplaceItems(ctx context.Context, sessionID string, items []MemoryItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		s.items = make(map[string]*MemoryItem)
+	} else {
+		for id, item := range s.items {
+			if item != nil && item.SessionID == sessionID {
+				delete(s.items, id)
+			}
+		}
+	}
+
+	if items == nil {
+		return nil
+	}
+	for i := range items {
+		item := items[i]
+		if strings.TrimSpace(item.ID) == "" {
+			item.ID = uuid.New().String()
+		}
+		if sessionID != "" {
+			item.SessionID = sessionID
+		}
+		if item.Status == "" {
+			item.Status = MemoryStatusActive
+		}
+		if item.Type == "" {
+			item.Type = MemoryTypeSTM
+		}
+		copied := item
+		s.items[copied.ID] = &copied
+	}
+	return nil
+}
+
 var defaultMemoryService IMemoryService
 
 // GetMemoryService 获取记忆服务实例
