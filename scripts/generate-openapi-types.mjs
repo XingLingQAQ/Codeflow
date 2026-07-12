@@ -3,7 +3,7 @@ import path from 'path';
 import { repoRoot } from './_shared/runtime.mjs';
 
 const openapiPath = path.resolve(repoRoot, 'backend/docs/openapi.yaml');
-const outputPath = path.resolve(repoRoot, 'apps/desktop/generated/openapi-types.ts');
+const outputPath = path.resolve(repoRoot, 'apps/workbench/generated/openapi-types.ts');
 const source = fs.readFileSync(openapiPath, 'utf8');
 const lines = source.split(/\r?\n/);
 

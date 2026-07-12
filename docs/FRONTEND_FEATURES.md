@@ -1,10 +1,10 @@
 # CodeFlow 前端功能清单
 
-> 说明：当前默认产品前端已裁决为 `apps/desktop`（`@codeflow/desktop`；历史 `codeflow_template` 已于 PR-3 删除）。本文档记录的是 `packages/gui` 历史组件资产，不再代表默认浏览器、E2E、Tauri 或交付入口。
+> 说明：当前默认产品前端已裁决为 `apps/workbench`（`@codeflow/workbench`；历史 `codeflow_template` 已于 PR-3 删除；G01 已 rename desktop→workbench）。本文档记录的是 `packages/gui` 历史组件资产，不再代表默认浏览器、E2E、Tauri 或交付入口。
 
 ## 概述
 
-本文档覆盖的历史 GUI 组件资产基于 **React + TypeScript** 构建，主要沉淀在 `packages/gui`。当前默认产品前端为 `apps/desktop`，它承接浏览器与 Tauri/sidecar 双模式工作台。
+本文档覆盖的历史 GUI 组件资产基于 **React + TypeScript** 构建，主要沉淀在 `packages/gui`。当前默认产品前端为 `apps/workbench`，它承接浏览器与 Tauri/sidecar 双模式工作台。
 
 ---
 

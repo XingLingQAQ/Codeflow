@@ -44,7 +44,7 @@ jobs:
           CODEFLOW_RUN_REAL_USER: "false"
           CODEFLOW_HEADLESS: "true"
           CODEFLOW_DEV_PM: "pnpm"
-          CODEFLOW_DEV_CWD: apps/desktop
+          CODEFLOW_DEV_CWD: apps/workbench
         run: pnpm run test:e2e:all
 
       - name: Upload Artifacts

@@ -35,7 +35,7 @@ function Invoke-FrontendInstall {
     $localNodeModules = Join-Path $FrontendDir 'node_modules'
     $rootNodeModules = Join-Path $RootDir 'node_modules'
 
-    # Prefer monorepo pnpm install at repo root for apps/desktop
+    # Prefer monorepo pnpm install at repo root for apps/workbench
     if ((Test-Path $workspaceYaml) -and (Test-Path $rootPkg)) {
         if (-not (Test-Path $rootNodeModules)) {
             Push-Location $RootDir
@@ -82,8 +82,8 @@ function Invoke-FrontendBuild {
     if (Test-Path $workspaceYaml) {
         Push-Location $RootDir
         try {
-            Write-Host "Building frontend with pnpm --filter @codeflow/desktop..."
-            pnpm --filter @codeflow/desktop build
+            Write-Host "Building frontend with pnpm --filter @codeflow/workbench..."
+            pnpm --filter @codeflow/workbench build
             if ($LASTEXITCODE -ne 0) {
                 throw 'Frontend build failed'
             }
@@ -118,7 +118,7 @@ Write-Host "Root directory: $RootDir"
 if (-not $SkipFrontend) {
     Write-Host "`n[1/3] Building frontend..." -ForegroundColor Yellow
 
-    $FrontendDir = Join-Path $RootDir "apps\desktop"
+    $FrontendDir = Join-Path $RootDir "apps\workbench"
     if (-not (Test-Path $FrontendDir)) {
         Write-Error "Frontend directory not found: $FrontendDir"
         exit 1

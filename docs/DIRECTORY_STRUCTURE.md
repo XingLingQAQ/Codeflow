@@ -1,6 +1,6 @@
 # CodeFlow 目录结构说明
 
-> 最后更新：2026-05-27
+> 最后更新：2026-07-12
 > 版本：2.0（重构后）
 
 ## 📁 项目结构概览
@@ -8,13 +8,13 @@
 ```
 CodeFlow/
 ├── apps/                      # 应用层（Monorepo Apps）
-│   └── desktop/              # 桌面应用（React + Tauri）
+│   └── workbench/            # 工作台应用（React + Tauri；G01 自 desktop 更名）
 │       ├── src/              # 前端源码
 │       ├── src-tauri/        # Tauri 配置与 Rust 代码
 │       ├── components/       # UI 组件
 │       ├── hooks/            # React Hooks
 │       ├── adapters/         # 适配器
-│       └── package.json      # @codeflow/desktop
+│       └── package.json      # @codeflow/workbench
 │
 ├── packages/                  # 共享包层（Monorepo Packages）
 │   ├── core/                 # 核心逻辑层
@@ -91,10 +91,10 @@ CodeFlow/
 
 ### 应用层（apps/）
 
-**apps/desktop** - 桌面应用
+**apps/workbench** - 工作台应用（React + Tauri）
 - **技术栈**：React 19 + TypeScript 5.8 + Tauri 2 + Vite 6
 - **职责**：CodeFlow 桌面客户端，支持浏览器与 Tauri 双模式
-- **包名**：`@codeflow/desktop`
+- **包名**：`@codeflow/workbench`
 - **启动命令**：
   ```bash
   pnpm dev:desktop      # Web 开发模式
@@ -131,7 +131,7 @@ CodeFlow/
 #### packages/ui-components - UI 组件库（历史资产）
 - **职责**：历史 GUI 组件库，不再作为默认前端
 - **包名**：`@codeflow/ui-components`
-- **状态**：维护模式，新功能在 `apps/desktop` 开发
+- **状态**：维护模式，新功能在 `apps/workbench` 开发
 
 #### packages/shared - 共享工具库
 - **职责**：跨包共享的工具函数与类型定义
@@ -170,7 +170,7 @@ CodeFlow/
 
 **变更内容**：
 1. ✅ 新增 `apps/` 目录，区分"应用"与"包"
-2. ✅ `codeflow_template` → `apps/desktop`（明确桌面应用身份）
+2. ✅ `codeflow_template` → `apps/desktop` → `apps/workbench`（G01；明确工作台身份）
 3. ✅ `packages/gui` → `packages/ui-components`（明确组件库定位）
 4. ✅ `archive` → `.archive/legacy`（隐藏归档）
 5. ✅ 清理 5 个 `.tmp_codeflow_review*` → `.archive/reviews/`
@@ -189,7 +189,7 @@ CodeFlow/
 ## 📦 包依赖关系
 
 ```
-apps/desktop
+apps/workbench
   └── @codeflow/core
       ├── @anthropic-ai/sdk
       ├── @google/generative-ai
@@ -245,7 +245,7 @@ pnpm tauri:dev
 pnpm tauri:build
 
 # 预览构建
-pnpm --filter @codeflow/desktop preview
+pnpm --filter @codeflow/workbench preview
 ```
 
 ### 后端命令

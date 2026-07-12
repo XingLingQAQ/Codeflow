@@ -9,7 +9,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BackendDir = Join-Path $ProjectRoot "backend"
-$FrontendDir = Join-Path $ProjectRoot "apps\desktop"
+$FrontendDir = Join-Path $ProjectRoot "apps\workbench"
 $BinariesDir = Join-Path $FrontendDir "src-tauri\binaries"
 
 function Invoke-FrontendInstall {
@@ -242,7 +242,7 @@ try {
 
     if (Test-Path (Join-Path $ProjectRoot 'pnpm-workspace.yaml')) {
         Set-Location $ProjectRoot
-        pnpm --filter @codeflow/desktop tauri:build
+        pnpm --filter @codeflow/workbench tauri:build
     }
     else {
         Set-Location $FrontendDir
@@ -251,7 +251,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [ERROR] Tauri build failed!" -ForegroundColor Red
         Write-Host '  If the failure still mentions vswhom-sys or LNK1143, the previous build may have mixed GNU and MSVC artifacts.' -ForegroundColor Yellow
-        Write-Host '  Retry after cleaning Rust build artifacts: cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml' -ForegroundColor Yellow
+        Write-Host '  Retry after cleaning Rust build artifacts: cargo clean --manifest-path apps/workbench/src-tauri/Cargo.toml' -ForegroundColor Yellow
         exit 1
     }
     Write-Host "  [OK] Tauri application built successfully" -ForegroundColor Green

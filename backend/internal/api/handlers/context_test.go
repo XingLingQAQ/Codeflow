@@ -62,7 +62,7 @@ func TestContextPresetLifecycleAPI(t *testing.T) {
 	createBody := map[string]any{
 		"name":        "core preset",
 		"description": "context api preset",
-		"paths":       []string{"backend", "apps/desktop"},
+		"paths":       []string{"backend", "apps/workbench"},
 		"extensions":  []string{"go", "ts"},
 		"max_tokens":  2048,
 	}
@@ -87,7 +87,7 @@ func TestContextPresetLifecycleAPI(t *testing.T) {
 	assert.Equal(t, 1, listed.Total)
 	assert.Len(t, listed.Presets, 1)
 	assert.Equal(t, created.ID, listed.Presets[0].ID)
-	assert.Equal(t, []string{"backend", "apps/desktop"}, listed.Presets[0].Paths)
+	assert.Equal(t, []string{"backend", "apps/workbench"}, listed.Presets[0].Paths)
 
 	deleteReq, _ := http.NewRequest("DELETE", "/api/v1/context/presets/"+created.ID, nil)
 	deleteResp := httptest.NewRecorder()

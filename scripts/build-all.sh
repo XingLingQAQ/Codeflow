@@ -27,7 +27,7 @@ install_frontend_deps() {
     local root_dir="$1"
     local frontend_dir="$2"
 
-    # Prefer monorepo pnpm install at repo root for apps/desktop
+    # Prefer monorepo pnpm install at repo root for apps/workbench
     if [ -f "$root_dir/pnpm-workspace.yaml" ] && [ -f "$root_dir/package.json" ]; then
         if [ ! -d "$root_dir/node_modules" ]; then
             echo "Installing monorepo dependencies via pnpm..."
@@ -53,8 +53,8 @@ build_frontend() {
     local frontend_dir="$2"
 
     if [ -f "$root_dir/pnpm-workspace.yaml" ]; then
-        echo "Building frontend with pnpm --filter @codeflow/desktop..."
-        (cd "$root_dir" && pnpm --filter @codeflow/desktop build)
+        echo "Building frontend with pnpm --filter @codeflow/workbench..."
+        (cd "$root_dir" && pnpm --filter @codeflow/workbench build)
         return 0
     fi
 
@@ -69,7 +69,7 @@ echo "Root directory: $ROOT_DIR"
 if [ "$SKIP_FRONTEND" != "true" ]; then
     echo -e "\n[1/3] Building frontend..."
 
-    FRONTEND_DIR="$ROOT_DIR/apps/desktop"
+    FRONTEND_DIR="$ROOT_DIR/apps/workbench"
     if [ ! -d "$FRONTEND_DIR" ]; then
         echo "Error: Frontend directory not found: $FRONTEND_DIR"
         exit 1

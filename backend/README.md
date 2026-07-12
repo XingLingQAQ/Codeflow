@@ -75,7 +75,7 @@ pnpm generate:api-types
 pnpm check:api-types
 ```
 
-Generated TypeScript contract types are written to `apps/desktop/generated/openapi-types.ts` and are checked in CI.
+Generated TypeScript contract types are written to `apps/workbench/generated/openapi-types.ts` and are checked in CI.
 
 ### Quick API Examples
 

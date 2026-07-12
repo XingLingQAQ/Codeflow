@@ -10,7 +10,7 @@ COVERAGE_OUT?=coverage.out
 COVERAGE_HTML?=coverage.html
 COVERAGE_PKGS?=./...
 LDFLAGS=-ldflags "-s -w"
-FRONTEND_DIR=../apps/desktop
+FRONTEND_DIR=../apps/workbench
 WEB_DIST_DIR=./internal/web/dist
 
 # Default target
@@ -105,7 +105,7 @@ build-frontend:
 	@if [ -f ../pnpm-workspace.yaml ]; then \
 		cd .. && \
 		if [ ! -d node_modules ]; then pnpm install; fi && \
-		pnpm --filter @codeflow/desktop build; \
+		pnpm --filter @codeflow/workbench build; \
 	else \
 		cd $(FRONTEND_DIR) && npm install && npm run build; \
 	fi

@@ -13,7 +13,7 @@
 
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
-| G01 | 单一前端主线 | ⚠️ | **PR-3 后**：物理双树已删；工具链/Nx/CI 仅 `apps/desktop` | 仅 rename `apps/desktop`→`workbench` | M0 | **2026-07-12 PR-3**：`codeflow_template` 已删除；Go fixture 已中性化；G01 仍 ⚠️ 因目标目录名 workbench 未更名 |
+| G01 | 单一前端主线 | ✅ | **G01 后**：唯一主线 `apps/workbench` / `@codeflow/workbench`；物理无 `apps/desktop` / `codeflow_template` | 保持单树；禁止再引入第二前端 | M0 | **2026-07-12 G01**：rename `apps/desktop`→`apps/workbench`；兼容 `dev:desktop`/`build:desktop` 别名；Nx tag `platform:desktop` 保留（平台语义） |
 | G02 | 文档 SSOT（design/plans/adr） | ⚠️ | 部分散落；mainline 曾过期 | docs 三分法 + ADR | M0 | |
 | G03 | 本矩阵持续跟踪 | ✅ | 本文档 | 每里程碑更新 | M0 | |
 | G30 | CGO / SQLite 基线决策 | ⚠️ | go-sqlite3 + CGO=1 | ADR 决策 | M0 | 落地可后置 |
@@ -108,3 +108,4 @@
 | 2026-07-11 | G01 备注补强：App.tsx 同 SHA + Nx project.json 错误绑定证据（与 2.0 计划第二轮复核对齐） |
 | 2026-07-11 | **PR-2**：工具链改绑 `apps/desktop`；G01 备注更新（双树残留 → 仍 ⚠️，待 PR-3） |
 | 2026-07-12 | **PR-3**：删除 `codeflow_template`；G01 现状改为物理双树已删，仍 ⚠️ 至 rename workbench |
+| 2026-07-12 | **G01**：rename `apps/desktop`→`apps/workbench`；G01 → ✅ |

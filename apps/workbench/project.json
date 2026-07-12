@@ -1,15 +1,15 @@
-﻿{
-  "name": "desktop",
+{
+  "name": "workbench",
   "$schema": "../node_modules/nx/schemas/project-schema.json",
   "projectType": "application",
-  "sourceRoot": "apps/desktop",
+  "sourceRoot": "apps/workbench",
   "tags": ["scope:apps", "lang:ts", "platform:desktop"],
   "targets": {
     "dev": {
       "executor": "nx:run-commands",
       "options": {
         "command": "pnpm dev",
-        "cwd": "apps/desktop"
+        "cwd": "apps/workbench"
       }
     },
     "build": {
@@ -17,7 +17,7 @@
       "dependsOn": ["core:build"],
       "options": {
         "command": "pnpm build",
-        "cwd": "apps/desktop"
+        "cwd": "apps/workbench"
       },
       "inputs": ["production"],
       "outputs": ["{projectRoot}/dist"]
@@ -26,7 +26,7 @@
       "executor": "nx:run-commands",
       "options": {
         "command": "pnpm tauri:dev",
-        "cwd": "apps/desktop"
+        "cwd": "apps/workbench"
       }
     },
     "tauri-build": {
@@ -34,7 +34,7 @@
       "dependsOn": ["build"],
       "options": {
         "command": "pnpm tauri:build",
-        "cwd": "apps/desktop"
+        "cwd": "apps/workbench"
       },
       "outputs": ["{projectRoot}/src-tauri/target/release"]
     }

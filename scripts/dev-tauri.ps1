@@ -9,7 +9,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BackendDir = Join-Path $ProjectRoot "backend"
-$FrontendDir = Join-Path $ProjectRoot "apps\desktop"
+$FrontendDir = Join-Path $ProjectRoot "apps\workbench"
 $BinariesDir = Join-Path $FrontendDir "src-tauri\binaries"
 
 # Step 1: Build Go Backend (dev mode)
@@ -42,7 +42,7 @@ if (Test-Path (Join-Path $ProjectRoot 'pnpm-workspace.yaml')) {
         }
     }
     Set-Location $ProjectRoot
-    pnpm --filter @codeflow/desktop tauri:dev
+    pnpm --filter @codeflow/workbench tauri:dev
 }
 else {
     Set-Location $FrontendDir
