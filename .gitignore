@@ -1,5 +1,8 @@
+# dependencies (never commit)
+node_modules/
+
+# local tooling / caches
 .ace-tool/
-node_modules
 .nx/
 .tmp-playwright/
 tmp-playwright/
@@ -19,6 +22,15 @@ backend/.claude/
 backend/coverage
 backend/nul
 
-# local build outputs
+# app / embed build outputs (must not be committed)
+apps/**/dist/
+backend/internal/web/dist/
+
+# package local build outputs
+# NOTE: packages/core|gui|shared|ui-components dist may remain tracked intentionally
+# until CI always builds them before consumers. packages/cli dist is always local.
 packages/cli/dist/
 packages/cli/tsconfig.tsbuildinfo
+
+# coverage reports
+coverage/

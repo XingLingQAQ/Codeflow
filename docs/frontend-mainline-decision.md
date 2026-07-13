@@ -178,12 +178,20 @@ pnpm tauri:build
 - PowerShell smoke：`scripts/smoke-embed.ps1`（可选 `go build ./internal/web`）
 - 嵌入入口仍为 `backend/internal/web/static.go`（`//go:embed all:dist`）；`backend/internal/web/dist` 为生成物（gitignore）
 
+### 已完成（M0.5，2026-07-13）
+
+- 强化 `.gitignore`：`node_modules/`、`apps/**/dist/`、`backend/internal/web/dist/`、`coverage/`（packages core/gui/shared/ui-components dist 仍可按需跟踪）
+- 取消跟踪历史误提交的 `node_modules`（index 清零，工作区依赖保留）
+- 新增 `scripts/check-repo-hygiene.mjs` + 根脚本 `pnpm check:repo-hygiene`
+- CI：`.github/workflows/nx-ci.yml` checkout 后执行 `Repo Hygiene Guard`
+- 卫兵规则：禁止 tracked `node_modules` / `apps/*/dist` / `backend/internal/web/dist` / `codeflow_template`
+
 ### 残留（M0 后续）
 
+- M0.6：docs 收敛（可分 PR）
 - M0.8：summarize 单包方案
 - M0.9：CGO/SQLite ADR
 - M1：`src/` 目录重组（shell/workbench/stages/ui 等）
-- PR-4：Snapshot 真 restore（与 M1 可并行设计）
 
 ---
 
@@ -191,7 +199,7 @@ pnpm tauri:build
 
 | 里程碑 | 前端主线动作 |
 | --- | --- |
-| M0 | 修订本裁决；路径重绑；删除 template；G01 rename → workbench；M0.3 embed smoke；建立 feature-parity-matrix |
+| M0 | 修订本裁决；路径重绑；删除 template；G01 rename → workbench；M0.3 embed smoke；M0.5 hygiene；建立 feature-parity-matrix |
 | M1 | `apps/workbench/src/` 重组（shell/workbench/stages/ui）；App Shell + Flow Rail |
 | M2+ | 阶段画布与 floweng 对接；禁止再引入第二产品前端树 |
 
@@ -225,3 +233,4 @@ pnpm tauri:build
 | 2026-07-12 | **PR-3**：删除 `codeflow_template` 物理双树；Go fixture 改 `apps/desktop`；残留段改为已删除；回滚依赖远程 `44fa821` 历史（无本地 pre-delete tag） |
 | 2026-07-12 | **G01**：`apps/desktop` → `apps/workbench`，`@codeflow/workbench`，Nx `workbench`；兼容 `dev:desktop`/`build:desktop` 别名；本文件结论与证据全面同步；残留仅 M0.3 embed |
 | 2026-07-12 | **M0.3**：Makefile `build-frontend` 同步 embed dist；新增 `scripts/smoke-embed.mjs` / `.ps1` 与 `pnpm smoke:embed`；Node 路径 smoke 通过（本机无 Go 时跳过 compile smoke）；清单勾选 M0.3；残留改为 M0.8/M0.9/M1/PR-4 |
+| 2026-07-13 | **M0.5**：gitignore + untrack node_modules + `check-repo-hygiene` + CI Repo Hygiene Guard；残留去掉已完成的 PR-4，保留 M0.6/M0.8/M0.9/M1 |

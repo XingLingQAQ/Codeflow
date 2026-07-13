@@ -85,6 +85,7 @@
 | G27 | summarize 合并 | 🔄 | `summarize` + `summarizer` | 单包 | M0/M1 | |
 | G28 | Schema-first OpenAPI | ⚠️ | 有 TS 生成脚本 | YAML SSOT + CI | 贯穿 | 输出已在 desktop |
 | G29 | WS 统一事件总线 | ⚠️ | hub 存在；多处独立 stream | 单连接多路 topics | M2–M3 | debate stream 待迁入 |
+| G31 | 仓库生成物 hygiene | ✅ | untrack node_modules；gitignore 强化；CI Repo Hygiene Guard | 持续禁止 tracked 生成物/依赖 | M0 | M0.5：`scripts/check-repo-hygiene.mjs` + `pnpm check:repo-hygiene` |
 
 ---
 
@@ -109,3 +110,4 @@
 | 2026-07-11 | **PR-2**：工具链改绑 `apps/desktop`；G01 备注更新（双树残留 → 仍 ⚠️，待 PR-3） |
 | 2026-07-12 | **PR-3**：删除 `codeflow_template`；G01 现状改为物理双树已删，仍 ⚠️ 至 rename workbench |
 | 2026-07-12 | **G01**：rename `apps/desktop`→`apps/workbench`；G01 → ✅ |
+| 2026-07-13 | **M0.5**：G31 仓库生成物 hygiene ✅；untrack node_modules；CI Repo Hygiene Guard |
