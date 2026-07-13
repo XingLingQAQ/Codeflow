@@ -5,9 +5,13 @@ task: 收口 backend adapter/provider conversion 与请求语义到 Go
 complexity: complex
 planning_method: builtin
 created_at: 2026-04-12T12:51:13.074604+00:00
+migrated: 2026-07-13 (M0.6) from backend/docs/plans/
 ---
 
 # Plan: Go 收口 backend adapter/provider conversion 与请求语义
+
+> M0.6 自 `backend/docs/plans/` 迁入 `docs/plans/`。配套需求：  
+> `docs/requirements/2026-04-12-go-backend-adapter-semantics-migration.md`。
 
 **执行目标是分波次把 backend-facing conversion 与 request semantics 收口到 Go，同时把 TS runtime/core 明确固定在 execution boundary 内。**
 

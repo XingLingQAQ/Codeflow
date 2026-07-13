@@ -5,9 +5,15 @@ task: Code Flow 智能集成开发环境 - 技术实施计划
 complexity: complex
 planning_method: builtin
 created_at: 2026-01-12T19:52:13+08:00
+status: Historical
+migrated: 2026-07-13 (M0.6) from plan/2026-01-12_19-52-13-codeflow-implementation.md
+superseded_by: docs/plans/2026-07-11-codeflow-2.0-implementation-and-hardening-plan.md
 ---
 
 # Plan: Code Flow Agentic IDE 技术实施计划
+
+> **Historical**：M0.6 自根目录 `plan/` 迁入。现行实施计划见  
+> `docs/plans/2026-07-11-codeflow-2.0-implementation-and-hardening-plan.md`。
 
 🎯 任务概述
 

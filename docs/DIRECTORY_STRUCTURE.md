@@ -1,7 +1,7 @@
 # CodeFlow 目录结构说明
 
-> 最后更新：2026-07-12
-> 版本：2.0（重构后）
+> 最后更新：2026-07-13  
+> 版本：2.1（M0.6 docs IA）
 
 ## 📁 项目结构概览
 
@@ -57,26 +57,27 @@ CodeFlow/
 │   ├── go.mod
 │   └── Makefile
 │
-├── docs/                      # 文档
-│   ├── plans/                # 执行计划
+├── docs/                      # 文档（IA 见 docs/README.md）
+│   ├── README.md             # 文档索引与三分法约定
+│   ├── adr/                  # 架构决策记录
+│   ├── design/               # 设计正文 + early/ 历史
+│   ├── plans/                # 实施计划
 │   ├── requirements/         # 需求文档
-│   ├── FRONTEND_FEATURES.md  # 前端功能清单
-│   ├── PROJECT_OVERVIEW.md   # 项目概览
+│   ├── frontend-mainline-decision.md
+│   ├── FRONTEND_FEATURES.md
+│   ├── PROJECT_OVERVIEW.md
 │   └── DIRECTORY_STRUCTURE.md # 本文件
 │
 ├── scripts/                   # 构建与工具脚本
 │   ├── test-all-e2e.mjs
+│   ├── check-repo-hygiene.mjs
+│   ├── smoke-embed.mjs
 │   ├── check-garbled-comments.mjs
 │   ├── check-api-contracts.mjs
 │   └── generate-openapi-types.mjs
 │
 ├── issues/                    # Issue 管理（CSV 格式）
 ├── outputs/                   # 构建输出
-├── plan/                      # 计划文档
-│
-├── .archive/                  # 归档目录（隐藏）
-│   ├── legacy/               # 历史代码归档
-│   └── reviews/              # Code Review 临时文件
 │
 ├── package.json               # 根 package.json（Monorepo 配置）
 ├── pnpm-workspace.yaml        # pnpm Workspace 配置
@@ -84,6 +85,8 @@ CodeFlow/
 ├── tsconfig.base.json         # TypeScript 基础配置
 └── README.md                  # 项目说明
 ```
+
+> **M0.6 起**：根目录 `plan/` 与 `archive/docs/early-design/` 已清空迁入 `docs/`；`backend/docs/` 仅保留 `openapi.yaml`（+ README 指针）。
 
 ---
 

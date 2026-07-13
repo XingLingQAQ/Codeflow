@@ -1,8 +1,8 @@
 # 前端主线裁决记录
 
 > 状态：Active  
-> 最近修订：2026-07-12  
-> 关联：`docs/design/2026-06-12-overall-roadmap.md`、`docs/plans/2026-07-11-codeflow-2.0-implementation-and-hardening-plan.md`
+> 最近修订：2026-07-13  
+> 关联：`docs/design/2026-06-12-overall-roadmap.md`、`docs/plans/2026-07-11-codeflow-2.0-implementation-and-hardening-plan.md`、`docs/README.md`
 
 ---
 
@@ -186,11 +186,18 @@ pnpm tauri:build
 - CI：`.github/workflows/nx-ci.yml` checkout 后执行 `Repo Hygiene Guard`
 - 卫兵规则：禁止 tracked `node_modules` / `apps/*/dist` / `backend/internal/web/dist` / `codeflow_template`
 
+### 已完成（M0.6，2026-07-13）
+
+- 建立 `docs/README.md` 文档 IA（design / plans / adr / requirements）
+- ADR：`docs/adr/0001-docs-information-architecture.md`、`0002-directory-structure-and-archive.md`
+- 2.0 设计五件套纳入 git：overall-roadmap / flow-engine / workbench-and-shell / agent-quality-system / frontend-experience
+- `archive/docs/early-design` → `docs/design/early`；根 `plan/` → `docs/plans/*-historical`；`backend/docs` 散文 → `docs/plans|requirements`（保留 `openapi.yaml`）
+- G02 文档 SSOT → ✅
+
 ### 残留（M0 后续）
 
-- M0.6：docs 收敛（可分 PR）
 - M0.8：summarize 单包方案
-- M0.9：CGO/SQLite ADR
+- M0.9：CGO/SQLite ADR（`docs/adr/0003-sqlite-cgo.md`）
 - M1：`src/` 目录重组（shell/workbench/stages/ui 等）
 
 ---
@@ -199,7 +206,7 @@ pnpm tauri:build
 
 | 里程碑 | 前端主线动作 |
 | --- | --- |
-| M0 | 修订本裁决；路径重绑；删除 template；G01 rename → workbench；M0.3 embed smoke；M0.5 hygiene；建立 feature-parity-matrix |
+| M0 | 修订本裁决；路径重绑；删除 template；G01 rename → workbench；M0.3 embed smoke；M0.5 hygiene；M0.6 docs IA；建立 feature-parity-matrix |
 | M1 | `apps/workbench/src/` 重组（shell/workbench/stages/ui）；App Shell + Flow Rail |
 | M2+ | 阶段画布与 floweng 对接；禁止再引入第二产品前端树 |
 

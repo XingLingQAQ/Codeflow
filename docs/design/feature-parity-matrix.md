@@ -14,7 +14,7 @@
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
 | G01 | 单一前端主线 | ✅ | **G01 后**：唯一主线 `apps/workbench` / `@codeflow/workbench`；物理无 `apps/desktop` / `codeflow_template` | 保持单树；禁止再引入第二前端 | M0 | **2026-07-12 G01**：rename `apps/desktop`→`apps/workbench`；兼容 `dev:desktop`/`build:desktop` 别名；Nx tag `platform:desktop` 保留（平台语义） |
-| G02 | 文档 SSOT（design/plans/adr） | ⚠️ | 部分散落；mainline 曾过期 | docs 三分法 + ADR | M0 | |
+| G02 | 文档 SSOT（design/plans/adr） | ✅ | **M0.6**：`docs/README.md` IA；design/plans/adr/requirements；5 份 2.0 设计纳入跟踪；early/historical 迁入；ADR 0001/0002 | 持续按 IA 写入；禁止再散落 plan/archive | M0 | **2026-07-13**：见 `docs/adr/0001-docs-information-architecture.md`；openapi 仍 `backend/docs/openapi.yaml` |
 | G03 | 本矩阵持续跟踪 | ✅ | 本文档 | 每里程碑更新 | M0 | |
 | G30 | CGO / SQLite 基线决策 | ⚠️ | go-sqlite3 + CGO=1 | ADR 决策 | M0 | 落地可后置 |
 
@@ -83,7 +83,7 @@
 |---|---|---|---|---|---|---|
 | G26 | DI 去除全局 Get/Set | ⚠️ | bootstrap 五服务 + 大量单例 | 按域分批删除 | 贯穿 | |
 | G27 | summarize 合并 | 🔄 | `summarize` + `summarizer` | 单包 | M0/M1 | |
-| G28 | Schema-first OpenAPI | ⚠️ | 有 TS 生成脚本 | YAML SSOT + CI | 贯穿 | 输出已在 desktop |
+| G28 | Schema-first OpenAPI | ⚠️ | 有 TS 生成脚本 | YAML SSOT + CI | 贯穿 | 输出 `apps/workbench/generated/`；契约 `backend/docs/openapi.yaml` |
 | G29 | WS 统一事件总线 | ⚠️ | hub 存在；多处独立 stream | 单连接多路 topics | M2–M3 | debate stream 待迁入 |
 | G31 | 仓库生成物 hygiene | ✅ | untrack node_modules；gitignore 强化；CI Repo Hygiene Guard | 持续禁止 tracked 生成物/依赖 | M0 | M0.5：`scripts/check-repo-hygiene.mjs` + `pnpm check:repo-hygiene` |
 
@@ -111,3 +111,4 @@
 | 2026-07-12 | **PR-3**：删除 `codeflow_template`；G01 现状改为物理双树已删，仍 ⚠️ 至 rename workbench |
 | 2026-07-12 | **G01**：rename `apps/desktop`→`apps/workbench`；G01 → ✅ |
 | 2026-07-13 | **M0.5**：G31 仓库生成物 hygiene ✅；untrack node_modules；CI Repo Hygiene Guard |
+| 2026-07-13 | **M0.6**：G02 文档 SSOT ✅；docs IA + ADR 0001/0002；2.0 设计五件套纳入跟踪；early/plan/backend 散文收敛 |

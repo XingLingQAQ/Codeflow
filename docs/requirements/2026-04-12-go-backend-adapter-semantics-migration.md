@@ -1,5 +1,8 @@
 # Requirement: Go 收口 backend adapter/provider conversion 与请求语义
 
+> M0.6 自 `backend/docs/requirements/` 迁入。配套计划：  
+> `docs/plans/2026-04-12-go-backend-adapter-semantics-migration-execution-plan.md`。
+
 **本轮只冻结迁移边界与首批切片：将 backend-facing adapter/provider conversion 与 request semantics 收口到 Go，明确 TS runtime/core 继续保留为唯一执行面。**
 
 > 重要前提：

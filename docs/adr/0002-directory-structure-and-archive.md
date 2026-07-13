@@ -1,4 +1,11 @@
-# 目录结构与归档决策
+# ADR 0002: 目录结构与归档决策
+
+- 状态：Accepted
+- 日期：2026-03（原文）；2026-07-13 迁入 `docs/adr/`（M0.6）
+- 关联：`docs/README.md`、ADR 0001、G01 workbench rename
+
+> 原路径：`docs/directory-structure-and-archive-decision.md`。  
+> 本文记录 monorepo 逻辑边界与归档策略；**文档散文 IA** 见 [ADR 0001](0001-docs-information-architecture.md)。
 
 ## 逻辑归类（Phase A/B — 当前阶段）
 
