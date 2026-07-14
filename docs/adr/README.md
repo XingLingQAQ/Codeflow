@@ -35,6 +35,4 @@
 |---|---|---|---|
 | [0001](0001-docs-information-architecture.md) | 文档信息架构（design/plans/adr） | Accepted | 2026-07-13 |
 | [0002](0002-directory-structure-and-archive.md) | 目录结构与归档（Nx 逻辑边界） | Accepted | 2026-03（迁入 2026-07-13） |
-| 0003 | CGO / SQLite 基线（占位，M0.9） | Proposed | — |
-
-预留：`docs/adr/0003-sqlite-cgo.md` 将在 **M0.9** 落盘（G30）。
+| [0003](0003-sqlite-cgo.md) | CGO / SQLite 基线（go-sqlite3 + CGO=1） | Accepted | 2026-07-15 |

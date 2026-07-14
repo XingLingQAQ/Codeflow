@@ -124,7 +124,7 @@
 - **浏览器 E2E**：`apps/workbench`；`scripts/test-all-e2e.mjs` 在 smoke 前确保 `packages/core/dist` 已构建
 - **CI 依赖**：根目录 `pnpm install --frozen-lockfile`；前端以 filter `@codeflow/workbench`（或等价 working-directory）构建；显式构建 `@codeflow/core` dist 后再跑 E2E
 - **嵌入式构建**：前端 dist 同步到 `backend/internal/web/dist`，由 `backend/internal/web/static.go` embed
-- **CGO**：默认 Go 打包链 `CGO_ENABLED=1`（`go-sqlite3`）；是否迁移 modernc 见独立 ADR（2.0 计划 M0.9）
+- **CGO**：默认 Go 打包链 `CGO_ENABLED=1`（`go-sqlite3`）；基线见 `docs/adr/0003-sqlite-cgo.md`（M0.9）；modernc 迁移后置
 - **Windows Tauri**：`scripts/build-tauri.ps1` 在 `tauri:build` 前探测并导入 VS MSVC 环境，避免 `vswhom-sys` / `LNK1143`
 
 ### 目标本地命令
@@ -199,10 +199,16 @@ pnpm tauri:build
 - 后端仅保留 `internal/summarize`；删除 `internal/summarizer`
 - API：`/api/v1/summarize/*` 与 handlers 契约不变
 
-### 残留（M0 后续）
+### 已完成（M0.9，2026-07-15）
 
-- M0.9：CGO/SQLite ADR（`docs/adr/0003-sqlite-cgo.md`）
-- M1：`src/` 目录重组（shell/workbench/stages/ui 等）
+- ADR：`docs/adr/0003-sqlite-cgo.md`（维持 go-sqlite3 + CGO=1；modernc 后置）
+- `backend/Makefile` `build-all` 与脚本对齐 `CGO_ENABLED=1`
+
+### 残留（M0 后 / 下一阶段）
+
+- M1：`src/` 目录重组（shell/workbench/stages/ui 等）— **前端**，按指示再开
+- modernc 迁移：非默认，见 ADR 0003 §3
+- M2+：floweng / guard / workspace 等后端大块
 
 ---
 

@@ -58,10 +58,13 @@
 
 ## CGO 语义差异
 
-| Makefile target | CGO_ENABLED | 用途 |
+| 入口 | CGO_ENABLED | 用途 |
 |----------------|-------------|------|
-| `build` | 1 | 开发构建，依赖 go-sqlite3 |
-| `build-all` | 0 | 嵌入式单文件发布，静态链接 |
+| `Makefile` `build` | 1 | 开发构建，依赖 go-sqlite3 |
+| `Makefile` `build-all` | 1 | embed 单文件发布（**M0.9 起与 go-sqlite3 对齐**；旧文档写 0 已废止） |
+| `scripts/build-all.ps1` / `.sh`、Tauri 脚本 | 1 | 发布与 sidecar |
+
+基线决策见 [ADR 0003](0003-sqlite-cgo.md)。modernc pure-Go 迁移为后置项，非当前默认。
 
 ## 迁移路线图
 

@@ -16,7 +16,7 @@
 | G01 | 单一前端主线 | ✅ | **G01 后**：唯一主线 `apps/workbench` / `@codeflow/workbench`；物理无 `apps/desktop` / `codeflow_template` | 保持单树；禁止再引入第二前端 | M0 | **2026-07-12 G01**：rename `apps/desktop`→`apps/workbench`；兼容 `dev:desktop`/`build:desktop` 别名；Nx tag `platform:desktop` 保留（平台语义） |
 | G02 | 文档 SSOT（design/plans/adr） | ✅ | **M0.6**：`docs/README.md` IA；design/plans/adr/requirements；5 份 2.0 设计纳入跟踪；early/historical 迁入；ADR 0001/0002 | 持续按 IA 写入；禁止再散落 plan/archive | M0 | **2026-07-13**：见 `docs/adr/0001-docs-information-architecture.md`；openapi 仍 `backend/docs/openapi.yaml` |
 | G03 | 本矩阵持续跟踪 | ✅ | 本文档 | 每里程碑更新 | M0 | |
-| G30 | CGO / SQLite 基线决策 | ⚠️ | go-sqlite3 + CGO=1 | ADR 决策 | M0 | 落地可后置 |
+| G30 | CGO / SQLite 基线决策 | ✅ | **M0.9**：维持 `mattn/go-sqlite3` + `CGO_ENABLED=1`；Makefile `build-all` 对齐为 1；modernc 后置 | 迁移须独立 ADR/PR | M0 | `docs/adr/0003-sqlite-cgo.md` |
 
 ---
 
@@ -113,3 +113,4 @@
 | 2026-07-13 | **M0.5**：G31 仓库生成物 hygiene ✅；untrack node_modules；CI Repo Hygiene Guard |
 | 2026-07-13 | **M0.6**：G02 文档 SSOT ✅；docs IA + ADR 0001/0002；2.0 设计五件套纳入跟踪；early/plan/backend 散文收敛 |
 | 2026-07-15 | **M0.8**：G27 summarize 合并 ✅；删除 `internal/summarizer`；engine 并入 `internal/summarize` |
+| 2026-07-15 | **M0.9**：G30 CGO/SQLite ADR ✅；`docs/adr/0003-sqlite-cgo.md`；Makefile `build-all` CGO=1 |

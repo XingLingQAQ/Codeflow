@@ -121,6 +121,7 @@ build-frontend:
 	@echo "Frontend build complete: $(WEB_DIST_DIR)"
 
 # Build all (frontend + backend with embedded assets)
+# CGO required: mattn/go-sqlite3 (see docs/adr/0003-sqlite-cgo.md)
 build-all: build-frontend
 	@echo "Building $(BINARY_NAME) with embedded frontend..."
 	@mkdir -p $(BUILD_DIR)
@@ -128,7 +129,7 @@ build-all: build-frontend
 		echo "Error: Embed dist missing at $(WEB_DIST_DIR). Run make build-frontend first."; \
 		exit 1; \
 	fi
-	CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME).exe $(MAIN_PATH)
+	CGO_ENABLED=1 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME).exe $(MAIN_PATH)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME).exe"
 	@echo "Run with: $(BUILD_DIR)/$(BINARY_NAME).exe"
 	@echo "Access at: http://localhost:8080"
