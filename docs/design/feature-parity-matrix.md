@@ -82,7 +82,7 @@
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
 | G26 | DI 去除全局 Get/Set | ⚠️ | bootstrap 五服务 + 大量单例 | 按域分批删除 | 贯穿 | |
-| G27 | summarize 合并 | 🔄 | `summarize` + `summarizer` | 单包 | M0/M1 | |
+| G27 | summarize 合并 | ✅ | **M0.8**：仅 `internal/summarize`；engine（Compressor/TokenCounter）迁入；删除 `internal/summarizer` | 保持单包；API 面不变 | M0 | **2026-07-15**：handlers/OpenAPI 仍 `/api/v1/summarize`；EntitySkeleton 与 API DecisionSkeleton 分型 |
 | G28 | Schema-first OpenAPI | ⚠️ | 有 TS 生成脚本 | YAML SSOT + CI | 贯穿 | 输出 `apps/workbench/generated/`；契约 `backend/docs/openapi.yaml` |
 | G29 | WS 统一事件总线 | ⚠️ | hub 存在；多处独立 stream | 单连接多路 topics | M2–M3 | debate stream 待迁入 |
 | G31 | 仓库生成物 hygiene | ✅ | untrack node_modules；gitignore 强化；CI Repo Hygiene Guard | 持续禁止 tracked 生成物/依赖 | M0 | M0.5：`scripts/check-repo-hygiene.mjs` + `pnpm check:repo-hygiene` |
@@ -112,3 +112,4 @@
 | 2026-07-12 | **G01**：rename `apps/desktop`→`apps/workbench`；G01 → ✅ |
 | 2026-07-13 | **M0.5**：G31 仓库生成物 hygiene ✅；untrack node_modules；CI Repo Hygiene Guard |
 | 2026-07-13 | **M0.6**：G02 文档 SSOT ✅；docs IA + ADR 0001/0002；2.0 设计五件套纳入跟踪；early/plan/backend 散文收敛 |
+| 2026-07-15 | **M0.8**：G27 summarize 合并 ✅；删除 `internal/summarizer`；engine 并入 `internal/summarize` |

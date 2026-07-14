@@ -8,14 +8,18 @@ import (
 	"time"
 )
 
-// SummarizerService implements ISummarizer.
+// SummarizerService implements ISummarizer (HTTP API surface).
+// Message-level compression engine lives alongside in this package (Compressor).
 type SummarizerService struct {
-	mu sync.RWMutex
+	mu           sync.RWMutex
+	tokenCounter *TokenCounter
 }
 
 // NewSummarizerService creates a new summarizer service.
 func NewSummarizerService() *SummarizerService {
-	return &SummarizerService{}
+	return &SummarizerService{
+		tokenCounter: NewTokenCounter(nil),
+	}
 }
 
 // SummarizeConversation summarizes a conversation.
@@ -144,11 +148,12 @@ func (s *SummarizerService) ExtractSkeleton(messages []Message) (*DecisionSkelet
 	return skeleton, nil
 }
 
-// CalculateTokens estimates token count for text.
-// Simple approximation: ~4 characters per token (GPT-style)
+// CalculateTokens estimates token count for text (EN/ZH heuristics via TokenCounter).
 func (s *SummarizerService) CalculateTokens(text string) int {
-	// Simple approximation: 1 token ≈ 4 characters
-	return len(text) / 4
+	if s.tokenCounter == nil {
+		s.tokenCounter = NewTokenCounter(nil)
+	}
+	return s.tokenCounter.Count(text)
 }
 
 // Helper functions

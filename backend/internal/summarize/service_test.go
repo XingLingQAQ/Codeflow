@@ -177,13 +177,13 @@ func TestExtractSkeleton_KeyFiles(t *testing.T) {
 func TestCalculateTokens(t *testing.T) {
 	svc := NewSummarizerService()
 
-	// Test with known text
+	// Shared TokenCounter (EN/ZH heuristics); non-empty text must yield > 0
 	text := "This is a test sentence with approximately twenty characters per word."
 	tokens := svc.CalculateTokens(text)
+	assert.Greater(t, tokens, 0)
 
-	// Should be roughly len(text) / 4
-	expectedTokens := len(text) / 4
-	assert.Equal(t, expectedTokens, tokens)
+	// Align with package TokenCounter
+	assert.Equal(t, NewTokenCounter(nil).Count(text), tokens)
 }
 
 func TestCalculateTokens_Empty(t *testing.T) {

@@ -194,9 +194,13 @@ pnpm tauri:build
 - `archive/docs/early-design` → `docs/design/early`；根 `plan/` → `docs/plans/*-historical`；`backend/docs` 散文 → `docs/plans|requirements`（保留 `openapi.yaml`）
 - G02 文档 SSOT → ✅
 
+### 已完成（M0.8，2026-07-15）
+
+- 后端仅保留 `internal/summarize`；删除 `internal/summarizer`
+- API：`/api/v1/summarize/*` 与 handlers 契约不变
+
 ### 残留（M0 后续）
 
-- M0.8：summarize 单包方案
 - M0.9：CGO/SQLite ADR（`docs/adr/0003-sqlite-cgo.md`）
 - M1：`src/` 目录重组（shell/workbench/stages/ui 等）
 

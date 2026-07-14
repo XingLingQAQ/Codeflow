@@ -1,4 +1,4 @@
-package summarizer
+package summarize
 
 import (
 	"context"
@@ -6,14 +6,14 @@ import (
 	"github.com/codeflow/backend/internal/adapters"
 )
 
-// TokenCount Token计数结果
+// TokenCount is the result of counting tokens across messages.
 type TokenCount struct {
 	Total     int            `json:"total"`
 	ByRole    map[string]int `json:"by_role"`
 	ByMessage []int          `json:"by_message"`
 }
 
-// CompressionConfig 压缩配置
+// CompressionConfig configures message-level context compression.
 type CompressionConfig struct {
 	MaxTokens               int     `json:"max_tokens"`
 	TargetRatio             float64 `json:"target_ratio"`
@@ -22,31 +22,32 @@ type CompressionConfig struct {
 	ExtractDecisionSkeleton bool    `json:"extract_decision_skeleton"`
 }
 
-// DecisionSkeleton 决策骨架
-type DecisionSkeleton struct {
-	Entities  []string   `json:"entities"`
-	Decisions []string   `json:"decisions"`
-	Relations []Relation `json:"relations"`
+// EntitySkeleton is an entity/decision graph extracted from messages.
+// Distinct from DecisionSkeleton (API architecture-decision shape).
+type EntitySkeleton struct {
+	Entities  []string         `json:"entities"`
+	Decisions []string         `json:"decisions"`
+	Relations []EntityRelation `json:"relations"`
 }
 
-// Relation 关系
-type Relation struct {
+// EntityRelation is a co-occurrence edge between entities.
+type EntityRelation struct {
 	From string `json:"from"`
 	To   string `json:"to"`
 	Type string `json:"type"`
 }
 
-// CompressionResult 压缩结果
+// CompressionResult is the output of message-level compression.
 type CompressionResult struct {
 	OriginalTokens    int                `json:"original_tokens"`
 	CompressedTokens  int                `json:"compressed_tokens"`
 	CompressionRatio  float64            `json:"compression_ratio"`
 	PreservedMessages []adapters.Message `json:"preserved_messages"`
 	Summary           string             `json:"summary,omitempty"`
-	DecisionSkeleton  *DecisionSkeleton  `json:"decision_skeleton,omitempty"`
+	EntitySkeleton    *EntitySkeleton    `json:"entity_skeleton,omitempty"`
 }
 
-// SummaryAgentConfig Summary Agent配置
+// SummaryAgentConfig configures optional LLM-backed summary generation.
 type SummaryAgentConfig struct {
 	Model            string `json:"model,omitempty"`
 	MaxSummaryTokens int    `json:"max_summary_tokens,omitempty"`
@@ -55,18 +56,18 @@ type SummaryAgentConfig struct {
 	IncludeRelations bool   `json:"include_relations,omitempty"`
 }
 
-// Context 上下文
-type Context struct {
+// EngineContext is a message list plus optional precomputed token count.
+type EngineContext struct {
 	Messages   []adapters.Message `json:"messages"`
 	TokenCount int                `json:"token_count"`
 }
 
-// SummaryHistory 总结历史记录
+// SummaryHistory stores a prior compression/summary for a session.
 type SummaryHistory struct {
-	ID           string            `json:"id"`
-	SessionID    string            `json:"session_id"`
-	Summary      string            `json:"summary"`
-	Skeleton     *DecisionSkeleton `json:"skeleton,omitempty"`
+	ID           string          `json:"id"`
+	SessionID    string          `json:"session_id"`
+	Summary      string          `json:"summary"`
+	Skeleton     *EntitySkeleton `json:"skeleton,omitempty"`
 	MessageRange struct {
 		Start int `json:"start"`
 		End   int `json:"end"`
@@ -74,23 +75,23 @@ type SummaryHistory struct {
 	CreatedAt int64 `json:"created_at"`
 }
 
-// ITokenCounter Token计数器接口
+// ITokenCounter estimates tokens for text and message lists.
 type ITokenCounter interface {
 	Count(text string) int
 	CountMessages(messages []adapters.Message) TokenCount
 	EstimateTokens(text string) int
 }
 
-// ICompressor 压缩器接口
+// ICompressor compresses message contexts and extracts entity skeletons.
 type ICompressor interface {
-	Compress(ctx Context, config *CompressionConfig) (*CompressionResult, error)
-	CompressContext(parent context.Context, ctx Context, config *CompressionConfig) (*CompressionResult, error)
-	ExtractSkeleton(messages []adapters.Message) (*DecisionSkeleton, error)
+	Compress(ctx EngineContext, config *CompressionConfig) (*CompressionResult, error)
+	CompressMessages(parent context.Context, ctx EngineContext, config *CompressionConfig) (*CompressionResult, error)
+	ExtractEntitySkeleton(messages []adapters.Message) (*EntitySkeleton, error)
 	GenerateSummary(messages []adapters.Message, config *SummaryAgentConfig) (string, error)
 	GenerateSummaryContext(ctx context.Context, messages []adapters.Message, config *SummaryAgentConfig) (string, error)
 }
 
-// ISummaryHistory 总结历史接口
+// ISummaryHistory persists summary history records.
 type ISummaryHistory interface {
 	Save(history *SummaryHistory) error
 	Load(id string) (*SummaryHistory, error)
@@ -99,7 +100,7 @@ type ISummaryHistory interface {
 	List() ([]*SummaryHistory, error)
 }
 
-// DefaultCompressionConfig 默认压缩配置
+// DefaultCompressionConfig is the default message-compression policy.
 var DefaultCompressionConfig = CompressionConfig{
 	MaxTokens:               4000,
 	TargetRatio:             0.2,
@@ -108,7 +109,7 @@ var DefaultCompressionConfig = CompressionConfig{
 	ExtractDecisionSkeleton: true,
 }
 
-// TokenEstimation Token估算常量
+// TokenEstimation holds heuristic token-estimation constants.
 var TokenEstimation = struct {
 	CharsPerTokenEN    float64
 	CharsPerTokenZH    float64
