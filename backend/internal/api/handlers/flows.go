@@ -79,7 +79,13 @@ func AdvanceFlowStage(c *gin.Context) {
 	flowID := c.Param("id")
 	stageID := c.Param("sid")
 	var req floweng.AdvanceRequest
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Empty body is allowed (zero AdvanceRequest).
+		if c.Request.ContentLength > 0 {
+			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+			return
+		}
+	}
 
 	// Ensure the path stage is the active one when provided
 	flow, err := floweng.GetEngine().Get(c.Request.Context(), flowID)
@@ -186,7 +192,12 @@ func AttachFlowArtifact(c *gin.Context) {
 		Type       string `json:"type"`
 		ContentRef string `json:"content_ref"`
 	}
-	_ = c.ShouldBindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		if c.Request.ContentLength > 0 {
+			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+			return
+		}
+	}
 	art, err := floweng.GetEngine().AttachArtifact(c.Request.Context(), flowID, stageID, body.Type, body.ContentRef)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
@@ -246,7 +257,12 @@ func AbortFlow(c *gin.Context) {
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	_ = c.ShouldBindJSON(&body)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		if c.Request.ContentLength > 0 {
+			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+			return
+		}
+	}
 	flow, err := floweng.GetEngine().Abort(c.Request.Context(), flowID, body.Reason)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {

@@ -19,12 +19,7 @@ func ImportSkills(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
-	reg, ok := skill.GetRegistry().(*skill.InMemoryRegistry)
-	if !ok || reg == nil {
-		respondError(c, http.StatusServiceUnavailable, "skill registry does not support import")
-		return
-	}
-	n, err := reg.ImportMarkdownDir(c.Request.Context(), body.Dir)
+	n, err := skill.GetRegistry().ImportMarkdownDir(c.Request.Context(), body.Dir)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
 		return

@@ -84,4 +84,6 @@ type Registry interface {
 	Match(ctx context.Context, req *MatchRequest) ([]MatchResult, error)
 	// RenderInjection concatenates matched skill bodies for prompt mounting.
 	RenderInjection(ctx context.Context, req *MatchRequest) (string, error)
+	// ImportMarkdownDir loads *.md files as skills (frontmatter optional).
+	ImportMarkdownDir(ctx context.Context, dir string) (int, error)
 }

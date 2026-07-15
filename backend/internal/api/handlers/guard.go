@@ -114,15 +114,7 @@ func GuardListExemptions(c *gin.Context) {
 func GuardClearExemption(c *gin.Context) {
 	path := strings.TrimSpace(c.Query("path"))
 	if path == "" {
-		// Allow JSON body for clients that prefer it.
-		var body struct {
-			Path string `json:"path"`
-		}
-		_ = c.ShouldBindJSON(&body)
-		path = strings.TrimSpace(body.Path)
-	}
-	if path == "" {
-		respondError(c, http.StatusBadRequest, "path is required")
+		respondError(c, http.StatusBadRequest, "path is required (query path=)")
 		return
 	}
 	svc, ok := guard.GetService().(*guard.Engine)

@@ -23,10 +23,10 @@ build:
 	CGO_ENABLED=1 $(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
-# Run tests
+# Run tests (CGO required by mattn/go-sqlite3 durable stores; see docs/adr/0003)
 test:
 	@echo "Running tests..."
-	$(GO) test -race -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PKGS)
+	CGO_ENABLED=1 $(GO) test -race -coverprofile=$(COVERAGE_OUT) $(COVERAGE_PKGS)
 	@echo "Tests complete"
 
 # Run tests with coverage report
