@@ -22,6 +22,8 @@ type Engine struct {
 	auditor    Auditor
 	symbols    *SymbolIndex
 	exemptions map[string]Exemption
+	// exStore optionally persists exemptions across process restarts.
+	exStore *sqliteExemptionStore
 }
 
 // NewEngine creates a guard engine with defaults merged over cfg.

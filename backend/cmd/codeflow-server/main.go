@@ -120,6 +120,10 @@ func run() error {
 		audit.SetAuditService(nil)
 	}()
 	guardEng := guard.NewEngine(nil, guard.NewAuditBridge(auditSvc))
+	if err := guardEng.OpenExemptionStore(durableDBPath("guard_exemptions.db")); err != nil {
+		return fmt.Errorf("init guard exemption store: %w", err)
+	}
+	defer func() { _ = guardEng.CloseExemptionStore() }()
 	// Optional project guard policy (ignore if missing).
 	_ = guardEng.TryLoadConfigFile(filepath.Join(".", ".codeflow", "guard.yaml"))
 	if root := strings.TrimSpace(os.Getenv("CODEFLOW_INDEX_ROOT")); root != "" {
@@ -187,7 +191,7 @@ func configureHookRuntimeControls() {
 			backendhooks.HookPostResponse,
 			backendhooks.HookOnStream,
 			backendhooks.HookBeforeCompress,
-				backendhooks.HookBeforeWrite,
+			backendhooks.HookBeforeWrite,
 			backendhooks.HookOnMessageComplete,
 			backendhooks.HookAfterExec,
 			backendhooks.HookRestoreState,

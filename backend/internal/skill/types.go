@@ -76,6 +76,9 @@ type Registry interface {
 	Create(ctx context.Context, req *CreateRequest) (*Skill, error)
 	Get(ctx context.Context, id string) (*Skill, error)
 	List(ctx context.Context) ([]*Skill, error)
+	// ListFiltered returns skills optionally filtered by stage tag.
+	// includeDisabled controls whether disabled skills appear.
+	ListFiltered(ctx context.Context, stage string, includeDisabled bool) ([]*Skill, error)
 	Update(ctx context.Context, id string, req *UpdateRequest) (*Skill, error)
 	Delete(ctx context.Context, id string) error
 	Match(ctx context.Context, req *MatchRequest) ([]MatchResult, error)

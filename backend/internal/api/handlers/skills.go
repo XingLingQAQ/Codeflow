@@ -28,16 +28,7 @@ func CreateSkill(c *gin.Context) {
 // ListSkills handles GET /api/v1/skills?stage=
 func ListSkills(c *gin.Context) {
 	stage := c.Query("stage")
-	reg := skill.GetRegistry()
-	var (
-		items []*skill.Skill
-		err   error
-	)
-	if ir, ok := reg.(*skill.InMemoryRegistry); ok && stage != "" {
-		items, err = ir.ListFiltered(c.Request.Context(), stage, true)
-	} else {
-		items, err = reg.List(c.Request.Context())
-	}
+	items, err := skill.GetRegistry().ListFiltered(c.Request.Context(), stage, true)
 	if err != nil {
 		respondInternalError(c, "list skills", err)
 		return
