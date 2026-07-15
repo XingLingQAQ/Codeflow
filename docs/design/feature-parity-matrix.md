@@ -57,7 +57,7 @@
 |---|---|---|---|---|---|---|
 | G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)，内存 | 2~N + model/channel + stage FK | M4 | `internal/debate` |
 | G20 | Agent 广场 / Registry | ⚠️ | agent 服务基础能力 | 版本/来源/插槽/市场 UI | M4 | |
-| G16 | `internal/workspace` | ❌ | 无 | list/read/watch + dev server | M3 | |
+| G16 | `internal/workspace` | ⚠️ | **M3.1 起步**：`list/read/write` + 路径沙箱 + WriteGuard 钩子；`/api/v1/workspace/*` experimental；无 watch/WS | watch + project root 绑定 + 强制 guard | M3 | 2026-07-15 |
 | G17 | `internal/guard` | ❌ | 无强制写入锚点 | hook_before_write + shadow | M3 | shadow/ast 资产可复用 |
 | — | 双方辩论 API | ✅ | create/round/resolve/export/stream | 保留并升级 | M4 | 不回退现有 API 直至兼容层 |
 
@@ -116,3 +116,4 @@
 | 2026-07-15 | **M0.9**：G30 CGO/SQLite ADR ✅；`docs/adr/0003-sqlite-cgo.md`；Makefile `build-all` CGO=1 |
 | 2026-07-15 | **PR-6 收尾**：bootstrap 注入 Snapshot/Debate/Summarize；G26 备注更新 |
 | 2026-07-15 | **PR-8**：`internal/floweng` 最小机 + experimental flows API；G09 → ⚠️ |
+| 2026-07-15 | **M3.1**：`internal/workspace` list/read/write + WriteGuard 钩子；G16 → ⚠️ |

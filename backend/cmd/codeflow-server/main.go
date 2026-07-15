@@ -23,6 +23,7 @@ import (
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
+	"github.com/codeflow/backend/internal/workspace"
 )
 
 const version = "0.1.0"
@@ -101,6 +102,7 @@ func run() error {
 		Debate:    debate.NewInMemoryDebateManager(),
 		Summarize: summarize.NewSummarizerService(),
 		Floweng:   flowEngine,
+		Workspace: workspace.NewFSService(nil), // guard injected when internal/guard lands
 	}
 	if err := services.Apply(); err != nil {
 		return err

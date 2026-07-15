@@ -13,6 +13,7 @@ import (
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
+	"github.com/codeflow/backend/internal/workspace"
 )
 
 // Services contains the explicit service dependencies required by the server runtime.
@@ -30,8 +31,9 @@ type Services struct {
 	Context   ctxsvc.IContextService
 	Snapshot  snapshot.ISnapshotService
 	Debate    debate.IDebateManager
-	Summarize summarize.ISummarizer
-	Floweng   floweng.Engine
+	Summarize  summarize.ISummarizer
+	Floweng    floweng.Engine
+	Workspace  workspace.Service
 }
 
 // Validate checks that every required service dependency has been provided.
@@ -64,6 +66,9 @@ func (s Services) Validate() error {
 	if s.Floweng == nil {
 		missing = append(missing, "floweng")
 	}
+	if s.Workspace == nil {
+		missing = append(missing, "workspace")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing bootstrap services: %v", missing)
 	}
@@ -84,6 +89,7 @@ func (s Services) Apply() error {
 	debate.SetDebateManager(s.Debate)
 	summarize.SetSummarizer(s.Summarize)
 	floweng.SetEngine(s.Floweng)
+	workspace.SetService(s.Workspace)
 	return nil
 }
 
@@ -98,4 +104,5 @@ func (s Services) Reset() {
 	debate.SetDebateManager(nil)
 	summarize.SetSummarizer(nil)
 	floweng.SetEngine(nil)
+	workspace.SetService(nil)
 }

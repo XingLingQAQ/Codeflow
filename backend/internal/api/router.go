@@ -125,6 +125,15 @@ func (s *Server) setupRoutes() {
 			flows.POST("/:id/loop", handlers.LoopFlow)
 		}
 
+		// Workspace filesystem (experimental: M3.1; writes optional WriteGuard)
+		ws := v1.Group("/workspace")
+		ws.Use(middleware.Experimental("workspace"))
+		{
+			ws.GET("/list", handlers.ListWorkspace)
+			ws.GET("/read", handlers.ReadWorkspaceFile)
+			ws.POST("/write", handlers.WriteWorkspaceFile)
+		}
+
 		// Memory routes
 		memory := v1.Group("/memory")
 		{
