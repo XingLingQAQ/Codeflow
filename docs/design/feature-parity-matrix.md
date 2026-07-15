@@ -99,7 +99,7 @@
 | `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/stages(+id)/active-stage/artifacts(+id)/gates/events/advance/skip/loop/abort |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/promote-all/staged/discard/discard-all |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import/export |
-| `/api/v1/guard` | ⚠️ Experimental | config/check/index/exempt/exemptions |
+| `/api/v1/guard` | ⚠️ Experimental | config/rules/check/index/exempt/exemptions |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
 
 ---
@@ -145,3 +145,4 @@
 | 2026-07-15 | **workflow debate_count**；guard relative exemption 匹配；smoke bulk staging |
 | 2026-07-15 | **flow gates list** GET `/flows/:id/gates`；events limit 查询 |
 | 2026-07-15 | **flow active-stage** GET `/flows/:id/active-stage` |
+| 2026-07-15 | **guard rules list** GET `/guard/rules` |
