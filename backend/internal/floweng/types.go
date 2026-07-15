@@ -167,6 +167,11 @@ type SnapshotCreator interface {
 	CreateStageSnapshot(ctx context.Context, flow *Flow, stage *Stage, sessionID string) (snapshotID string, err error)
 }
 
+// EventNotifier is optional; receives each appended flow event for buses (WS, etc.).
+type EventNotifier interface {
+	OnFlowEvent(flow *Flow, event FlowEvent)
+}
+
 // GateDecisionRequest approves or rejects a gate.
 type GateDecisionRequest struct {
 	Approved bool   `json:"approved"`

@@ -15,6 +15,7 @@ type InMemoryEngine struct {
 	mu        sync.Mutex
 	store     FlowStore
 	snapshots SnapshotCreator // optional
+	notifier  EventNotifier   // optional
 }
 
 // NewInMemoryEngine creates an engine with an in-process memory store.
@@ -48,6 +49,13 @@ func (e *InMemoryEngine) SetSnapshotCreator(s SnapshotCreator) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.snapshots = s
+}
+
+// SetEventNotifier attaches or replaces the event bus hook (e.g. WebSocket).
+func (e *InMemoryEngine) SetEventNotifier(n EventNotifier) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.notifier = n
 }
 
 // Create instantiates a Flow from a built-in template.
@@ -435,13 +443,18 @@ func (e *InMemoryEngine) putRaw(flow *Flow) error {
 }
 
 func (e *InMemoryEngine) appendEvent(flow *Flow, typ, stageID, msg string) {
-	flow.Events = append(flow.Events, FlowEvent{
+	ev := FlowEvent{
 		ID:        uuid.New().String(),
 		Type:      typ,
 		StageID:   stageID,
 		Message:   msg,
 		Timestamp: time.Now().UTC(),
-	})
+	}
+	flow.Events = append(flow.Events, ev)
+	if e.notifier != nil {
+		// clone flow view for external bus without sharing mutable stages slice
+		e.notifier.OnFlowEvent(cloneFlow(flow), ev)
+	}
 }
 
 func activeStageIndex(flow *Flow) int {
