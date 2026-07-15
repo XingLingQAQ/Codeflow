@@ -98,7 +98,7 @@
 | `/api/v1/debates` | ⚠️ 双方 | list/create + flow_id/stage_id 过滤与 FK |
 | `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/stages(+id)/artifacts(+id)/advance/skip/loop/abort/gate |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/promote-all/staged/discard/discard-all |
-| `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
+| `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import/export |
 | `/api/v1/guard` | ⚠️ Experimental | config/check/index/exempt/exemptions |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
 
@@ -141,3 +141,4 @@
 | 2026-07-15 | **workspace discard-all** 批量放弃 staging |
 | 2026-07-15 | **flow stage by id** GET `/flows/:id/stages/:sid` |
 | 2026-07-15 | **flow artifact by id** GET `/flows/:id/artifacts/:aid` |
+| 2026-07-15 | **skill export** GET `/skills/export` markdown dump；events type/stage 过滤 |
