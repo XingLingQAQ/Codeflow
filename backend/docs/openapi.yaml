@@ -3838,6 +3838,15 @@ paths:
         '503':
           description: Registry does not support import
 
+  /api/v1/skills/export:
+    get:
+      tags: [Skills]
+      summary: Export all skills as concatenated markdown with frontmatter
+      x-codeflow-experimental: true
+      responses:
+        '200':
+          description: Markdown dump
+
   /api/v1/skills/match:
     post:
       tags: [Skills]

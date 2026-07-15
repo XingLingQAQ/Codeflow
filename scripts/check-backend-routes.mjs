@@ -31,6 +31,7 @@ const required = [
   "handlers.DiscardAllWorkspaceStaged",
   "handlers.CreateSkill",
   "handlers.ImportSkills",
+  "handlers.ExportSkills",
   "handlers.GuardCheck",
   "handlers.GuardConfig",
   "handlers.GuardIndexTree",

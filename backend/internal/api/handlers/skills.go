@@ -108,3 +108,25 @@ func InjectSkills(c *gin.Context) {
 	}
 	respondOK(c, gin.H{"injection": text})
 }
+
+// ExportSkills handles GET /api/v1/skills/export — markdown dump of all skills.
+func ExportSkills(c *gin.Context) {
+	items, err := skill.GetRegistry().List(c.Request.Context())
+	if err != nil {
+		respondInternalError(c, "export skills", err)
+		return
+	}
+	var b strings.Builder
+	for _, s := range items {
+		b.WriteString("---\n")
+		b.WriteString("name: " + s.Name + "\n")
+		b.WriteString("version: " + s.Version + "\n")
+		if s.Description != "" {
+			b.WriteString("description: " + s.Description + "\n")
+		}
+		b.WriteString("---\n")
+		b.WriteString(s.Body)
+		b.WriteString("\n\n")
+	}
+	respondOK(c, gin.H{"markdown": b.String(), "total": len(items)})
+}

@@ -289,6 +289,7 @@ const requiredOperations = [
   ['/api/v1/skills/match', 'POST'],
   ['/api/v1/skills/inject', 'POST'],
   ['/api/v1/skills/import', 'POST'],
+  ['/api/v1/skills/export', 'GET'],
   ['/api/v1/skills/{id}', 'GET'],
   ['/api/v1/skills/{id}', 'PATCH'],
   ['/api/v1/skills/{id}', 'DELETE'],
