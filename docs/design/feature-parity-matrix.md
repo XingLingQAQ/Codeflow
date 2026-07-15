@@ -95,8 +95,8 @@
 |---|---|---|
 | `/api/v1/snapshots` | ⚠️ Experimental | 真 restore（conv/vector/graph）；git opt-in |
 | `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
-| `/api/v1/debates` | ⚠️ 双方 | 未绑 Flow stage |
-| `/api/v1/flows` | ⚠️ Experimental | create/advance/skip/loop/abort/gate decide |
+| `/api/v1/debates` | ⚠️ 双方 | 可选 flow_id/stage_id FK |
+| `/api/v1/flows` | ⚠️ Experimental | create/advance/skip/loop/abort/gate/artifacts |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/write/promote |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
 | `/api/v1/guard` | ⚠️ Experimental | check/index |
