@@ -3215,6 +3215,12 @@ paths:
           in: query
           schema:
             type: string
+        - name: status
+          in: query
+          description: Filter by flow status (active|completed|aborted)
+          schema:
+            type: string
+            enum: [active, completed, aborted]
       responses:
         '200':
           description: Flow list
@@ -3252,6 +3258,21 @@ paths:
           description: Flow detail
         '404':
           description: Not found
+    delete:
+      tags: [Flows]
+      summary: Delete flow document
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+        '404':
+          description: Not found
 
   /api/v1/flows/{id}/events:
     get:
@@ -3267,6 +3288,123 @@ paths:
       responses:
         '200':
           description: Event list
+
+  /api/v1/flows/{id}/stages:
+    get:
+      tags: [Flows]
+      summary: List stages for a flow
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stage list
+        '404':
+          description: Not found
+
+  /api/v1/flows/{id}/artifacts:
+    get:
+      tags: [Flows]
+      summary: List artifacts for a flow
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Artifact list
+        '404':
+          description: Not found
+
+  /api/v1/flows/{id}/artifacts/{aid}:
+    patch:
+      tags: [Flows]
+      summary: Update artifact status
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: aid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFlowArtifactStatusRequest'
+      responses:
+        '200':
+          description: Updated artifact
+        '400':
+          description: Invalid status
+        '404':
+          description: Not found
+
+  /api/v1/flows/{id}/abort:
+    post:
+      tags: [Flows]
+      summary: Abort an active flow
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AbortFlowRequest'
+      responses:
+        '200':
+          description: Flow after abort
+        '404':
+          description: Not found
+        '409':
+          description: Flow not active
+
+  /api/v1/flows/{id}/stages/{sid}/artifacts:
+    post:
+      tags: [Flows]
+      summary: Attach artifact to a stage
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachFlowArtifactRequest'
+      responses:
+        '201':
+          description: Artifact created
+        '400':
+          description: Invalid request
+        '404':
+          description: Flow or stage not found
 
   /api/v1/flows/{id}/stages/{sid}/advance:
     post:
@@ -3454,6 +3592,12 @@ paths:
       tags: [Skills]
       summary: List skills
       x-codeflow-experimental: true
+      parameters:
+        - name: stage
+          in: query
+          description: Optional stage type filter (empty stage_tags match any)
+          schema:
+            type: string
       responses:
         '200':
           description: Skill list
@@ -3470,6 +3614,25 @@ paths:
       responses:
         '201':
           description: Skill created
+
+  /api/v1/skills/import:
+    post:
+      tags: [Skills]
+      summary: Import markdown skills from a directory
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportSkillsRequest'
+      responses:
+        '200':
+          description: Import count
+        '400':
+          description: Invalid directory
+        '503':
+          description: Registry does not support import
 
   /api/v1/skills/match:
     post:
@@ -3590,6 +3753,23 @@ paths:
       responses:
         '200':
           description: Indexed file count
+
+  /api/v1/guard/exempt:
+    post:
+      tags: [Guard]
+      summary: Grant temporary path exemption for selected rules
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuardExemptRequest'
+      responses:
+        '200':
+          description: Exemption granted
+        '503':
+          description: Guard engine unavailable
 
 components:
   schemas:
@@ -6747,6 +6927,58 @@ components:
           type: string
         create_parents:
           type: boolean
+        mode:
+          type: string
+          description: direct writes into tree; stage writes under .codeflow/staging
+          enum: [direct, stage]
+
+    AbortFlowRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    AttachFlowArtifactRequest:
+      type: object
+      properties:
+        type:
+          type: string
+        content_ref:
+          type: string
+          description: Optional storage pointer (path, blob id, URI)
+
+    UpdateFlowArtifactStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [draft, approved, stale]
+
+    ImportSkillsRequest:
+      type: object
+      required: [dir]
+      properties:
+        dir:
+          type: string
+          description: Absolute directory containing .md skill files
+
+    GuardExemptRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+        rules:
+          type: array
+          items:
+            type: string
+          description: Rule ids to exempt; empty may mean all (engine-defined)
+        reason:
+          type: string
+        ttl_seconds:
+          type: integer
+          description: Seconds until expiry; default 3600 when omitted or non-positive
 
     CreateSkillRequest:
       type: object
