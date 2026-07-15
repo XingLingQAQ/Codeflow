@@ -138,10 +138,32 @@ func (r *InMemoryRegistry) Get(ctx context.Context, id string) (*Skill, error) {
 
 // List returns all skills.
 func (r *InMemoryRegistry) List(ctx context.Context) ([]*Skill, error) {
+	return r.ListFiltered(ctx, "", true)
+}
+
+// ListFiltered returns skills optionally filtered by stage tag.
+// includeDisabled controls whether disabled skills appear.
+func (r *InMemoryRegistry) ListFiltered(ctx context.Context, stage string, includeDisabled bool) ([]*Skill, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	stage = strings.ToLower(strings.TrimSpace(stage))
 	out := make([]*Skill, 0, len(r.skills))
 	for _, s := range r.skills {
+		if !includeDisabled && !s.Enabled {
+			continue
+		}
+		if stage != "" && len(s.StageTags) > 0 {
+			ok := false
+			for _, t := range s.StageTags {
+				if strings.ToLower(t) == stage {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				continue
+			}
+		}
 		out = append(out, cloneSkill(s))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
