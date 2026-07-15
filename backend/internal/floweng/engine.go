@@ -408,8 +408,8 @@ func (e *InMemoryEngine) Abort(ctx context.Context, flowID, reason string) (*Flo
 	return cloneFlow(flow), nil
 }
 
-// AttachArtifact records a draft artifact on a stage.
-func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, artType string) (*Artifact, error) {
+// AttachArtifact records a draft artifact on a stage (contentRef optional).
+func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, artType, contentRef string) (*Artifact, error) {
 	if artType == "" {
 		artType = "generic"
 	}
@@ -422,7 +422,6 @@ func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, ar
 	if stageIndexByID(flow, stageID) < 0 {
 		return nil, fmt.Errorf("stage not found: %s", stageID)
 	}
-	// version = count of same type on stage + 1
 	ver := 1
 	for _, a := range flow.Artifacts {
 		if a.StageID == stageID && a.Type == artType {
@@ -430,12 +429,13 @@ func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, ar
 		}
 	}
 	art := Artifact{
-		ID:        uuid.New().String(),
-		StageID:   stageID,
-		Type:      artType,
-		Version:   ver,
-		Status:    ArtifactStatusDraft,
-		CreatedAt: time.Now().UTC(),
+		ID:         uuid.New().String(),
+		StageID:    stageID,
+		Type:       artType,
+		Version:    ver,
+		Status:     ArtifactStatusDraft,
+		ContentRef: contentRef,
+		CreatedAt:  time.Now().UTC(),
 	}
 	flow.Artifacts = append(flow.Artifacts, art)
 	e.appendEvent(flow, "artifact.created", stageID, fmt.Sprintf("artifact type=%s v=%d", artType, ver))

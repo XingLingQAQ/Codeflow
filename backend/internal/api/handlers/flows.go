@@ -159,10 +159,11 @@ func AttachFlowArtifact(c *gin.Context) {
 	flowID := c.Param("id")
 	stageID := c.Param("sid")
 	var body struct {
-		Type string `json:"type"`
+		Type       string `json:"type"`
+		ContentRef string `json:"content_ref"`
 	}
 	_ = c.ShouldBindJSON(&body)
-	art, err := floweng.GetEngine().AttachArtifact(c.Request.Context(), flowID, stageID, body.Type)
+	art, err := floweng.GetEngine().AttachArtifact(c.Request.Context(), flowID, stageID, body.Type, body.ContentRef)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())

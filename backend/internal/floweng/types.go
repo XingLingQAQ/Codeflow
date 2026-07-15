@@ -119,12 +119,14 @@ type LoopEdge struct {
 
 // Artifact is a stage output reference (content stored elsewhere).
 type Artifact struct {
-	ID        string         `json:"id"`
-	StageID   string         `json:"stage_id"`
-	Type      string         `json:"type"`
-	Version   int            `json:"version"`
-	Status    ArtifactStatus `json:"status"`
-	CreatedAt time.Time      `json:"created_at"`
+	ID         string         `json:"id"`
+	StageID    string         `json:"stage_id"`
+	Type       string         `json:"type"`
+	Version    int            `json:"version"`
+	Status     ArtifactStatus `json:"status"`
+	// ContentRef is an optional storage pointer (path, blob id, URI).
+	ContentRef string    `json:"content_ref,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // FlowEvent is an append-only audit/timeline entry for observation adapters.
@@ -191,6 +193,6 @@ type Engine interface {
 	DecideGate(ctx context.Context, flowID, gateID string, req *GateDecisionRequest) (*Flow, error)
 	// Abort marks a flow aborted (terminal).
 	Abort(ctx context.Context, flowID, reason string) (*Flow, error)
-	// AttachArtifact records a draft artifact on a stage.
-	AttachArtifact(ctx context.Context, flowID, stageID, artType string) (*Artifact, error)
+	// AttachArtifact records a draft artifact on a stage (contentRef optional storage pointer).
+	AttachArtifact(ctx context.Context, flowID, stageID, artType, contentRef string) (*Artifact, error)
 }
