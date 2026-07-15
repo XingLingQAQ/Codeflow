@@ -3592,6 +3592,28 @@ paths:
         '200':
           description: File content (text + base64)
 
+  /api/v1/workspace/stat:
+    get:
+      tags: [Workspace]
+      summary: Stat file or directory under project root
+      x-codeflow-experimental: true
+      parameters:
+        - name: root
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Entry metadata
+        '404':
+          description: Not found
+
   /api/v1/workspace/staged:
     get:
       tags: [Workspace]

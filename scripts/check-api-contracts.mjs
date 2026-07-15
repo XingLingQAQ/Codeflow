@@ -275,6 +275,7 @@ const requiredOperations = [
   ['/api/v1/flows/{id}/gates/{gid}/decide', 'POST'],
   ['/api/v1/workspace/list', 'GET'],
   ['/api/v1/workspace/read', 'GET'],
+  ['/api/v1/workspace/stat', 'GET'],
   ['/api/v1/workspace/staged', 'GET'],
   ['/api/v1/workspace/write', 'POST'],
   ['/api/v1/workspace/promote', 'POST'],

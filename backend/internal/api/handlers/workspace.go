@@ -143,6 +143,31 @@ func WriteWorkspaceFile(c *gin.Context) {
 	respondOK(c, ent)
 }
 
+
+// StatWorkspaceFile handles GET /api/v1/workspace/stat?root=&path=
+func StatWorkspaceFile(c *gin.Context) {
+	root := workspaceRootFromRequest(c, "")
+	path := c.Query("path")
+	if root == "" || path == "" {
+		respondError(c, http.StatusBadRequest, "root and path are required")
+		return
+	}
+	ent, err := workspace.GetService().Stat(c.Request.Context(), root, path)
+	if err != nil {
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "escapes") || strings.Contains(err.Error(), "relative") {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondInternalError(c, "stat workspace", err)
+		return
+	}
+	respondOK(c, ent)
+}
+
 // ListWorkspaceStaged handles GET /api/v1/workspace/staged?root=
 func ListWorkspaceStaged(c *gin.Context) {
 	root := workspaceRootFromRequest(c, "")
