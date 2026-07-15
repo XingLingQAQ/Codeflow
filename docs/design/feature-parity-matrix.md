@@ -96,7 +96,7 @@
 | `/api/v1/snapshots` | ⚠️ Experimental | 真 restore（conv/vector/graph）；git opt-in |
 | `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
 | `/api/v1/debates` | ⚠️ 双方 | list/create + flow_id/stage_id 过滤与 FK |
-| `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/advance/skip/loop/abort/gate/artifacts |
+| `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/stages(+id)/advance/skip/loop/abort/gate/artifacts |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/promote-all/staged/discard/discard-all |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
 | `/api/v1/guard` | ⚠️ Experimental | config/check/index/exempt/exemptions |
@@ -139,3 +139,4 @@
 | 2026-07-15 | **workspace stat**；debate WS topics；promote clears staging |
 | 2026-07-15 | **workspace promote-all** + staged read query；shadow pipeline 闭环 |
 | 2026-07-15 | **workspace discard-all** 批量放弃 staging |
+| 2026-07-15 | **flow stage by id** GET `/flows/:id/stages/:sid` |
