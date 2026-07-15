@@ -53,6 +53,9 @@ jobs:
       - name: API Contract Check
         run: pnpm run check:api-contracts
 
+      - name: Backend Experimental Routes Check
+        run: pnpm run check:backend-routes
+
       - name: Generated API Types Check
         run: pnpm run check:api-types
 
@@ -93,10 +96,14 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Backend Test
+      - name: Backend Experimental Routes Check
+        run: node scripts/check-backend-routes.mjs
+
+      - name: Backend Test (CGO=1)
         working-directory: backend
+        env:
+          CGO_ENABLED: "1"
         run: go test -race -coverprofile=coverage.out ./...
-        continue-on-error: true
 
       - name: Backend Coverage Report
         if: always()
