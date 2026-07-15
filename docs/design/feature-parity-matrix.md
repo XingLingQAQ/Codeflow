@@ -142,3 +142,4 @@
 | 2026-07-15 | **flow stage by id** GET `/flows/:id/stages/:sid` |
 | 2026-07-15 | **flow artifact by id** GET `/flows/:id/artifacts/:aid` |
 | 2026-07-15 | **skill export** GET `/skills/export` markdown dump；events type/stage 过滤 |
+| 2026-07-15 | **workflow debate_count**；guard relative exemption 匹配；smoke bulk staging |
