@@ -150,8 +150,10 @@ func ListFlowEvents(c *gin.Context) {
 
 // ListFlowTemplates handles GET /api/v1/flows/templates
 func ListFlowTemplates(c *gin.Context) {
+	// Prefer rich descriptions; keep ids for older clients under "ids".
+	infos := floweng.ListTemplateInfos()
 	ids := floweng.ListTemplates()
-	respondOK(c, gin.H{"items": ids})
+	respondOK(c, gin.H{"items": infos, "ids": ids, "total": len(infos)})
 }
 
 // AttachFlowArtifact handles POST /api/v1/flows/:id/stages/:sid/artifacts

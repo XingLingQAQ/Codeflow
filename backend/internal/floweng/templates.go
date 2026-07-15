@@ -67,6 +67,48 @@ func ListTemplates() []TemplateID {
 	return []TemplateID{TemplateNewProject, TemplateImport}
 }
 
+// TemplateInfo is a public view of a built-in template.
+type TemplateInfo struct {
+	ID     TemplateID   `json:"id"`
+	Stages []StageBrief `json:"stages"`
+	Loops  []LoopEdge   `json:"loops"`
+}
+
+// StageBrief describes a template stage without instance IDs.
+type StageBrief struct {
+	Type     StageType `json:"type"`
+	Name     string    `json:"name"`
+	Canvas   string    `json:"canvas"`
+	Optional bool      `json:"optional"`
+}
+
+// DescribeTemplate returns a public template description.
+func DescribeTemplate(id TemplateID) (*TemplateInfo, bool) {
+	t, ok := getTemplate(id)
+	if !ok {
+		return nil, false
+	}
+	info := &TemplateInfo{ID: t.ID, Loops: append([]LoopEdge(nil), t.Loops...)}
+	for _, s := range t.Stages {
+		info.Stages = append(info.Stages, StageBrief{
+			Type: s.Type, Name: s.Name, Canvas: s.Canvas, Optional: s.Optional,
+		})
+	}
+	return info, true
+}
+
+// ListTemplateInfos returns all built-in template descriptions.
+func ListTemplateInfos() []TemplateInfo {
+	ids := ListTemplates()
+	out := make([]TemplateInfo, 0, len(ids))
+	for _, id := range ids {
+		if info, ok := DescribeTemplate(id); ok {
+			out = append(out, *info)
+		}
+	}
+	return out
+}
+
 func getTemplate(id TemplateID) (templateDef, bool) {
 	if id == "" {
 		id = TemplateNewProject
