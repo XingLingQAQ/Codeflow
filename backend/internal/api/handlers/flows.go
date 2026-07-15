@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -187,6 +188,12 @@ func ListFlowEvents(c *gin.Context) {
 			filtered = append(filtered, ev)
 		}
 		events = filtered
+	}
+	if limitQ := strings.TrimSpace(c.Query("limit")); limitQ != "" {
+		if n, err := strconv.Atoi(limitQ); err == nil && n >= 0 && n < len(events) {
+			// Keep the most recent N events (engine stores oldest-first).
+			events = events[len(events)-n:]
+		}
 	}
 	respondOK(c, gin.H{"items": events, "total": len(events)})
 }
