@@ -167,6 +167,12 @@ type SnapshotCreator interface {
 	CreateStageSnapshot(ctx context.Context, flow *Flow, stage *Stage, sessionID string) (snapshotID string, err error)
 }
 
+// GateDecisionRequest approves or rejects a gate.
+type GateDecisionRequest struct {
+	Approved bool   `json:"approved"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 // Engine is the Flow state machine API.
 type Engine interface {
 	Create(ctx context.Context, req *CreateFlowRequest) (*Flow, error)
@@ -176,4 +182,6 @@ type Engine interface {
 	Skip(ctx context.Context, flowID string, req *SkipRequest) (*Flow, error)
 	Loop(ctx context.Context, flowID string, req *LoopRequest) (*Flow, error)
 	ListEvents(ctx context.Context, flowID string) ([]FlowEvent, error)
+	// DecideGate sets human/agent gate passed flag (approve/reject).
+	DecideGate(ctx context.Context, flowID, gateID string, req *GateDecisionRequest) (*Flow, error)
 }

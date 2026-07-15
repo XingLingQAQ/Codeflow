@@ -311,6 +311,51 @@ func (e *InMemoryEngine) ListEvents(ctx context.Context, flowID string) ([]FlowE
 	return out, nil
 }
 
+// DecideGate approves or rejects a gate on a flow stage.
+func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, req *GateDecisionRequest) (*Flow, error) {
+	if gateID == "" {
+		return nil, fmt.Errorf("gate_id is required")
+	}
+	if req == nil {
+		req = &GateDecisionRequest{}
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	flow, err := e.mustGetLocked(flowID)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for si := range flow.Stages {
+		for gi := range flow.Stages[si].Gates {
+			g := &flow.Stages[si].Gates[gi]
+			if g.ID != gateID {
+				continue
+			}
+			found = true
+			if req.Approved {
+				g.Passed = true
+				if flow.Stages[si].Status == StageStatusWaitingGate {
+					flow.Stages[si].Status = StageStatusActive
+				}
+				e.appendEvent(flow, "gate.approved", flow.Stages[si].ID, fmt.Sprintf("gate %s approved: %s", gateID, req.Reason))
+			} else {
+				g.Passed = false
+				flow.Stages[si].Status = StageStatusWaitingGate
+				e.appendEvent(flow, "gate.rejected", flow.Stages[si].ID, fmt.Sprintf("gate %s rejected: %s", gateID, req.Reason))
+			}
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("gate not found: %s", gateID)
+	}
+	flow.UpdatedAt = time.Now().UTC()
+	e.flows[flow.ID] = cloneFlow(flow)
+	return cloneFlow(flow), nil
+}
+
 // AttachArtifact records a draft artifact on a stage (used by tests / future stages).
 func (e *InMemoryEngine) AttachArtifact(flowID, stageID, artType string) (*Artifact, error) {
 	e.mu.Lock()

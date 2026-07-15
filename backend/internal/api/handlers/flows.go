@@ -153,3 +153,25 @@ func ListFlowTemplates(c *gin.Context) {
 	ids := floweng.ListTemplates()
 	respondOK(c, gin.H{"items": ids})
 }
+
+// DecideFlowGate handles POST /api/v1/flows/:id/gates/:gid/decide
+func DecideFlowGate(c *gin.Context) {
+	flowID := c.Param("id")
+	gateID := c.Param("gid")
+	var req floweng.GateDecisionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// allow empty body for approve via query? require JSON
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	flow, err := floweng.GetEngine().DecideGate(c.Request.Context(), flowID, gateID, &req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondOK(c, flow)
+}

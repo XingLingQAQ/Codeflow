@@ -194,6 +194,37 @@ func TestUnknownTemplate(t *testing.T) {
 	}
 }
 
+func TestDecideGateApproveThenAdvance(t *testing.T) {
+	// template with human exit gate on first stage
+	e := NewInMemoryEngine(nil)
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// replace first stage exit gate with human approval
+	e.mu.Lock()
+	f := e.flows[flow.ID]
+	f.Stages[0].Gates = []Gate{{ID: "gate-human-1", Phase: GatePhaseExit, Kind: GateKindHumanApproval, Passed: false}}
+	e.flows[flow.ID] = f
+	e.mu.Unlock()
+
+	_, err = e.Advance(context.Background(), flow.ID, &AdvanceRequest{})
+	if err == nil {
+		t.Fatal("expected block on human gate")
+	}
+	flow, err = e.DecideGate(context.Background(), flow.ID, "gate-human-1", &GateDecisionRequest{Approved: true, Reason: "lgtm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err = e.Advance(context.Background(), flow.ID, &AdvanceRequest{})
+	if err != nil {
+		t.Fatalf("advance after approve: %v", err)
+	}
+	if stageByType(flow, StageTypeIdea).Status != StageStatusDone {
+		t.Fatal("idea should be done")
+	}
+}
+
 func TestGetSetEngine(t *testing.T) {
 	prev := GetEngine()
 	t.Cleanup(func() { SetEngine(prev) })
