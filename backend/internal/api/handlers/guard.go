@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -172,5 +173,6 @@ func GuardRules(c *gin.Context) {
 	for id, rc := range cfg.Rules {
 		out = append(out, row{ID: id, Severity: rc.Severity})
 	}
+	sort.Slice(out, func(i, j int) bool { return string(out[i].ID) < string(out[j].ID) })
 	respondOK(c, gin.H{"items": out, "total": len(out), "denied_path_globs": cfg.DeniedPathGlobs, "max_file_bytes": cfg.MaxFileBytes})
 }
