@@ -30,6 +30,8 @@ const (
 	// Context management hooks
 	HookBeforeCompress    HookType = "hook_before_compress"
 	HookOnMessageComplete HookType = "hook_on_message_complete"
+	// Workspace write intercept (payload: map with path/content)
+	HookBeforeWrite HookType = "hook_before_write"
 
 	// State management hooks
 	HookAfterExec    HookType = "hook_after_exec"

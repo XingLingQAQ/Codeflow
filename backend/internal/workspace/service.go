@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	backendhooks "github.com/codeflow/backend/internal/hooks"
 )
 
 // FSService is a real filesystem workspace rooted per-call.
@@ -175,11 +178,30 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 	if err != nil {
 		return nil, err
 	}
+	content := req.Content
+	if backendhooks.HasHookManager() {
+		payload := map[string]interface{}{
+			"path":    finalAbs,
+			"rel":     rel,
+			"content": content,
+			"mode":    string(mode),
+		}
+		result, herr := backendhooks.GetHookManager().Trigger(ctx, backendhooks.HookBeforeWrite, payload)
+		if herr != nil {
+			log.Printf("[WARN] workspace before-write hook failed: %v", herr)
+		} else if m, ok := result.(map[string]interface{}); ok {
+			if c, ok := m["content"].([]byte); ok {
+				content = c
+			} else if c, ok := m["content"].(string); ok {
+				content = []byte(c)
+			}
+		}
+	}
 	s.mu.RLock()
 	guard := s.guard
 	s.mu.RUnlock()
 	if guard != nil {
-		if err := guard.BeforeWrite(ctx, finalAbs, req.Content); err != nil {
+		if err := guard.BeforeWrite(ctx, finalAbs, content); err != nil {
 			return nil, fmt.Errorf("write blocked by guard: %w", err)
 		}
 	}
@@ -189,7 +211,7 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 			return nil, fmt.Errorf("mkdir: %w", err)
 		}
 	}
-	if err := os.WriteFile(abs, req.Content, 0o644); err != nil {
+	if err := os.WriteFile(abs, content, 0o644); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 	info, err := os.Stat(abs)
