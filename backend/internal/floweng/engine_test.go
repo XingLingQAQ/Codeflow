@@ -202,11 +202,10 @@ func TestDecideGateApproveThenAdvance(t *testing.T) {
 		t.Fatal(err)
 	}
 	// replace first stage exit gate with human approval
-	e.mu.Lock()
-	f := e.flows[flow.ID]
-	f.Stages[0].Gates = []Gate{{ID: "gate-human-1", Phase: GatePhaseExit, Kind: GateKindHumanApproval, Passed: false}}
-	e.flows[flow.ID] = f
-	e.mu.Unlock()
+	flow.Stages[0].Gates = []Gate{{ID: "gate-human-1", Phase: GatePhaseExit, Kind: GateKindHumanApproval, Passed: false}}
+	if err := e.putRaw(flow); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err = e.Advance(context.Background(), flow.ID, &AdvanceRequest{})
 	if err == nil {

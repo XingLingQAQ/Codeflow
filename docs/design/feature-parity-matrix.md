@@ -43,7 +43,7 @@
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
 | G08 | Snapshot 真 restore | ⚠️ | capture=digest；restore=token 校验；git opt-in | 四态真恢复 + 受控 git | M2 前置 | `snapshot/state_provider.go` |
-| G09 | Flow 执行引擎 | ⚠️ | **PR-8**：`internal/floweng` 最小状态机 + `/api/v1/flows` experimental；内存引擎；新项目/导入模板；advance/skip/loop + 阶段快照钩子 | 持久化 + workflow 观测合并 + 全模板 | M2 | 2026-07-15：API experimental；尚无 WS flow.* |
+| G09 | Flow 执行引擎 | ⚠️ | **PR-8+**：状态机 + SQLite 文档存储（`floweng.db`）+ gate decide + timeline 桥；内存/SQLite 可切换 | WS flow.* + Gate 产品化 + 模板市场 | M2 | 2026-07-15 持久化落地 |
 | G10 | 阶段自动快照与回跳 | ❌ | 无 | exit → snapshot；loop restore | M2 | 依赖 G08 |
 | G11 | Artifact / Gate 一等公民 | ❌ | 无 | 模型 + API | M2 | |
 | G12 | 工作流模板可视化编辑器 | ❌ | 无 | 节点画布 JSON 导入导出 | M2 | |
@@ -120,3 +120,4 @@
 | 2026-07-15 | **M3.2**：`internal/guard` 引擎 + workspace 强制挂钩；G17 → ⚠️ |
 | 2026-07-15 | **M5.0**：`internal/skill` registry + match/inject API；G22 → ⚠️ |
 | 2026-07-15 | **G14 bridge**：workflow timeline 合并 floweng events |
+| 2026-07-15 | **floweng SQLite**：FlowStore + SQLiteFlowStore；main 默认 `data/floweng.db` |

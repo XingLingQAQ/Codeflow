@@ -93,7 +93,10 @@ func run() error {
 
 	// B1 services: same in-memory defaults as previous Get* lazy init; wired via bootstrap.
 	snapshotSvc := snapshot.NewInMemorySnapshotService()
-	flowEngine := floweng.NewInMemoryEngine(floweng.NewDefaultSnapshotHook(snapshotSvc))
+	flowEngine, err := floweng.NewSQLiteEngine(durableDBPath("floweng.db"), floweng.NewDefaultSnapshotHook(snapshotSvc))
+	if err != nil {
+		return fmt.Errorf("init floweng sqlite: %w", err)
+	}
 	guardEng := guard.NewEngine(nil, nil)
 	services := bootstrap.Services{
 		Config:    configSvc,

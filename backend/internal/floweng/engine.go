@@ -9,19 +9,38 @@ import (
 	"github.com/google/uuid"
 )
 
-// InMemoryEngine is an in-memory Flow engine (PR-8 baseline).
+// InMemoryEngine is the Flow state machine. Despite the historical name it can
+// back onto any FlowStore (memory default, or SQLite via NewSQLiteEngine).
 type InMemoryEngine struct {
-	mu        sync.RWMutex
-	flows     map[string]*Flow
+	mu        sync.Mutex
+	store     FlowStore
 	snapshots SnapshotCreator // optional
 }
 
-// NewInMemoryEngine creates an engine. snapshots may be nil (no auto snapshot).
+// NewInMemoryEngine creates an engine with an in-process memory store.
+// snapshots may be nil (no auto snapshot on advance).
 func NewInMemoryEngine(snapshots SnapshotCreator) *InMemoryEngine {
 	return &InMemoryEngine{
-		flows:     make(map[string]*Flow),
+		store:     newMemoryStore(),
 		snapshots: snapshots,
 	}
+}
+
+// NewEngineWithStore creates an engine on a custom store (tests / composition).
+func NewEngineWithStore(store FlowStore, snapshots SnapshotCreator) *InMemoryEngine {
+	if store == nil {
+		store = newMemoryStore()
+	}
+	return &InMemoryEngine{store: store, snapshots: snapshots}
+}
+
+// NewSQLiteEngine opens a durable engine at dbPath (e.g. data/floweng.db).
+func NewSQLiteEngine(dbPath string, snapshots SnapshotCreator) (*InMemoryEngine, error) {
+	store, err := NewSQLiteFlowStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return NewEngineWithStore(store, snapshots), nil
 }
 
 // SetSnapshotCreator attaches or replaces the stage-completion snapshot hook.
@@ -84,34 +103,25 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 	e.appendEvent(flow, "flow.created", "", fmt.Sprintf("created template=%s project=%s", tmpl.ID, req.ProjectID))
 
 	e.mu.Lock()
-	e.flows[flow.ID] = cloneFlow(flow)
-	e.mu.Unlock()
-
+	defer e.mu.Unlock()
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
 	return cloneFlow(flow), nil
 }
 
 // Get returns a flow by id.
 func (e *InMemoryEngine) Get(ctx context.Context, id string) (*Flow, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	f, ok := e.flows[id]
-	if !ok {
-		return nil, fmt.Errorf("flow not found: %s", id)
-	}
-	return cloneFlow(f), nil
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.store.Get(id)
 }
 
 // List returns flows, optionally filtered by projectID (empty = all).
 func (e *InMemoryEngine) List(ctx context.Context, projectID string) ([]*Flow, error) {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	out := make([]*Flow, 0)
-	for _, f := range e.flows {
-		if projectID == "" || f.ProjectID == projectID {
-			out = append(out, cloneFlow(f))
-		}
-	}
-	return out, nil
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.store.List(projectID)
 }
 
 // Advance completes the active stage and activates the next non-skipped pending stage.
@@ -123,7 +133,7 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	flow, err := e.mustGetLocked(flowID)
+	flow, err := e.store.Get(flowID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,10 +148,12 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	stage := &flow.Stages[activeIdx]
 
 	if err := passExitGates(stage, req.Force); err != nil {
+		// persist waiting_gate status
+		flow.UpdatedAt = time.Now().UTC()
+		_ = e.store.Put(flow)
 		return nil, err
 	}
 
-	// Optional snapshot on completion
 	if e.snapshots != nil {
 		sid, err := e.snapshots.CreateStageSnapshot(ctx, flow, stage, req.SessionID)
 		if err != nil {
@@ -153,7 +165,6 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	stage.Status = StageStatusDone
 	e.appendEvent(flow, "stage.done", stage.ID, fmt.Sprintf("completed stage type=%s", stage.Type))
 
-	// Activate next pending (skip already skipped)
 	next := -1
 	for i := activeIdx + 1; i < len(flow.Stages); i++ {
 		if flow.Stages[i].Status == StageStatusPending {
@@ -170,7 +181,9 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	}
 
 	flow.UpdatedAt = time.Now().UTC()
-	e.flows[flow.ID] = cloneFlow(flow)
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
 	return cloneFlow(flow), nil
 }
 
@@ -183,7 +196,7 @@ func (e *InMemoryEngine) Skip(ctx context.Context, flowID string, req *SkipReque
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	flow, err := e.mustGetLocked(flowID)
+	flow, err := e.store.Get(flowID)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +221,6 @@ func (e *InMemoryEngine) Skip(ctx context.Context, flowID string, req *SkipReque
 	e.appendEvent(flow, "stage.skipped", stage.ID, fmt.Sprintf("skipped optional type=%s", stage.Type))
 
 	if wasActive {
-		// Activate next pending
 		activated := false
 		for i := idx + 1; i < len(flow.Stages); i++ {
 			if flow.Stages[i].Status == StageStatusPending {
@@ -225,7 +237,9 @@ func (e *InMemoryEngine) Skip(ctx context.Context, flowID string, req *SkipReque
 	}
 
 	flow.UpdatedAt = time.Now().UTC()
-	e.flows[flow.ID] = cloneFlow(flow)
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
 	return cloneFlow(flow), nil
 }
 
@@ -238,7 +252,7 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	flow, err := e.mustGetLocked(flowID)
+	flow, err := e.store.Get(flowID)
 	if err != nil {
 		return nil, err
 	}
@@ -264,14 +278,12 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 		return nil, fmt.Errorf("loop from stage must be active or done")
 	}
 
-	// Mark artifacts on the reopened target and all downstream stages as stale.
 	for i := range flow.Artifacts {
 		artStageIdx := stageIndexByID(flow, flow.Artifacts[i].StageID)
 		if artStageIdx >= toIdx {
 			flow.Artifacts[i].Status = ArtifactStatusStale
 		}
 	}
-	// Stages after target that were done/active/waiting become pending (re-work).
 	for i := toIdx + 1; i < len(flow.Stages); i++ {
 		st := flow.Stages[i].Status
 		if st == StageStatusDone || st == StageStatusActive || st == StageStatusWaitingGate {
@@ -282,7 +294,6 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 			}
 		}
 	}
-	// Re-open target stage.
 	flow.Stages[toIdx].Status = StageStatusActive
 	flow.Stages[toIdx].SnapshotID = ""
 	for gi := range flow.Stages[toIdx].Gates {
@@ -296,7 +307,9 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 	e.appendEvent(flow, "flow.loop", to.ID, fmt.Sprintf("loop %s→%s reason=%s", from.Type, to.Type, reason))
 
 	flow.UpdatedAt = time.Now().UTC()
-	e.flows[flow.ID] = cloneFlow(flow)
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
 	return cloneFlow(flow), nil
 }
 
@@ -323,7 +336,7 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	flow, err := e.mustGetLocked(flowID)
+	flow, err := e.store.Get(flowID)
 	if err != nil {
 		return nil, err
 	}
@@ -352,7 +365,9 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 		return nil, fmt.Errorf("gate not found: %s", gateID)
 	}
 	flow.UpdatedAt = time.Now().UTC()
-	e.flows[flow.ID] = cloneFlow(flow)
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
 	return cloneFlow(flow), nil
 }
 
@@ -360,7 +375,7 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 func (e *InMemoryEngine) AttachArtifact(flowID, stageID, artType string) (*Artifact, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	flow, err := e.mustGetLocked(flowID)
+	flow, err := e.store.Get(flowID)
 	if err != nil {
 		return nil, err
 	}
@@ -377,17 +392,17 @@ func (e *InMemoryEngine) AttachArtifact(flowID, stageID, artType string) (*Artif
 	}
 	flow.Artifacts = append(flow.Artifacts, art)
 	flow.UpdatedAt = time.Now().UTC()
-	e.flows[flow.ID] = cloneFlow(flow)
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
 	return &art, nil
 }
 
-func (e *InMemoryEngine) mustGetLocked(id string) (*Flow, error) {
-	f, ok := e.flows[id]
-	if !ok {
-		return nil, fmt.Errorf("flow not found: %s", id)
-	}
-	// work on a mutable clone; caller stores back
-	return cloneFlow(f), nil
+// putRaw is used by tests to inject stage/gate fixtures.
+func (e *InMemoryEngine) putRaw(flow *Flow) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.store.Put(flow)
 }
 
 func (e *InMemoryEngine) appendEvent(flow *Flow, typ, stageID, msg string) {
