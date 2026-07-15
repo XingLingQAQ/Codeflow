@@ -256,6 +256,13 @@ func TestGetSetEngine(t *testing.T) {
 	}
 }
 
+func TestCloseMemoryEngineIsNoop(t *testing.T) {
+	e := NewInMemoryEngine(nil)
+	if err := e.Close(); err != nil {
+		t.Fatalf("memory close: %v", err)
+	}
+}
+
 func activeStage(f *Flow) *Stage {
 	for i := range f.Stages {
 		if f.Stages[i].Status == StageStatusActive {
