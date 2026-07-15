@@ -231,3 +231,16 @@ make test-coverage
 ## License
 
 ISC
+
+
+## Recent backend modules (2026-07-15)
+
+| Package | Role |
+|---|---|
+| internal/floweng | Flow state machine + SQLite + WS events |
+| internal/workspace | Project FS sandbox, stage/promote, hook_before_write |
+| internal/guard | WriteGuard, AST dups, guard.yaml, exemptions |
+| internal/skill | Skill registry SQLite, match/inject/import |
+| internal/summarize | Single summarize package (API + engine) |
+
+Data defaults under CODEFLOW_DATA_DIR or ./data: loweng.db, skills.db, udit/.
