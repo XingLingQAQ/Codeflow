@@ -191,4 +191,6 @@ type Engine interface {
 	DecideGate(ctx context.Context, flowID, gateID string, req *GateDecisionRequest) (*Flow, error)
 	// Abort marks a flow aborted (terminal).
 	Abort(ctx context.Context, flowID, reason string) (*Flow, error)
+	// AttachArtifact records a draft artifact on a stage.
+	AttachArtifact(ctx context.Context, flowID, stageID, artType string) (*Artifact, error)
 }

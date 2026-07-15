@@ -154,6 +154,36 @@ func ListFlowTemplates(c *gin.Context) {
 	respondOK(c, gin.H{"items": ids})
 }
 
+// AttachFlowArtifact handles POST /api/v1/flows/:id/stages/:sid/artifacts
+func AttachFlowArtifact(c *gin.Context) {
+	flowID := c.Param("id")
+	stageID := c.Param("sid")
+	var body struct {
+		Type string `json:"type"`
+	}
+	_ = c.ShouldBindJSON(&body)
+	art, err := floweng.GetEngine().AttachArtifact(c.Request.Context(), flowID, stageID, body.Type)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondCreated(c, art)
+}
+
+// ListFlowArtifacts handles GET /api/v1/flows/:id/artifacts
+func ListFlowArtifacts(c *gin.Context) {
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	respondOK(c, gin.H{"items": flow.Artifacts, "total": len(flow.Artifacts)})
+}
+
 // AbortFlow handles POST /api/v1/flows/:id/abort
 func AbortFlow(c *gin.Context) {
 	flowID := c.Param("id")

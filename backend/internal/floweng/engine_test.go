@@ -120,7 +120,7 @@ func TestLoopReviewToCoding(t *testing.T) {
 	}
 
 	// attach artifact on coding then loop back
-	if _, err := e.AttachArtifact(flow.ID, coding.ID, "changeset"); err != nil {
+	if _, err := e.AttachArtifact(context.Background(), flow.ID, coding.ID, "changeset"); err != nil {
 		t.Fatal(err)
 	}
 
