@@ -31,14 +31,14 @@ const (
 type StageType string
 
 const (
-	StageTypeIdea     StageType = "idea"
-	StageTypeDesign   StageType = "design"
-	StageTypePlanning StageType = "planning"
-	StageTypeResearch StageType = "research"
-	StageTypeCoding   StageType = "coding"
-	StageTypeReview   StageType = "review"
-	StageTypeSubmit   StageType = "submit"
-	StageTypeImport   StageType = "import"
+	StageTypeIdea       StageType = "idea"
+	StageTypeDesign     StageType = "design"
+	StageTypePlanning   StageType = "planning"
+	StageTypeResearch   StageType = "research"
+	StageTypeCoding     StageType = "coding"
+	StageTypeReview     StageType = "review"
+	StageTypeSubmit     StageType = "submit"
+	StageTypeImport     StageType = "import"
 	StageTypeComprehend StageType = "comprehension"
 )
 
@@ -119,11 +119,11 @@ type LoopEdge struct {
 
 // Artifact is a stage output reference (content stored elsewhere).
 type Artifact struct {
-	ID         string         `json:"id"`
-	StageID    string         `json:"stage_id"`
-	Type       string         `json:"type"`
-	Version    int            `json:"version"`
-	Status     ArtifactStatus `json:"status"`
+	ID      string         `json:"id"`
+	StageID string         `json:"stage_id"`
+	Type    string         `json:"type"`
+	Version int            `json:"version"`
+	Status  ArtifactStatus `json:"status"`
 	// ContentRef is an optional storage pointer (path, blob id, URI).
 	ContentRef string    `json:"content_ref,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -148,8 +148,12 @@ type CreateFlowRequest struct {
 // AdvanceRequest completes the active stage and moves forward.
 type AdvanceRequest struct {
 	SessionID string `json:"session_id,omitempty"`
-	// SkipExitGate forces auto gates through (human gates still block unless Approve used).
+	// Force is retained for API compatibility. It never bypasses human-approval
+	// or agent-check gates; automatic gates pass as part of normal evaluation.
 	Force bool `json:"force,omitempty"`
+	// ExpectedStageID binds an API advance to the stage named in its route.
+	// It is internal-only and checked atomically with the state transition.
+	ExpectedStageID string `json:"-"`
 }
 
 // SkipRequest skips an optional stage.
@@ -176,7 +180,7 @@ type EventNotifier interface {
 
 // GateDecisionRequest approves or rejects a gate.
 type GateDecisionRequest struct {
-	Approved bool   `json:"approved"`
+	Approved *bool  `json:"approved" binding:"required"`
 	Reason   string `json:"reason,omitempty"`
 }
 

@@ -211,7 +211,8 @@ func TestDecideGateApproveThenAdvance(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected block on human gate")
 	}
-	flow, err = e.DecideGate(context.Background(), flow.ID, "gate-human-1", &GateDecisionRequest{Approved: true, Reason: "lgtm"})
+	approved := true
+	flow, err = e.DecideGate(context.Background(), flow.ID, "gate-human-1", &GateDecisionRequest{Approved: &approved, Reason: "lgtm"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +222,82 @@ func TestDecideGateApproveThenAdvance(t *testing.T) {
 	}
 	if stageByType(flow, StageTypeIdea).Status != StageStatusDone {
 		t.Fatal("idea should be done")
+	}
+}
+
+func TestForceDoesNotBypassHumanGate(t *testing.T) {
+	e := NewInMemoryEngine(nil)
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow.Stages[0].Gates = []Gate{{ID: "gate-human-force", Phase: GatePhaseExit, Kind: GateKindHumanApproval}}
+	if err := e.putRaw(flow); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.Advance(context.Background(), flow.ID, &AdvanceRequest{Force: true}); err == nil {
+		t.Fatal("force must not bypass a human-approval gate")
+	}
+	got, err := e.Get(context.Background(), flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stages[0].Status != StageStatusWaitingGate || got.Stages[0].Gates[0].Passed {
+		t.Fatalf("gate state after forced advance: %+v", got.Stages[0])
+	}
+}
+
+func TestAdvanceChecksExpectedStageAtomically(t *testing.T) {
+	e := NewInMemoryEngine(nil)
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := e.Advance(context.Background(), flow.ID, &AdvanceRequest{ExpectedStageID: flow.Stages[1].ID}); err == nil {
+		t.Fatal("expected stage mismatch")
+	}
+	got, err := e.Get(context.Background(), flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stages[0].Status != StageStatusActive || got.Stages[1].Status != StageStatusPending {
+		t.Fatalf("stage mismatch mutated flow: %+v", got.Stages[:2])
+	}
+}
+
+func TestDecideGateRejectsNonActiveStage(t *testing.T) {
+	e := NewInMemoryEngine(nil)
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow.Stages[1].Gates = []Gate{{ID: "gate-pending", Phase: GatePhaseExit, Kind: GateKindHumanApproval}}
+	if err := e.putRaw(flow); err != nil {
+		t.Fatal(err)
+	}
+	approved := false
+	if _, err := e.DecideGate(context.Background(), flow.ID, "gate-pending", &GateDecisionRequest{Approved: &approved}); err == nil {
+		t.Fatal("expected decision on pending stage to fail")
+	}
+	got, err := e.Get(context.Background(), flow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Stages[0].Status != StageStatusActive || got.Stages[1].Status != StageStatusPending {
+		t.Fatalf("non-active gate decision mutated stages: %+v", got.Stages[:2])
+	}
+}
+
+func TestDecideGateRequiresApproved(t *testing.T) {
+	e := NewInMemoryEngine(nil)
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DecideGate(context.Background(), flow.ID, flow.Stages[0].Gates[0].ID, &GateDecisionRequest{}); err == nil {
+		t.Fatal("expected approved-required error")
 	}
 }
 

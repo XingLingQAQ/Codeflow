@@ -3638,6 +3638,10 @@ paths:
       responses:
         '200':
           description: Flow after gate decision
+        '400':
+          description: Missing or invalid decision
+        '409':
+          description: Gate does not belong to the active stage
 
   # ==================== Workspace (experimental) ====================
   /api/v1/workspace/list:
@@ -7187,6 +7191,8 @@ components:
           type: string
         force:
           type: boolean
+          deprecated: true
+          description: Retained for compatibility; never bypasses human-approval or agent-check gates
 
     LoopFlowRequest:
       type: object
@@ -7201,6 +7207,7 @@ components:
 
     GateDecisionRequest:
       type: object
+      required: [approved]
       properties:
         approved:
           type: boolean

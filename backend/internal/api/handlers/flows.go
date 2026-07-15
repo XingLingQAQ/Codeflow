@@ -75,7 +75,7 @@ func DeleteFlow(c *gin.Context) {
 }
 
 // AdvanceFlowStage handles POST /api/v1/flows/:id/stages/:sid/advance
-// Stage id in path is validated against the current active stage (or ignored if matches any — advance always acts on active).
+// The engine atomically verifies that the stage in the route is still active.
 func AdvanceFlowStage(c *gin.Context) {
 	flowID := c.Param("id")
 	stageID := c.Param("sid")
@@ -88,31 +88,14 @@ func AdvanceFlowStage(c *gin.Context) {
 		}
 	}
 
-	// Ensure the path stage is the active one when provided
-	flow, err := floweng.GetEngine().Get(c.Request.Context(), flowID)
-	if err != nil {
-		respondError(c, http.StatusNotFound, err.Error())
-		return
-	}
-	activeID := ""
-	for _, s := range flow.Stages {
-		if s.Status == floweng.StageStatusActive {
-			activeID = s.ID
-			break
-		}
-	}
-	if stageID != "" && activeID != "" && stageID != activeID {
-		respondError(c, http.StatusConflict, "stage is not active; advance only applies to the active stage")
-		return
-	}
-
-	flow, err = floweng.GetEngine().Advance(c.Request.Context(), flowID, &req)
+	req.ExpectedStageID = stageID
+	flow, err := floweng.GetEngine().Advance(c.Request.Context(), flowID, &req)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
 		}
-		if strings.Contains(err.Error(), "blocked") || strings.Contains(err.Error(), "not active") {
+		if strings.Contains(err.Error(), "blocked") || strings.Contains(err.Error(), "not active") || strings.Contains(err.Error(), "no active stage") {
 			respondError(c, http.StatusConflict, err.Error())
 			return
 		}
@@ -361,6 +344,10 @@ func DecideFlowGate(c *gin.Context) {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
 		}
+		if strings.Contains(err.Error(), "not active") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -375,7 +362,7 @@ func ListFlowGates(c *gin.Context) {
 		return
 	}
 	type gateRow struct {
-		StageID   string           `json:"stage_id"`
+		StageID   string            `json:"stage_id"`
 		StageType floweng.StageType `json:"stage_type"`
 		floweng.Gate
 	}

@@ -188,8 +188,11 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 		return nil, fmt.Errorf("no active stage")
 	}
 	stage := &flow.Stages[activeIdx]
+	if req.ExpectedStageID != "" && stage.ID != req.ExpectedStageID {
+		return nil, fmt.Errorf("stage is not active: %s", req.ExpectedStageID)
+	}
 
-	if err := passExitGates(stage, req.Force); err != nil {
+	if err := passExitGates(stage); err != nil {
 		// persist waiting_gate status
 		flow.UpdatedAt = time.Now().UTC()
 		_ = e.store.Put(flow)
@@ -371,8 +374,8 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 	if gateID == "" {
 		return nil, fmt.Errorf("gate_id is required")
 	}
-	if req == nil {
-		req = &GateDecisionRequest{}
+	if req == nil || req.Approved == nil {
+		return nil, fmt.Errorf("approved is required")
 	}
 
 	e.mu.Lock()
@@ -390,16 +393,20 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 				continue
 			}
 			found = true
-			if req.Approved {
+			stage := &flow.Stages[si]
+			if stage.Status != StageStatusActive && stage.Status != StageStatusWaitingGate {
+				return nil, fmt.Errorf("gate stage is not active: %s", stage.Status)
+			}
+			if *req.Approved {
 				g.Passed = true
-				if flow.Stages[si].Status == StageStatusWaitingGate {
-					flow.Stages[si].Status = StageStatusActive
+				if stage.Status == StageStatusWaitingGate {
+					stage.Status = StageStatusActive
 				}
-				e.appendEvent(flow, "gate.approved", flow.Stages[si].ID, fmt.Sprintf("gate %s approved: %s", gateID, req.Reason))
+				e.appendEvent(flow, "gate.approved", stage.ID, fmt.Sprintf("gate %s approved: %s", gateID, req.Reason))
 			} else {
 				g.Passed = false
-				flow.Stages[si].Status = StageStatusWaitingGate
-				e.appendEvent(flow, "gate.rejected", flow.Stages[si].ID, fmt.Sprintf("gate %s rejected: %s", gateID, req.Reason))
+				stage.Status = StageStatusWaitingGate
+				e.appendEvent(flow, "gate.rejected", stage.ID, fmt.Sprintf("gate %s rejected: %s", gateID, req.Reason))
 			}
 		}
 	}
@@ -569,7 +576,7 @@ func loopAllowed(loops []LoopEdge, from, to StageType) bool {
 	return false
 }
 
-func passExitGates(stage *Stage, force bool) error {
+func passExitGates(stage *Stage) error {
 	for i := range stage.Gates {
 		g := &stage.Gates[i]
 		if g.Phase != GatePhaseExit {
@@ -579,10 +586,6 @@ func passExitGates(stage *Stage, force bool) error {
 		case GateKindAuto:
 			g.Passed = true
 		case GateKindHumanApproval, GateKindAgentCheck:
-			if force {
-				g.Passed = true
-				continue
-			}
 			if !g.Passed {
 				stage.Status = StageStatusWaitingGate
 				return fmt.Errorf("stage %s blocked on %s gate %s", stage.Type, g.Kind, g.ID)
