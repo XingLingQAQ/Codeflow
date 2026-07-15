@@ -124,6 +124,12 @@ func ExportSkills(c *gin.Context) {
 		if s.Description != "" {
 			b.WriteString("description: " + s.Description + "\n")
 		}
+		if len(s.Triggers) > 0 {
+			b.WriteString("triggers: [" + strings.Join(s.Triggers, ", ") + "]\n")
+		}
+		if len(s.StageTags) > 0 {
+			b.WriteString("stage_tags: [" + strings.Join(s.StageTags, ", ") + "]\n")
+		}
 		b.WriteString("---\n")
 		b.WriteString(s.Body)
 		b.WriteString("\n\n")
