@@ -132,6 +132,26 @@ func (e *InMemoryEngine) List(ctx context.Context, projectID string) ([]*Flow, e
 	return e.store.List(projectID)
 }
 
+// ListByStatus filters flows by optional projectID and status.
+func (e *InMemoryEngine) ListByStatus(ctx context.Context, projectID string, status FlowStatus) ([]*Flow, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	all, err := e.store.List(projectID)
+	if err != nil {
+		return nil, err
+	}
+	if status == "" {
+		return all, nil
+	}
+	out := make([]*Flow, 0, len(all))
+	for _, f := range all {
+		if f != nil && f.Status == status {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
 // Advance completes the active stage and activates the next non-skipped pending stage.
 func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *AdvanceRequest) (*Flow, error) {
 	if req == nil {

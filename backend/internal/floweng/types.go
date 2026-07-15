@@ -185,6 +185,8 @@ type Engine interface {
 	Create(ctx context.Context, req *CreateFlowRequest) (*Flow, error)
 	Get(ctx context.Context, id string) (*Flow, error)
 	List(ctx context.Context, projectID string) ([]*Flow, error)
+	// ListByStatus filters by project (optional) and status (optional empty = any).
+	ListByStatus(ctx context.Context, projectID string, status FlowStatus) ([]*Flow, error)
 	Advance(ctx context.Context, flowID string, req *AdvanceRequest) (*Flow, error)
 	Skip(ctx context.Context, flowID string, req *SkipRequest) (*Flow, error)
 	Loop(ctx context.Context, flowID string, req *LoopRequest) (*Flow, error)

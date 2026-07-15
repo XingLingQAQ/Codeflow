@@ -29,10 +29,19 @@ func CreateFlow(c *gin.Context) {
 	respondCreated(c, flow)
 }
 
-// ListFlows handles GET /api/v1/flows?project_id=
+// ListFlows handles GET /api/v1/flows?project_id=&status=
 func ListFlows(c *gin.Context) {
 	projectID := c.Query("project_id")
-	flows, err := floweng.GetEngine().List(c.Request.Context(), projectID)
+	status := floweng.FlowStatus(c.Query("status"))
+	var (
+		flows []*floweng.Flow
+		err   error
+	)
+	if status != "" {
+		flows, err = floweng.GetEngine().ListByStatus(c.Request.Context(), projectID, status)
+	} else {
+		flows, err = floweng.GetEngine().List(c.Request.Context(), projectID)
+	}
 	if err != nil {
 		respondInternalError(c, "list flows", err)
 		return
