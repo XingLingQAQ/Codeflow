@@ -44,6 +44,20 @@ func NewSQLiteEngine(dbPath string, snapshots SnapshotCreator) (*InMemoryEngine,
 	return NewEngineWithStore(store, snapshots), nil
 }
 
+// Close releases durable resources when the underlying store supports it.
+func (e *InMemoryEngine) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	type closer interface{ Close() error }
+	if c, ok := e.store.(closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
 // SetSnapshotCreator attaches or replaces the stage-completion snapshot hook.
 func (e *InMemoryEngine) SetSnapshotCreator(s SnapshotCreator) {
 	e.mu.Lock()

@@ -98,6 +98,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init floweng sqlite: %w", err)
 	}
+	defer func() { _ = flowEngine.Close() }()
 	flowEngine.SetEventNotifier(floweng.NewWSNotifier(nil))
 	skillReg, err := skill.NewSQLiteRegistry(durableDBPath("skills.db"))
 	if err != nil {
