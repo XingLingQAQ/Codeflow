@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -49,7 +50,7 @@ func ListWorkspace(c *gin.Context) {
 	respondOK(c, gin.H{"items": entries, "total": len(entries)})
 }
 
-// ReadWorkspaceFile handles GET /api/v1/workspace/read?root=&path=
+// ReadWorkspaceFile handles GET /api/v1/workspace/read?root=&path=&staged=
 func ReadWorkspaceFile(c *gin.Context) {
 	root := workspaceRootFromRequest(c, "")
 	path := c.Query("path")
@@ -57,7 +58,11 @@ func ReadWorkspaceFile(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "root and path are required")
 		return
 	}
-	fc, err := workspace.GetService().Read(c.Request.Context(), &workspace.ReadRequest{Root: root, Path: path})
+	readRoot := root
+	if c.Query("staged") == "true" || c.Query("staged") == "1" {
+		readRoot = filepath.Join(root, ".codeflow", "staging")
+	}
+	fc, err := workspace.GetService().Read(c.Request.Context(), &workspace.ReadRequest{Root: readRoot, Path: path})
 	if err != nil {
 		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
 			respondError(c, http.StatusNotFound, err.Error())

@@ -3588,6 +3588,12 @@ paths:
           required: true
           schema:
             type: string
+        - name: staged
+          in: query
+          description: When true, read from .codeflow/staging instead of the project tree
+          schema:
+            type: string
+            enum: [true, false, '1', '0']
       responses:
         '200':
           description: File content (text + base64)
