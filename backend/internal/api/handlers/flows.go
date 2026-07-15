@@ -184,6 +184,16 @@ func ListFlowTemplates(c *gin.Context) {
 	respondOK(c, gin.H{"items": infos, "ids": ids, "total": len(infos)})
 }
 
+// GetFlowTemplate handles GET /api/v1/flows/templates/:tid
+func GetFlowTemplate(c *gin.Context) {
+	info, ok := floweng.DescribeTemplate(floweng.TemplateID(c.Param("tid")))
+	if !ok {
+		respondError(c, http.StatusNotFound, "unknown template: "+c.Param("tid"))
+		return
+	}
+	respondOK(c, info)
+}
+
 // AttachFlowArtifact handles POST /api/v1/flows/:id/stages/:sid/artifacts
 func AttachFlowArtifact(c *gin.Context) {
 	flowID := c.Param("id")
