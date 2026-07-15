@@ -22,6 +22,7 @@ import (
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
 	"github.com/codeflow/backend/internal/workspace"
@@ -106,6 +107,7 @@ func run() error {
 		Floweng:   flowEngine,
 		Guard:     guardEng,
 		Workspace: workspace.NewFSService(guardEng),
+		Skill:     skill.NewInMemoryRegistry(),
 	}
 	if err := services.Apply(); err != nil {
 		return err

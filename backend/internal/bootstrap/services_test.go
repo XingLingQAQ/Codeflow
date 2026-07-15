@@ -12,6 +12,7 @@ import (
 	"github.com/codeflow/backend/internal/guard"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
 	"github.com/codeflow/backend/internal/workspace"
@@ -22,7 +23,7 @@ func TestServicesValidateReportsMissingDependencies(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected missing services error")
 	}
-	for _, name := range []string{"config", "agent", "planner", "project", "context", "snapshot", "debate", "summarize", "floweng", "workspace", "guard"} {
+	for _, name := range []string{"config", "agent", "planner", "project", "context", "snapshot", "debate", "summarize", "floweng", "workspace", "guard", "skill"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("expected missing dependency %q in error %q", name, err.Error())
 		}
@@ -42,6 +43,7 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 		Floweng:   floweng.NewInMemoryEngine(nil),
 		Workspace: workspace.NewFSService(nil),
 		Guard:     guard.NewEngine(nil, nil),
+		Skill:     skill.NewInMemoryRegistry(),
 	}
 	services.Reset()
 	t.Cleanup(services.Reset)
@@ -82,6 +84,9 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	if guard.GetService() != services.Guard {
 		t.Fatalf("guard service was not applied")
 	}
+	if skill.GetRegistry() != services.Skill {
+		t.Fatalf("skill registry was not applied")
+	}
 
 	services.Reset()
 	if cfgsvc.GetConfigService() == services.Config {
@@ -117,5 +122,8 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	}
 	if guard.GetService() == services.Guard {
 		t.Fatalf("guard service was not reset (still previous instance)")
+	}
+	if skill.GetRegistry() == services.Skill {
+		t.Fatalf("skill registry was not reset (still previous instance)")
 	}
 }

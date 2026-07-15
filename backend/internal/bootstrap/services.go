@@ -12,6 +12,7 @@ import (
 	"github.com/codeflow/backend/internal/guard"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
 	"github.com/codeflow/backend/internal/workspace"
@@ -36,6 +37,7 @@ type Services struct {
 	Floweng    floweng.Engine
 	Workspace  workspace.Service
 	Guard      guard.Service
+	Skill      skill.Registry
 }
 
 // Validate checks that every required service dependency has been provided.
@@ -74,6 +76,9 @@ func (s Services) Validate() error {
 	if s.Guard == nil {
 		missing = append(missing, "guard")
 	}
+	if s.Skill == nil {
+		missing = append(missing, "skill")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing bootstrap services: %v", missing)
 	}
@@ -96,6 +101,7 @@ func (s Services) Apply() error {
 	floweng.SetEngine(s.Floweng)
 	workspace.SetService(s.Workspace)
 	guard.SetService(s.Guard)
+	skill.SetRegistry(s.Skill)
 	// Keep workspace write path forced through the same guard instance when possible.
 	if fs, ok := s.Workspace.(*workspace.FSService); ok {
 		if ge, ok := s.Guard.(*guard.Engine); ok {
@@ -120,4 +126,5 @@ func (s Services) Reset() {
 	floweng.SetEngine(nil)
 	workspace.SetService(nil)
 	guard.SetService(nil)
+	skill.SetRegistry(nil)
 }

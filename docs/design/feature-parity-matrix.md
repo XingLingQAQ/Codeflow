@@ -72,7 +72,7 @@
 | — | Hook / 审计 / 隐私 / 披露 | ✅ | 底座存在 | 与 gate/guard 串联 | 贯穿 | |
 | — | 黑板 / 指挥官 | ✅ | 存在 | 挂接阶段 | 贯穿 | |
 | G21 | DeepSearch + 导入流水线 | ⚠️ | search/retriever 底座 | 联网 Provider + 导入流 | M5 | |
-| G22 | Skill 资产服务 | ❌ | 无 `internal/skill` | 存储 + 注入 | M5 | |
+| G22 | Skill 资产服务 | ⚠️ | **M5.0 起步**：`internal/skill` 内存 Registry CRUD + Match/Inject；`/api/v1/skills` experimental；2 个 builtin | 持久化 + frontmatter 市场 + Agent 挂载 UI | M5 | 2026-07-15 |
 | G23 | 插件贡献点 + 沙箱 | ⚠️ | plugin + isolation 部分 | 注册表与替换点 | M6 | |
 
 ---
@@ -118,3 +118,4 @@
 | 2026-07-15 | **PR-8**：`internal/floweng` 最小机 + experimental flows API；G09 → ⚠️ |
 | 2026-07-15 | **M3.1**：`internal/workspace` list/read/write + WriteGuard 钩子；G16 → ⚠️ |
 | 2026-07-15 | **M3.2**：`internal/guard` 引擎 + workspace 强制挂钩；G17 → ⚠️ |
+| 2026-07-15 | **M5.0**：`internal/skill` registry + match/inject API；G22 → ⚠️ |

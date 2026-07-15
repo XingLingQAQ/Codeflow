@@ -134,6 +134,19 @@ func (s *Server) setupRoutes() {
 			ws.POST("/write", handlers.WriteWorkspaceFile)
 		}
 
+		// Skill registry (experimental: M5.0 minimal)
+		skills := v1.Group("/skills")
+		skills.Use(middleware.Experimental("skill"))
+		{
+			skills.POST("", handlers.CreateSkill)
+			skills.GET("", handlers.ListSkills)
+			skills.POST("/match", handlers.MatchSkills)
+			skills.POST("/inject", handlers.InjectSkills)
+			skills.GET("/:id", handlers.GetSkill)
+			skills.PATCH("/:id", handlers.UpdateSkill)
+			skills.DELETE("/:id", handlers.DeleteSkill)
+		}
+
 		// Memory routes
 		memory := v1.Group("/memory")
 		{
