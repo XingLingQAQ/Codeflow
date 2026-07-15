@@ -387,3 +387,19 @@ func ListFlowGates(c *gin.Context) {
 	}
 	respondOK(c, gin.H{"items": out, "total": len(out)})
 }
+
+// GetActiveFlowStage handles GET /api/v1/flows/:id/active-stage
+func GetActiveFlowStage(c *gin.Context) {
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	for i := range flow.Stages {
+		if flow.Stages[i].Status == floweng.StageStatusActive || flow.Stages[i].Status == floweng.StageStatusWaitingGate {
+			respondOK(c, flow.Stages[i])
+			return
+		}
+	}
+	respondError(c, http.StatusNotFound, "no active stage")
+}

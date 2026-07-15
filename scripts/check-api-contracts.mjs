@@ -265,6 +265,7 @@ const requiredOperations = [
   ['/api/v1/flows/{id}', 'DELETE'],
   ['/api/v1/flows/{id}/events', 'GET'],
   ['/api/v1/flows/{id}/gates', 'GET'],
+  ['/api/v1/flows/{id}/active-stage', 'GET'],
   ['/api/v1/flows/{id}/stages', 'GET'],
   ['/api/v1/flows/{id}/stages/{sid}', 'GET'],
   ['/api/v1/flows/{id}/artifacts', 'GET'],

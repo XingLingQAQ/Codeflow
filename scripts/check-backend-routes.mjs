@@ -41,6 +41,7 @@ const required = [
   "handlers.DeleteFlow",
   "handlers.AbortFlow",
   "handlers.ListFlowGates",
+  "handlers.GetActiveFlowStage",
   "handlers.ListDebates",
 ];
 
