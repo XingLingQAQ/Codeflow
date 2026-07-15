@@ -366,3 +366,24 @@ func DecideFlowGate(c *gin.Context) {
 	}
 	respondOK(c, flow)
 }
+
+// ListFlowGates handles GET /api/v1/flows/:id/gates
+func ListFlowGates(c *gin.Context) {
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	type gateRow struct {
+		StageID   string           `json:"stage_id"`
+		StageType floweng.StageType `json:"stage_type"`
+		floweng.Gate
+	}
+	out := make([]gateRow, 0)
+	for _, s := range flow.Stages {
+		for _, g := range s.Gates {
+			out = append(out, gateRow{StageID: s.ID, StageType: s.Type, Gate: g})
+		}
+	}
+	respondOK(c, gin.H{"items": out, "total": len(out)})
+}

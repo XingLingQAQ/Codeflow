@@ -40,6 +40,7 @@ const required = [
   "handlers.GuardClearExemption",
   "handlers.DeleteFlow",
   "handlers.AbortFlow",
+  "handlers.ListFlowGates",
   "handlers.ListDebates",
 ];
 

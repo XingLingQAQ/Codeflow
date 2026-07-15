@@ -3348,6 +3348,23 @@ paths:
         '200':
           description: Event list
 
+  /api/v1/flows/{id}/gates:
+    get:
+      tags: [Flows]
+      summary: List all gates across stages
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Gate list with stage context
+        '404':
+          description: Not found
+
   /api/v1/flows/{id}/stages:
     get:
       tags: [Flows]

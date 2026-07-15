@@ -122,6 +122,7 @@ func (s *Server) setupRoutes() {
 			flows.GET("/:id", handlers.GetFlow)
 			flows.DELETE("/:id", handlers.DeleteFlow)
 			flows.GET("/:id/events", handlers.ListFlowEvents)
+				flows.GET("/:id/gates", handlers.ListFlowGates)
 			flows.GET("/:id/stages", handlers.ListFlowStages)
 				flows.GET("/:id/stages/:sid", handlers.GetFlowStage)
 			flows.GET("/:id/artifacts", handlers.ListFlowArtifacts)
