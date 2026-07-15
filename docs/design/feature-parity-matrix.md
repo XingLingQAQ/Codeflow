@@ -124,4 +124,4 @@
 | 2026-07-15 | **guard AST**：SymbolIndex 跨文件 duplicate_symbol 规则 |
 | 2026-07-15 | **skill SQLite**：`NewSQLiteRegistry`；main → `data/skills.db` |
 | 2026-07-15 | **guard.yaml + IndexTree + audit bridge**；main 挂 audit；skill frontmatter；openapi flows/workspace/skills |
-| 2026-07-15 | floweng abort + SQLite；skill import dir；guard /check /index；audit files；overview flow counts |
+| 2026-07-15 | workspace staging/promote; floweng abort + SQLite；skill import dir；guard /check /index；audit files；overview flow counts |

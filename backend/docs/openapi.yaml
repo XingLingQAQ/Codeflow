@@ -3410,6 +3410,27 @@ paths:
         '200':
           description: File content (text + base64)
 
+
+  /api/v1/workspace/promote:
+    post:
+      tags: [Workspace]
+      summary: Promote staged file into project tree
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                root: { type: string }
+                path: { type: string }
+      responses:
+        '200':
+          description: Promoted entry
+        '403':
+          description: Blocked by guard
   /api/v1/workspace/write:
     post:
       tags: [Workspace]
