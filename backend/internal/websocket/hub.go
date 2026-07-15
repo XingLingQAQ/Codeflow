@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,9 +45,11 @@ type Client struct {
 	ID        string
 	Conn      *websocket.Conn
 	SessionID string
-	Send      chan []byte
-	Hub       *Hub
-	mu        sync.Mutex
+	// topics are optional fan-out keys (e.g. "flow_event"); independent of SessionID.
+	topics map[string]struct{}
+	Send   chan []byte
+	Hub    *Hub
+	mu     sync.Mutex
 }
 
 // Hub WebSocket连接管理中心
@@ -54,6 +57,7 @@ type Hub struct {
 	mu         sync.RWMutex
 	clients    map[string]*Client
 	sessions   map[string]map[string]*Client // sessionID -> clientID -> client
+	topics     map[string]map[string]*Client // topic -> clientID -> client
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan *Message
@@ -64,6 +68,7 @@ func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[string]*Client),
 		sessions:   make(map[string]map[string]*Client),
+		topics:     make(map[string]map[string]*Client),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		broadcast:  make(chan *Message, 256),
@@ -98,6 +103,14 @@ func (h *Hub) Run() {
 						delete(sessionClients, client.ID)
 						if len(sessionClients) == 0 {
 							delete(h.sessions, client.SessionID)
+						}
+					}
+				}
+				for topic := range client.topics {
+					if topicClients, ok := h.topics[topic]; ok {
+						delete(topicClients, client.ID)
+						if len(topicClients) == 0 {
+							delete(h.topics, topic)
 						}
 					}
 				}
@@ -178,6 +191,97 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *Message) {
 func (h *Hub) BroadcastAll(msg *Message) {
 	msg.Timestamp = time.Now().UnixMilli()
 	h.broadcast <- msg
+}
+
+// TopicFlowEvent is the hub topic for floweng lifecycle events.
+const TopicFlowEvent = "flow_event"
+
+// BroadcastToTopic sends a message only to clients subscribed to topic.
+// SessionID on the message is ignored for routing (topic fan-out only).
+func (h *Hub) BroadcastToTopic(topic string, msg *Message) {
+	if h == nil || topic == "" || msg == nil {
+		return
+	}
+	msg.Timestamp = time.Now().UnixMilli()
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("[WS] Failed to marshal topic message: %v", err)
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, client := range h.topics[topic] {
+		select {
+		case client.Send <- data:
+		default:
+		}
+	}
+}
+
+// SubscribeTopic registers a client for a topic (no-op if already subscribed).
+func (h *Hub) SubscribeTopic(client *Client, topic string) {
+	if h == nil || client == nil {
+		return
+	}
+	topic = normalizeTopic(topic)
+	if topic == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if client.topics == nil {
+		client.topics = make(map[string]struct{})
+	}
+	client.topics[topic] = struct{}{}
+	if _, ok := h.topics[topic]; !ok {
+		h.topics[topic] = make(map[string]*Client)
+	}
+	h.topics[topic][client.ID] = client
+}
+
+// UnsubscribeTopic removes a client from a topic.
+func (h *Hub) UnsubscribeTopic(client *Client, topic string) {
+	if h == nil || client == nil {
+		return
+	}
+	topic = normalizeTopic(topic)
+	if topic == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if client.topics != nil {
+		delete(client.topics, topic)
+	}
+	if topicClients, ok := h.topics[topic]; ok {
+		delete(topicClients, client.ID)
+		if len(topicClients) == 0 {
+			delete(h.topics, topic)
+		}
+	}
+}
+
+// TopicSubscriberCount returns how many clients listen on topic.
+func (h *Hub) TopicSubscriberCount(topic string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.topics[normalizeTopic(topic)])
+}
+
+func normalizeTopic(topic string) string {
+	return strings.TrimSpace(topic)
+}
+
+func topicFromMessage(msg *Message) string {
+	if msg == nil {
+		return ""
+	}
+	if msg.Data != nil {
+		if t, ok := msg.Data["topic"].(string); ok {
+			return normalizeTopic(t)
+		}
+	}
+	return normalizeTopic(msg.Content)
 }
 
 // GetSessionClientCount 获取会话客户端数量
@@ -308,16 +412,18 @@ func (c *Client) handleMessage(msg *Message) {
 	case MsgTypePong:
 		// 心跳响应，不需要处理
 	case MsgTypeSubscribe:
-		// 订阅会话
+		// Topic subscribe: {type:subscribe, data:{topic:"flow_event"}} or content as topic.
+		if topic := topicFromMessage(msg); topic != "" {
+			c.Hub.SubscribeTopic(c, topic)
+		}
+		// Session subscribe (legacy path)
 		if msg.SessionID != "" && msg.SessionID != c.SessionID {
 			c.Hub.mu.Lock()
-			// 从旧会话移除
 			if c.SessionID != "" {
 				if sessionClients, ok := c.Hub.sessions[c.SessionID]; ok {
 					delete(sessionClients, c.ID)
 				}
 			}
-			// 添加到新会话
 			c.SessionID = msg.SessionID
 			if _, ok := c.Hub.sessions[c.SessionID]; !ok {
 				c.Hub.sessions[c.SessionID] = make(map[string]*Client)
@@ -326,7 +432,11 @@ func (c *Client) handleMessage(msg *Message) {
 			c.Hub.mu.Unlock()
 		}
 	case MsgTypeUnsubscribe:
-		// 取消订阅
+		if topic := topicFromMessage(msg); topic != "" {
+			c.Hub.UnsubscribeTopic(c, topic)
+			break
+		}
+		// 取消会话订阅
 		c.Hub.mu.Lock()
 		if c.SessionID != "" {
 			if sessionClients, ok := c.Hub.sessions[c.SessionID]; ok {

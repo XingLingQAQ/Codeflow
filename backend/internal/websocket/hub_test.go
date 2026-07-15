@@ -36,6 +36,38 @@ func TestClientHandleMessageTriggersMessageCompleteHook(t *testing.T) {
 	}
 }
 
+func TestTopicSubscribeAndBroadcast(t *testing.T) {
+	hub := NewHub()
+	client := &Client{ID: "c-topic", Hub: hub, Send: make(chan []byte, 4)}
+	hub.clients[client.ID] = client
+
+	client.handleMessage(&Message{
+		Type: MsgTypeSubscribe,
+		Data: map[string]interface{}{"topic": TopicFlowEvent},
+	})
+	if hub.TopicSubscriberCount(TopicFlowEvent) != 1 {
+		t.Fatalf("expected 1 subscriber, got %d", hub.TopicSubscriberCount(TopicFlowEvent))
+	}
+
+	hub.BroadcastToTopic(TopicFlowEvent, &Message{Type: MessageType("flow_event"), Content: "flow.created"})
+	select {
+	case raw := <-client.Send:
+		if len(raw) == 0 {
+			t.Fatal("empty payload")
+		}
+	default:
+		t.Fatal("expected topic message on client send channel")
+	}
+
+	client.handleMessage(&Message{
+		Type:    MsgTypeUnsubscribe,
+		Content: TopicFlowEvent,
+	})
+	if hub.TopicSubscriberCount(TopicFlowEvent) != 0 {
+		t.Fatalf("expected 0 subscribers after unsubscribe, got %d", hub.TopicSubscriberCount(TopicFlowEvent))
+	}
+}
+
 func TestClientHandleMessageTriggersUserInputSubmittedHook(t *testing.T) {
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()

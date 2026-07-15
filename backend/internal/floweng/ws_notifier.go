@@ -38,5 +38,9 @@ func (n *WSNotifier) OnFlowEvent(flow *Flow, event FlowEvent) {
 			"timestamp":   event.Timestamp.UTC().Format(time.RFC3339),
 		},
 	}
-	n.Hub.BroadcastAll(msg)
+	// Topic fan-out: clients must subscribe to TopicFlowEvent (or project-scoped topic).
+	n.Hub.BroadcastToTopic(websocket.TopicFlowEvent, msg)
+	if flow.ProjectID != "" {
+		n.Hub.BroadcastToTopic("flow:project:"+flow.ProjectID, msg)
+	}
 }

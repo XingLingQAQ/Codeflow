@@ -131,3 +131,4 @@
 | 2026-07-15 | **OpenAPI**：补齐 flows abort/delete/stages/artifacts、skills import、guard exempt 与契约检查 |
 | 2026-07-15 | **guard exemptions SQLite**：`data/guard_exemptions.db`；过期行 load 时清理；skill `ListFiltered` 入 Registry 接口 |
 | 2026-07-15 | **guard exemptions API**：GET `/exemptions` + DELETE `/exempt`；list/clear 与持久化联动 |
+| 2026-07-15 | **WS topics**：Hub 主题订阅；`flow_event` / `flow:project:{id}` 按 topic 广播 |
