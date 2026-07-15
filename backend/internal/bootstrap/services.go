@@ -8,6 +8,7 @@ import (
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/debate"
+	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/snapshot"
@@ -19,7 +20,8 @@ import (
 // while handlers and legacy packages can keep using Get*/Set* during migration.
 //
 // B0: Config/Agent/Planner/Project/Context
-// B1 (PR-6 residual): Snapshot/Debate + Summarize (post M0.8 single package)
+// B1: Snapshot/Debate/Summarize
+// B1+: Floweng (PR-8 minimal engine)
 type Services struct {
 	Config    cfgsvc.IConfigService
 	Agent     agent.IAgentService
@@ -29,6 +31,7 @@ type Services struct {
 	Snapshot  snapshot.ISnapshotService
 	Debate    debate.IDebateManager
 	Summarize summarize.ISummarizer
+	Floweng   floweng.Engine
 }
 
 // Validate checks that every required service dependency has been provided.
@@ -58,6 +61,9 @@ func (s Services) Validate() error {
 	if s.Summarize == nil {
 		missing = append(missing, "summarize")
 	}
+	if s.Floweng == nil {
+		missing = append(missing, "floweng")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing bootstrap services: %v", missing)
 	}
@@ -77,6 +83,7 @@ func (s Services) Apply() error {
 	snapshot.SetSnapshotService(s.Snapshot)
 	debate.SetDebateManager(s.Debate)
 	summarize.SetSummarizer(s.Summarize)
+	floweng.SetEngine(s.Floweng)
 	return nil
 }
 
@@ -90,4 +97,5 @@ func (s Services) Reset() {
 	snapshot.SetSnapshotService(nil)
 	debate.SetDebateManager(nil)
 	summarize.SetSummarizer(nil)
+	floweng.SetEngine(nil)
 }

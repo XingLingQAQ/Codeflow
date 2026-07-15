@@ -17,6 +17,7 @@ import (
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/debate"
+	"github.com/codeflow/backend/internal/floweng"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
@@ -88,15 +89,18 @@ func run() error {
 	defer contextClose()
 
 	// B1 services: same in-memory defaults as previous Get* lazy init; wired via bootstrap.
+	snapshotSvc := snapshot.NewInMemorySnapshotService()
+	flowEngine := floweng.NewInMemoryEngine(floweng.NewDefaultSnapshotHook(snapshotSvc))
 	services := bootstrap.Services{
 		Config:    configSvc,
 		Agent:     agentSvc,
 		Planner:   plannerSvc,
 		Project:   projectSvc,
 		Context:   contextSvc,
-		Snapshot:  snapshot.NewInMemorySnapshotService(),
+		Snapshot:  snapshotSvc,
 		Debate:    debate.NewInMemoryDebateManager(),
 		Summarize: summarize.NewSummarizerService(),
+		Floweng:   flowEngine,
 	}
 	if err := services.Apply(); err != nil {
 		return err

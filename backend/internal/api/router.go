@@ -111,6 +111,20 @@ func (s *Server) setupRoutes() {
 			snapshots.DELETE("/:id", handlers.DeleteSnapshot)
 		}
 
+		// Flow engine routes (experimental: M2 / PR-8 minimal state machine)
+		flows := v1.Group("/flows")
+		flows.Use(middleware.Experimental("floweng"))
+		{
+			flows.GET("/templates", handlers.ListFlowTemplates)
+			flows.POST("", handlers.CreateFlow)
+			flows.GET("", handlers.ListFlows)
+			flows.GET("/:id", handlers.GetFlow)
+			flows.GET("/:id/events", handlers.ListFlowEvents)
+			flows.POST("/:id/stages/:sid/advance", handlers.AdvanceFlowStage)
+			flows.POST("/:id/stages/:sid/skip", handlers.SkipFlowStage)
+			flows.POST("/:id/loop", handlers.LoopFlow)
+		}
+
 		// Memory routes
 		memory := v1.Group("/memory")
 		{

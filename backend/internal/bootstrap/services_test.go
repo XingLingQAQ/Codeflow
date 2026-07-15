@@ -8,6 +8,7 @@ import (
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/debate"
+	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/snapshot"
@@ -19,7 +20,7 @@ func TestServicesValidateReportsMissingDependencies(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected missing services error")
 	}
-	for _, name := range []string{"config", "agent", "planner", "project", "context", "snapshot", "debate", "summarize"} {
+	for _, name := range []string{"config", "agent", "planner", "project", "context", "snapshot", "debate", "summarize", "floweng"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("expected missing dependency %q in error %q", name, err.Error())
 		}
@@ -36,6 +37,7 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 		Snapshot:  snapshot.NewInMemorySnapshotService(),
 		Debate:    debate.NewInMemoryDebateManager(),
 		Summarize: summarize.NewSummarizerService(),
+		Floweng:   floweng.NewInMemoryEngine(nil),
 	}
 	services.Reset()
 	t.Cleanup(services.Reset)
@@ -67,6 +69,9 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	if summarize.GetSummarizer() != services.Summarize {
 		t.Fatalf("summarize service was not applied")
 	}
+	if floweng.GetEngine() != services.Floweng {
+		t.Fatalf("floweng engine was not applied")
+	}
 
 	services.Reset()
 	if cfgsvc.GetConfigService() == services.Config {
@@ -93,5 +98,8 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	}
 	if summarize.GetSummarizer() == services.Summarize {
 		t.Fatalf("summarize service was not reset (still previous instance)")
+	}
+	if floweng.GetEngine() == services.Floweng {
+		t.Fatalf("floweng engine was not reset (still previous instance)")
 	}
 }

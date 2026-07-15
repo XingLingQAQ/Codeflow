@@ -1,0 +1,155 @@
+// Package handlers - Flow engine API handlers (experimental).
+package handlers
+
+import (
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/codeflow/backend/internal/floweng"
+)
+
+// CreateFlow handles POST /api/v1/flows
+func CreateFlow(c *gin.Context) {
+	var req floweng.CreateFlowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	flow, err := floweng.GetEngine().Create(c.Request.Context(), &req)
+	if err != nil {
+		if strings.Contains(err.Error(), "unknown template") || strings.Contains(err.Error(), "required") {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondInternalError(c, "create flow", err)
+		return
+	}
+	respondCreated(c, flow)
+}
+
+// ListFlows handles GET /api/v1/flows?project_id=
+func ListFlows(c *gin.Context) {
+	projectID := c.Query("project_id")
+	flows, err := floweng.GetEngine().List(c.Request.Context(), projectID)
+	if err != nil {
+		respondInternalError(c, "list flows", err)
+		return
+	}
+	respondOK(c, gin.H{"items": flows, "total": len(flows)})
+}
+
+// GetFlow handles GET /api/v1/flows/:id
+func GetFlow(c *gin.Context) {
+	id := c.Param("id")
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), id)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	respondOK(c, flow)
+}
+
+// AdvanceFlowStage handles POST /api/v1/flows/:id/stages/:sid/advance
+// Stage id in path is validated against the current active stage (or ignored if matches any — advance always acts on active).
+func AdvanceFlowStage(c *gin.Context) {
+	flowID := c.Param("id")
+	stageID := c.Param("sid")
+	var req floweng.AdvanceRequest
+	_ = c.ShouldBindJSON(&req)
+
+	// Ensure the path stage is the active one when provided
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), flowID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	activeID := ""
+	for _, s := range flow.Stages {
+		if s.Status == floweng.StageStatusActive {
+			activeID = s.ID
+			break
+		}
+	}
+	if stageID != "" && activeID != "" && stageID != activeID {
+		respondError(c, http.StatusConflict, "stage is not active; advance only applies to the active stage")
+		return
+	}
+
+	flow, err = floweng.GetEngine().Advance(c.Request.Context(), flowID, &req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "blocked") || strings.Contains(err.Error(), "not active") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+		respondInternalError(c, "advance flow", err)
+		return
+	}
+	respondOK(c, flow)
+}
+
+// SkipFlowStage handles POST /api/v1/flows/:id/stages/:sid/skip
+func SkipFlowStage(c *gin.Context) {
+	flowID := c.Param("id")
+	stageID := c.Param("sid")
+	flow, err := floweng.GetEngine().Skip(c.Request.Context(), flowID, &floweng.SkipRequest{StageID: stageID})
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not optional") || strings.Contains(err.Error(), "cannot be skipped") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+		respondInternalError(c, "skip stage", err)
+		return
+	}
+	respondOK(c, flow)
+}
+
+// LoopFlow handles POST /api/v1/flows/:id/loop
+func LoopFlow(c *gin.Context) {
+	flowID := c.Param("id")
+	var req floweng.LoopRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	flow, err := floweng.GetEngine().Loop(c.Request.Context(), flowID, &req)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not allowed") || strings.Contains(err.Error(), "must be") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+		respondInternalError(c, "loop flow", err)
+		return
+	}
+	respondOK(c, flow)
+}
+
+// ListFlowEvents handles GET /api/v1/flows/:id/events
+func ListFlowEvents(c *gin.Context) {
+	flowID := c.Param("id")
+	events, err := floweng.GetEngine().ListEvents(c.Request.Context(), flowID)
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	respondOK(c, gin.H{"items": events, "total": len(events)})
+}
+
+// ListFlowTemplates handles GET /api/v1/flows/templates
+func ListFlowTemplates(c *gin.Context) {
+	ids := floweng.ListTemplates()
+	respondOK(c, gin.H{"items": ids})
+}

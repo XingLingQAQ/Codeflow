@@ -43,7 +43,7 @@
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
 | G08 | Snapshot 真 restore | ⚠️ | capture=digest；restore=token 校验；git opt-in | 四态真恢复 + 受控 git | M2 前置 | `snapshot/state_provider.go` |
-| G09 | Flow 执行引擎 | ❌ | 无 `internal/floweng` | Flow/Stage/Artifact/Gate | M2 | |
+| G09 | Flow 执行引擎 | ⚠️ | **PR-8**：`internal/floweng` 最小状态机 + `/api/v1/flows` experimental；内存引擎；新项目/导入模板；advance/skip/loop + 阶段快照钩子 | 持久化 + workflow 观测合并 + 全模板 | M2 | 2026-07-15：API experimental；尚无 WS flow.* |
 | G10 | 阶段自动快照与回跳 | ❌ | 无 | exit → snapshot；loop restore | M2 | 依赖 G08 |
 | G11 | Artifact / Gate 一等公民 | ❌ | 无 | 模型 + API | M2 | |
 | G12 | 工作流模板可视化编辑器 | ❌ | 无 | 节点画布 JSON 导入导出 | M2 | |
@@ -115,3 +115,4 @@
 | 2026-07-15 | **M0.8**：G27 summarize 合并 ✅；删除 `internal/summarizer`；engine 并入 `internal/summarize` |
 | 2026-07-15 | **M0.9**：G30 CGO/SQLite ADR ✅；`docs/adr/0003-sqlite-cgo.md`；Makefile `build-all` CGO=1 |
 | 2026-07-15 | **PR-6 收尾**：bootstrap 注入 Snapshot/Debate/Summarize；G26 备注更新 |
+| 2026-07-15 | **PR-8**：`internal/floweng` 最小机 + experimental flows API；G09 → ⚠️ |

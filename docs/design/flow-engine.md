@@ -1,9 +1,9 @@
 # 工作流引擎（Flow Engine）详细设计
 
-> 状态：Active / 目标态设计（**代码中尚无** `internal/floweng`）  
-> 模块：`backend/internal/floweng`（与现有 `internal/workflow` 观测层同域合并）  
+> 状态：Active / 目标态设计（**PR-8 最小实现已落地**：内存引擎 + experimental API）  
+> 模块：`backend/internal/floweng`（与现有 `internal/workflow` 观测层同域合并——观测合并仍待）  
 > 里程碑：M2  
-> 纳入跟踪：2026-07-13（M0.6）
+> 纳入跟踪：2026-07-13（M0.6）；实现起步 2026-07-15（PR-8）
 
 ---
 
