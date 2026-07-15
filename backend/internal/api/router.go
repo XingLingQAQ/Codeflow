@@ -123,6 +123,7 @@ func (s *Server) setupRoutes() {
 			flows.DELETE("/:id", handlers.DeleteFlow)
 			flows.GET("/:id/events", handlers.ListFlowEvents)
 			flows.GET("/:id/stages", handlers.ListFlowStages)
+				flows.GET("/:id/stages/:sid", handlers.GetFlowStage)
 			flows.GET("/:id/artifacts", handlers.ListFlowArtifacts)
 			flows.PATCH("/:id/artifacts/:aid", handlers.UpdateFlowArtifactStatus)
 			flows.POST("/:id/stages/:sid/advance", handlers.AdvanceFlowStage)

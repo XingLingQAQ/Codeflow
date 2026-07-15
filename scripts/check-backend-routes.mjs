@@ -17,6 +17,7 @@ const required = [
   "handlers.CreateFlow",
   "handlers.GetFlowTemplate",
   "handlers.ListFlowStages",
+  "handlers.GetFlowStage",
   "handlers.ListFlowArtifacts",
   "handlers.AttachFlowArtifact",
   "handlers.UpdateFlowArtifactStatus",

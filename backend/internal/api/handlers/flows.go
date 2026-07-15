@@ -220,6 +220,23 @@ func AttachFlowArtifact(c *gin.Context) {
 	respondCreated(c, art)
 }
 
+// GetFlowStage handles GET /api/v1/flows/:id/stages/:sid
+func GetFlowStage(c *gin.Context) {
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	sid := c.Param("sid")
+	for i := range flow.Stages {
+		if flow.Stages[i].ID == sid {
+			respondOK(c, flow.Stages[i])
+			return
+		}
+	}
+	respondError(c, http.StatusNotFound, "stage not found: "+sid)
+}
+
 // ListFlowStages handles GET /api/v1/flows/:id/stages
 func ListFlowStages(c *gin.Context) {
 	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))

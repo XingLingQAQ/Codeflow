@@ -3450,6 +3450,28 @@ paths:
         '404':
           description: Flow or stage not found
 
+  /api/v1/flows/{id}/stages/{sid}:
+    get:
+      tags: [Flows]
+      summary: Get a single stage by id
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Stage detail
+        '404':
+          description: Not found
+
   /api/v1/flows/{id}/stages/{sid}/advance:
     post:
       tags: [Flows]
