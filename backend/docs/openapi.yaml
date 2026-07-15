@@ -595,6 +595,33 @@ paths:
           description: Vote cast
 
   /api/v1/debates:
+    get:
+      tags: [Debates]
+      summary: List debates
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: flow_id
+          in: query
+          schema:
+            type: string
+        - name: stage_id
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Debate list (supports flow_id/stage_id filter)
     post:
       tags: [Debates]
       summary: Create debate

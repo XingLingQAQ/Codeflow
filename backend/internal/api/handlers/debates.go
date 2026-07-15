@@ -28,6 +28,21 @@ func CreateDebate(c *gin.Context) {
 	respondCreated(c, result)
 }
 
+// ListDebates handles GET /api/v1/debates?status=&flow_id=&stage_id=&limit=&offset=
+func ListDebates(c *gin.Context) {
+	var req debate.DebateListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid query: "+err.Error())
+		return
+	}
+	result, err := debate.GetDebateManager().ListDebates(c.Request.Context(), &req)
+	if err != nil {
+		respondInternalError(c, "list debates", err)
+		return
+	}
+	respondOK(c, result)
+}
+
 // GetDebate handles GET /api/v1/debates/:id
 func GetDebate(c *gin.Context) {
 	id, ok := requireUUIDParam(c, "id", "debate ID")

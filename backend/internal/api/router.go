@@ -324,6 +324,7 @@ func (s *Server) setupRoutes() {
 		debates := v1.Group("/debates")
 		{
 			debates.POST("", handlers.CreateDebate)
+			debates.GET("", handlers.ListDebates)
 			debates.GET("/:id", handlers.GetDebate)
 			debates.POST("/:id/next-round", handlers.NextDebateRound)
 			debates.POST("/:id/conflicts/:cid/resolve", handlers.ResolveConflict)

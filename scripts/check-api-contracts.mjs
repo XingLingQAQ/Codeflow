@@ -254,6 +254,8 @@ const requiredOperations = [
   ['/api/v1/workflows/{projectId}/overview', 'GET'],
   ['/api/v1/workflows/{projectId}/timeline', 'GET'],
   ['/api/v1/workflows/{projectId}/replay', 'GET'],
+  ['/api/v1/debates', 'GET'],
+  ['/api/v1/debates', 'POST'],
   // Experimental: floweng / workspace / skill / guard
   ['/api/v1/flows/templates', 'GET'],
   ['/api/v1/flows', 'GET'],
