@@ -76,6 +76,35 @@ func TestStageFilter(t *testing.T) {
 	}
 }
 
+func TestListFilteredEnabledOnly(t *testing.T) {
+	r := NewInMemoryRegistry()
+	ctx := context.Background()
+	created, err := r.Create(ctx, &CreateRequest{Name: "Disable Me", Body: "body", Triggers: []string{"x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	if _, err := r.Update(ctx, created.ID, &UpdateRequest{Enabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.ListFiltered(ctx, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabledOnly, err := r.ListFiltered(ctx, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(enabledOnly) >= len(all) {
+		t.Fatalf("expected enabled-only shorter: all=%d enabled=%d", len(all), len(enabledOnly))
+	}
+	for _, s := range enabledOnly {
+		if !s.Enabled {
+			t.Fatalf("disabled skill leaked: %+v", s)
+		}
+	}
+}
+
 func TestGetSetRegistry(t *testing.T) {
 	prev := GetRegistry()
 	t.Cleanup(func() { SetRegistry(prev) })
