@@ -143,6 +143,7 @@ func (s *Server) setupRoutes() {
 			skills.GET("", handlers.ListSkills)
 			skills.POST("/match", handlers.MatchSkills)
 			skills.POST("/inject", handlers.InjectSkills)
+			skills.POST("/import", handlers.ImportSkills)
 			skills.GET("/:id", handlers.GetSkill)
 			skills.PATCH("/:id", handlers.UpdateSkill)
 			skills.DELETE("/:id", handlers.DeleteSkill)
