@@ -145,3 +145,13 @@ func GuardIndexTree(c *gin.Context) {
 	}
 	respondOK(c, gin.H{"indexed_files": n, "root": body.Root})
 }
+
+// GuardConfig handles GET /api/v1/guard/config — active policy snapshot.
+func GuardConfig(c *gin.Context) {
+	svc, ok := guard.GetService().(*guard.Engine)
+	if !ok || svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "guard engine not available")
+		return
+	}
+	respondOK(c, svc.Config())
+}

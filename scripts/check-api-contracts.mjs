@@ -287,6 +287,7 @@ const requiredOperations = [
   ['/api/v1/skills/{id}', 'GET'],
   ['/api/v1/skills/{id}', 'PATCH'],
   ['/api/v1/skills/{id}', 'DELETE'],
+  ['/api/v1/guard/config', 'GET'],
   ['/api/v1/guard/check', 'POST'],
   ['/api/v1/guard/index', 'POST'],
   ['/api/v1/guard/exempt', 'POST'],

@@ -3798,6 +3798,17 @@ paths:
           description: Deleted
 
   # ==================== Guard (experimental) ====================
+  /api/v1/guard/config:
+    get:
+      tags: [Guard]
+      summary: Get active guard policy configuration
+      x-codeflow-experimental: true
+      responses:
+        '200':
+          description: Config snapshot
+        '503':
+          description: Guard engine unavailable
+
   /api/v1/guard/check:
     post:
       tags: [Guard]

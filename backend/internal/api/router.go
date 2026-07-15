@@ -164,6 +164,7 @@ func (s *Server) setupRoutes() {
 		guardAPI.Use(middleware.Experimental("guard"))
 		{
 			guardAPI.POST("/check", handlers.GuardCheck)
+				guardAPI.GET("/config", handlers.GuardConfig)
 			guardAPI.POST("/index", handlers.GuardIndexTree)
 			guardAPI.POST("/exempt", handlers.GuardExempt)
 				guardAPI.GET("/exemptions", handlers.GuardListExemptions)

@@ -27,6 +27,7 @@ const required = [
   "handlers.CreateSkill",
   "handlers.ImportSkills",
   "handlers.GuardCheck",
+  "handlers.GuardConfig",
   "handlers.GuardIndexTree",
   "handlers.GuardExempt",
   "handlers.GuardListExemptions",
