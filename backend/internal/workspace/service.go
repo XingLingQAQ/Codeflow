@@ -242,13 +242,19 @@ func (s *FSService) Promote(ctx context.Context, root, rel string) (*Entry, erro
 	if err != nil {
 		return nil, fmt.Errorf("read staged: %w", err)
 	}
-	return s.Write(ctx, &WriteRequest{
+	ent, err := s.Write(ctx, &WriteRequest{
 		Root:          root,
 		Path:          rel,
 		Content:       data,
 		CreateParents: true,
 		Mode:          WriteModeDirect,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Best-effort cleanup of the shadow copy after successful promote.
+	_ = os.Remove(stagedAbs)
+	return ent, nil
 }
 
 // DiscardStaged removes a file from .codeflow/staging (does not touch the real tree).
