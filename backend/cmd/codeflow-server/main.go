@@ -103,6 +103,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init skill sqlite: %w", err)
 	}
+	defer func() { _ = skillReg.Close() }()
 	// Optional bulk import from project skills directory (ignore if missing).
 	if n, err := skillReg.ImportMarkdownDir(context.Background(), filepath.Join(".", ".codeflow", "skills")); err == nil && n > 0 {
 		fmt.Printf("✓ Imported %d skill(s) from .codeflow/skills\n", n)

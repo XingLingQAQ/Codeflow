@@ -320,6 +320,21 @@ func (r *InMemoryRegistry) RenderInjection(ctx context.Context, req *MatchReques
 	return b.String(), nil
 }
 
+// Close releases the optional durable store.
+func (r *InMemoryRegistry) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.store == nil {
+		return nil
+	}
+	err := r.store.Close()
+	r.store = nil
+	return err
+}
+
 func cloneSkill(s *Skill) *Skill {
 	if s == nil {
 		return nil
