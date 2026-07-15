@@ -3329,6 +3329,16 @@ paths:
           required: true
           schema:
             type: string
+        - name: type
+          in: query
+          description: Filter by event type
+          schema:
+            type: string
+        - name: stage_id
+          in: query
+          description: Filter by stage id
+          schema:
+            type: string
       responses:
         '200':
           description: Event list
