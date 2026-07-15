@@ -145,6 +145,7 @@ func (s *Server) setupRoutes() {
 			ws.POST("/promote", handlers.PromoteWorkspaceFile)
 				ws.POST("/promote-all", handlers.PromoteAllWorkspace)
 				ws.POST("/discard", handlers.DiscardWorkspaceStaged)
+				ws.POST("/discard-all", handlers.DiscardAllWorkspaceStaged)
 		}
 
 		// Skill registry (experimental: M5.0 minimal)

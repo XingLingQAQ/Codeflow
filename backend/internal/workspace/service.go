@@ -302,6 +302,26 @@ func (s *FSService) DiscardStaged(ctx context.Context, root, rel string) error {
 	return nil
 }
 
+// DiscardAllStaged removes every staged file. Returns count discarded.
+func (s *FSService) DiscardAllStaged(ctx context.Context, root string) (int, error) {
+	staged, err := s.ListStaged(ctx, root)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	var firstErr error
+	for _, e := range staged {
+		if err := s.DiscardStaged(ctx, root, e.Path); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		n++
+	}
+	return n, firstErr
+}
+
 // ListStaged walks .codeflow/staging and returns file entries with project-relative paths.
 // Missing staging dir yields an empty list (not an error).
 func (s *FSService) ListStaged(ctx context.Context, root string) ([]Entry, error) {

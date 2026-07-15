@@ -3699,6 +3699,22 @@ paths:
         '404':
           description: Staged file not found
 
+  /api/v1/workspace/discard-all:
+    post:
+      tags: [Workspace]
+      summary: Discard all staged files
+      x-codeflow-experimental: true
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                root: { type: string }
+      responses:
+        '200':
+          description: Discard count
+
   /api/v1/workspace/write:
     post:
       tags: [Workspace]

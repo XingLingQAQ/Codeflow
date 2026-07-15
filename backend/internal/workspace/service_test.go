@@ -233,3 +233,19 @@ func TestPromoteAll(t *testing.T) {
 		t.Fatalf("staging left: %+v err=%v", remaining, err)
 	}
 }
+
+func TestDiscardAllStaged(t *testing.T) {
+	root := t.TempDir()
+	svc := NewFSService(nil)
+	ctx := context.Background()
+	_, _ = svc.Write(ctx, &WriteRequest{Root: root, Path: "x.txt", Content: []byte("x"), Mode: WriteModeStage, CreateParents: true})
+	_, _ = svc.Write(ctx, &WriteRequest{Root: root, Path: "y.txt", Content: []byte("y"), Mode: WriteModeStage, CreateParents: true})
+	n, err := svc.DiscardAllStaged(ctx, root)
+	if err != nil || n != 2 {
+		t.Fatalf("discard all n=%d err=%v", n, err)
+	}
+	rem, _ := svc.ListStaged(ctx, root)
+	if len(rem) != 0 {
+		t.Fatal(rem)
+	}
+}
