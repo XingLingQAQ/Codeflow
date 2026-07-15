@@ -185,6 +185,27 @@ func ListFlowArtifacts(c *gin.Context) {
 	respondOK(c, gin.H{"items": flow.Artifacts, "total": len(flow.Artifacts)})
 }
 
+// UpdateFlowArtifactStatus handles PATCH /api/v1/flows/:id/artifacts/:aid
+func UpdateFlowArtifactStatus(c *gin.Context) {
+	var body struct {
+		Status string `json:"status" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	art, err := floweng.GetEngine().SetArtifactStatus(c.Request.Context(), c.Param("id"), c.Param("aid"), floweng.ArtifactStatus(body.Status))
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondOK(c, art)
+}
+
 // AbortFlow handles POST /api/v1/flows/:id/abort
 func AbortFlow(c *gin.Context) {
 	flowID := c.Param("id")

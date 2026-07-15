@@ -195,4 +195,6 @@ type Engine interface {
 	Abort(ctx context.Context, flowID, reason string) (*Flow, error)
 	// AttachArtifact records a draft artifact on a stage (contentRef optional storage pointer).
 	AttachArtifact(ctx context.Context, flowID, stageID, artType, contentRef string) (*Artifact, error)
+	// SetArtifactStatus updates artifact status (draft/approved/stale).
+	SetArtifactStatus(ctx context.Context, flowID, artifactID string, status ArtifactStatus) (*Artifact, error)
 }

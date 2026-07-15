@@ -121,6 +121,7 @@ func (s *Server) setupRoutes() {
 			flows.GET("/:id", handlers.GetFlow)
 			flows.GET("/:id/events", handlers.ListFlowEvents)
 			flows.GET("/:id/artifacts", handlers.ListFlowArtifacts)
+			flows.PATCH("/:id/artifacts/:aid", handlers.UpdateFlowArtifactStatus)
 			flows.POST("/:id/stages/:sid/advance", handlers.AdvanceFlowStage)
 			flows.POST("/:id/stages/:sid/skip", handlers.SkipFlowStage)
 			flows.POST("/:id/stages/:sid/artifacts", handlers.AttachFlowArtifact)

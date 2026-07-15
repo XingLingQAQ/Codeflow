@@ -446,6 +446,39 @@ func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, ar
 	return &art, nil
 }
 
+// SetArtifactStatus updates an artifact's status.
+func (e *InMemoryEngine) SetArtifactStatus(ctx context.Context, flowID, artifactID string, status ArtifactStatus) (*Artifact, error) {
+	switch status {
+	case ArtifactStatusDraft, ArtifactStatusApproved, ArtifactStatusStale:
+	default:
+		return nil, fmt.Errorf("invalid artifact status %q", status)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	flow, err := e.store.Get(flowID)
+	if err != nil {
+		return nil, err
+	}
+	var out *Artifact
+	for i := range flow.Artifacts {
+		if flow.Artifacts[i].ID == artifactID {
+			flow.Artifacts[i].Status = status
+			out = &flow.Artifacts[i]
+			e.appendEvent(flow, "artifact.status", flow.Artifacts[i].StageID, fmt.Sprintf("artifact %s -> %s", artifactID, status))
+			break
+		}
+	}
+	if out == nil {
+		return nil, fmt.Errorf("artifact not found: %s", artifactID)
+	}
+	flow.UpdatedAt = time.Now().UTC()
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
+	cp := *out
+	return &cp, nil
+}
+
 // putRaw is used by tests to inject stage/gate fixtures.
 func (e *InMemoryEngine) putRaw(flow *Flow) error {
 	e.mu.Lock()
