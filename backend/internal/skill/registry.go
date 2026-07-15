@@ -11,17 +11,46 @@ import (
 	"github.com/google/uuid"
 )
 
-// InMemoryRegistry is the M5.0 skill registry.
+// InMemoryRegistry is the skill registry (optional SQLite durability via store).
 type InMemoryRegistry struct {
 	mu     sync.RWMutex
 	skills map[string]*Skill
+	store  *sqliteSkillStore // optional
 }
 
-// NewInMemoryRegistry creates a registry with optional built-in skills.
+// NewInMemoryRegistry creates a registry with built-in skills (memory only).
 func NewInMemoryRegistry() *InMemoryRegistry {
 	r := &InMemoryRegistry{skills: make(map[string]*Skill)}
 	r.seedBuiltins()
 	return r
+}
+
+// NewSQLiteRegistry opens a durable registry at dbPath.
+// Loads existing rows; seeds builtins only when the database is empty.
+func NewSQLiteRegistry(dbPath string) (*InMemoryRegistry, error) {
+	store, err := openSQLiteSkillStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	r := &InMemoryRegistry{skills: make(map[string]*Skill), store: store}
+	loaded, err := store.loadAll()
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	for _, sk := range loaded {
+		r.skills[sk.ID] = sk
+	}
+	if len(r.skills) == 0 {
+		r.seedBuiltins()
+		for _, sk := range r.skills {
+			if err := store.put(sk); err != nil {
+				_ = store.Close()
+				return nil, err
+			}
+		}
+	}
+	return r, nil
 }
 
 func (r *InMemoryRegistry) seedBuiltins() {
@@ -81,6 +110,13 @@ func (r *InMemoryRegistry) Create(ctx context.Context, req *CreateRequest) (*Ski
 	}
 	r.mu.Lock()
 	r.skills[s.ID] = cloneSkill(s)
+	if r.store != nil {
+		if err := r.store.put(s); err != nil {
+			delete(r.skills, s.ID)
+			r.mu.Unlock()
+			return nil, err
+		}
+	}
 	r.mu.Unlock()
 	return cloneSkill(s), nil
 }
@@ -141,15 +177,25 @@ func (r *InMemoryRegistry) Update(ctx context.Context, id string, req *UpdateReq
 		s.Enabled = *req.Enabled
 	}
 	s.UpdatedAt = time.Now().UTC()
+	if r.store != nil {
+		if err := r.store.put(s); err != nil {
+			return nil, err
+		}
+	}
 	return cloneSkill(s), nil
 }
 
-// Delete removes a skill. Builtin skills may be deleted only if source is not builtin? Allow all for simplicity of registry tests; document that builtin can be re-seeded by process restart.
+// Delete removes a skill.
 func (r *InMemoryRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.skills[id]; !ok {
 		return fmt.Errorf("skill not found: %s", id)
+	}
+	if r.store != nil {
+		if err := r.store.delete(id); err != nil {
+			return err
+		}
 	}
 	delete(r.skills, id)
 	return nil

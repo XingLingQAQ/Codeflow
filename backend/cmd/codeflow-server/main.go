@@ -91,11 +91,15 @@ func run() error {
 	}
 	defer contextClose()
 
-	// B1 services: same in-memory defaults as previous Get* lazy init; wired via bootstrap.
+	// B1 services: wired via bootstrap (floweng/skill durable sqlite).
 	snapshotSvc := snapshot.NewInMemorySnapshotService()
 	flowEngine, err := floweng.NewSQLiteEngine(durableDBPath("floweng.db"), floweng.NewDefaultSnapshotHook(snapshotSvc))
 	if err != nil {
 		return fmt.Errorf("init floweng sqlite: %w", err)
+	}
+	skillReg, err := skill.NewSQLiteRegistry(durableDBPath("skills.db"))
+	if err != nil {
+		return fmt.Errorf("init skill sqlite: %w", err)
 	}
 	guardEng := guard.NewEngine(nil, nil)
 	services := bootstrap.Services{
@@ -110,7 +114,7 @@ func run() error {
 		Floweng:   flowEngine,
 		Guard:     guardEng,
 		Workspace: workspace.NewFSService(guardEng),
-		Skill:     skill.NewInMemoryRegistry(),
+		Skill:     skillReg,
 	}
 	if err := services.Apply(); err != nil {
 		return err
