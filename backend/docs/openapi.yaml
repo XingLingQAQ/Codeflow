@@ -3548,6 +3548,24 @@ paths:
         '200':
           description: File content (text + base64)
 
+  /api/v1/workspace/staged:
+    get:
+      tags: [Workspace]
+      summary: List files in shadow staging (.codeflow/staging)
+      x-codeflow-experimental: true
+      parameters:
+        - name: root
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: X-Codeflow-Workspace-Root
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Staged file entries (paths relative to project tree)
 
   /api/v1/workspace/promote:
     post:

@@ -141,6 +141,10 @@ func TestStageAndPromote(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".codeflow", "staging", "src", "a.txt")); err != nil {
 		t.Fatalf("staged missing: %v", err)
 	}
+	staged, err := svc.ListStaged(ctx, root)
+	if err != nil || len(staged) != 1 || staged[0].Path != "src/a.txt" {
+		t.Fatalf("list staged=%+v err=%v", staged, err)
+	}
 	if _, err := svc.Promote(ctx, root, "src/a.txt"); err != nil {
 		t.Fatal(err)
 	}

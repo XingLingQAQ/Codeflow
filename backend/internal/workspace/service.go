@@ -251,6 +251,63 @@ func (s *FSService) Promote(ctx context.Context, root, rel string) (*Entry, erro
 	})
 }
 
+// ListStaged walks .codeflow/staging and returns file entries with project-relative paths.
+// Missing staging dir yields an empty list (not an error).
+func (s *FSService) ListStaged(ctx context.Context, root string) ([]Entry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_ = ctx
+	if strings.TrimSpace(root) == "" {
+		return nil, fmt.Errorf("workspace root is required")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve root: %w", err)
+	}
+	stagingRoot := filepath.Join(absRoot, ".codeflow", "staging")
+	info, err := os.Stat(stagingRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Entry{}, nil
+		}
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("staging path is not a directory")
+	}
+	out := make([]Entry, 0)
+	err = filepath.WalkDir(stagingRoot, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(stagingRoot, path)
+		if err != nil {
+			return err
+		}
+		rel = normalizeRel(rel)
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		out = append(out, Entry{
+			Name:    d.Name(),
+			Path:    rel,
+			IsDir:   false,
+			Size:    fi.Size(),
+			ModTime: fi.ModTime().UTC(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Stat returns metadata for a path under root.
 func (s *FSService) Stat(ctx context.Context, root, rel string) (*Entry, error) {
 	abs, err := s.Resolve(root, rel)

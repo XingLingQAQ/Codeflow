@@ -76,4 +76,6 @@ type Service interface {
 	Resolve(root, rel string) (abs string, err error)
 	// Promote moves a staged file from .codeflow/staging into the real tree (re-runs guard).
 	Promote(ctx context.Context, root, rel string) (*Entry, error)
+	// ListStaged returns files under .codeflow/staging (paths relative to project tree).
+	ListStaged(ctx context.Context, root string) ([]Entry, error)
 }

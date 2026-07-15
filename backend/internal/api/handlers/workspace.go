@@ -143,6 +143,21 @@ func WriteWorkspaceFile(c *gin.Context) {
 	respondOK(c, ent)
 }
 
+// ListWorkspaceStaged handles GET /api/v1/workspace/staged?root=
+func ListWorkspaceStaged(c *gin.Context) {
+	root := workspaceRootFromRequest(c, "")
+	if root == "" {
+		respondError(c, http.StatusBadRequest, "root is required (query root= or header X-Codeflow-Workspace-Root)")
+		return
+	}
+	entries, err := workspace.GetService().ListStaged(c.Request.Context(), root)
+	if err != nil {
+		respondInternalError(c, "list staged workspace", err)
+		return
+	}
+	respondOK(c, gin.H{"items": entries, "total": len(entries)})
+}
+
 // PromoteWorkspaceFile handles POST /api/v1/workspace/promote
 func PromoteWorkspaceFile(c *gin.Context) {
 	var body promoteWorkspaceBody

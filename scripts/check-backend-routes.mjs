@@ -21,6 +21,7 @@ const required = [
   "handlers.UpdateFlowArtifactStatus",
   "handlers.WriteWorkspaceFile",
   "handlers.PromoteWorkspaceFile",
+  "handlers.ListWorkspaceStaged",
   "handlers.CreateSkill",
   "handlers.ImportSkills",
   "handlers.GuardCheck",
