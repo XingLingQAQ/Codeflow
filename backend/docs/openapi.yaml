@@ -3368,6 +3368,26 @@ paths:
           description: Not found
 
   /api/v1/flows/{id}/artifacts/{aid}:
+    get:
+      tags: [Flows]
+      summary: Get artifact by id
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: aid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Artifact
+        '404':
+          description: Not found
     patch:
       tags: [Flows]
       summary: Update artifact status

@@ -247,6 +247,23 @@ func ListFlowStages(c *gin.Context) {
 	respondOK(c, gin.H{"items": flow.Stages, "total": len(flow.Stages)})
 }
 
+// GetFlowArtifact handles GET /api/v1/flows/:id/artifacts/:aid
+func GetFlowArtifact(c *gin.Context) {
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	aid := c.Param("aid")
+	for i := range flow.Artifacts {
+		if flow.Artifacts[i].ID == aid {
+			respondOK(c, flow.Artifacts[i])
+			return
+		}
+	}
+	respondError(c, http.StatusNotFound, "artifact not found: "+aid)
+}
+
 // ListFlowArtifacts handles GET /api/v1/flows/:id/artifacts
 func ListFlowArtifacts(c *gin.Context) {
 	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))

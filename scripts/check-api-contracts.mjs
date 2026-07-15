@@ -267,6 +267,7 @@ const requiredOperations = [
   ['/api/v1/flows/{id}/stages', 'GET'],
   ['/api/v1/flows/{id}/stages/{sid}', 'GET'],
   ['/api/v1/flows/{id}/artifacts', 'GET'],
+  ['/api/v1/flows/{id}/artifacts/{aid}', 'GET'],
   ['/api/v1/flows/{id}/artifacts/{aid}', 'PATCH'],
   ['/api/v1/flows/{id}/stages/{sid}/advance', 'POST'],
   ['/api/v1/flows/{id}/stages/{sid}/skip', 'POST'],
