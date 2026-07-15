@@ -165,13 +165,28 @@ func LoopFlow(c *gin.Context) {
 	respondOK(c, flow)
 }
 
-// ListFlowEvents handles GET /api/v1/flows/:id/events
+// ListFlowEvents handles GET /api/v1/flows/:id/events?type=&stage_id=
 func ListFlowEvents(c *gin.Context) {
 	flowID := c.Param("id")
 	events, err := floweng.GetEngine().ListEvents(c.Request.Context(), flowID)
 	if err != nil {
 		respondError(c, http.StatusNotFound, err.Error())
 		return
+	}
+	typeFilter := strings.TrimSpace(c.Query("type"))
+	stageFilter := strings.TrimSpace(c.Query("stage_id"))
+	if typeFilter != "" || stageFilter != "" {
+		filtered := make([]floweng.FlowEvent, 0, len(events))
+		for _, ev := range events {
+			if typeFilter != "" && ev.Type != typeFilter {
+				continue
+			}
+			if stageFilter != "" && ev.StageID != stageFilter {
+				continue
+			}
+			filtered = append(filtered, ev)
+		}
+		events = filtered
 	}
 	respondOK(c, gin.H{"items": events, "total": len(events)})
 }
