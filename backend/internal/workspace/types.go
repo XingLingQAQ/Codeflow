@@ -24,6 +24,16 @@ type FileContent struct {
 	ModTime time.Time `json:"mod_time"`
 }
 
+// WriteMode controls whether content hits the real tree or shadow staging.
+type WriteMode string
+
+const (
+	// WriteModeDirect writes to the project tree (default).
+	WriteModeDirect WriteMode = "direct"
+	// WriteModeStage writes under .codeflow/staging/ then requires Promote.
+	WriteModeStage WriteMode = "stage"
+)
+
 // WriteRequest is a guarded write.
 type WriteRequest struct {
 	// Root is the absolute project root directory.
@@ -34,6 +44,8 @@ type WriteRequest struct {
 	Content []byte `json:"content"`
 	// CreateParents creates intermediate directories when true.
 	CreateParents bool `json:"create_parents,omitempty"`
+	// Mode is direct (default) or stage (shadow staging under .codeflow/staging).
+	Mode WriteMode `json:"mode,omitempty"`
 }
 
 // ListRequest lists a relative directory under Root.
@@ -62,4 +74,6 @@ type Service interface {
 	Stat(ctx context.Context, root, rel string) (*Entry, error)
 	// Resolve returns the absolute path if and only if it stays within root.
 	Resolve(root, rel string) (abs string, err error)
+	// Promote moves a staged file from .codeflow/staging into the real tree (re-runs guard).
+	Promote(ctx context.Context, root, rel string) (*Entry, error)
 }

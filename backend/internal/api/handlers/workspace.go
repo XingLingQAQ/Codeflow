@@ -85,6 +85,12 @@ type writeWorkspaceBody struct {
 	ContentText   string `json:"content_text"`
 	ContentBase64 string `json:"content_base64"`
 	CreateParents bool   `json:"create_parents"`
+	Mode          string `json:"mode"` // direct | stage
+}
+
+type promoteWorkspaceBody struct {
+	Root string `json:"root"`
+	Path string `json:"path" binding:"required"`
 }
 
 // WriteWorkspaceFile handles POST /api/v1/workspace/write
@@ -111,11 +117,16 @@ func WriteWorkspaceFile(c *gin.Context) {
 	default:
 		content = []byte(body.ContentText)
 	}
+	mode := workspace.WriteMode(body.Mode)
+	if mode == "" {
+		mode = workspace.WriteModeDirect
+	}
 	ent, err := workspace.GetService().Write(c.Request.Context(), &workspace.WriteRequest{
 		Root:          root,
 		Path:          body.Path,
 		Content:       content,
 		CreateParents: body.CreateParents,
+		Mode:          mode,
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "blocked by guard") {
@@ -127,6 +138,30 @@ func WriteWorkspaceFile(c *gin.Context) {
 			return
 		}
 		respondInternalError(c, "write workspace", err)
+		return
+	}
+	respondOK(c, ent)
+}
+
+// PromoteWorkspaceFile handles POST /api/v1/workspace/promote
+func PromoteWorkspaceFile(c *gin.Context) {
+	var body promoteWorkspaceBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	root := workspaceRootFromRequest(c, body.Root)
+	if root == "" {
+		respondError(c, http.StatusBadRequest, "root is required")
+		return
+	}
+	ent, err := workspace.GetService().Promote(c.Request.Context(), root, body.Path)
+	if err != nil {
+		if strings.Contains(err.Error(), "blocked by guard") {
+			respondError(c, http.StatusForbidden, err.Error())
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	respondOK(c, ent)

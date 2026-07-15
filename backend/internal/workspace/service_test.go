@@ -122,6 +122,34 @@ func TestWriteGuardAllows(t *testing.T) {
 	}
 }
 
+func TestStageAndPromote(t *testing.T) {
+	root := t.TempDir()
+	svc := NewFSService(nil)
+	ctx := context.Background()
+	_, err := svc.Write(ctx, &WriteRequest{
+		Root: root, Path: "src/a.txt", Content: []byte("staged"),
+		CreateParents: true, Mode: WriteModeStage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// real path must not exist yet
+	if _, err := os.Stat(filepath.Join(root, "src", "a.txt")); !os.IsNotExist(err) {
+		t.Fatal("real file should not exist before promote")
+	}
+	// staged exists
+	if _, err := os.Stat(filepath.Join(root, ".codeflow", "staging", "src", "a.txt")); err != nil {
+		t.Fatalf("staged missing: %v", err)
+	}
+	if _, err := svc.Promote(ctx, root, "src/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "src", "a.txt"))
+	if err != nil || string(data) != "staged" {
+		t.Fatalf("promoted content=%q err=%v", data, err)
+	}
+}
+
 func TestGetSetService(t *testing.T) {
 	prev := GetService()
 	t.Cleanup(func() { SetService(prev) })

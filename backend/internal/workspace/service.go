@@ -140,6 +140,7 @@ func (s *FSService) Read(ctx context.Context, req *ReadRequest) (*FileContent, e
 }
 
 // Write writes a file under root after optional guard approval.
+// Mode stage writes under .codeflow/staging/<rel> (still path-sandboxed via Resolve on staging root).
 func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error) {
 	if req == nil || strings.TrimSpace(req.Path) == "" {
 		return nil, fmt.Errorf("path is required")
@@ -147,21 +148,43 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	abs, err := s.Resolve(req.Root, req.Path)
+	// Always validate rel path against project root first.
+	if _, err := s.Resolve(req.Root, req.Path); err != nil {
+		return nil, err
+	}
+
+	targetRoot := req.Root
+	rel := normalizeRel(req.Path)
+	mode := req.Mode
+	if mode == "" {
+		mode = WriteModeDirect
+	}
+	if mode == WriteModeStage {
+		targetRoot = filepath.Join(req.Root, ".codeflow", "staging")
+		if err := os.MkdirAll(targetRoot, 0o755); err != nil {
+			return nil, fmt.Errorf("mkdir staging: %w", err)
+		}
+	}
+	abs, err := s.Resolve(targetRoot, rel)
 	if err != nil {
 		return nil, err
 	}
 
+	// Guard always evaluates against the *intended* final path (project tree), not staging path.
+	finalAbs, err := s.Resolve(req.Root, rel)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.RLock()
 	guard := s.guard
 	s.mu.RUnlock()
 	if guard != nil {
-		if err := guard.BeforeWrite(ctx, abs, req.Content); err != nil {
+		if err := guard.BeforeWrite(ctx, finalAbs, req.Content); err != nil {
 			return nil, fmt.Errorf("write blocked by guard: %w", err)
 		}
 	}
 
-	if req.CreateParents {
+	if req.CreateParents || mode == WriteModeStage {
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir: %w", err)
 		}
@@ -175,11 +198,35 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 	}
 	return &Entry{
 		Name:    filepath.Base(abs),
-		Path:    normalizeRel(req.Path),
+		Path:    rel,
 		IsDir:   false,
 		Size:    info.Size(),
 		ModTime: info.ModTime().UTC(),
 	}, nil
+}
+
+// Promote copies a staged file into the real project tree (guard re-checked).
+func (s *FSService) Promote(ctx context.Context, root, rel string) (*Entry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rel = normalizeRel(rel)
+	stagingRoot := filepath.Join(root, ".codeflow", "staging")
+	stagedAbs, err := s.Resolve(stagingRoot, rel)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(stagedAbs)
+	if err != nil {
+		return nil, fmt.Errorf("read staged: %w", err)
+	}
+	return s.Write(ctx, &WriteRequest{
+		Root:          root,
+		Path:          rel,
+		Content:       data,
+		CreateParents: true,
+		Mode:          WriteModeDirect,
+	})
 }
 
 // Stat returns metadata for a path under root.
