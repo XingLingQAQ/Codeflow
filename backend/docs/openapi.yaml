@@ -3339,6 +3339,11 @@ paths:
           description: Filter by stage id
           schema:
             type: string
+        - name: limit
+          in: query
+          description: Max number of newest events to return
+          schema:
+            type: integer
       responses:
         '200':
           description: Event list
