@@ -84,6 +84,28 @@ func TestBackendCoreSmoke(t *testing.T) {
 	if remaining, err := ws.ListStaged(ctx, root); err != nil || len(remaining) != 0 {
 		t.Fatalf("staging should be empty after promote: %+v err=%v", remaining, err)
 	}
+	// promote-all / discard-all bulk path
+	if _, err := ws.Write(ctx, &workspace.WriteRequest{
+		Root: root, Path: "bulk/a.txt", Content: []byte("a"), CreateParents: true, Mode: workspace.WriteModeStage,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.Write(ctx, &workspace.WriteRequest{
+		Root: root, Path: "bulk/b.txt", Content: []byte("b"), CreateParents: true, Mode: workspace.WriteModeStage,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if items, err := ws.PromoteAll(ctx, root); err != nil || len(items) != 2 {
+		t.Fatalf("promote all: %d %v", len(items), err)
+	}
+	if _, err := ws.Write(ctx, &workspace.WriteRequest{
+		Root: root, Path: "bulk/c.txt", Content: []byte("c"), CreateParents: true, Mode: workspace.WriteModeStage,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := ws.DiscardAllStaged(ctx, root); err != nil || n != 1 {
+		t.Fatalf("discard all: n=%d err=%v", n, err)
+	}
 	// temporary exemption for stacked name
 	blocked := filepath.Join(root, "src", "utils2.go")
 	g.GrantExemption(guard.Exemption{
