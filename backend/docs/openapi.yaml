@@ -61,6 +61,8 @@ tags:
     description: Project-root filesystem (experimental) — list/read/write via guard
   - name: Skills
     description: Skill registry (experimental) — match and prompt injection
+  - name: Guard
+    description: Write policy guard (experimental) — dry-run check and AST index
 
 paths:
   /health:
@@ -3526,6 +3528,47 @@ paths:
       responses:
         '200':
           description: Deleted
+
+  # ==================== Guard (experimental) ====================
+  /api/v1/guard/check:
+    post:
+      tags: [Guard]
+      summary: Dry-run write policy evaluation
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+                root: { type: string }
+                abs_path: { type: string }
+                content_text: { type: string }
+                content_base64: { type: string }
+      responses:
+        '200':
+          description: Decision with violations
+
+  /api/v1/guard/index:
+    post:
+      tags: [Guard]
+      summary: Seed AST symbol index from project tree
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [root]
+              properties:
+                root: { type: string }
+      responses:
+        '200':
+          description: Indexed file count
 
 components:
   schemas:
