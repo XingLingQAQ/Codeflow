@@ -466,6 +466,13 @@ func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, ar
 	return &art, nil
 }
 
+// Delete removes a flow.
+func (e *InMemoryEngine) Delete(ctx context.Context, flowID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.store.Delete(flowID)
+}
+
 // SetArtifactStatus updates an artifact's status.
 func (e *InMemoryEngine) SetArtifactStatus(ctx context.Context, flowID, artifactID string, status ArtifactStatus) (*Artifact, error) {
 	switch status {

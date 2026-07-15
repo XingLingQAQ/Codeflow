@@ -60,6 +60,19 @@ func GetFlow(c *gin.Context) {
 	respondOK(c, flow)
 }
 
+// DeleteFlow handles DELETE /api/v1/flows/:id
+func DeleteFlow(c *gin.Context) {
+	if err := floweng.GetEngine().Delete(c.Request.Context(), c.Param("id")); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondInternalError(c, "delete flow", err)
+		return
+	}
+	respondOK(c, gin.H{"deleted": true})
+}
+
 // AdvanceFlowStage handles POST /api/v1/flows/:id/stages/:sid/advance
 // Stage id in path is validated against the current active stage (or ignored if matches any — advance always acts on active).
 func AdvanceFlowStage(c *gin.Context) {

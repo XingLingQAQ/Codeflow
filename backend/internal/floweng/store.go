@@ -11,6 +11,7 @@ type FlowStore interface {
 	Put(flow *Flow) error
 	Get(id string) (*Flow, error)
 	List(projectID string) ([]*Flow, error)
+	Delete(id string) error
 }
 
 // memoryStore is the default process-local store.
@@ -53,4 +54,14 @@ func (s *memoryStore) List(projectID string) ([]*Flow, error) {
 		}
 	}
 	return out, nil
+}
+
+func (s *memoryStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.flows[id]; !ok {
+		return fmt.Errorf("flow not found: %s", id)
+	}
+	delete(s.flows, id)
+	return nil
 }

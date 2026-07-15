@@ -147,3 +147,16 @@ func (s *SQLiteFlowStore) List(projectID string) ([]*Flow, error) {
 	}
 	return out, rows.Err()
 }
+
+// Delete removes a flow by id.
+func (s *SQLiteFlowStore) Delete(id string) error {
+	res, err := s.db.Exec(`DELETE FROM flows WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete flow: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("flow not found: %s", id)
+	}
+	return nil
+}

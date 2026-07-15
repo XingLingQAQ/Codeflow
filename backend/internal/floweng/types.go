@@ -199,4 +199,6 @@ type Engine interface {
 	AttachArtifact(ctx context.Context, flowID, stageID, artType, contentRef string) (*Artifact, error)
 	// SetArtifactStatus updates artifact status (draft/approved/stale).
 	SetArtifactStatus(ctx context.Context, flowID, artifactID string, status ArtifactStatus) (*Artifact, error)
+	// Delete removes a flow document.
+	Delete(ctx context.Context, flowID string) error
 }
