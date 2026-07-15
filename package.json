@@ -20,6 +20,7 @@
     "check:api-contracts": "node scripts/check-api-contracts.mjs",
     "check:repo-hygiene": "node scripts/check-repo-hygiene.mjs",
     "check:backend-routes": "node scripts/check-backend-routes.mjs",
+    "check:backend": "node scripts/check-backend-routes.mjs && node scripts/check-api-contracts.mjs && node scripts/check-repo-hygiene.mjs",
     "nx:build": "nx run-many -t build",
     "nx:test": "nx run-many -t test",
     "nx:lint": "nx run-many -t lint",
