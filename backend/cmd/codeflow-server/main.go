@@ -122,6 +122,11 @@ func run() error {
 	guardEng := guard.NewEngine(nil, guard.NewAuditBridge(auditSvc))
 	// Optional project guard policy (ignore if missing).
 	_ = guardEng.TryLoadConfigFile(filepath.Join(".", ".codeflow", "guard.yaml"))
+	if root := strings.TrimSpace(os.Getenv("CODEFLOW_INDEX_ROOT")); root != "" {
+		if n, err := guardEng.IndexTree(context.Background(), root); err == nil {
+			fmt.Printf("✓ Guard indexed %d source file(s) under %s\n", n, root)
+		}
+	}
 	services := bootstrap.Services{
 		Config:    configSvc,
 		Agent:     agentSvc,
