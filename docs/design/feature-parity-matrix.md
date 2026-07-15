@@ -97,7 +97,7 @@
 | `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
 | `/api/v1/debates` | ⚠️ 双方 | list/create + flow_id/stage_id 过滤与 FK |
 | `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/advance/skip/loop/abort/gate/artifacts |
-| `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/staged/discard |
+| `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/promote-all/staged/discard |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
 | `/api/v1/guard` | ⚠️ Experimental | config/check/index/exempt/exemptions |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
@@ -137,3 +137,4 @@
 | 2026-07-15 | **debate list**：GET `/debates` 支持 status/flow_id/stage_id 过滤；CI CGO=1 硬门禁 |
 | 2026-07-15 | **flow template by id**；workspace promote 清理 staging；guard GET `/config`；smoke 扩展 |
 | 2026-07-15 | **workspace stat**；debate WS topics；promote clears staging |
+| 2026-07-15 | **workspace promote-all** + staged read query；shadow pipeline 闭环 |
