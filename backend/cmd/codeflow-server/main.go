@@ -18,6 +18,7 @@ import (
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/floweng"
+	"github.com/codeflow/backend/internal/guard"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
@@ -92,6 +93,7 @@ func run() error {
 	// B1 services: same in-memory defaults as previous Get* lazy init; wired via bootstrap.
 	snapshotSvc := snapshot.NewInMemorySnapshotService()
 	flowEngine := floweng.NewInMemoryEngine(floweng.NewDefaultSnapshotHook(snapshotSvc))
+	guardEng := guard.NewEngine(nil, nil)
 	services := bootstrap.Services{
 		Config:    configSvc,
 		Agent:     agentSvc,
@@ -102,7 +104,8 @@ func run() error {
 		Debate:    debate.NewInMemoryDebateManager(),
 		Summarize: summarize.NewSummarizerService(),
 		Floweng:   flowEngine,
-		Workspace: workspace.NewFSService(nil), // guard injected when internal/guard lands
+		Guard:     guardEng,
+		Workspace: workspace.NewFSService(guardEng),
 	}
 	if err := services.Apply(); err != nil {
 		return err

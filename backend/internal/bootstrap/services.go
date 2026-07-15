@@ -9,6 +9,7 @@ import (
 	ctxsvc "github.com/codeflow/backend/internal/context"
 	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/floweng"
+	"github.com/codeflow/backend/internal/guard"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/snapshot"
@@ -34,6 +35,7 @@ type Services struct {
 	Summarize  summarize.ISummarizer
 	Floweng    floweng.Engine
 	Workspace  workspace.Service
+	Guard      guard.Service
 }
 
 // Validate checks that every required service dependency has been provided.
@@ -69,6 +71,9 @@ func (s Services) Validate() error {
 	if s.Workspace == nil {
 		missing = append(missing, "workspace")
 	}
+	if s.Guard == nil {
+		missing = append(missing, "guard")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing bootstrap services: %v", missing)
 	}
@@ -90,6 +95,15 @@ func (s Services) Apply() error {
 	summarize.SetSummarizer(s.Summarize)
 	floweng.SetEngine(s.Floweng)
 	workspace.SetService(s.Workspace)
+	guard.SetService(s.Guard)
+	// Keep workspace write path forced through the same guard instance when possible.
+	if fs, ok := s.Workspace.(*workspace.FSService); ok {
+		if ge, ok := s.Guard.(*guard.Engine); ok {
+			fs.SetGuard(ge)
+		} else {
+			fs.SetGuard(s.Guard)
+		}
+	}
 	return nil
 }
 
@@ -105,4 +119,5 @@ func (s Services) Reset() {
 	summarize.SetSummarizer(nil)
 	floweng.SetEngine(nil)
 	workspace.SetService(nil)
+	guard.SetService(nil)
 }
