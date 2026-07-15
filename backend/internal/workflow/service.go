@@ -9,6 +9,7 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
@@ -33,6 +34,8 @@ type WorkflowSummary struct {
 	ActiveFlowCount    int `json:"active_flow_count"`
 	CompletedFlowCount int `json:"completed_flow_count"`
 	AbortedFlowCount   int `json:"aborted_flow_count"`
+	// Debate enrichment (optional; zero when debate manager unavailable)
+	DebateCount int `json:"debate_count"`
 }
 
 type WorkflowOverview struct {
@@ -130,6 +133,7 @@ func (s *Service) GetOverview(ctx context.Context, projectID string) (*WorkflowO
 
 	summary := buildWorkflowSummary(snapshot)
 	enrichSummaryWithFlows(ctx, projectID, &summary)
+	enrichSummaryWithDebates(ctx, projectID, &summary)
 
 	return &WorkflowOverview{
 		Project:     snapshot.project,
@@ -168,6 +172,47 @@ func enrichSummaryWithFlows(ctx context.Context, projectID string, summary *Work
 			summary.AbortedFlowCount++
 		}
 	}
+}
+
+
+func enrichSummaryWithDebates(ctx context.Context, projectID string, summary *WorkflowSummary) {
+	if summary == nil {
+		return
+	}
+	dm := debate.GetDebateManager()
+	if dm == nil {
+		return
+	}
+	listed, err := dm.ListDebates(ctx, &debate.DebateListRequest{Limit: 10000})
+	if err != nil || listed == nil {
+		return
+	}
+	if projectID == "" {
+		summary.DebateCount = listed.Total
+		return
+	}
+	eng := floweng.GetEngine()
+	if eng == nil {
+		summary.DebateCount = listed.Total
+		return
+	}
+	flows, err := eng.List(ctx, projectID)
+	if err != nil {
+		return
+	}
+	flowIDs := make(map[string]struct{}, len(flows))
+	for _, f := range flows {
+		if f != nil {
+			flowIDs[f.ID] = struct{}{}
+		}
+	}
+	n := 0
+	for i := range listed.Debates {
+		if _, ok := flowIDs[listed.Debates[i].FlowID]; ok {
+			n++
+		}
+	}
+	summary.DebateCount = n
 }
 
 func (s *Service) GetTimeline(ctx context.Context, projectID string) (*WorkflowTimeline, error) {
