@@ -32,6 +32,7 @@ const required = [
   "handlers.GuardClearExemption",
   "handlers.DeleteFlow",
   "handlers.AbortFlow",
+  "handlers.ListDebates",
 ];
 
 let failed = false;
