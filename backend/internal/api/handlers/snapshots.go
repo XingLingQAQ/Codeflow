@@ -12,7 +12,7 @@ import (
 	"github.com/codeflow/backend/internal/snapshot"
 )
 
-const snapshotWarning = "Snapshot module is experimental: capture functions return placeholder data, restore functions are no-op. See P0-001 for implementation status."
+const snapshotWarning = "Snapshot module is experimental: conversation/vector/graph true restore is available (PR-4/5); git hard reset remains opt-in via CODEFLOW_SNAPSHOT_ENABLE_GIT_RESTORE."
 
 // experimentalSnapshotResponse adds experimental metadata without wrapping the original payload.
 func experimentalSnapshotResponse(c *gin.Context, status int, data interface{}) {
