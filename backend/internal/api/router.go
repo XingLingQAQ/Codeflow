@@ -148,6 +148,14 @@ func (s *Server) setupRoutes() {
 			skills.DELETE("/:id", handlers.DeleteSkill)
 		}
 
+		// Guard policy (experimental)
+		guardAPI := v1.Group("/guard")
+		guardAPI.Use(middleware.Experimental("guard"))
+		{
+			guardAPI.POST("/check", handlers.GuardCheck)
+			guardAPI.POST("/index", handlers.GuardIndexTree)
+		}
+
 		// Memory routes
 		memory := v1.Group("/memory")
 		{

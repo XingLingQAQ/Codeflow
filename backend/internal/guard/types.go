@@ -73,3 +73,5 @@ type Service interface {
 	// Config returns a copy of the active config.
 	Config() Config
 }
+
+// Note: IndexTree / TryLoadConfigFile remain on *Engine (concrete) for admin APIs.
