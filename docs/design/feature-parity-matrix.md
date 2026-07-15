@@ -123,3 +123,4 @@
 | 2026-07-15 | **floweng SQLite**：FlowStore + SQLiteFlowStore；main 默认 `data/floweng.db` |
 | 2026-07-15 | **guard AST**：SymbolIndex 跨文件 duplicate_symbol 规则 |
 | 2026-07-15 | **skill SQLite**：`NewSQLiteRegistry`；main → `data/skills.db` |
+| 2026-07-15 | **guard.yaml + IndexTree + audit bridge**；main 挂 audit；skill frontmatter；openapi flows/workspace/skills |

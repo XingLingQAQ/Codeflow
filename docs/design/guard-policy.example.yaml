@@ -1,0 +1,27 @@
+# Example project policy — copy to .codeflow/guard.yaml
+# Loaded by codeflow-server via guard.TryLoadConfigFile.
+
+max_file_bytes: 2097152
+
+denied_path_globs:
+  - ".env"
+  - ".env.*"
+  - "**/*.pem"
+  - "**/*.key"
+  - "**/id_rsa"
+  - "**/id_rsa.pub"
+  - "secrets/**"
+
+rules:
+  stacked_naming:
+    severity: error
+  denied_path:
+    severity: error
+  max_file_bytes:
+    severity: error
+  empty_path:
+    severity: error
+  binary_exec_write:
+    severity: warn
+  duplicate_symbol:
+    severity: error
