@@ -73,6 +73,10 @@ func UpdateSkill(c *gin.Context) {
 // DeleteSkill handles DELETE /api/v1/skills/:id
 func DeleteSkill(c *gin.Context) {
 	if err := skill.GetRegistry().Delete(c.Request.Context(), c.Param("id")); err != nil {
+		if strings.Contains(err.Error(), "builtin") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
 		respondError(c, http.StatusNotFound, err.Error())
 		return
 	}
