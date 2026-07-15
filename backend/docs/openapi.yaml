@@ -3232,6 +3232,23 @@ paths:
         '200':
           description: Template id list
 
+  /api/v1/flows/templates/{tid}:
+    get:
+      tags: [Flows]
+      summary: Get built-in flow template by id
+      x-codeflow-experimental: true
+      parameters:
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template detail
+        '404':
+          description: Unknown template
+
   /api/v1/flows:
     get:
       tags: [Flows]

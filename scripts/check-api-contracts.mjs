@@ -258,6 +258,7 @@ const requiredOperations = [
   ['/api/v1/debates', 'POST'],
   // Experimental: floweng / workspace / skill / guard
   ['/api/v1/flows/templates', 'GET'],
+  ['/api/v1/flows/templates/{tid}', 'GET'],
   ['/api/v1/flows', 'GET'],
   ['/api/v1/flows', 'POST'],
   ['/api/v1/flows/{id}', 'GET'],

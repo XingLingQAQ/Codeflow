@@ -15,6 +15,7 @@ const required = [
   'Group("/skills")',
   'Group("/guard")',
   "handlers.CreateFlow",
+  "handlers.GetFlowTemplate",
   "handlers.ListFlowStages",
   "handlers.ListFlowArtifacts",
   "handlers.AttachFlowArtifact",

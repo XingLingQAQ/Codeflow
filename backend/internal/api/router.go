@@ -116,6 +116,7 @@ func (s *Server) setupRoutes() {
 		flows.Use(middleware.Experimental("floweng"))
 		{
 			flows.GET("/templates", handlers.ListFlowTemplates)
+				flows.GET("/templates/:tid", handlers.GetFlowTemplate)
 			flows.POST("", handlers.CreateFlow)
 			flows.GET("", handlers.ListFlows)
 			flows.GET("/:id", handlers.GetFlow)
