@@ -25,10 +25,15 @@ func CreateSkill(c *gin.Context) {
 	respondCreated(c, s)
 }
 
-// ListSkills handles GET /api/v1/skills?stage=
+// ListSkills handles GET /api/v1/skills?stage=&enabled=
 func ListSkills(c *gin.Context) {
 	stage := c.Query("stage")
-	items, err := skill.GetRegistry().ListFiltered(c.Request.Context(), stage, true)
+	includeDisabled := true
+	if c.Query("enabled") == "true" {
+		// enabled=true → only enabled skills
+		includeDisabled = false
+	}
+	items, err := skill.GetRegistry().ListFiltered(c.Request.Context(), stage, includeDisabled)
 	if err != nil {
 		respondInternalError(c, "list skills", err)
 		return

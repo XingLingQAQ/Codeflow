@@ -3704,6 +3704,12 @@ paths:
           description: Optional stage type filter (empty stage_tags match any)
           schema:
             type: string
+        - name: enabled
+          in: query
+          description: When true, only enabled skills are returned
+          schema:
+            type: string
+            enum: [true, false]
       responses:
         '200':
           description: Skill list
