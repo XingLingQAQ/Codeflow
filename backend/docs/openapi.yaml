@@ -3587,6 +3587,28 @@ paths:
           description: Promoted entry
         '403':
           description: Blocked by guard
+
+  /api/v1/workspace/discard:
+    post:
+      tags: [Workspace]
+      summary: Discard a staged file without promoting
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                root: { type: string }
+                path: { type: string }
+      responses:
+        '200':
+          description: Discarded
+        '404':
+          description: Staged file not found
+
   /api/v1/workspace/write:
     post:
       tags: [Workspace]

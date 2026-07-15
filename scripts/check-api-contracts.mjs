@@ -275,6 +275,7 @@ const requiredOperations = [
   ['/api/v1/workspace/staged', 'GET'],
   ['/api/v1/workspace/write', 'POST'],
   ['/api/v1/workspace/promote', 'POST'],
+  ['/api/v1/workspace/discard', 'POST'],
   ['/api/v1/skills', 'GET'],
   ['/api/v1/skills', 'POST'],
   ['/api/v1/skills/match', 'POST'],

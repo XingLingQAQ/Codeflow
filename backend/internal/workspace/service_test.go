@@ -187,3 +187,23 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestDiscardStaged(t *testing.T) {
+	root := t.TempDir()
+	svc := NewFSService(nil)
+	ctx := context.Background()
+	_, err := svc.Write(ctx, &WriteRequest{
+		Root: root, Path: "tmp/x.txt", Content: []byte("x"),
+		CreateParents: true, Mode: WriteModeStage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DiscardStaged(ctx, root, "tmp/x.txt"); err != nil {
+		t.Fatal(err)
+	}
+	staged, err := svc.ListStaged(ctx, root)
+	if err != nil || len(staged) != 0 {
+		t.Fatalf("expected empty after discard: %+v err=%v", staged, err)
+	}
+}

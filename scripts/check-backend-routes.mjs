@@ -22,6 +22,7 @@ const required = [
   "handlers.WriteWorkspaceFile",
   "handlers.PromoteWorkspaceFile",
   "handlers.ListWorkspaceStaged",
+  "handlers.DiscardWorkspaceStaged",
   "handlers.CreateSkill",
   "handlers.ImportSkills",
   "handlers.GuardCheck",

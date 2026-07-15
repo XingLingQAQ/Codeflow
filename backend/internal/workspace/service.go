@@ -251,6 +251,30 @@ func (s *FSService) Promote(ctx context.Context, root, rel string) (*Entry, erro
 	})
 }
 
+// DiscardStaged removes a file from .codeflow/staging (does not touch the real tree).
+func (s *FSService) DiscardStaged(ctx context.Context, root, rel string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	_ = ctx
+	rel = normalizeRel(rel)
+	if rel == "" {
+		return fmt.Errorf("path is required")
+	}
+	stagingRoot := filepath.Join(root, ".codeflow", "staging")
+	stagedAbs, err := s.Resolve(stagingRoot, rel)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(stagedAbs); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("staged file not found: %s", rel)
+		}
+		return fmt.Errorf("discard staged: %w", err)
+	}
+	return nil
+}
+
 // ListStaged walks .codeflow/staging and returns file entries with project-relative paths.
 // Missing staging dir yields an empty list (not an error).
 func (s *FSService) ListStaged(ctx context.Context, root string) ([]Entry, error) {

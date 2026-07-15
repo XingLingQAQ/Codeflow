@@ -181,3 +181,26 @@ func PromoteWorkspaceFile(c *gin.Context) {
 	}
 	respondOK(c, ent)
 }
+
+// DiscardWorkspaceStaged handles POST /api/v1/workspace/discard
+func DiscardWorkspaceStaged(c *gin.Context) {
+	var body promoteWorkspaceBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	root := workspaceRootFromRequest(c, body.Root)
+	if root == "" {
+		respondError(c, http.StatusBadRequest, "root is required")
+		return
+	}
+	if err := workspace.GetService().DiscardStaged(c.Request.Context(), root, body.Path); err != nil {
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondOK(c, gin.H{"discarded": true, "path": body.Path})
+}
