@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -154,7 +155,7 @@ func StatWorkspaceFile(c *gin.Context) {
 	}
 	ent, err := workspace.GetService().Stat(c.Request.Context(), root, path)
 	if err != nil {
-		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
 		}
