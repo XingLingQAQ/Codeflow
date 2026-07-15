@@ -173,6 +173,7 @@ func (s *Server) setupRoutes() {
 		{
 			guardAPI.POST("/check", handlers.GuardCheck)
 				guardAPI.GET("/config", handlers.GuardConfig)
+				guardAPI.GET("/rules", handlers.GuardRules)
 			guardAPI.POST("/index", handlers.GuardIndexTree)
 			guardAPI.POST("/exempt", handlers.GuardExempt)
 				guardAPI.GET("/exemptions", handlers.GuardListExemptions)

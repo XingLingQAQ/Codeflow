@@ -155,3 +155,22 @@ func GuardConfig(c *gin.Context) {
 	}
 	respondOK(c, svc.Config())
 }
+
+// GuardRules handles GET /api/v1/guard/rules — list known rule ids with active severity.
+func GuardRules(c *gin.Context) {
+	svc, ok := guard.GetService().(*guard.Engine)
+	if !ok || svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "guard engine not available")
+		return
+	}
+	cfg := svc.Config()
+	type row struct {
+		ID       guard.RuleID   `json:"id"`
+		Severity guard.Severity `json:"severity"`
+	}
+	out := make([]row, 0, len(cfg.Rules))
+	for id, rc := range cfg.Rules {
+		out = append(out, row{ID: id, Severity: rc.Severity})
+	}
+	respondOK(c, gin.H{"items": out, "total": len(out), "denied_path_globs": cfg.DeniedPathGlobs, "max_file_bytes": cfg.MaxFileBytes})
+}

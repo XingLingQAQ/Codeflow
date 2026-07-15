@@ -3977,6 +3977,17 @@ paths:
         '503':
           description: Guard engine unavailable
 
+  /api/v1/guard/rules:
+    get:
+      tags: [Guard]
+      summary: List guard rule ids and severities
+      x-codeflow-experimental: true
+      responses:
+        '200':
+          description: Rule list with denied globs and max bytes
+        '503':
+          description: Guard engine unavailable
+
   /api/v1/guard/check:
     post:
       tags: [Guard]

@@ -34,6 +34,7 @@ const required = [
   "handlers.ExportSkills",
   "handlers.GuardCheck",
   "handlers.GuardConfig",
+  "handlers.GuardRules",
   "handlers.GuardIndexTree",
   "handlers.GuardExempt",
   "handlers.GuardListExemptions",
