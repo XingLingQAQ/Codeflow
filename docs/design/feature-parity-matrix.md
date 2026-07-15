@@ -95,7 +95,7 @@
 |---|---|---|
 | `/api/v1/snapshots` | ⚠️ Experimental | 真 restore（conv/vector/graph）；git opt-in |
 | `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
-| `/api/v1/debates` | ⚠️ 双方 | 可选 flow_id/stage_id FK |
+| `/api/v1/debates` | ⚠️ 双方 | list/create + flow_id/stage_id 过滤与 FK |
 | `/api/v1/flows` | ⚠️ Experimental | create/advance/skip/loop/abort/gate/artifacts |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/write/promote/staged/discard |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
@@ -134,3 +134,4 @@
 | 2026-07-15 | **WS topics**：Hub 主题订阅；`flow_event` / `flow:project:{id}` 按 topic 广播 |
 | 2026-07-15 | **workspace staged list**：GET `/workspace/staged` 枚举 `.codeflow/staging` |
 | 2026-07-15 | **workspace discard**：POST `/workspace/discard` 放弃 staging 文件 |
+| 2026-07-15 | **debate list**：GET `/debates` 支持 status/flow_id/stage_id 过滤；CI CGO=1 硬门禁 |
