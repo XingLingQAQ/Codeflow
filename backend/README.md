@@ -237,10 +237,18 @@ ISC
 
 | Package | Role |
 |---|---|
-| internal/floweng | Flow state machine + SQLite + WS events |
+| internal/floweng | Flow state machine + SQLite + WS topic events (`flow_event`) |
 | internal/workspace | Project FS sandbox, stage/promote, hook_before_write |
-| internal/guard | WriteGuard, AST dups, guard.yaml, exemptions |
+| internal/guard | WriteGuard, AST dups, guard.yaml, durable exemptions |
 | internal/skill | Skill registry SQLite, match/inject/import |
 | internal/summarize | Single summarize package (API + engine) |
+| internal/websocket | Hub with session + multi-topic subscribe |
 
-Data defaults under CODEFLOW_DATA_DIR or ./data: loweng.db, skills.db, udit/.
+Data defaults under `CODEFLOW_DATA_DIR` or `./data`:
+
+- `floweng.db` — flow documents
+- `skills.db` — skill registry
+- `guard_exemptions.db` — temporary path exemptions
+- `audit/` — file audit logs
+
+Build/test requires CGO (`CGO_ENABLED=1`) and a C toolchain for `mattn/go-sqlite3` (see `docs/adr/0003-sqlite-cgo.md`). `make test` forces CGO=1.
