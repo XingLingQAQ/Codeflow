@@ -80,4 +80,6 @@ type Service interface {
 	ListStaged(ctx context.Context, root string) ([]Entry, error)
 	// DiscardStaged removes a staged file (does not touch the real project tree).
 	DiscardStaged(ctx context.Context, root, rel string) error
+	// PromoteAll promotes every staged file under .codeflow/staging.
+	PromoteAll(ctx context.Context, root string) ([]Entry, error)
 }

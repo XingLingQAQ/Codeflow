@@ -235,3 +235,33 @@ func DiscardWorkspaceStaged(c *gin.Context) {
 	}
 	respondOK(c, gin.H{"discarded": true, "path": body.Path})
 }
+
+// PromoteAllWorkspace handles POST /api/v1/workspace/promote-all
+func PromoteAllWorkspace(c *gin.Context) {
+	var body struct {
+		Root string `json:"root"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		// Empty body is allowed when root is provided via header.
+		if c.Request.ContentLength > 0 {
+			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+			return
+		}
+	}
+	root := workspaceRootFromRequest(c, body.Root)
+	if root == "" {
+		respondError(c, http.StatusBadRequest, "root is required")
+		return
+	}
+	items, err := workspace.GetService().PromoteAll(c.Request.Context(), root)
+	if err != nil {
+		if strings.Contains(err.Error(), "blocked by guard") {
+			respondError(c, http.StatusForbidden, err.Error())
+			return
+		}
+		// Partial success: return promoted items with error detail.
+		respondOK(c, gin.H{"items": items, "total": len(items), "error": err.Error()})
+		return
+	}
+	respondOK(c, gin.H{"items": items, "total": len(items)})
+}

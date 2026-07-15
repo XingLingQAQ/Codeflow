@@ -143,6 +143,7 @@ func (s *Server) setupRoutes() {
 				ws.GET("/staged", handlers.ListWorkspaceStaged)
 			ws.POST("/write", handlers.WriteWorkspaceFile)
 			ws.POST("/promote", handlers.PromoteWorkspaceFile)
+				ws.POST("/promote-all", handlers.PromoteAllWorkspace)
 				ws.POST("/discard", handlers.DiscardWorkspaceStaged)
 		}
 

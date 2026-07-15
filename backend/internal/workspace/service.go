@@ -257,6 +257,27 @@ func (s *FSService) Promote(ctx context.Context, root, rel string) (*Entry, erro
 	return ent, nil
 }
 
+// PromoteAll promotes every staged file (best-effort continues after individual failures).
+func (s *FSService) PromoteAll(ctx context.Context, root string) ([]Entry, error) {
+	staged, err := s.ListStaged(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Entry, 0, len(staged))
+	var firstErr error
+	for _, e := range staged {
+		ent, err := s.Promote(ctx, root, e.Path)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("promote %s: %w", e.Path, err)
+			}
+			continue
+		}
+		out = append(out, *ent)
+	}
+	return out, firstErr
+}
+
 // DiscardStaged removes a file from .codeflow/staging (does not touch the real tree).
 func (s *FSService) DiscardStaged(ctx context.Context, root, rel string) error {
 	if ctx == nil {

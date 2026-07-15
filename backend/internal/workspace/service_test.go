@@ -211,3 +211,25 @@ func TestDiscardStaged(t *testing.T) {
 		t.Fatalf("expected empty after discard: %+v err=%v", staged, err)
 	}
 }
+
+func TestPromoteAll(t *testing.T) {
+	root := t.TempDir()
+	svc := NewFSService(nil)
+	ctx := context.Background()
+	for _, p := range []string{"a.txt", "b/c.txt"} {
+		if _, err := svc.Write(ctx, &WriteRequest{
+			Root: root, Path: p, Content: []byte(p),
+			CreateParents: true, Mode: WriteModeStage,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := svc.PromoteAll(ctx, root)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("promote all items=%d err=%v", len(items), err)
+	}
+	remaining, err := svc.ListStaged(ctx, root)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("staging left: %+v err=%v", remaining, err)
+	}
+}
