@@ -152,6 +152,10 @@ func TestStageAndPromote(t *testing.T) {
 	if err != nil || string(data) != "staged" {
 		t.Fatalf("promoted content=%q err=%v", data, err)
 	}
+	remaining, err := svc.ListStaged(ctx, root)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("expected staging cleaned after promote: %+v err=%v", remaining, err)
+	}
 }
 
 func TestGetSetService(t *testing.T) {
