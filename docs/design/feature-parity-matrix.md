@@ -55,7 +55,7 @@
 
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
-| G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)，内存 | 2~N + model/channel + stage FK | M4 | `internal/debate` |
+| G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)；**flow_id/stage_id FK**；内存 | 2~N + model/channel | M4 | `internal/debate` |
 | G20 | Agent 广场 / Registry | ⚠️ | agent 服务基础能力 | 版本/来源/插槽/市场 UI | M4 | |
 | G16 | `internal/workspace` | ⚠️ | list/read/write + 沙箱 + **stage/promote**；API experimental；无 watch/WS | watch + project root 绑定 | M3 | 2026-07-15 |
 | G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit bridge + check/index API | 豁免审批 + 全量 shadow 流水线 | M3 | 2026-07-15 |
@@ -84,7 +84,7 @@
 | G26 | DI 去除全局 Get/Set | ⚠️ | bootstrap B0+B1 八服务 Apply；handlers 仍走 Get* | 按域继续 B2+ 删除全局 | 贯穿 | **2026-07-15 PR-6**：Snapshot/Debate/Summarize 已入 bootstrap |
 | G27 | summarize 合并 | ✅ | **M0.8**：仅 `internal/summarize`；engine（Compressor/TokenCounter）迁入；删除 `internal/summarizer` | 保持单包；API 面不变 | M0 | **2026-07-15**：handlers/OpenAPI 仍 `/api/v1/summarize`；EntitySkeleton 与 API DecisionSkeleton 分型 |
 | G28 | Schema-first OpenAPI | ⚠️ | 有 TS 生成脚本 | YAML SSOT + CI | 贯穿 | 输出 `apps/workbench/generated/`；契约 `backend/docs/openapi.yaml` |
-| G29 | WS 统一事件总线 | ⚠️ | hub 存在；多处独立 stream | 单连接多路 topics | M2–M3 | debate stream 待迁入 |
+| G29 | WS 统一事件总线 | ⚠️ | hub 存在；**flow_event 广播**；debate stream 仍独立 | 单连接多路 topics | M2–M3 | 2026-07-15 floweng→WS |
 | G31 | 仓库生成物 hygiene | ✅ | untrack node_modules；gitignore 强化；CI Repo Hygiene Guard | 持续禁止 tracked 生成物/依赖 | M0 | M0.5：`scripts/check-repo-hygiene.mjs` + `pnpm check:repo-hygiene` |
 
 ---
