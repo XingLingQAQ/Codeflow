@@ -58,7 +58,7 @@
 | G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)；**flow_id/stage_id FK**；内存 | 2~N + model/channel | M4 | `internal/debate` |
 | G20 | Agent 广场 / Registry | ⚠️ | agent 服务基础能力 | 版本/来源/插槽/市场 UI | M4 | |
 | G16 | `internal/workspace` | ⚠️ | list/read/write + 沙箱 + **stage/promote**；API experimental；无 watch/WS | watch + project root 绑定 | M3 | 2026-07-15 |
-| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit bridge + check/index API | 豁免审批 + 全量 shadow 流水线 | M3 | 2026-07-15 |
+| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit + check/index/**exempt** + stage/promote 链路 | 持久化豁免审批 + 全量 shadow | M3 | 2026-07-15 |
 | — | 双方辩论 API | ✅ | create/round/resolve/export/stream | 保留并升级 | M4 | 不回退现有 API 直至兼容层 |
 
 ---
