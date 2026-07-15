@@ -7,8 +7,11 @@ import (
 	"github.com/codeflow/backend/internal/agent"
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
+	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/snapshot"
+	"github.com/codeflow/backend/internal/summarize"
 )
 
 func TestServicesValidateReportsMissingDependencies(t *testing.T) {
@@ -16,7 +19,7 @@ func TestServicesValidateReportsMissingDependencies(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected missing services error")
 	}
-	for _, name := range []string{"config", "agent", "planner", "project", "context"} {
+	for _, name := range []string{"config", "agent", "planner", "project", "context", "snapshot", "debate", "summarize"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("expected missing dependency %q in error %q", name, err.Error())
 		}
@@ -25,11 +28,14 @@ func TestServicesValidateReportsMissingDependencies(t *testing.T) {
 
 func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	services := Services{
-		Config:  cfgsvc.NewConfigManager(nil),
-		Agent:   agent.NewInMemoryAgentService(),
-		Planner: planner.NewInMemoryPlanner(),
-		Project: project.NewInMemoryProjectService(),
-		Context: ctxsvc.NewInMemoryContextService(),
+		Config:    cfgsvc.NewConfigManager(nil),
+		Agent:     agent.NewInMemoryAgentService(),
+		Planner:   planner.NewInMemoryPlanner(),
+		Project:   project.NewInMemoryProjectService(),
+		Context:   ctxsvc.NewInMemoryContextService(),
+		Snapshot:  snapshot.NewInMemorySnapshotService(),
+		Debate:    debate.NewInMemoryDebateManager(),
+		Summarize: summarize.NewSummarizerService(),
 	}
 	services.Reset()
 	t.Cleanup(services.Reset)
@@ -52,6 +58,15 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	if ctxsvc.GetContextService() != services.Context {
 		t.Fatalf("context service was not applied")
 	}
+	if snapshot.GetSnapshotService() != services.Snapshot {
+		t.Fatalf("snapshot service was not applied")
+	}
+	if debate.GetDebateManager() != services.Debate {
+		t.Fatalf("debate manager was not applied")
+	}
+	if summarize.GetSummarizer() != services.Summarize {
+		t.Fatalf("summarize service was not applied")
+	}
 
 	services.Reset()
 	if cfgsvc.GetConfigService() == services.Config {
@@ -68,5 +83,15 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	}
 	if ctxsvc.GetContextService() == services.Context {
 		t.Fatalf("context service was not reset")
+	}
+	// Snapshot/Summarize Get* auto-construct when nil; ensure they are not the same instance we applied.
+	if snapshot.GetSnapshotService() == services.Snapshot {
+		t.Fatalf("snapshot service was not reset (still previous instance)")
+	}
+	if debate.GetDebateManager() == services.Debate {
+		t.Fatalf("debate manager was not reset")
+	}
+	if summarize.GetSummarizer() == services.Summarize {
+		t.Fatalf("summarize service was not reset (still previous instance)")
 	}
 }

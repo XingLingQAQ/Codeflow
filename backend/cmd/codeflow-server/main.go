@@ -16,9 +16,12 @@ import (
 	"github.com/codeflow/backend/internal/commander"
 	cfgsvc "github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
+	"github.com/codeflow/backend/internal/debate"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/snapshot"
+	"github.com/codeflow/backend/internal/summarize"
 )
 
 const version = "0.1.0"
@@ -84,12 +87,16 @@ func run() error {
 	}
 	defer contextClose()
 
+	// B1 services: same in-memory defaults as previous Get* lazy init; wired via bootstrap.
 	services := bootstrap.Services{
-		Config:  configSvc,
-		Agent:   agentSvc,
-		Planner: plannerSvc,
-		Project: projectSvc,
-		Context: contextSvc,
+		Config:    configSvc,
+		Agent:     agentSvc,
+		Planner:   plannerSvc,
+		Project:   projectSvc,
+		Context:   contextSvc,
+		Snapshot:  snapshot.NewInMemorySnapshotService(),
+		Debate:    debate.NewInMemoryDebateManager(),
+		Summarize: summarize.NewSummarizerService(),
 	}
 	if err := services.Apply(); err != nil {
 		return err

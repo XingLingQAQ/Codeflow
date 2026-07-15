@@ -720,13 +720,26 @@ var debateOnce sync.Once
 
 // GetDebateManager 获取辩论管理器实例
 func GetDebateManager() IDebateManager {
-	debateOnce.Do(func() {
-		defaultDebateManager = NewInMemoryDebateManager()
-	})
+	if defaultDebateManager == nil {
+		debateOnce.Do(func() {
+			if defaultDebateManager == nil {
+				defaultDebateManager = NewInMemoryDebateManager()
+			}
+		})
+		// SetDebateManager may race with first Get after Reset(nil); re-check.
+		if defaultDebateManager == nil {
+			defaultDebateManager = NewInMemoryDebateManager()
+		}
+	}
 	return defaultDebateManager
 }
 
-// SetDebateManager 设置辩论管理器实例
+// SetDebateManager 设置辩论管理器实例（bootstrap / 测试）。
+// 传入 nil 清除全局实例，使下次 Get 可重建（Reset 兼容）。
 func SetDebateManager(dm IDebateManager) {
 	defaultDebateManager = dm
+	if dm == nil {
+		// Allow lazy re-init after Reset: recreate Once.
+		debateOnce = sync.Once{}
+	}
 }
