@@ -3,6 +3,7 @@ package guard
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -129,6 +130,22 @@ func (e *Engine) isExempt(absPath string, rule RuleID) bool {
 	}
 	key := filepath.Clean(absPath)
 	ex, ok := e.exemptions[key]
+	if !ok {
+		// Allow relative exemption paths to match absolute write targets by suffix.
+		slashAbs := filepath.ToSlash(key)
+		for k, candidate := range e.exemptions {
+			slashKey := filepath.ToSlash(k)
+			if slashKey == "" {
+				continue
+			}
+			if slashAbs == slashKey || strings.HasSuffix(slashAbs, "/"+slashKey) || strings.HasSuffix(slashAbs, slashKey) {
+				ex = candidate
+				ok = true
+				key = k
+				break
+			}
+		}
+	}
 	if !ok {
 		return false
 	}

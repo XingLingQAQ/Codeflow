@@ -35,3 +35,18 @@ func TestExemptionBypassesStackedNaming(t *testing.T) {
 		t.Fatal("expected block after clear")
 	}
 }
+
+func TestExemptionRelativePathMatchesAbsolute(t *testing.T) {
+	e := NewEngine(nil, nil)
+	// Grant with project-relative path; evaluate with absolute-looking join.
+	rel := filepath.Join("proj", "helpers2.go")
+	abs := filepath.Join(t.TempDir(), rel)
+	e.GrantExemption(Exemption{
+		Path:      rel,
+		Rules:     []RuleID{RuleStackedNaming},
+		ExpiresAt: time.Now().UTC().Add(time.Minute),
+	})
+	if err := e.BeforeWrite(context.Background(), abs, []byte("package p")); err != nil {
+		t.Fatalf("relative exemption should match absolute write path: %v", err)
+	}
+}
