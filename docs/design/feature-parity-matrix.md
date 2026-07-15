@@ -96,7 +96,7 @@
 | `/api/v1/snapshots` | ⚠️ Experimental | 真 restore（conv/vector/graph）；git opt-in |
 | `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
 | `/api/v1/debates` | ⚠️ 双方 | list/create + flow_id/stage_id 过滤与 FK |
-| `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/stages(+id)/artifacts(+id)/gates/events/advance/skip/loop/abort |
+| `/api/v1/flows` | ⚠️ Experimental | templates(+id)/create/stages(+id)/active-stage/artifacts(+id)/gates/events/advance/skip/loop/abort |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/promote-all/staged/discard/discard-all |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import/export |
 | `/api/v1/guard` | ⚠️ Experimental | config/check/index/exempt/exemptions |
@@ -144,3 +144,4 @@
 | 2026-07-15 | **skill export** GET `/skills/export` markdown dump；events type/stage 过滤 |
 | 2026-07-15 | **workflow debate_count**；guard relative exemption 匹配；smoke bulk staging |
 | 2026-07-15 | **flow gates list** GET `/flows/:id/gates`；events limit 查询 |
+| 2026-07-15 | **flow active-stage** GET `/flows/:id/active-stage` |
