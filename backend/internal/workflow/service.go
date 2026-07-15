@@ -28,6 +28,11 @@ type WorkflowSummary struct {
 	SessionCount    int `json:"session_count"`
 	AuditCount      int `json:"audit_count"`
 	Progress        int `json:"progress"`
+	// Floweng runtime (G14 enrichment)
+	FlowCount          int `json:"flow_count"`
+	ActiveFlowCount    int `json:"active_flow_count"`
+	CompletedFlowCount int `json:"completed_flow_count"`
+	AbortedFlowCount   int `json:"aborted_flow_count"`
 }
 
 type WorkflowOverview struct {
@@ -123,6 +128,9 @@ func (s *Service) GetOverview(ctx context.Context, projectID string) (*WorkflowO
 		return nil, err
 	}
 
+	summary := buildWorkflowSummary(snapshot)
+	enrichSummaryWithFlows(ctx, projectID, &summary)
+
 	return &WorkflowOverview{
 		Project:     snapshot.project,
 		Plans:       snapshot.plans,
@@ -130,8 +138,36 @@ func (s *Service) GetOverview(ctx context.Context, projectID string) (*WorkflowO
 		Agents:      snapshot.agents,
 		SessionIDs:  snapshot.sessionIDs,
 		LatestAudit: snapshot.latestAudit,
-		Summary:     buildWorkflowSummary(snapshot),
+		Summary:     summary,
 	}, nil
+}
+
+func enrichSummaryWithFlows(ctx context.Context, projectID string, summary *WorkflowSummary) {
+	if summary == nil {
+		return
+	}
+	eng := floweng.GetEngine()
+	if eng == nil {
+		return
+	}
+	flows, err := eng.List(ctx, projectID)
+	if err != nil {
+		return
+	}
+	summary.FlowCount = len(flows)
+	for _, f := range flows {
+		if f == nil {
+			continue
+		}
+		switch f.Status {
+		case floweng.FlowStatusActive:
+			summary.ActiveFlowCount++
+		case floweng.FlowStatusCompleted:
+			summary.CompletedFlowCount++
+		case floweng.FlowStatusAborted:
+			summary.AbortedFlowCount++
+		}
+	}
 }
 
 func (s *Service) GetTimeline(ctx context.Context, projectID string) (*WorkflowTimeline, error) {
@@ -146,11 +182,13 @@ func (s *Service) GetTimeline(ctx context.Context, projectID string) (*WorkflowT
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].Timestamp < events[j].Timestamp
 	})
+	summary := buildWorkflowSummary(snapshot)
+	enrichSummaryWithFlows(ctx, projectID, &summary)
 	return &WorkflowTimeline{
 		ProjectID:  projectID,
 		SessionIDs: snapshot.sessionIDs,
 		Events:     events,
-		Summary:    buildWorkflowSummary(snapshot),
+		Summary:    summary,
 	}, nil
 }
 
