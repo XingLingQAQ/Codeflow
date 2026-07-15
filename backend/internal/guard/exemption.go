@@ -95,6 +95,32 @@ func (e *Engine) ClearExemption(path string) {
 	}
 }
 
+// ListExemptions returns a snapshot of non-expired exemptions.
+func (e *Engine) ListExemptions() []Exemption {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.exemptions == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	out := make([]Exemption, 0, len(e.exemptions))
+	for key, ex := range e.exemptions {
+		if now.After(ex.ExpiresAt) {
+			delete(e.exemptions, key)
+			if e.exStore != nil {
+				_ = e.exStore.delete(key)
+			}
+			continue
+		}
+		cp := ex
+		if len(ex.Rules) > 0 {
+			cp.Rules = append([]RuleID(nil), ex.Rules...)
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
 func (e *Engine) isExempt(absPath string, rule RuleID) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()

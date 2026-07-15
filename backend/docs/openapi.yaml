@@ -3770,6 +3770,34 @@ paths:
           description: Exemption granted
         '503':
           description: Guard engine unavailable
+    delete:
+      tags: [Guard]
+      summary: Clear a path exemption
+      x-codeflow-experimental: true
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cleared
+        '400':
+          description: Missing path
+        '503':
+          description: Guard engine unavailable
+
+  /api/v1/guard/exemptions:
+    get:
+      tags: [Guard]
+      summary: List active (non-expired) path exemptions
+      x-codeflow-experimental: true
+      responses:
+        '200':
+          description: Exemption list
+        '503':
+          description: Guard engine unavailable
 
 components:
   schemas:

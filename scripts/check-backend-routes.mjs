@@ -26,6 +26,8 @@ const required = [
   "handlers.GuardCheck",
   "handlers.GuardIndexTree",
   "handlers.GuardExempt",
+  "handlers.GuardListExemptions",
+  "handlers.GuardClearExemption",
   "handlers.DeleteFlow",
   "handlers.AbortFlow",
 ];

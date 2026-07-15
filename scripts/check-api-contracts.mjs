@@ -157,6 +157,7 @@ const checks = [
       '/api/v1/flows/{id}/stages/{sid}/artifacts:',
       '/api/v1/skills/import:',
       '/api/v1/guard/exempt:',
+      '/api/v1/guard/exemptions:',
       '    AbortFlowRequest:',
       '    AttachFlowArtifactRequest:',
       '    UpdateFlowArtifactStatusRequest:',
@@ -284,6 +285,8 @@ const requiredOperations = [
   ['/api/v1/guard/check', 'POST'],
   ['/api/v1/guard/index', 'POST'],
   ['/api/v1/guard/exempt', 'POST'],
+  ['/api/v1/guard/exempt', 'DELETE'],
+  ['/api/v1/guard/exemptions', 'GET'],
 ];
 
 const failures = [];

@@ -58,7 +58,7 @@
 | G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)；**flow_id/stage_id FK**；内存 | 2~N + model/channel | M4 | `internal/debate` |
 | G20 | Agent 广场 / Registry | ⚠️ | agent 服务基础能力 | 版本/来源/插槽/市场 UI | M4 | |
 | G16 | `internal/workspace` | ⚠️ | list/read/write + 沙箱 + **stage/promote**；API experimental；无 watch/WS | watch + project root 绑定 | M3 | 2026-07-15 |
-| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit + check/index/**exempt** + stage/promote 链路 | 持久化豁免审批 + 全量 shadow | M3 | 2026-07-15 |
+| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit + check/index/**exempt** + **SQLite 豁免持久化**（`guard_exemptions.db`）+ stage/promote 链路 | 审批流 + 全量 shadow | M3 | 2026-07-15 |
 | — | 双方辩论 API | ✅ | create/round/resolve/export/stream | 保留并升级 | M4 | 不回退现有 API 直至兼容层 |
 
 ---
@@ -99,7 +99,7 @@
 | `/api/v1/flows` | ⚠️ Experimental | create/advance/skip/loop/abort/gate/artifacts |
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/write/promote |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
-| `/api/v1/guard` | ⚠️ Experimental | check/index |
+| `/api/v1/guard` | ⚠️ Experimental | check/index/exempt/exemptions |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
 
 ---
@@ -128,3 +128,6 @@
 | 2026-07-15 | **skill SQLite**：`NewSQLiteRegistry`；main → `data/skills.db` |
 | 2026-07-15 | **guard.yaml + IndexTree + audit bridge**；main 挂 audit；skill frontmatter；openapi flows/workspace/skills |
 | 2026-07-15 | workspace staging/promote; floweng abort + SQLite；skill import dir；guard /check /index；audit files；overview flow counts |
+| 2026-07-15 | **OpenAPI**：补齐 flows abort/delete/stages/artifacts、skills import、guard exempt 与契约检查 |
+| 2026-07-15 | **guard exemptions SQLite**：`data/guard_exemptions.db`；过期行 load 时清理；skill `ListFiltered` 入 Registry 接口 |
+| 2026-07-15 | **guard exemptions API**：GET `/exemptions` + DELETE `/exempt`；list/clear 与持久化联动 |
