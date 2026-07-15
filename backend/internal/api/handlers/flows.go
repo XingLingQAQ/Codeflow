@@ -154,6 +154,29 @@ func ListFlowTemplates(c *gin.Context) {
 	respondOK(c, gin.H{"items": ids})
 }
 
+// AbortFlow handles POST /api/v1/flows/:id/abort
+func AbortFlow(c *gin.Context) {
+	flowID := c.Param("id")
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&body)
+	flow, err := floweng.GetEngine().Abort(c.Request.Context(), flowID, body.Reason)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "not active") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+		respondInternalError(c, "abort flow", err)
+		return
+	}
+	respondOK(c, flow)
+}
+
 // DecideFlowGate handles POST /api/v1/flows/:id/gates/:gid/decide
 func DecideFlowGate(c *gin.Context) {
 	flowID := c.Param("id")

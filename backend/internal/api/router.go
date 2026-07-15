@@ -123,6 +123,7 @@ func (s *Server) setupRoutes() {
 			flows.POST("/:id/stages/:sid/advance", handlers.AdvanceFlowStage)
 			flows.POST("/:id/stages/:sid/skip", handlers.SkipFlowStage)
 			flows.POST("/:id/loop", handlers.LoopFlow)
+			flows.POST("/:id/abort", handlers.AbortFlow)
 			flows.POST("/:id/gates/:gid/decide", handlers.DecideFlowGate)
 		}
 

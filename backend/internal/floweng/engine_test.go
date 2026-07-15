@@ -224,6 +224,24 @@ func TestDecideGateApproveThenAdvance(t *testing.T) {
 	}
 }
 
+func TestAbortFlow(t *testing.T) {
+	e := NewInMemoryEngine(nil)
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err = e.Abort(context.Background(), flow.ID, "user cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.Status != FlowStatusAborted {
+		t.Fatalf("status=%s", flow.Status)
+	}
+	if _, err := e.Advance(context.Background(), flow.ID, &AdvanceRequest{}); err == nil {
+		t.Fatal("advance after abort should fail")
+	}
+}
+
 func TestGetSetEngine(t *testing.T) {
 	prev := GetEngine()
 	t.Cleanup(func() { SetEngine(prev) })

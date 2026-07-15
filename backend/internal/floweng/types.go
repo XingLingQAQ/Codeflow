@@ -184,4 +184,6 @@ type Engine interface {
 	ListEvents(ctx context.Context, flowID string) ([]FlowEvent, error)
 	// DecideGate sets human/agent gate passed flag (approve/reject).
 	DecideGate(ctx context.Context, flowID, gateID string, req *GateDecisionRequest) (*Flow, error)
+	// Abort marks a flow aborted (terminal).
+	Abort(ctx context.Context, flowID, reason string) (*Flow, error)
 }

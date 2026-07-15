@@ -371,6 +371,35 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 	return cloneFlow(flow), nil
 }
 
+// Abort terminates an active flow.
+func (e *InMemoryEngine) Abort(ctx context.Context, flowID, reason string) (*Flow, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	flow, err := e.store.Get(flowID)
+	if err != nil {
+		return nil, err
+	}
+	if flow.Status != FlowStatusActive {
+		return nil, fmt.Errorf("flow is not active: %s", flow.Status)
+	}
+	flow.Status = FlowStatusAborted
+	if reason == "" {
+		reason = "aborted"
+	}
+	e.appendEvent(flow, "flow.aborted", "", reason)
+	// clear active stages
+	for i := range flow.Stages {
+		if flow.Stages[i].Status == StageStatusActive || flow.Stages[i].Status == StageStatusWaitingGate {
+			flow.Stages[i].Status = StageStatusPending
+		}
+	}
+	flow.UpdatedAt = time.Now().UTC()
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
+	return cloneFlow(flow), nil
+}
+
 // AttachArtifact records a draft artifact on a stage (used by tests / future stages).
 func (e *InMemoryEngine) AttachArtifact(flowID, stageID, artType string) (*Artifact, error) {
 	e.mu.Lock()
