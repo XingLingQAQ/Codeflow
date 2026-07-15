@@ -42,10 +42,10 @@
 
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
-| G08 | Snapshot 真 restore | ⚠️ | capture=digest；restore=token 校验；git opt-in | 四态真恢复 + 受控 git | M2 前置 | `snapshot/state_provider.go` |
-| G09 | Flow 执行引擎 | ⚠️ | **PR-8+**：状态机 + SQLite 文档存储（`floweng.db`）+ gate decide + timeline 桥；内存/SQLite 可切换 | WS flow.* + Gate 产品化 + 模板市场 | M2 | 2026-07-15 持久化落地 |
-| G10 | 阶段自动快照与回跳 | ❌ | 无 | exit → snapshot；loop restore | M2 | 依赖 G08 |
-| G11 | Artifact / Gate 一等公民 | ❌ | 无 | 模型 + API | M2 | |
+| G08 | Snapshot 真 restore | ⚠️ | conversation/vector/graph **真 restore**（PR-4/5）；git hard reset 仍 opt-in | 产品化 API + 受控 git + 执行锁 | M2 前置 | experimental 警告已更新 |
+| G09 | Flow 执行引擎 | ⚠️ | 状态机 + SQLite + abort/gate decide + timeline/overview 桥 | WS flow.* + 模板市场 | M2 | `internal/floweng` |
+| G10 | 阶段自动快照与回跳 | ⚠️ | advance 可挂 snapshot hook；loop 回跳存在；未绑全量 restore UX | loop → snapshot restore 闭环 | M2 | |
+| G11 | Artifact / Gate 一等公民 | ⚠️ | 模型 + gate decide API + artifact stale on loop | 完整 CRUD/审批 UI | M2 | |
 | G12 | 工作流模板可视化编辑器 | ❌ | 无 | 节点画布 JSON 导入导出 | M2 | |
 | G14 | workflow 观测与引擎合一 | ⚠️ | timeline **已合并** floweng 事件（lane=floweng）；overview/replay 仍 planner/audit 拼装 | overview 含 Flow 状态；replay 消费 flow events | M2 | 2026-07-15 bridge |
 
@@ -57,8 +57,8 @@
 |---|---|---|---|---|---|---|
 | G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)，内存 | 2~N + model/channel + stage FK | M4 | `internal/debate` |
 | G20 | Agent 广场 / Registry | ⚠️ | agent 服务基础能力 | 版本/来源/插槽/市场 UI | M4 | |
-| G16 | `internal/workspace` | ⚠️ | **M3.1 起步**：`list/read/write` + 路径沙箱 + WriteGuard 钩子；`/api/v1/workspace/*` experimental；无 watch/WS | watch + project root 绑定 + 强制 guard | M3 | 2026-07-15 |
-| G17 | `internal/guard` | ⚠️ | WriteGuard + **AST 重复符号检测**（function/class/interface）；stacked/denied/maxbytes；无 shadow 合入 / yaml 项目配置 | shadow 合入 + 项目 guard.yaml + 豁免审批 | M3 | 2026-07-15 |
+| G16 | `internal/workspace` | ⚠️ | list/read/write + 沙箱 + **stage/promote**；API experimental；无 watch/WS | watch + project root 绑定 | M3 | 2026-07-15 |
+| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit bridge + check/index API | 豁免审批 + 全量 shadow 流水线 | M3 | 2026-07-15 |
 | — | 双方辩论 API | ✅ | create/round/resolve/export/stream | 保留并升级 | M4 | 不回退现有 API 直至兼容层 |
 
 ---
@@ -93,10 +93,13 @@
 
 | 路由族 | 状态 | 说明 |
 |---|---|---|
-| `/api/v1/snapshots` | ⚠️ Experimental | capture 可用；restore 非真恢复 |
-| `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay |
+| `/api/v1/snapshots` | ⚠️ Experimental | 真 restore（conv/vector/graph）；git opt-in |
+| `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
 | `/api/v1/debates` | ⚠️ 双方 | 未绑 Flow stage |
-| `/api/v1/flows` / gates | ❌ | 设计有、代码无 |
+| `/api/v1/flows` | ⚠️ Experimental | create/advance/skip/loop/abort/gate decide |
+| `/api/v1/workspace` | ⚠️ Experimental | list/read/write/promote |
+| `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
+| `/api/v1/guard` | ⚠️ Experimental | check/index |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
 
 ---
