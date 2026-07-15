@@ -84,17 +84,23 @@ func NextDebateRound(c *gin.Context) {
 		return
 	}
 
-	// 通知WebSocket客户端
+	// Notify topic subscribers (clients subscribe to debate_event).
 	hub := websocket.GetHub()
-	hub.BroadcastAll(&websocket.Message{
-		Type:    websocket.MsgTypeText,
-		Content: "Debate round advanced",
+	msg := &websocket.Message{
+		Type:    websocket.MessageType("debate_event"),
+		Content: "round_advanced",
 		Data: map[string]interface{}{
 			"debate_id":     id,
 			"current_round": result.CurrentRound,
 			"status":        result.Status,
+			"flow_id":       result.FlowID,
+			"stage_id":      result.StageID,
 		},
-	})
+	}
+	hub.BroadcastToTopic(websocket.TopicDebateEvent, msg)
+	if result.FlowID != "" {
+		hub.BroadcastToTopic("debate:flow:"+result.FlowID, msg)
+	}
 
 	respondOK(c, result)
 }

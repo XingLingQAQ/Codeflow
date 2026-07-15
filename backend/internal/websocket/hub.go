@@ -196,6 +196,9 @@ func (h *Hub) BroadcastAll(msg *Message) {
 // TopicFlowEvent is the hub topic for floweng lifecycle events.
 const TopicFlowEvent = "flow_event"
 
+// TopicDebateEvent is the hub topic for debate lifecycle updates.
+const TopicDebateEvent = "debate_event"
+
 // BroadcastToTopic sends a message only to clients subscribed to topic.
 // SessionID on the message is ignored for routing (topic fan-out only).
 func (h *Hub) BroadcastToTopic(topic string, msg *Message) {
