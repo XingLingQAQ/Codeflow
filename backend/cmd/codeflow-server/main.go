@@ -12,6 +12,7 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api"
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/bootstrap"
 	"github.com/codeflow/backend/internal/commander"
 	cfgsvc "github.com/codeflow/backend/internal/config"
@@ -101,7 +102,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init skill sqlite: %w", err)
 	}
-	guardEng := guard.NewEngine(nil, nil)
+	auditSvc := audit.NewAuditService(audit.NewMemoryStorage())
+	audit.SetAuditService(auditSvc)
+	defer audit.SetAuditService(nil)
+	guardEng := guard.NewEngine(nil, guard.NewAuditBridge(auditSvc))
 	// Optional project guard policy (ignore if missing).
 	_ = guardEng.TryLoadConfigFile(filepath.Join(".", ".codeflow", "guard.yaml"))
 	services := bootstrap.Services{
