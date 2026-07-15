@@ -47,7 +47,7 @@
 | G10 | 阶段自动快照与回跳 | ❌ | 无 | exit → snapshot；loop restore | M2 | 依赖 G08 |
 | G11 | Artifact / Gate 一等公民 | ❌ | 无 | 模型 + API | M2 | |
 | G12 | 工作流模板可视化编辑器 | ❌ | 无 | 节点画布 JSON 导入导出 | M2 | |
-| G14 | workflow 观测与引擎合一 | ⚠️ | `internal/workflow` 只读拼装 | events 由 floweng 产生 | M2 | overview/timeline/replay 已有 |
+| G14 | workflow 观测与引擎合一 | ⚠️ | timeline **已合并** floweng 事件（lane=floweng）；overview/replay 仍 planner/audit 拼装 | overview 含 Flow 状态；replay 消费 flow events | M2 | 2026-07-15 bridge |
 
 ---
 
@@ -119,3 +119,4 @@
 | 2026-07-15 | **M3.1**：`internal/workspace` list/read/write + WriteGuard 钩子；G16 → ⚠️ |
 | 2026-07-15 | **M3.2**：`internal/guard` 引擎 + workspace 强制挂钩；G17 → ⚠️ |
 | 2026-07-15 | **M5.0**：`internal/skill` registry + match/inject API；G22 → ⚠️ |
+| 2026-07-15 | **G14 bridge**：workflow timeline 合并 floweng events |

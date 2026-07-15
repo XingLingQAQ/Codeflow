@@ -9,6 +9,7 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
 )
@@ -140,12 +141,49 @@ func (s *Service) GetTimeline(ctx context.Context, projectID string) (*WorkflowT
 	}
 
 	events := buildTimelineEvents(snapshot)
+	// G14: merge floweng runtime events so observation is not planner/audit-only.
+	events = append(events, collectFlowengTimelineEvents(ctx, projectID)...)
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].Timestamp < events[j].Timestamp
+	})
 	return &WorkflowTimeline{
 		ProjectID:  projectID,
 		SessionIDs: snapshot.sessionIDs,
 		Events:     events,
 		Summary:    buildWorkflowSummary(snapshot),
 	}, nil
+}
+
+// collectFlowengTimelineEvents adapts floweng FlowEvent → WorkflowTimelineEvent (query adapter).
+func collectFlowengTimelineEvents(ctx context.Context, projectID string) []WorkflowTimelineEvent {
+	eng := floweng.GetEngine()
+	if eng == nil {
+		return nil
+	}
+	flows, err := eng.List(ctx, projectID)
+	if err != nil || len(flows) == 0 {
+		return nil
+	}
+	out := make([]WorkflowTimelineEvent, 0)
+	for _, flow := range flows {
+		if flow == nil {
+			continue
+		}
+		for _, ev := range flow.Events {
+			out = append(out, WorkflowTimelineEvent{
+				ID:        ev.ID,
+				Type:      ev.Type,
+				Lane:      "floweng",
+				Title:     ev.Type,
+				Detail:    ev.Message,
+				Status:    string(flow.Status),
+				Source:    "floweng",
+				Timestamp: ev.Timestamp.UnixMilli(),
+				ProjectID: projectID,
+			})
+		}
+	}
+	return out
 }
 
 func (s *Service) GetReplay(ctx context.Context, projectID, requestedSessionID string) (*WorkflowReplay, error) {
