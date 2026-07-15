@@ -175,6 +175,16 @@ func AttachFlowArtifact(c *gin.Context) {
 	respondCreated(c, art)
 }
 
+// ListFlowStages handles GET /api/v1/flows/:id/stages
+func ListFlowStages(c *gin.Context) {
+	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	respondOK(c, gin.H{"items": flow.Stages, "total": len(flow.Stages)})
+}
+
 // ListFlowArtifacts handles GET /api/v1/flows/:id/artifacts
 func ListFlowArtifacts(c *gin.Context) {
 	flow, err := floweng.GetEngine().Get(c.Request.Context(), c.Param("id"))
