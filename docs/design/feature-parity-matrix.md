@@ -97,7 +97,7 @@
 | `/api/v1/workflows/:projectId/*` | ⚠️ 观测 | overview/timeline/replay；timeline/summary 含 floweng |
 | `/api/v1/debates` | ⚠️ 双方 | 可选 flow_id/stage_id FK |
 | `/api/v1/flows` | ⚠️ Experimental | create/advance/skip/loop/abort/gate/artifacts |
-| `/api/v1/workspace` | ⚠️ Experimental | list/read/write/promote/staged |
+| `/api/v1/workspace` | ⚠️ Experimental | list/read/write/promote/staged/discard |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import |
 | `/api/v1/guard` | ⚠️ Experimental | check/index/exempt/exemptions |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
@@ -133,3 +133,4 @@
 | 2026-07-15 | **guard exemptions API**：GET `/exemptions` + DELETE `/exempt`；list/clear 与持久化联动 |
 | 2026-07-15 | **WS topics**：Hub 主题订阅；`flow_event` / `flow:project:{id}` 按 topic 广播 |
 | 2026-07-15 | **workspace staged list**：GET `/workspace/staged` 枚举 `.codeflow/staging` |
+| 2026-07-15 | **workspace discard**：POST `/workspace/discard` 放弃 staging 文件 |
