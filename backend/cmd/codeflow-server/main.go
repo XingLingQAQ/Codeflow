@@ -102,9 +102,18 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("init skill sqlite: %w", err)
 	}
-	auditSvc := audit.NewAuditService(audit.NewMemoryStorage())
+	auditStore := audit.NewFileAuditStorage(&audit.FileStorageConfig{
+		LogDir: durableDBPath("audit"),
+	})
+	if err := auditStore.Initialize(); err != nil {
+		return fmt.Errorf("init audit storage: %w", err)
+	}
+	auditSvc := audit.NewAuditService(auditStore)
 	audit.SetAuditService(auditSvc)
-	defer audit.SetAuditService(nil)
+	defer func() {
+		_ = auditSvc.Close()
+		audit.SetAuditService(nil)
+	}()
 	guardEng := guard.NewEngine(nil, guard.NewAuditBridge(auditSvc))
 	// Optional project guard policy (ignore if missing).
 	_ = guardEng.TryLoadConfigFile(filepath.Join(".", ".codeflow", "guard.yaml"))
