@@ -102,6 +102,8 @@ func run() error {
 		return fmt.Errorf("init skill sqlite: %w", err)
 	}
 	guardEng := guard.NewEngine(nil, nil)
+	// Optional project guard policy (ignore if missing).
+	_ = guardEng.TryLoadConfigFile(filepath.Join(".", ".codeflow", "guard.yaml"))
 	services := bootstrap.Services{
 		Config:    configSvc,
 		Agent:     agentSvc,
