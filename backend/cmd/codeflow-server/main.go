@@ -187,6 +187,7 @@ func configureHookRuntimeControls() {
 			backendhooks.HookPostResponse,
 			backendhooks.HookOnStream,
 			backendhooks.HookBeforeCompress,
+				backendhooks.HookBeforeWrite,
 			backendhooks.HookOnMessageComplete,
 			backendhooks.HookAfterExec,
 			backendhooks.HookRestoreState,
