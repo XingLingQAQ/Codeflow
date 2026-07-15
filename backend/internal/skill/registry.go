@@ -83,7 +83,11 @@ func (r *InMemoryRegistry) seedBuiltins() {
 
 // Create adds a skill.
 func (r *InMemoryRegistry) Create(ctx context.Context, req *CreateRequest) (*Skill, error) {
-	if req == nil || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Body) == "" {
+	if req == nil {
+		return nil, fmt.Errorf("name and body are required")
+	}
+	applyFrontmatter(req)
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Body) == "" {
 		return nil, fmt.Errorf("name and body are required")
 	}
 	now := time.Now().UTC()
