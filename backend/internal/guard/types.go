@@ -20,11 +20,12 @@ const (
 type RuleID string
 
 const (
-	RuleStackedNaming   RuleID = "stacked_naming"
-	RuleDeniedPath      RuleID = "denied_path"
-	RuleMaxFileBytes    RuleID = "max_file_bytes"
-	RuleEmptyPath       RuleID = "empty_path"
-	RuleBinaryExecWrite RuleID = "binary_exec_write"
+	RuleStackedNaming     RuleID = "stacked_naming"
+	RuleDeniedPath        RuleID = "denied_path"
+	RuleMaxFileBytes      RuleID = "max_file_bytes"
+	RuleEmptyPath         RuleID = "empty_path"
+	RuleBinaryExecWrite   RuleID = "binary_exec_write"
+	RuleDuplicateSymbol   RuleID = "duplicate_symbol"
 )
 
 // RuleConfig is per-rule severity and parameters.

@@ -58,7 +58,7 @@
 | G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)，内存 | 2~N + model/channel + stage FK | M4 | `internal/debate` |
 | G20 | Agent 广场 / Registry | ⚠️ | agent 服务基础能力 | 版本/来源/插槽/市场 UI | M4 | |
 | G16 | `internal/workspace` | ⚠️ | **M3.1 起步**：`list/read/write` + 路径沙箱 + WriteGuard 钩子；`/api/v1/workspace/*` experimental；无 watch/WS | watch + project root 绑定 + 强制 guard | M3 | 2026-07-15 |
-| G17 | `internal/guard` | ⚠️ | **M3.2 起步**：WriteGuard 引擎（stacked naming / denied path / max bytes / exec warn）；workspace 写入强制经 guard；无 AST 重复检测 / shadow 合入 | AST 重复检测 + shadow + yaml 项目配置 + 豁免审批 | M3 | 2026-07-15 |
+| G17 | `internal/guard` | ⚠️ | WriteGuard + **AST 重复符号检测**（function/class/interface）；stacked/denied/maxbytes；无 shadow 合入 / yaml 项目配置 | shadow 合入 + 项目 guard.yaml + 豁免审批 | M3 | 2026-07-15 |
 | — | 双方辩论 API | ✅ | create/round/resolve/export/stream | 保留并升级 | M4 | 不回退现有 API 直至兼容层 |
 
 ---
@@ -121,3 +121,4 @@
 | 2026-07-15 | **M5.0**：`internal/skill` registry + match/inject API；G22 → ⚠️ |
 | 2026-07-15 | **G14 bridge**：workflow timeline 合并 floweng events |
 | 2026-07-15 | **floweng SQLite**：FlowStore + SQLiteFlowStore；main 默认 `data/floweng.db` |
+| 2026-07-15 | **guard AST**：SymbolIndex 跨文件 duplicate_symbol 规则 |

@@ -20,15 +20,28 @@ type Engine struct {
 	mu      sync.RWMutex
 	cfg     Config
 	auditor Auditor
+	symbols *SymbolIndex
 }
 
 // NewEngine creates a guard engine with defaults merged over cfg.
+// A SymbolIndex is always attached for duplicate-symbol detection.
 func NewEngine(cfg *Config, auditor Auditor) *Engine {
-	e := &Engine{auditor: auditor, cfg: defaultConfig()}
+	e := &Engine{
+		auditor: auditor,
+		cfg:     defaultConfig(),
+		symbols: NewSymbolIndex(),
+	}
 	if cfg != nil {
 		e.cfg = mergeConfig(e.cfg, *cfg)
 	}
 	return e
+}
+
+// SymbolIndex returns the engine's symbol index (for seeding from disk).
+func (e *Engine) SymbolIndex() *SymbolIndex {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.symbols
 }
 
 func defaultConfig() Config {
@@ -39,6 +52,7 @@ func defaultConfig() Config {
 			RuleMaxFileBytes:    {Severity: SeverityError},
 			RuleEmptyPath:       {Severity: SeverityError},
 			RuleBinaryExecWrite: {Severity: SeverityWarn},
+				RuleDuplicateSymbol: {Severity: SeverityError},
 		},
 		DeniedPathGlobs: []string{
 			".env",
@@ -88,20 +102,24 @@ func (e *Engine) BeforeWrite(ctx context.Context, absPath string, content []byte
 	dec := e.Evaluate(ctx, absPath, content)
 	e.mu.RLock()
 	auditor := e.auditor
+	symbols := e.symbols
 	e.mu.RUnlock()
 	if auditor != nil {
 		_ = auditor.RecordGuardDecision(ctx, absPath, dec)
 	}
-	if dec.Allowed {
-		return nil
-	}
-	// Prefer first error message
-	for _, v := range dec.Violations {
-		if v.Severity == SeverityError {
-			return fmt.Errorf("%s: %s", v.Rule, v.Message)
+	if !dec.Allowed {
+		for _, v := range dec.Violations {
+			if v.Severity == SeverityError {
+				return fmt.Errorf("%s: %s", v.Rule, v.Message)
+			}
 		}
+		return fmt.Errorf("write denied by guard")
 	}
-	return fmt.Errorf("write denied by guard")
+	// Commit symbols only when write is allowed (index tracks accepted tree).
+	if symbols != nil {
+		symbols.Commit(ctx, absPath, content)
+	}
+	return nil
 }
 
 // Evaluate runs all enabled rules.
@@ -172,6 +190,24 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 				Message: fmt.Sprintf("writing executable-like extension %s", ext),
 				Path:    absPath, At: now,
 			})
+		}
+	}
+
+	if sev := severity(cfg, RuleDuplicateSymbol); sev != SeverityOff {
+		e.mu.RLock()
+		symbols := e.symbols
+		e.mu.RUnlock()
+		if symbols != nil {
+			for _, loc := range symbols.CheckDuplicates(ctx, absPath, content) {
+				// find which incoming name collided — message uses existing loc
+				violations = append(violations, Violation{
+					Rule:     RuleDuplicateSymbol,
+					Severity: sev,
+					Message:  formatConflict(loc.Name, loc.Kind, loc),
+					Path:     absPath,
+					At:       now,
+				})
+			}
 		}
 	}
 
