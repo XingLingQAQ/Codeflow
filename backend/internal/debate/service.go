@@ -300,12 +300,12 @@ func (m *InMemoryDebateManager) ListDebates(ctx context.Context, req *DebateList
 		if req.Status != "" && string(d.Status) != req.Status {
 			continue
 		}
-			if req.FlowID != "" && d.FlowID != req.FlowID {
-				continue
-			}
-			if req.StageID != "" && d.StageID != req.StageID {
-				continue
-			}
+		if req.FlowID != "" && d.FlowID != req.FlowID {
+			continue
+		}
+		if req.StageID != "" && d.StageID != req.StageID {
+			continue
+		}
 		filtered = append(filtered, d)
 	}
 
