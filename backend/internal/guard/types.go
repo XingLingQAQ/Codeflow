@@ -20,13 +20,21 @@ const (
 type RuleID string
 
 const (
-	RuleStackedNaming     RuleID = "stacked_naming"
-	RuleDeniedPath        RuleID = "denied_path"
-	RuleMaxFileBytes      RuleID = "max_file_bytes"
-	RuleEmptyPath         RuleID = "empty_path"
-	RuleBinaryExecWrite   RuleID = "binary_exec_write"
-	RuleDuplicateSymbol   RuleID = "duplicate_symbol"
+	RuleStackedNaming   RuleID = "stacked_naming"
+	RuleDeniedPath      RuleID = "denied_path"
+	RuleMaxFileBytes    RuleID = "max_file_bytes"
+	RuleEmptyPath       RuleID = "empty_path"
+	RuleBinaryExecWrite RuleID = "binary_exec_write"
+	RuleDuplicateSymbol RuleID = "duplicate_symbol"
 )
+
+// Exemption grants a temporary path-level bypass for selected rules.
+type Exemption struct {
+	Path      string    `json:"path"`
+	Rules     []RuleID  `json:"rules,omitempty"` // empty = all rules
+	Reason    string    `json:"reason,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
 
 // RuleConfig is per-rule severity and parameters.
 type RuleConfig struct {

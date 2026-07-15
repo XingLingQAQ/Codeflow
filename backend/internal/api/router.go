@@ -161,6 +161,7 @@ func (s *Server) setupRoutes() {
 		{
 			guardAPI.POST("/check", handlers.GuardCheck)
 			guardAPI.POST("/index", handlers.GuardIndexTree)
+			guardAPI.POST("/exempt", handlers.GuardExempt)
 		}
 
 		// Memory routes

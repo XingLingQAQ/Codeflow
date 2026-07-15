@@ -17,10 +17,11 @@ var stackedNaming = regexp.MustCompile(`(?i)(?:_v\d+|_new|_copy|_bak|2)\.[^./\\]
 
 // Engine is the default guard implementation.
 type Engine struct {
-	mu      sync.RWMutex
-	cfg     Config
-	auditor Auditor
-	symbols *SymbolIndex
+	mu         sync.RWMutex
+	cfg        Config
+	auditor    Auditor
+	symbols    *SymbolIndex
+	exemptions map[string]Exemption
 }
 
 // NewEngine creates a guard engine with defaults merged over cfg.
@@ -132,7 +133,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 	violations := make([]Violation, 0)
 
 	base := filepath.Base(absPath)
-	if severity(cfg, RuleEmptyPath) != SeverityOff {
+	if severity(cfg, RuleEmptyPath) != SeverityOff && !e.isExempt(absPath, RuleEmptyPath) {
 		if strings.TrimSpace(absPath) == "" || base == "." || base == string(filepath.Separator) {
 			violations = append(violations, Violation{
 				Rule: RuleEmptyPath, Severity: severity(cfg, RuleEmptyPath),
@@ -141,7 +142,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleStackedNaming); sev != SeverityOff {
+	if sev := severity(cfg, RuleStackedNaming); sev != SeverityOff && !e.isExempt(absPath, RuleStackedNaming) {
 		if stackedNaming.MatchString(absPath) || stackedNaming.MatchString(base) {
 			violations = append(violations, Violation{
 				Rule: RuleStackedNaming, Severity: sev,
@@ -151,9 +152,8 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleDeniedPath); sev != SeverityOff {
+	if sev := severity(cfg, RuleDeniedPath); sev != SeverityOff && !e.isExempt(absPath, RuleDeniedPath) {
 		rel := filepath.ToSlash(base)
-		// also check full slash path tail segments
 		full := filepath.ToSlash(absPath)
 		for _, g := range cfg.DeniedPathGlobs {
 			if matchDenied(g, rel) || matchDenied(g, full) {
@@ -167,7 +167,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleMaxFileBytes); sev != SeverityOff {
+	if sev := severity(cfg, RuleMaxFileBytes); sev != SeverityOff && !e.isExempt(absPath, RuleMaxFileBytes) {
 		max := cfg.MaxFileBytes
 		if max <= 0 {
 			max = defaultMaxFileBytes
@@ -181,7 +181,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleBinaryExecWrite); sev != SeverityOff {
+	if sev := severity(cfg, RuleBinaryExecWrite); sev != SeverityOff && !e.isExempt(absPath, RuleBinaryExecWrite) {
 		ext := strings.ToLower(filepath.Ext(absPath))
 		switch ext {
 		case ".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1":
@@ -193,13 +193,12 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleDuplicateSymbol); sev != SeverityOff {
+	if sev := severity(cfg, RuleDuplicateSymbol); sev != SeverityOff && !e.isExempt(absPath, RuleDuplicateSymbol) {
 		e.mu.RLock()
 		symbols := e.symbols
 		e.mu.RUnlock()
 		if symbols != nil {
 			for _, loc := range symbols.CheckDuplicates(ctx, absPath, content) {
-				// find which incoming name collided — message uses existing loc
 				violations = append(violations, Violation{
 					Rule:     RuleDuplicateSymbol,
 					Severity: sev,

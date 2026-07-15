@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -59,6 +60,40 @@ func GuardCheck(c *gin.Context) {
 
 type guardIndexBody struct {
 	Root string `json:"root" binding:"required"`
+}
+
+// GuardExempt handles POST /api/v1/guard/exempt — temporary path exemption.
+func GuardExempt(c *gin.Context) {
+	var body struct {
+		Path      string   `json:"path" binding:"required"`
+		Rules     []string `json:"rules"`
+		Reason    string   `json:"reason"`
+		TTLSeconds int     `json:"ttl_seconds"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	svc, ok := guard.GetService().(*guard.Engine)
+	if !ok || svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "guard engine not available")
+		return
+	}
+	ttl := body.TTLSeconds
+	if ttl <= 0 {
+		ttl = 3600
+	}
+	rules := make([]guard.RuleID, 0, len(body.Rules))
+	for _, r := range body.Rules {
+		rules = append(rules, guard.RuleID(r))
+	}
+	svc.GrantExemption(guard.Exemption{
+		Path:      body.Path,
+		Rules:     rules,
+		Reason:    body.Reason,
+		ExpiresAt: time.Now().UTC().Add(time.Duration(ttl) * time.Second),
+	})
+	respondOK(c, gin.H{"path": body.Path, "ttl_seconds": ttl, "rules": body.Rules})
 }
 
 // GuardIndexTree handles POST /api/v1/guard/index — seed AST symbol index from a tree.
