@@ -215,8 +215,12 @@ func (r *InMemoryRegistry) Update(ctx context.Context, id string, req *UpdateReq
 func (r *InMemoryRegistry) Delete(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.skills[id]; !ok {
+	s, ok := r.skills[id]
+	if !ok {
 		return fmt.Errorf("skill not found: %s", id)
+	}
+	if s.Source == SourceBuiltin {
+		return fmt.Errorf("cannot delete builtin skill: %s", id)
 	}
 	if r.store != nil {
 		if err := r.store.delete(id); err != nil {

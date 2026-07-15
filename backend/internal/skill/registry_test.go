@@ -76,6 +76,13 @@ func TestStageFilter(t *testing.T) {
 	}
 }
 
+func TestCannotDeleteBuiltin(t *testing.T) {
+	r := NewInMemoryRegistry()
+	if err := r.Delete(context.Background(), "builtin-commit-hygiene"); err == nil {
+		t.Fatal("expected error deleting builtin")
+	}
+}
+
 func TestListFilteredEnabledOnly(t *testing.T) {
 	r := NewInMemoryRegistry()
 	ctx := context.Background()
