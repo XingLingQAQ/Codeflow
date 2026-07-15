@@ -63,6 +63,9 @@ type Debate struct {
 	GeneratorID   string                 `json:"generator_id"`
 	CriticID      string                 `json:"critic_id"`
 	MediatorID    string                 `json:"mediator_id,omitempty"`
+	// FlowID / StageID optionally bind this debate to a floweng stage (M4 FK).
+	FlowID        string                 `json:"flow_id,omitempty"`
+	StageID       string                 `json:"stage_id,omitempty"`
 	Rounds        []*DebateRound         `json:"rounds"`
 	Conflicts     []*Conflict            `json:"conflicts"`
 	Solutions     []*Solution            `json:"solutions"`
@@ -152,6 +155,8 @@ type DebateCreateRequest struct {
 	MediatorID  string                 `json:"mediator_id,omitempty"`
 	MaxRounds   int                    `json:"max_rounds,omitempty"` // default 5
 	InitialInput string                `json:"initial_input" binding:"required"`
+	FlowID      string                 `json:"flow_id,omitempty"`
+	StageID     string                 `json:"stage_id,omitempty"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -185,9 +190,11 @@ type ProposeSolutionRequest struct {
 
 // DebateListRequest 辩论列表请求
 type DebateListRequest struct {
-	Status    string `form:"status"`
-	Limit     int    `form:"limit"`
-	Offset    int    `form:"offset"`
+	Status  string `form:"status"`
+	FlowID  string `form:"flow_id"`
+	StageID string `form:"stage_id"`
+	Limit   int    `form:"limit"`
+	Offset  int    `form:"offset"`
 }
 
 // DebateListResponse 辩论列表响应
@@ -253,6 +260,8 @@ func (m *InMemoryDebateManager) CreateDebate(ctx context.Context, req *DebateCre
 		GeneratorID:  req.GeneratorID,
 		CriticID:     req.CriticID,
 		MediatorID:   req.MediatorID,
+		FlowID:       req.FlowID,
+		StageID:      req.StageID,
 		Rounds: []*DebateRound{{
 			Number:         1,
 			GeneratorInput: req.InitialInput,
@@ -291,6 +300,12 @@ func (m *InMemoryDebateManager) ListDebates(ctx context.Context, req *DebateList
 		if req.Status != "" && string(d.Status) != req.Status {
 			continue
 		}
+			if req.FlowID != "" && d.FlowID != req.FlowID {
+				continue
+			}
+			if req.StageID != "" && d.StageID != req.StageID {
+				continue
+			}
 		filtered = append(filtered, d)
 	}
 
