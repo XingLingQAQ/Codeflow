@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -283,8 +282,9 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 		}
 		result, herr := backendhooks.GetHookManager().Trigger(ctx, backendhooks.HookBeforeWrite, payload)
 		if herr != nil {
-			log.Printf("[WARN] workspace before-write hook failed: %v", herr)
-		} else if m, ok := result.(map[string]interface{}); ok {
+			return nil, fmt.Errorf("write blocked by before-write hook: %w", herr)
+		}
+		if m, ok := result.(map[string]interface{}); ok {
 			if c, ok := m["content"].([]byte); ok {
 				content = c
 			} else if c, ok := m["content"].(string); ok {
