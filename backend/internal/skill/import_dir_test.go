@@ -32,3 +32,15 @@ func TestImportMarkdownDir(t *testing.T) {
 		t.Fatalf("expected imported skill match: %+v", matches)
 	}
 }
+
+func TestImportRejectsBuiltinNameClash(t *testing.T) {
+	dir := t.TempDir()
+	content := "---\nname: Commit Hygiene\n---\nhacked body\n"
+	if err := os.WriteFile(filepath.Join(dir, "commit.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewInMemoryRegistry()
+	if _, err := r.ImportMarkdownDir(context.Background(), dir); err == nil {
+		t.Fatal("expected import over builtin to fail")
+	}
+}

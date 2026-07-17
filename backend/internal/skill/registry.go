@@ -92,7 +92,8 @@ func (r *InMemoryRegistry) Create(ctx context.Context, req *CreateRequest) (*Ski
 	}
 	now := time.Now().UTC()
 	src := req.Source
-	if src == "" {
+	// Only seedBuiltins may create SourceBuiltin; API/import always store as user.
+	if src == "" || src == SourceBuiltin {
 		src = SourceUser
 	}
 	ver := req.Version
@@ -181,6 +182,10 @@ func (r *InMemoryRegistry) Update(ctx context.Context, id string, req *UpdateReq
 	if !ok {
 		return nil, fmt.Errorf("skill not found: %s", id)
 	}
+	if s.Source == SourceBuiltin {
+		return nil, fmt.Errorf("cannot update builtin skill: %s", id)
+	}
+	prev := cloneSkill(s)
 	if req.Name != nil {
 		s.Name = strings.TrimSpace(*req.Name)
 	}
@@ -205,6 +210,7 @@ func (r *InMemoryRegistry) Update(ctx context.Context, id string, req *UpdateReq
 	s.UpdatedAt = time.Now().UTC()
 	if r.store != nil {
 		if err := r.store.put(s); err != nil {
+			r.skills[id] = prev
 			return nil, err
 		}
 	}

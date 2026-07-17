@@ -121,3 +121,27 @@ func TestGetSetRegistry(t *testing.T) {
 		t.Fatal("expected custom registry")
 	}
 }
+
+func TestCannotUpdateBuiltin(t *testing.T) {
+	r := NewInMemoryRegistry()
+	name := "hacked"
+	if _, err := r.Update(context.Background(), "builtin-commit-hygiene", &UpdateRequest{Name: &name}); err == nil {
+		t.Fatal("expected error updating builtin")
+	}
+}
+
+func TestCreateCannotMintBuiltinSource(t *testing.T) {
+	r := NewInMemoryRegistry()
+	s, err := r.Create(context.Background(), &CreateRequest{
+		Name: "User Skill", Body: "body", Source: SourceBuiltin, Triggers: []string{"x"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Source != SourceUser {
+		t.Fatalf("source=%s want user", s.Source)
+	}
+	if err := r.Delete(context.Background(), s.ID); err != nil {
+		t.Fatalf("user skill should be deletable: %v", err)
+	}
+}

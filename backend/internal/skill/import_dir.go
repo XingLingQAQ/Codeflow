@@ -43,8 +43,11 @@ func (r *InMemoryRegistry) ImportMarkdownDir(ctx context.Context, dir string) (i
 		if strings.TrimSpace(req.Body) == "" {
 			continue
 		}
-		// replace existing by name
+		// replace existing by name (never overwrite builtins)
 		if existing := r.findByName(req.Name); existing != nil {
+			if existing.Source == SourceBuiltin {
+				return count, fmt.Errorf("cannot import over builtin skill: %s", existing.Name)
+			}
 			_, err = r.Update(ctx, existing.ID, &UpdateRequest{
 				Description: &req.Description,
 				Version:     &req.Version,

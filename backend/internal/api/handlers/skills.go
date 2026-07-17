@@ -60,6 +60,10 @@ func UpdateSkill(c *gin.Context) {
 	}
 	s, err := skill.GetRegistry().Update(c.Request.Context(), c.Param("id"), &req)
 	if err != nil {
+		if strings.Contains(err.Error(), "builtin") {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
