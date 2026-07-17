@@ -89,3 +89,24 @@ func TestGetSetService(t *testing.T) {
 		t.Fatal("expected custom")
 	}
 }
+
+func TestMatchDeniedDirGlob(t *testing.T) {
+	if !matchDenied("secrets/**", "secrets/token.txt") {
+		t.Fatal("secrets/** should match secrets/token.txt")
+	}
+	if !matchDenied("secrets/**", "secrets") {
+		t.Fatal("secrets/** should match secrets itself")
+	}
+	if matchDenied("secrets/**", "mysecrets/x") {
+		t.Fatal("should not match mysecrets")
+	}
+}
+
+func TestMatchDeniedIDRsaBoundary(t *testing.T) {
+	if !matchDenied("**/id_rsa", "proj/id_rsa") {
+		t.Fatal("should match id_rsa basename with segment")
+	}
+	if matchDenied("**/id_rsa", "proj/my_id_rsa") {
+		t.Fatal("must not bare-suffix match my_id_rsa")
+	}
+}

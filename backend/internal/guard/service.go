@@ -231,12 +231,20 @@ func severity(cfg Config, id RuleID) Severity {
 	return SeverityError
 }
 
-// matchDenied supports simple patterns: exact, prefix*, *.suffix, and **/name.
+// matchDenied supports simple patterns: exact, prefix*, *.suffix, **/name, and dir/**.
 func matchDenied(glob, path string) bool {
 	glob = strings.TrimSpace(glob)
 	path = strings.TrimSpace(path)
-	if glob == "" {
+	if glob == "" || path == "" {
 		return false
+	}
+	// dir/** — path equals dir or is under dir/
+	if strings.HasSuffix(glob, "/**") {
+		dir := strings.Trim(strings.TrimSuffix(glob, "/**"), "/")
+		if dir == "" {
+			return true
+		}
+		return path == dir || strings.HasPrefix(path, dir+"/")
 	}
 	// **/foo or **/*.ext
 	if strings.HasPrefix(glob, "**/") {
@@ -244,7 +252,8 @@ func matchDenied(glob, path string) bool {
 		if strings.HasPrefix(rest, "*.") {
 			return strings.HasSuffix(strings.ToLower(path), strings.ToLower(rest[1:]))
 		}
-		return strings.HasSuffix(path, "/"+rest) || path == rest || strings.HasSuffix(path, rest)
+		// Path-segment boundary only (**/id_rsa must not match my_id_rsa).
+		return path == rest || strings.HasSuffix(path, "/"+rest)
 	}
 	if strings.HasPrefix(glob, "*.") {
 		return strings.HasSuffix(strings.ToLower(path), strings.ToLower(glob[1:]))

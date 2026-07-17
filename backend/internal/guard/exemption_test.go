@@ -50,3 +50,17 @@ func TestExemptionRelativePathMatchesAbsolute(t *testing.T) {
 		t.Fatalf("relative exemption should match absolute write path: %v", err)
 	}
 }
+
+func TestExemptionBareSuffixDoesNotMatch(t *testing.T) {
+	// Exempt key "s2.go" must not bare-suffix match "utils2.go".
+	e := NewEngine(nil, nil)
+	e.GrantExemption(Exemption{
+		Path:      "s2.go",
+		Rules:     []RuleID{RuleStackedNaming},
+		ExpiresAt: time.Now().UTC().Add(time.Minute),
+	})
+	blocked := filepath.Join(t.TempDir(), "utils2.go")
+	if err := e.BeforeWrite(context.Background(), blocked, []byte("package p")); err == nil {
+		t.Fatal("bare-suffix exemption s2.go must not exempt utils2.go")
+	}
+}

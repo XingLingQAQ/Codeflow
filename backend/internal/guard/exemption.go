@@ -35,7 +35,7 @@ func (e *Engine) OpenExemptionStore(dbPath string) error {
 		if ex.Path == "" {
 			continue
 		}
-		ex.Path = filepath.Clean(ex.Path)
+		ex.Path = normalizeExemptionPath(ex.Path)
 		e.exemptions[ex.Path] = ex
 	}
 	e.mu.Unlock()
@@ -66,7 +66,7 @@ func (e *Engine) GrantExemption(ex Exemption) {
 	if ex.ExpiresAt.IsZero() {
 		ex.ExpiresAt = time.Now().UTC().Add(time.Hour)
 	}
-	ex.Path = filepath.Clean(ex.Path)
+	ex.Path = normalizeExemptionPath(ex.Path)
 	// Copy rules slice so callers cannot mutate after grant.
 	if len(ex.Rules) > 0 {
 		ex.Rules = append([]RuleID(nil), ex.Rules...)
@@ -85,7 +85,7 @@ func (e *Engine) GrantExemption(ex Exemption) {
 
 // ClearExemption removes a path exemption (memory + durable store).
 func (e *Engine) ClearExemption(path string) {
-	path = filepath.Clean(path)
+	path = normalizeExemptionPath(path)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.exemptions != nil {
@@ -128,17 +128,18 @@ func (e *Engine) isExempt(absPath string, rule RuleID) bool {
 	if e.exemptions == nil {
 		return false
 	}
-	key := filepath.Clean(absPath)
+	key := normalizeExemptionPath(absPath)
 	ex, ok := e.exemptions[key]
 	if !ok {
-		// Allow relative exemption paths to match absolute write targets by suffix.
+		// Allow relative exemption paths to match absolute write targets by
+		// exact path or path-segment boundary only (never bare suffix).
 		slashAbs := filepath.ToSlash(key)
 		for k, candidate := range e.exemptions {
-			slashKey := filepath.ToSlash(k)
-			if slashKey == "" {
+			slashKey := filepath.ToSlash(filepath.Clean(k))
+			if slashKey == "" || slashKey == "." {
 				continue
 			}
-			if slashAbs == slashKey || strings.HasSuffix(slashAbs, "/"+slashKey) || strings.HasSuffix(slashAbs, slashKey) {
+			if pathMatchesExemption(slashAbs, slashKey) {
 				ex = candidate
 				ok = true
 				key = k
@@ -165,4 +166,53 @@ func (e *Engine) isExempt(absPath string, rule RuleID) bool {
 		}
 	}
 	return false
+}
+
+// normalizeExemptionPath cleans exemption keys for stable map lookup.
+// Relative paths stay relative (so they can match absolute writes by segment).
+// Absolute paths are Abs'd and symlink-resolved on the longest existing prefix
+// so they compare equal to workspace.Resolve results.
+func normalizeExemptionPath(p string) string {
+	p = filepath.Clean(p)
+	if p == "" || p == "." {
+		return p
+	}
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return resolveExistingPrefix(abs)
+}
+
+// resolveExistingPrefix EvalSymlinks the longest existing ancestor and rejoins
+// any missing trailing segments (write targets that do not exist yet).
+func resolveExistingPrefix(abs string) string {
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	rest := make([]string, 0, 4)
+	cur := abs
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs
+		}
+		rest = append([]string{filepath.Base(cur)}, rest...)
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(append([]string{resolved}, rest...)...)
+		}
+		cur = parent
+	}
+}
+
+// pathMatchesExemption returns true when absPath equals key or ends with "/"+key.
+// Bare suffix matching is intentionally rejected to avoid "a.go" exempting "ba.go".
+func pathMatchesExemption(slashAbs, slashKey string) bool {
+	if slashAbs == slashKey {
+		return true
+	}
+	return strings.HasSuffix(slashAbs, "/"+slashKey)
 }
