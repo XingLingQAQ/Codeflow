@@ -53,5 +53,17 @@ for (const needle of required) {
     failed = true;
   }
 }
+// hooks /events must be registered before /:name (route shadowing)
+const hooksBlockMatch = router.match(/hooksGroup := v1\.Group\("\/hooks"\)[\s\S]*?^\t\t\}/m);
+if (hooksBlockMatch) {
+  const block = hooksBlockMatch[0];
+  const eventsPos = block.indexOf('"/events"');
+  const namePos = block.indexOf('"/:name"');
+  if (eventsPos < 0 || namePos < 0 || eventsPos > namePos) {
+    console.error("[check-backend-routes] MISSING: hooks /events before /:name");
+    failed = true;
+  }
+}
+
 if (failed) process.exit(1);
 console.log(`[check-backend-routes] OK (${required.length} markers)`);
