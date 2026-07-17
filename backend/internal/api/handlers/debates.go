@@ -2,7 +2,9 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -80,7 +82,7 @@ func NextDebateRound(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.NextRound(c.Request.Context(), id, &req)
 	if err != nil {
-		respondInternalError(c, "advance debate round", err)
+		mapDebateError(c, "advance debate round", err)
 		return
 	}
 
@@ -125,7 +127,7 @@ func ResolveConflict(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.ResolveConflict(c.Request.Context(), debateID, conflictID, &req)
 	if err != nil {
-		respondInternalError(c, "resolve debate conflict", err)
+		mapDebateError(c, "resolve debate conflict", err)
 		return
 	}
 
@@ -160,7 +162,7 @@ func SelectSolution(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.SelectSolution(c.Request.Context(), id, &req)
 	if err != nil {
-		respondInternalError(c, "select debate solution", err)
+		mapDebateError(c, "select debate solution", err)
 		return
 	}
 
@@ -228,7 +230,7 @@ func ProposeSolution(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.ProposeSolution(c.Request.Context(), id, &req)
 	if err != nil {
-		respondInternalError(c, "propose debate solution", err)
+		mapDebateError(c, "propose debate solution", err)
 		return
 	}
 
@@ -245,4 +247,19 @@ func ProposeSolution(c *gin.Context) {
 	})
 
 	respondCreated(c, result)
+}
+
+func mapDebateError(c *gin.Context, op string, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, debate.ErrNotFound) || strings.Contains(err.Error(), "not found") {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if strings.Contains(err.Error(), "not in progress") || strings.Contains(err.Error(), "already") {
+		respondError(c, http.StatusConflict, err.Error())
+		return
+	}
+	respondInternalError(c, op, err)
 }

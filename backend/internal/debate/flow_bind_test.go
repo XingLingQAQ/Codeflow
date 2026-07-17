@@ -2,6 +2,7 @@ package debate
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -29,5 +30,35 @@ func TestCreateAndListByFlowStage(t *testing.T) {
 	list2, _ := m.ListDebates(ctx, &DebateListRequest{FlowID: "other"})
 	if list2.Total != 0 {
 		t.Fatalf("expected empty for other flow")
+	}
+}
+
+func TestGetDebateReturnsClone(t *testing.T) {
+	m := NewInMemoryDebateManager()
+	ctx := context.Background()
+	created, err := m.CreateDebate(ctx, &DebateCreateRequest{
+		Title: "t", GeneratorID: "g", CriticID: "c", InitialInput: "i",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.GetDebate(ctx, created.ID)
+	if err != nil || got == nil {
+		t.Fatal(err)
+	}
+	got.Title = "mutated"
+	again, _ := m.GetDebate(ctx, created.ID)
+	if again.Title == "mutated" {
+		t.Fatal("GetDebate must return a clone")
+	}
+}
+
+func TestNextRoundNotFound(t *testing.T) {
+	m := NewInMemoryDebateManager()
+	_, err := m.NextRound(context.Background(), "missing", &NextRoundRequest{
+		GeneratorOutput: "g", CriticFeedback: "c",
+	})
+	if err == nil || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }

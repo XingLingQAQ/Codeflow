@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -226,6 +227,9 @@ type IDebateManager interface {
 	ExportReport(ctx context.Context, debateID string) (*AuditReport, error)
 }
 
+// ErrNotFound is returned when a debate or nested entity is missing.
+var ErrNotFound = errors.New("debate not found")
+
 // InMemoryDebateManager 内存实现的辩论管理器
 type InMemoryDebateManager struct {
 	mu      sync.RWMutex
@@ -275,10 +279,10 @@ func (m *InMemoryDebateManager) CreateDebate(ctx context.Context, req *DebateCre
 	}
 
 	m.debates[debate.ID] = debate
-	return debate, nil
+	return cloneDebate(debate), nil
 }
 
-// GetDebate 获取辩论
+// GetDebate 获取辩论 (deep copy; nil,nil when missing for list-style callers).
 func (m *InMemoryDebateManager) GetDebate(ctx context.Context, id string) (*Debate, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -287,7 +291,7 @@ func (m *InMemoryDebateManager) GetDebate(ctx context.Context, id string) (*Deba
 	if !ok {
 		return nil, nil
 	}
-	return debate, nil
+	return cloneDebate(debate), nil
 }
 
 // ListDebates 列出辩论
@@ -335,7 +339,8 @@ func (m *InMemoryDebateManager) ListDebates(ctx context.Context, req *DebateList
 
 	result := make([]Debate, end-start)
 	for i := start; i < end; i++ {
-		result[i-start] = *filtered[i]
+		cp := cloneDebate(filtered[i])
+		result[i-start] = *cp
 	}
 
 	return &DebateListResponse{
@@ -352,7 +357,7 @@ func (m *InMemoryDebateManager) NextRound(ctx context.Context, debateID string, 
 
 	debate, ok := m.debates[debateID]
 	if !ok {
-		return nil, errors.New("debate not found")
+		return nil, ErrNotFound
 	}
 
 	if debate.Status != DebateStatusInProgress {
@@ -382,7 +387,7 @@ func (m *InMemoryDebateManager) NextRound(ctx context.Context, debateID string, 
 	if debate.CurrentRound >= debate.MaxRounds {
 		debate.Status = DebateStatusPaused
 		debate.UpdatedAt = now
-		return debate, nil
+		return cloneDebate(debate), nil
 	}
 
 	// 开始新轮次
@@ -394,7 +399,7 @@ func (m *InMemoryDebateManager) NextRound(ctx context.Context, debateID string, 
 	})
 	debate.UpdatedAt = now
 
-	return debate, nil
+	return cloneDebate(debate), nil
 }
 
 // DetectConflicts 检测冲突
@@ -517,7 +522,7 @@ func (m *InMemoryDebateManager) ResolveConflict(ctx context.Context, debateID, c
 
 	debate, ok := m.debates[debateID]
 	if !ok {
-		return nil, errors.New("debate not found")
+		return nil, ErrNotFound
 	}
 
 	for _, c := range debate.Conflicts {
@@ -544,7 +549,7 @@ func (m *InMemoryDebateManager) ProposeSolution(ctx context.Context, debateID st
 
 	debate, ok := m.debates[debateID]
 	if !ok {
-		return nil, errors.New("debate not found")
+		return nil, ErrNotFound
 	}
 
 	solution := &Solution{
@@ -586,7 +591,7 @@ func (m *InMemoryDebateManager) SelectSolution(ctx context.Context, debateID str
 
 	debate, ok := m.debates[debateID]
 	if !ok {
-		return nil, errors.New("debate not found")
+		return nil, ErrNotFound
 	}
 
 	// 验证方案存在
@@ -598,7 +603,7 @@ func (m *InMemoryDebateManager) SelectSolution(ctx context.Context, debateID str
 		}
 	}
 	if !found {
-		return nil, errors.New("solution not found")
+		return nil, fmt.Errorf("%w: solution", ErrNotFound)
 	}
 
 	now := time.Now().Unix()
@@ -617,7 +622,7 @@ func (m *InMemoryDebateManager) ExportReport(ctx context.Context, debateID strin
 
 	debate, ok := m.debates[debateID]
 	if !ok {
-		return nil, errors.New("debate not found")
+		return nil, ErrNotFound
 	}
 
 	// 统计冲突
@@ -757,4 +762,72 @@ func SetDebateManager(dm IDebateManager) {
 		// Allow lazy re-init after Reset: recreate Once.
 		debateOnce = sync.Once{}
 	}
+}
+
+// cloneDebate returns a deep copy so concurrent mutations cannot race with JSON encoding.
+func cloneDebate(d *Debate) *Debate {
+	if d == nil {
+		return nil
+	}
+	cp := *d
+	if d.Rounds != nil {
+		cp.Rounds = make([]*DebateRound, len(d.Rounds))
+		for i, r := range d.Rounds {
+			if r == nil {
+				continue
+			}
+			rc := *r
+			if r.ConflictsFound != nil {
+				rc.ConflictsFound = append([]string(nil), r.ConflictsFound...)
+			}
+			cp.Rounds[i] = &rc
+		}
+	}
+	if d.Conflicts != nil {
+		cp.Conflicts = make([]*Conflict, len(d.Conflicts))
+		for i, c := range d.Conflicts {
+			if c == nil {
+				continue
+			}
+			cc := *c
+			if c.Metadata != nil {
+				cc.Metadata = copyMap(c.Metadata)
+			}
+			cp.Conflicts[i] = &cc
+		}
+	}
+	if d.Solutions != nil {
+		cp.Solutions = make([]*Solution, len(d.Solutions))
+		for i, sol := range d.Solutions {
+			if sol == nil {
+				continue
+			}
+			sc := *sol
+			if sol.Pros != nil {
+				sc.Pros = append([]string(nil), sol.Pros...)
+			}
+			if sol.Cons != nil {
+				sc.Cons = append([]string(nil), sol.Cons...)
+			}
+			if sol.Metadata != nil {
+				sc.Metadata = copyMap(sol.Metadata)
+			}
+			cp.Solutions[i] = &sc
+		}
+	}
+	if d.Metadata != nil {
+		cp.Metadata = copyMap(d.Metadata)
+	}
+	return &cp
+}
+
+func copyMap(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
