@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/codeflow/backend/internal/workspace"
@@ -67,5 +68,33 @@ func TestDuplicateBlocksWorkspaceWrite(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected duplicate block via workspace")
+	}
+}
+
+func TestConcurrentReserveWrite(t *testing.T) {
+	e := NewEngine(nil, nil)
+	ctx := context.Background()
+	code := []byte("package p\n\nfunc Shared() {}\n")
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, p := range []string{filepath.Join("proj", "a.go"), filepath.Join("proj", "b.go")} {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			errs <- e.ReserveWrite(ctx, path, code)
+		}(p)
+	}
+	wg.Wait()
+	close(errs)
+	ok, fail := 0, 0
+	for err := range errs {
+		if err == nil {
+			ok++
+		} else {
+			fail++
+		}
+	}
+	if ok != 1 || fail != 1 {
+		t.Fatalf("expected exactly one success and one failure, ok=%d fail=%d", ok, fail)
 	}
 }

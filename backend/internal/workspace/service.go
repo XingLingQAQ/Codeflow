@@ -301,17 +301,38 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 		}
 	}
 
+	// Direct writes: optionally reserve symbol-index slots before disk I/O so
+	// concurrent writers cannot both pass duplicate checks.
+	reserved := false
+	if mode == WriteModeDirect && guard != nil {
+		if r, ok := guard.(WriteReserver); ok {
+			if err := r.ReserveWrite(ctx, finalAbs, content); err != nil {
+				return nil, fmt.Errorf("write blocked by guard: %w", err)
+			}
+			reserved = true
+		}
+	}
+
 	if req.CreateParents || mode == WriteModeStage {
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			if reserved {
+				if r, ok := guard.(WriteReserver); ok {
+					r.ReleaseWrite(finalAbs)
+				}
+			}
 			return nil, fmt.Errorf("mkdir: %w", err)
 		}
 	}
 	if err := os.WriteFile(abs, content, 0o644); err != nil {
+		if reserved {
+			if r, ok := guard.(WriteReserver); ok {
+				r.ReleaseWrite(finalAbs)
+			}
+		}
 		return nil, fmt.Errorf("write: %w", err)
 	}
-	// Commit guard side-effects only after a successful direct write to the
-	// real project tree (not shadow staging).
-	if mode == WriteModeDirect && guard != nil {
+	// If the guard does not support reservation, commit after successful write.
+	if mode == WriteModeDirect && guard != nil && !reserved {
 		if c, ok := guard.(WriteCommitter); ok {
 			c.AfterWrite(ctx, finalAbs, content)
 		}
@@ -524,6 +545,13 @@ var (
 	defaultSvc Service
 	svcMu      sync.RWMutex
 )
+
+// HasService reports whether a workspace service was explicitly set.
+func HasService() bool {
+	svcMu.RLock()
+	defer svcMu.RUnlock()
+	return defaultSvc != nil
+}
 
 // GetService returns the global workspace service.
 func GetService() Service {

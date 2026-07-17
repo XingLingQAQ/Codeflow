@@ -82,8 +82,52 @@ func (idx *SymbolIndex) Commit(ctx context.Context, absPath string, content []by
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
+	idx.commitLocked(absPath, incoming)
+}
 
-	// remove old entries for this path
+// CheckAndCommit atomically detects cross-file duplicates and, when clear,
+// commits the incoming symbols. Used for direct writes to close TOCTOU
+// between CheckDuplicates and Commit under concurrent writers.
+func (idx *SymbolIndex) CheckAndCommit(ctx context.Context, absPath string, content []byte) []SymbolLoc {
+	if idx == nil {
+		return nil
+	}
+	incoming := idx.extract(ctx, absPath, content)
+	if len(incoming) == 0 {
+		// Still clear prior symbols for this path (rewrite to non-code / empty).
+		idx.mu.Lock()
+		idx.commitLocked(filepath.Clean(absPath), nil)
+		idx.mu.Unlock()
+		return nil
+	}
+	absPath = filepath.Clean(absPath)
+
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	conflicts := make([]SymbolLoc, 0)
+	seen := make(map[string]bool)
+	for _, sym := range incoming {
+		for _, existing := range idx.byKey[sym.SigKey] {
+			if filepath.Clean(existing.Path) == absPath {
+				continue
+			}
+			key := existing.Path + "|" + existing.SigKey
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			conflicts = append(conflicts, existing)
+		}
+	}
+	if len(conflicts) > 0 {
+		return conflicts
+	}
+	idx.commitLocked(absPath, incoming)
+	return nil
+}
+
+func (idx *SymbolIndex) commitLocked(absPath string, incoming []SymbolLoc) {
 	if old, ok := idx.byPath[absPath]; ok {
 		for _, sym := range old {
 			idx.byKey[sym.SigKey] = removeLoc(idx.byKey[sym.SigKey], absPath)
@@ -91,6 +135,10 @@ func (idx *SymbolIndex) Commit(ctx context.Context, absPath string, content []by
 				delete(idx.byKey, sym.SigKey)
 			}
 		}
+	}
+	if len(incoming) == 0 {
+		delete(idx.byPath, absPath)
+		return
 	}
 	idx.byPath[absPath] = incoming
 	for _, sym := range incoming {

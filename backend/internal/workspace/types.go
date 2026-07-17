@@ -72,6 +72,14 @@ type WriteCommitter interface {
 	AfterWrite(ctx context.Context, absPath string, content []byte)
 }
 
+// WriteReserver optionally reserves side-effects (symbol index) before disk write
+// and can roll them back if the write fails. Preferred over WriteCommitter when
+// concurrent direct writers may race on duplicate detection.
+type WriteReserver interface {
+	ReserveWrite(ctx context.Context, absPath string, content []byte) error
+	ReleaseWrite(absPath string)
+}
+
 // Service is the workspace filesystem API.
 type Service interface {
 	List(ctx context.Context, req *ListRequest) ([]Entry, error)

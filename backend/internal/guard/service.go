@@ -125,6 +125,8 @@ func (e *Engine) BeforeWrite(ctx context.Context, absPath string, content []byte
 }
 
 // AfterWrite commits symbol index after a successful direct (or promoted) write.
+// Prefer ReserveWrite for concurrent direct writers; AfterWrite remains for
+// callers that already passed policy checks without reservation.
 func (e *Engine) AfterWrite(ctx context.Context, absPath string, content []byte) {
 	if e == nil {
 		return
@@ -134,6 +136,55 @@ func (e *Engine) AfterWrite(ctx context.Context, absPath string, content []byte)
 	e.mu.RUnlock()
 	if symbols != nil {
 		symbols.Commit(ctx, absPath, content)
+	}
+}
+
+// ReserveWrite re-evaluates policy and atomically reserves symbol-index slots
+// for a direct write. On failure the index is unchanged. Call ReleaseWrite if
+// the subsequent disk write fails.
+func (e *Engine) ReserveWrite(ctx context.Context, absPath string, content []byte) error {
+	if e == nil {
+		return nil
+	}
+	dec := e.Evaluate(ctx, absPath, content)
+	if !dec.Allowed {
+		for _, v := range dec.Violations {
+			if v.Severity == SeverityError {
+				return fmt.Errorf("%s: %s", v.Rule, v.Message)
+			}
+		}
+		return fmt.Errorf("write denied by guard")
+	}
+	e.mu.RLock()
+	symbols := e.symbols
+	e.mu.RUnlock()
+	if symbols == nil {
+		return nil
+	}
+	// Temporarily disable duplicate_symbol in Evaluate path already ran; do atomic commit.
+	// If CheckAndCommit finds races, reject.
+	// Force CheckAndCommit even when RuleDuplicateSymbol is off: still update index truth.
+	if severity(e.Config(), RuleDuplicateSymbol) != SeverityOff {
+		if conflicts := symbols.CheckAndCommit(ctx, absPath, content); len(conflicts) > 0 {
+			loc := conflicts[0]
+			return fmt.Errorf("%s: %s", RuleDuplicateSymbol, formatConflict(loc.Name, loc.Kind, loc))
+		}
+		return nil
+	}
+	symbols.Commit(ctx, absPath, content)
+	return nil
+}
+
+// ReleaseWrite undoes a ReserveWrite when the disk write fails.
+func (e *Engine) ReleaseWrite(absPath string) {
+	if e == nil {
+		return
+	}
+	e.mu.RLock()
+	symbols := e.symbols
+	e.mu.RUnlock()
+	if symbols != nil {
+		symbols.Remove(absPath)
 	}
 }
 
@@ -294,6 +345,13 @@ var (
 	defaultGuard Service
 	guardMu      sync.RWMutex
 )
+
+// HasService reports whether a guard was explicitly set (no lazy construct).
+func HasService() bool {
+	guardMu.RLock()
+	defer guardMu.RUnlock()
+	return defaultGuard != nil
+}
 
 // GetService returns the process-wide guard.
 func GetService() Service {
