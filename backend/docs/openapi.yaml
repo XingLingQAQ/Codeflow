@@ -3955,6 +3955,10 @@ paths:
       responses:
         '200':
           description: Updated skill
+        '404':
+          description: Skill not found
+        '409':
+          description: Builtin skill cannot be updated
     delete:
       tags: [Skills]
       summary: Delete skill
@@ -3968,6 +3972,10 @@ paths:
       responses:
         '200':
           description: Deleted
+        '404':
+          description: Skill not found
+        '409':
+          description: Builtin skill cannot be deleted
 
   # ==================== Guard (experimental) ====================
   /api/v1/guard/config:

@@ -3,7 +3,9 @@ package handlers
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -134,17 +136,22 @@ func GuardIndexTree(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
+	root, err := sanitizeIndexRoot(body.Root)
+	if err != nil {
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	svc, ok := guard.GetService().(*guard.Engine)
 	if !ok || svc == nil {
 		respondError(c, http.StatusServiceUnavailable, "guard engine not available")
 		return
 	}
-	n, err := svc.IndexTree(c.Request.Context(), body.Root)
+	n, err := svc.IndexTree(c.Request.Context(), root)
 	if err != nil {
 		respondInternalError(c, "index tree", err)
 		return
 	}
-	respondOK(c, gin.H{"indexed_files": n, "root": body.Root})
+	respondOK(c, gin.H{"indexed_files": n, "root": root})
 }
 
 // GuardConfig handles GET /api/v1/guard/config — active policy snapshot.
@@ -175,4 +182,47 @@ func GuardRules(c *gin.Context) {
 	}
 	sort.Slice(out, func(i, j int) bool { return string(out[i].ID) < string(out[j].ID) })
 	respondOK(c, gin.H{"items": out, "total": len(out), "denied_path_globs": cfg.DeniedPathGlobs, "max_file_bytes": cfg.MaxFileBytes})
+}
+
+// sanitizeIndexRoot restricts IndexTree to cwd or CODEFLOW_INDEX_ROOT.
+func sanitizeIndexRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("root is required")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("root is not a directory")
+	}
+	allow := make([]string, 0, 2)
+	if env := strings.TrimSpace(os.Getenv("CODEFLOW_INDEX_ROOT")); env != "" {
+		if a, err := filepath.Abs(env); err == nil {
+			if r, err := filepath.EvalSymlinks(a); err == nil {
+				a = r
+			}
+			allow = append(allow, filepath.Clean(a))
+		}
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		if r, err := filepath.EvalSymlinks(cwd); err == nil {
+			cwd = r
+		}
+		allow = append(allow, filepath.Clean(cwd))
+	}
+	for _, a := range allow {
+		if abs == a || strings.HasPrefix(abs, a+string(filepath.Separator)) {
+			return abs, nil
+		}
+	}
+	return "", fmt.Errorf("index root must be under process cwd or CODEFLOW_INDEX_ROOT")
 }
