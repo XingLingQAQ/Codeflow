@@ -56,7 +56,7 @@ var builtinTemplates = map[TemplateID]templateDef{
 		},
 		Loops: []LoopEdge{
 			{From: StageTypeReview, To: StageTypeCoding},
-			{From: StageTypeReview, To: StageTypeDesign},
+			{From: StageTypeReview, To: StageTypePlanning},
 			{From: StageTypeCoding, To: StageTypePlanning},
 		},
 	},
