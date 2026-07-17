@@ -20,9 +20,9 @@
     "build-embedded": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "嵌入式发布构建 (CGO_ENABLED=0, 静态链接, 含前端 dist)"
+        "description": "嵌入式发布构建 (CGO_ENABLED=1, go-sqlite3, 含 workbench dist)"
       },
-      "dependsOn": ["desktop:build"],
+      "dependsOn": ["workbench:build"],
       "options": {
         "command": "make build-all",
         "cwd": "backend"

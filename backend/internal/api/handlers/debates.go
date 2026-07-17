@@ -131,9 +131,9 @@ func ResolveConflict(c *gin.Context) {
 
 	// 通知WebSocket客户端
 	hub := websocket.GetHub()
-	hub.BroadcastAll(&websocket.Message{
-		Type:    websocket.MsgTypeText,
-		Content: "Conflict resolved",
+	hub.BroadcastToTopic(websocket.TopicDebateEvent, &websocket.Message{
+		Type:    websocket.MessageType("debate_event"),
+		Content: "conflict_resolved",
 		Data: map[string]interface{}{
 			"debate_id":   debateID,
 			"conflict_id": conflictID,
@@ -166,15 +166,20 @@ func SelectSolution(c *gin.Context) {
 
 	// 通知WebSocket客户端
 	hub := websocket.GetHub()
-	hub.BroadcastAll(&websocket.Message{
-		Type:    websocket.MsgTypeText,
-		Content: "Solution selected, debate resolved",
+	msg := &websocket.Message{
+		Type:    websocket.MessageType("debate_event"),
+		Content: "solution_selected",
 		Data: map[string]interface{}{
 			"debate_id":         id,
 			"selected_solution": result.SelectedSolution,
 			"status":            result.Status,
+			"flow_id":           result.FlowID,
 		},
-	})
+	}
+	hub.BroadcastToTopic(websocket.TopicDebateEvent, msg)
+	if result.FlowID != "" {
+		hub.BroadcastToTopic("debate:flow:"+result.FlowID, msg)
+	}
 
 	respondOK(c, result)
 }
@@ -229,9 +234,9 @@ func ProposeSolution(c *gin.Context) {
 
 	// 通知WebSocket客户端
 	hub := websocket.GetHub()
-	hub.BroadcastAll(&websocket.Message{
-		Type:    websocket.MsgTypeText,
-		Content: "New solution proposed",
+	hub.BroadcastToTopic(websocket.TopicDebateEvent, &websocket.Message{
+		Type:    websocket.MessageType("debate_event"),
+		Content: "solution_proposed",
 		Data: map[string]interface{}{
 			"debate_id":   id,
 			"solution_id": result.ID,

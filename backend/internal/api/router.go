@@ -69,6 +69,8 @@ func NewServer(config *Config) *Server {
 			middleware.HeaderSessionID,
 			middleware.HeaderTaskID,
 			middleware.HeaderAgentID,
+			// Workspace APIs prefer this header for project root.
+			"X-Codeflow-Workspace-Root",
 		},
 		ExposeHeaders: []string{
 			"Content-Length",
