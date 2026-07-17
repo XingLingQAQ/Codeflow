@@ -133,6 +133,11 @@ func run() error {
 			fmt.Printf("✓ Guard indexed %d source file(s) under %s\n", n, root)
 		}
 	}
+	wsSvc := workspace.NewFSService(guardEng)
+	if roots := parseAllowedWorkspaceRoots(); len(roots) > 0 {
+		wsSvc.SetAllowedRoots(roots)
+		fmt.Printf("✓ Workspace roots restricted to %d path(s)\n", len(roots))
+	}
 	services := bootstrap.Services{
 		Config:    configSvc,
 		Agent:     agentSvc,
@@ -144,7 +149,7 @@ func run() error {
 		Summarize: summarize.NewSummarizerService(),
 		Floweng:   flowEngine,
 		Guard:     guardEng,
-		Workspace: workspace.NewFSService(guardEng),
+		Workspace: wsSvc,
 		Skill:     skillReg,
 	}
 	if err := services.Apply(); err != nil {
@@ -290,4 +295,24 @@ func durableDBPath(filename string) string {
 		return filepath.Join(root, filename)
 	}
 	return filepath.Join(".", "data", filename)
+}
+
+// parseAllowedWorkspaceRoots reads CODEFLOW_WORKSPACE_ROOTS (comma-separated).
+// Empty means unrestricted (desktop default). When set, all workspace API roots
+// must resolve under one of the listed paths.
+func parseAllowedWorkspaceRoots() []string {
+	raw := strings.TrimSpace(os.Getenv("CODEFLOW_WORKSPACE_ROOTS"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }

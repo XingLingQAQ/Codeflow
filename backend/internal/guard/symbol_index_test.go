@@ -19,6 +19,7 @@ func TestDuplicateSymbolAcrossFiles(t *testing.T) {
 	if err := e.BeforeWrite(ctx, a, []byte(codeA)); err != nil {
 		t.Fatalf("first write should pass: %v", err)
 	}
+	e.AfterWrite(ctx, a, []byte(codeA))
 
 	codeB := "package proj\n\nfunc ParseConfig() {}\n"
 	err := e.BeforeWrite(ctx, b, []byte(codeB))
@@ -41,10 +42,12 @@ func TestSameFileRewriteAllowed(t *testing.T) {
 	if err := e.BeforeWrite(ctx, path, []byte(code)); err != nil {
 		t.Fatal(err)
 	}
+	e.AfterWrite(ctx, path, []byte(code))
 	// rewrite same path with same symbol ok
 	if err := e.BeforeWrite(ctx, path, []byte(code+"\n// touch\n")); err != nil {
 		t.Fatalf("rewrite same file: %v", err)
 	}
+	e.AfterWrite(ctx, path, []byte(code+"\n// touch\n"))
 }
 
 func TestDuplicateBlocksWorkspaceWrite(t *testing.T) {

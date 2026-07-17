@@ -66,6 +66,12 @@ type WriteGuard interface {
 	BeforeWrite(ctx context.Context, absPath string, content []byte) error
 }
 
+// WriteCommitter is optionally implemented by WriteGuard to learn about
+// successful direct writes (e.g. guard symbol index commit).
+type WriteCommitter interface {
+	AfterWrite(ctx context.Context, absPath string, content []byte)
+}
+
 // Service is the workspace filesystem API.
 type Service interface {
 	List(ctx context.Context, req *ListRequest) ([]Entry, error)

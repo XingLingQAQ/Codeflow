@@ -15,8 +15,9 @@ import (
 
 // FSService is a real filesystem workspace rooted per-call.
 type FSService struct {
-	mu    sync.RWMutex
-	guard WriteGuard
+	mu           sync.RWMutex
+	guard        WriteGuard
+	allowedRoots []string // empty = unrestricted (tests / default desktop)
 }
 
 // NewFSService creates a workspace service. guard may be nil.
@@ -31,6 +32,51 @@ func (s *FSService) SetGuard(g WriteGuard) {
 	s.guard = g
 }
 
+// SetAllowedRoots restricts workspace operations to the given absolute roots.
+// Empty list means unrestricted (backward compatible for unit tests).
+func (s *FSService) SetAllowedRoots(roots []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowedRoots = nil
+	for _, r := range roots {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		abs, err := filepath.Abs(r)
+		if err != nil {
+			continue
+		}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = resolved
+		}
+		s.allowedRoots = append(s.allowedRoots, filepath.Clean(abs))
+	}
+}
+
+func (s *FSService) ensureRootAllowed(root string) error {
+	s.mu.RLock()
+	allowed := append([]string(nil), s.allowedRoots...)
+	s.mu.RUnlock()
+	if len(allowed) == 0 {
+		return nil
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve root: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	abs = filepath.Clean(abs)
+	for _, a := range allowed {
+		if abs == a || strings.HasPrefix(abs, a+string(filepath.Separator)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("workspace root not allowed: %s", root)
+}
+
 // Resolve joins root+rel and ensures the result is inside root.
 // Existing path components are EvalSymlinks'd so a symlink inside the tree
 // cannot point outside the project root. Non-existent write targets are
@@ -38,6 +84,9 @@ func (s *FSService) SetGuard(g WriteGuard) {
 func (s *FSService) Resolve(root, rel string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", fmt.Errorf("workspace root is required")
+	}
+	if err := s.ensureRootAllowed(root); err != nil {
+		return "", err
 	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -259,6 +308,13 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 	}
 	if err := os.WriteFile(abs, content, 0o644); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
+	}
+	// Commit guard side-effects only after a successful direct write to the
+	// real project tree (not shadow staging).
+	if mode == WriteModeDirect && guard != nil {
+		if c, ok := guard.(WriteCommitter); ok {
+			c.AfterWrite(ctx, finalAbs, content)
+		}
 	}
 	info, err := os.Stat(abs)
 	if err != nil {

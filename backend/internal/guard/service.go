@@ -118,11 +118,23 @@ func (e *Engine) BeforeWrite(ctx context.Context, absPath string, content []byte
 		}
 		return fmt.Errorf("write denied by guard")
 	}
-	// Commit symbols only when write is allowed (index tracks accepted tree).
+	// Do not Commit here: workspace may still fail os.WriteFile, and stage
+	// writes must not index until promote. See AfterWrite.
+	_ = symbols
+	return nil
+}
+
+// AfterWrite commits symbol index after a successful direct (or promoted) write.
+func (e *Engine) AfterWrite(ctx context.Context, absPath string, content []byte) {
+	if e == nil {
+		return
+	}
+	e.mu.RLock()
+	symbols := e.symbols
+	e.mu.RUnlock()
 	if symbols != nil {
 		symbols.Commit(ctx, absPath, content)
 	}
-	return nil
 }
 
 // Evaluate runs all enabled rules.

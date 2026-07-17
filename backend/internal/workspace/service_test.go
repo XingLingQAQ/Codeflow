@@ -249,3 +249,20 @@ func TestDiscardAllStaged(t *testing.T) {
 		t.Fatal(rem)
 	}
 }
+
+func TestAllowedRootsRejectOutside(t *testing.T) {
+	allowed := t.TempDir()
+	outside := t.TempDir()
+	svc := NewFSService(nil)
+	svc.SetAllowedRoots([]string{allowed})
+	if _, err := svc.Write(context.Background(), &WriteRequest{
+		Root: outside, Path: "x.txt", Content: []byte("x"),
+	}); err == nil {
+		t.Fatal("expected outside root rejected")
+	}
+	if _, err := svc.Write(context.Background(), &WriteRequest{
+		Root: allowed, Path: "x.txt", Content: []byte("x"),
+	}); err != nil {
+		t.Fatalf("allowed root write: %v", err)
+	}
+}

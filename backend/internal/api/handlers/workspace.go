@@ -259,12 +259,16 @@ func PromoteAllWorkspace(c *gin.Context) {
 	}
 	items, err := workspace.GetService().PromoteAll(c.Request.Context(), root)
 	if err != nil {
-		if strings.Contains(err.Error(), "blocked by guard") {
-			respondError(c, http.StatusForbidden, err.Error())
-			return
-		}
-		// Partial success: return promoted items with error detail.
-		respondOK(c, gin.H{"items": items, "total": len(items), "error": err.Error()})
+		// Always return items on partial success (including guard blocks) so
+		// clients see what landed; HTTP stays 200 with error detail.
+		blocked := strings.Contains(err.Error(), "blocked by guard")
+		respondOK(c, gin.H{
+			"items":          items,
+			"total":          len(items),
+			"error":          err.Error(),
+			"partial":        true,
+			"guard_blocked":  blocked,
+		})
 		return
 	}
 	respondOK(c, gin.H{"items": items, "total": len(items)})
