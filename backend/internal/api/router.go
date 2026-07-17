@@ -304,13 +304,14 @@ func (s *Server) setupRoutes() {
 		hooksGroup := v1.Group("/hooks")
 		{
 			hooksGroup.GET("", handlers.GetHooks)
+			// Static paths before /:name so "events" is not captured as a hook name.
+			hooksGroup.GET("/events", handlers.GetHookEvents)
+			hooksGroup.DELETE("/events", handlers.ClearHookEvents)
 			hooksGroup.GET("/:name", handlers.GetHook)
 			hooksGroup.PUT("/:name/config", handlers.UpdateHookConfig)
 			hooksGroup.POST("/:name/enable", handlers.EnableHook)
 			hooksGroup.POST("/:name/disable", handlers.DisableHook)
 			hooksGroup.POST("/:name/trigger", handlers.TriggerHook)
-			hooksGroup.GET("/events", handlers.GetHookEvents)
-			hooksGroup.DELETE("/events", handlers.ClearHookEvents)
 		}
 
 		// Plugin routes
