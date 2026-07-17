@@ -32,6 +32,9 @@ func (s *FSService) SetGuard(g WriteGuard) {
 }
 
 // Resolve joins root+rel and ensures the result is inside root.
+// Existing path components are EvalSymlinks'd so a symlink inside the tree
+// cannot point outside the project root. Non-existent write targets are
+// checked via the deepest existing ancestor.
 func (s *FSService) Resolve(root, rel string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", fmt.Errorf("workspace root is required")
@@ -39,6 +42,9 @@ func (s *FSService) Resolve(root, rel string) (string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve root: %w", err)
+	}
+	if resolvedRoot, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolvedRoot
 	}
 	info, err := os.Stat(absRoot)
 	if err != nil {
@@ -62,20 +68,60 @@ func (s *FSService) Resolve(root, rel string) (string, error) {
 		return "", fmt.Errorf("path escapes project root: %s", rel)
 	}
 
-	joined := filepath.Join(absRoot, clean)
-	absJoined, err := filepath.Abs(joined)
-	if err != nil {
-		return "", err
+	// Walk clean components, resolving each existing segment.
+	cur := absRoot
+	parts := strings.Split(clean, string(filepath.Separator))
+	for i, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		next := filepath.Join(cur, part)
+		fi, err := os.Lstat(next)
+		if err != nil {
+			// Remainder does not exist yet (typical write target).
+			candidate := filepath.Join(append([]string{cur}, parts[i:]...)...)
+			absCandidate, err := filepath.Abs(candidate)
+			if err != nil {
+				return "", err
+			}
+			if !pathWithinRoot(absRoot, absCandidate) {
+				return "", fmt.Errorf("path escapes project root: %s", rel)
+			}
+			return absCandidate, nil
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			resolved, err := filepath.EvalSymlinks(next)
+			if err != nil {
+				return "", fmt.Errorf("resolve symlink: %w", err)
+			}
+			if !pathWithinRoot(absRoot, resolved) {
+				return "", fmt.Errorf("path escapes project root: %s", rel)
+			}
+			cur = resolved
+			continue
+		}
+		absNext, err := filepath.Abs(next)
+		if err != nil {
+			return "", err
+		}
+		if !pathWithinRoot(absRoot, absNext) {
+			return "", fmt.Errorf("path escapes project root: %s", rel)
+		}
+		cur = absNext
 	}
-	// Ensure absJoined is under absRoot (with separator boundary)
-	rootPrefix := absRoot
+	return cur, nil
+}
+
+// pathWithinRoot reports whether candidate equals root or is a child path.
+func pathWithinRoot(root, candidate string) bool {
+	if candidate == root {
+		return true
+	}
+	rootPrefix := root
 	if !strings.HasSuffix(rootPrefix, string(filepath.Separator)) {
 		rootPrefix += string(filepath.Separator)
 	}
-	if absJoined != absRoot && !strings.HasPrefix(absJoined, rootPrefix) {
-		return "", fmt.Errorf("path escapes project root: %s", rel)
-	}
-	return absJoined, nil
+	return strings.HasPrefix(candidate, rootPrefix)
 }
 
 // List lists a directory under root.
@@ -295,7 +341,7 @@ func (s *FSService) DiscardStaged(ctx context.Context, root, rel string) error {
 	}
 	if err := os.Remove(stagedAbs); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("staged file not found: %s", rel)
+			return fmt.Errorf("staged file not found: %s: %w", rel, err)
 		}
 		return fmt.Errorf("discard staged: %w", err)
 	}

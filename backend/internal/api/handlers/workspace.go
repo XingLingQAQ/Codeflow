@@ -36,7 +36,7 @@ func ListWorkspace(c *gin.Context) {
 	}
 	entries, err := workspace.GetService().List(c.Request.Context(), &workspace.ListRequest{Root: root, Path: path})
 	if err != nil {
-		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
 		}
@@ -64,7 +64,7 @@ func ReadWorkspaceFile(c *gin.Context) {
 	}
 	fc, err := workspace.GetService().Read(c.Request.Context(), &workspace.ReadRequest{Root: readRoot, Path: path})
 	if err != nil {
-		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
 		}
@@ -126,6 +126,10 @@ func WriteWorkspaceFile(c *gin.Context) {
 	mode := workspace.WriteMode(body.Mode)
 	if mode == "" {
 		mode = workspace.WriteModeDirect
+	}
+	if mode != workspace.WriteModeDirect && mode != workspace.WriteModeStage {
+		respondError(c, http.StatusBadRequest, "mode must be direct or stage")
+		return
 	}
 	ent, err := workspace.GetService().Write(c.Request.Context(), &workspace.WriteRequest{
 		Root:          root,
@@ -226,7 +230,7 @@ func DiscardWorkspaceStaged(c *gin.Context) {
 		return
 	}
 	if err := workspace.GetService().DiscardStaged(c.Request.Context(), root, body.Path); err != nil {
-		if os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
+		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
 		}
