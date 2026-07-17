@@ -362,6 +362,13 @@ var (
 	regMu      sync.RWMutex
 )
 
+// HasRegistry reports whether a skill registry was explicitly set.
+func HasRegistry() bool {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	return defaultReg != nil
+}
+
 // GetRegistry returns the process-wide skill registry.
 func GetRegistry() Registry {
 	regMu.RLock()

@@ -7,6 +7,14 @@ var (
 	engineMu      sync.RWMutex
 )
 
+// HasEngine reports whether a process-wide engine was explicitly set
+// (does not trigger lazy construction).
+func HasEngine() bool {
+	engineMu.RLock()
+	defer engineMu.RUnlock()
+	return defaultEngine != nil
+}
+
 // GetEngine returns the process-wide engine, creating an in-memory default if needed.
 func GetEngine() Engine {
 	engineMu.RLock()
