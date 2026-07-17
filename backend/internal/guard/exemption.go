@@ -58,10 +58,11 @@ func (e *Engine) CloseExemptionStore() error {
 }
 
 // GrantExemption registers a temporary path exemption.
-// duration via ExpiresAt; zero defaults to 1 hour. When a durable store is open, the grant is persisted.
-func (e *Engine) GrantExemption(ex Exemption) {
+// duration via ExpiresAt; zero defaults to 1 hour. When a durable store is open, the grant is persisted
+// before the in-memory map is updated so API callers can surface DB failures.
+func (e *Engine) GrantExemption(ex Exemption) error {
 	if ex.Path == "" {
-		return
+		return fmt.Errorf("exemption path required")
 	}
 	if ex.ExpiresAt.IsZero() {
 		ex.ExpiresAt = time.Now().UTC().Add(time.Hour)
@@ -74,26 +75,32 @@ func (e *Engine) GrantExemption(ex Exemption) {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.exStore != nil {
+		if err := e.exStore.put(ex); err != nil {
+			return err
+		}
+	}
 	if e.exemptions == nil {
 		e.exemptions = make(map[string]Exemption)
 	}
 	e.exemptions[ex.Path] = ex
-	if e.exStore != nil {
-		_ = e.exStore.put(ex)
-	}
+	return nil
 }
 
 // ClearExemption removes a path exemption (memory + durable store).
-func (e *Engine) ClearExemption(path string) {
+func (e *Engine) ClearExemption(path string) error {
 	path = normalizeExemptionPath(path)
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.exStore != nil {
+		if err := e.exStore.delete(path); err != nil {
+			return err
+		}
+	}
 	if e.exemptions != nil {
 		delete(e.exemptions, path)
 	}
-	if e.exStore != nil {
-		_ = e.exStore.delete(path)
-	}
+	return nil
 }
 
 // ListExemptions returns a snapshot of non-expired exemptions.

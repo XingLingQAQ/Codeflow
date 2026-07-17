@@ -72,3 +72,30 @@ func TestIndexTreeFindsDuplicate(t *testing.T) {
 		t.Fatal("expected duplicate after index tree")
 	}
 }
+
+func TestIndexTreeRemovesDeletedPaths(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a.go")
+	b := filepath.Join(root, "b.go")
+	codeKeep := "package p\n\nfunc Keep() {}\n"
+	codeGone := "package p\n\nfunc Gone() {}\n"
+	if err := os.WriteFile(a, []byte(codeKeep), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(b, []byte(codeGone), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := NewEngine(nil, nil)
+	if _, err := e.IndexTree(nil, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.IndexTree(nil, root); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.BeforeWrite(nil, filepath.Join(root, "c.go"), []byte(codeGone)); err != nil {
+		t.Fatalf("ghost symbol after re-index: %v", err)
+	}
+}

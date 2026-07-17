@@ -33,6 +33,7 @@ func (e *Engine) IndexTree(ctx context.Context, root string) (int, error) {
 	}
 
 	count := 0
+	seen := make(map[string]struct{})
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil
@@ -58,11 +59,33 @@ func (e *Engine) IndexTree(ctx context.Context, root string) (int, error) {
 			default:
 			}
 		}
-		idx.Commit(ctx, path, data)
+		clean := filepath.Clean(path)
+		idx.Commit(ctx, clean, data)
+		seen[clean] = struct{}{}
 		count++
 		return nil
 	})
-	return count, err
+	if err != nil {
+		return count, err
+	}
+	// Drop symbols for source files under root that no longer exist on disk.
+	rootPrefix := root
+	if !strings.HasSuffix(rootPrefix, string(filepath.Separator)) {
+		rootPrefix += string(filepath.Separator)
+	}
+	for _, p := range idx.Paths() {
+		if p != root && !strings.HasPrefix(p, rootPrefix) {
+			continue
+		}
+		if !isSourceExt(p) {
+			continue
+		}
+		if _, ok := seen[filepath.Clean(p)]; ok {
+			continue
+		}
+		idx.Remove(p)
+	}
+	return count, nil
 }
 
 func isSourceExt(path string) bool {

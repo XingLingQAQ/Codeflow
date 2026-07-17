@@ -103,6 +103,41 @@ func (idx *SymbolIndex) IndexContent(ctx context.Context, absPath string, conten
 	idx.Commit(ctx, absPath, content)
 }
 
+// Remove drops all symbols previously indexed for absPath.
+func (idx *SymbolIndex) Remove(absPath string) {
+	if idx == nil {
+		return
+	}
+	absPath = filepath.Clean(absPath)
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	old, ok := idx.byPath[absPath]
+	if !ok {
+		return
+	}
+	for _, sym := range old {
+		idx.byKey[sym.SigKey] = removeLoc(idx.byKey[sym.SigKey], absPath)
+		if len(idx.byKey[sym.SigKey]) == 0 {
+			delete(idx.byKey, sym.SigKey)
+		}
+	}
+	delete(idx.byPath, absPath)
+}
+
+// Paths returns a snapshot of currently indexed absolute paths.
+func (idx *SymbolIndex) Paths() []string {
+	if idx == nil {
+		return nil
+	}
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	out := make([]string, 0, len(idx.byPath))
+	for p := range idx.byPath {
+		out = append(out, p)
+	}
+	return out
+}
+
 func (idx *SymbolIndex) extract(ctx context.Context, absPath string, content []byte) []SymbolLoc {
 	lang := languageFromPath(absPath)
 	if lang == ast.LangUnknown {

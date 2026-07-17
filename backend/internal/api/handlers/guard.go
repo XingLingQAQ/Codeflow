@@ -90,12 +90,15 @@ func GuardExempt(c *gin.Context) {
 	for _, r := range body.Rules {
 		rules = append(rules, guard.RuleID(r))
 	}
-	svc.GrantExemption(guard.Exemption{
+	if err := svc.GrantExemption(guard.Exemption{
 		Path:      body.Path,
 		Rules:     rules,
 		Reason:    body.Reason,
 		ExpiresAt: time.Now().UTC().Add(time.Duration(ttl) * time.Second),
-	})
+	}); err != nil {
+		respondInternalError(c, "grant exemption", err)
+		return
+	}
 	respondOK(c, gin.H{"path": body.Path, "ttl_seconds": ttl, "rules": body.Rules})
 }
 
@@ -125,7 +128,10 @@ func GuardClearExemption(c *gin.Context) {
 		respondError(c, http.StatusServiceUnavailable, "guard engine not available")
 		return
 	}
-	svc.ClearExemption(path)
+	if err := svc.ClearExemption(path); err != nil {
+		respondInternalError(c, "clear exemption", err)
+		return
+	}
 	respondOK(c, gin.H{"cleared": true, "path": path})
 }
 
