@@ -37,7 +37,7 @@ export default function CodingCanvas() {
               <div className="space-y-0.5 py-1">
                 {entries.map((e) => (
                   <div key={e.path} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[12px] text-ink-dim hover:bg-tint">
-                    {e.is_dir ? <FolderTree size={13} className="text-accent-2/60" /> : <FileCode2 size={13} className="text-ink-mute" />}
+                    {e.is_dir ? <FolderTree size={13} className="text-ink-mute" /> : <FileCode2 size={13} className="text-ink-mute" />}
                     <span className="truncate">{e.name}</span>
                   </div>
                 ))}

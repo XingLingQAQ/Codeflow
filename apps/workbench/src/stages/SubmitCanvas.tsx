@@ -11,7 +11,7 @@ export default function SubmitCanvas() {
         {[1, 2].map((g) => (
           <Card key={g} className="p-4">
             <div className="flex items-center gap-2">
-              <GitCommitHorizontal size={15} className="text-accent" />
+              <GitCommitHorizontal size={15} className="text-ink-mute" />
               <Skeleton className="h-4 w-3/5" />
               <Badge>{g === 1 ? '3 files' : '2 files'}</Badge>
             </div>

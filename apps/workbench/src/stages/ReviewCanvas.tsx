@@ -35,7 +35,7 @@ export default function ReviewCanvas() {
           {[1, 2, 3].map((i) => (
             <Card key={i} className="p-4" style={{ animationDelay: `${i * 80}ms` }}>
               <div className="flex items-start gap-2.5">
-                <div className="size-7 shrink-0 rounded-full bg-accent/15" />
+                <div className="size-7 shrink-0 rounded-full border border-line bg-tint-active" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <Skeleton className="h-3 w-20" />

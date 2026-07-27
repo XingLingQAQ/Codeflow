@@ -41,7 +41,6 @@
   --animate-shimmer: shimmer 1.6s linear infinite;
   --animate-flow: flow-sheen 3s linear infinite;
   --animate-pulse-dot: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-ring: ring-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-rise: rise 0.4s cubic-bezier(0.32, 0.72, 0, 1) both;
 
   @keyframes shimmer {
@@ -56,11 +55,6 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.45; transform: scale(0.82); }
   }
-  @keyframes ring-pulse {
-    0% { box-shadow: 0 0 0 0 rgba(124, 92, 255, 0.45); }
-    70% { box-shadow: 0 0 0 10px rgba(124, 92, 255, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(124, 92, 255, 0); }
-  }
   @keyframes rise {
     from { opacity: 0; transform: translateY(12px); }
     to { opacity: 1; transform: translateY(0); }
@@ -70,7 +64,6 @@
 /* Theme-aware runtime vars (not Tailwind utilities — used in component CSS + inline styles) */
 :root {
   --grad-signature: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
-  --grad-signature-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.10), rgba(34, 211, 238, 0.10));
   --glass-bg: rgba(255, 255, 255, 0.75);
   --glass-border: rgba(15, 23, 42, 0.06);
   /* Monochrome primary button: black bg + white text on light theme */
@@ -103,7 +96,6 @@ html.dark {
   --color-tint: rgba(255, 255, 255, 0.05);
   --color-tint-hover: rgba(255, 255, 255, 0.06);
   --color-tint-active: rgba(255, 255, 255, 0.08);
-  --grad-signature-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.16), rgba(34, 211, 238, 0.16));
   --glass-bg: rgba(15, 18, 24, 0.72);
   --glass-border: rgba(255, 255, 255, 0.08);
   /* Monochrome primary button: white bg + black text on dark theme (inverted) */
@@ -130,8 +122,11 @@ html.dark {
 }
 
 .cf-app ::selection {
-  background: rgba(124, 92, 255, 0.32);
-  color: #fff;
+  background: rgba(15, 23, 42, 0.16);
+  color: inherit;
+}
+html.dark .cf-app ::selection {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .cf-app ::-webkit-scrollbar { width: 8px; height: 8px; }

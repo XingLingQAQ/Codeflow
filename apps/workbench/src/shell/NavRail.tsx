@@ -117,7 +117,7 @@ export function NavRail() {
           icon={
             <span className="relative">
               <Search size={18} />
-              <CommandIcon size={9} className="absolute -bottom-1 -right-1 text-accent" />
+              <CommandIcon size={9} className="absolute -bottom-1 -right-1 text-ink-mute" />
             </span>
           }
           label="命令面板"

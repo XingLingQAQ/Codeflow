@@ -4,9 +4,9 @@ import { cn } from '../lib/cn';
 
 const toneDot: Record<'neutral' | 'accent' | 'success' | 'warn', string> = {
   neutral: 'bg-ink-mute/60',
-  accent: 'bg-accent',
-  success: 'bg-success',
-  warn: 'bg-warn',
+  accent: 'bg-ink',
+  success: 'bg-ink',
+  warn: 'bg-ink-mute',
 };
 
 /** Compact seven-node flow indicator for cards and lists. */

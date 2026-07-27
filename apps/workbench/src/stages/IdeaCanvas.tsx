@@ -23,7 +23,7 @@ export default function IdeaCanvas() {
         ].map((q, i) => (
           <Card key={i} className="animate-rise p-3.5" style={{ animationDelay: `${120 + i * 80}ms` }}>
             <div className="flex items-start gap-2.5">
-              <MessageCircleQuestion size={16} className="mt-0.5 shrink-0 text-accent" />
+              <MessageCircleQuestion size={16} className="mt-0.5 shrink-0 text-ink-mute" />
               <p className="text-[13px] leading-relaxed text-ink-dim">{q}</p>
             </div>
             <div className="mt-2.5 flex gap-1.5">
