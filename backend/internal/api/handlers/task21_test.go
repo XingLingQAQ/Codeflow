@@ -178,7 +178,8 @@ func TestFlowTemplateImportExportRoundTrip(t *testing.T) {
 func TestFlowTemplateDeleteBuiltin(t *testing.T) {
 	r := flowTemplateIORouter(t)
 
-	w := rexRequest(t, r, http.MethodDelete, "/api/v1/flows/templates/standard", nil, nil)
+	// Builtin template id is "new_project" (see floweng.TemplateNewProject).
+	w := rexRequest(t, r, http.MethodDelete, "/api/v1/flows/templates/new_project", nil, nil)
 	rexData(t, w, http.StatusConflict, false, nil)
 }
 

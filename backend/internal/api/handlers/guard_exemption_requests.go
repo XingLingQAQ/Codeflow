@@ -20,7 +20,9 @@ type createExemptionRequestBody struct {
 }
 
 type decideExemptionRequestBody struct {
-	Approve   bool   `json:"approve" binding:"required"`
+	// Approve is a pointer so false is a valid explicit value (binding:"required"
+	// on a bare bool rejects false as "empty").
+	Approve   *bool  `json:"approve" binding:"required"`
 	DecidedBy string `json:"decided_by"`
 	Reason    string `json:"reason"`
 }
@@ -81,7 +83,7 @@ func DecideExemptionRequest(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
-	result, err := eng.DecideExemptionRequest(c.Request.Context(), id, body.Approve, body.DecidedBy, body.Reason)
+	result, err := eng.DecideExemptionRequest(c.Request.Context(), id, *body.Approve, body.DecidedBy, body.Reason)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())

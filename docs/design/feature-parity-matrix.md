@@ -56,9 +56,9 @@
 | ID | 能力 | 状态 | 现状摘要 | 目标 | 里程碑 | 备注 |
 |---|---|---|---|---|---|---|
 | G19 | 多方多模型辩论 | ⚠️ | Generator/Critic(+Mediator)；**flow_id/stage_id FK**；**SQLite 持久化**（`data/debates.db`，write-through + rollback-on-persist-failure）；**N 方数据模型**（Parties 2..N per-party model/channel，PartyContribution mirroring）；clone fixes（SelectSolution/ResolveConflict/ProposeSolution）；26 测试 | 2~N 运行时 adapter routing per party | M4 | `internal/debate` |
-| G20 | Agent 广场 / Registry | ⚠️ | **AgentRegistry** CRUD + SQLite 持久化（`data/agents.db`）；5 builtin prompted agents；Match/RenderInjection；23 测试；无 UI/市场 | 版本/来源/插槽/市场 UI | M4 | 2026-07-26 backend landed |
-| G16 | `internal/workspace` | ⚠️ | list/read/stat/write + 沙箱 + **stage/promote/promote-all/discard/discard-all** + staged read；**polling Watcher + WSNotifier**（workspace_event topic + `workspace:root:{hash8}`）；watch/watches/delete HTTP API（experimental，capped 16，idempotent per root）；junction/symlink escape fail-closed fix；28 测试 | project root 绑定 | M3 | 2026-07-26 watch 已实现（轮询） |
-| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit + check/index/**exempt** + **SQLite 豁免持久化**（`guard_exemptions.db`）+ stage/promote 链路；**deprecated_path 规则**（deprecated_path_globs，默认 warn）；规则 severity override / exemption lifecycle 测试；35 测试 | 审批流 + 全量 shadow | M3 | 2026-07-26 |
+| G20 | Agent 广场 / Registry | ⚠️ | **AgentRegistry** CRUD + SQLite 持久化（`data/agents.db`，main+bootstrap 接线）；5 builtin prompted agents；**SelectForStage** 推荐；**RenderInjectionForAgent** skill 挂载注入；agents/registry API（7 routes 含 usage/score）；45 测试；无 UI/市场 | 版本/来源/插槽/市场 UI | M4 | 2026-07-27 backend+API landed |
+| G16 | `internal/workspace` | ⚠️ | list/read/stat/write + 沙箱 + **stage/promote/promote-all/discard/discard-all** + staged read；**polling Watcher + WSNotifier**（workspace_event topic + `workspace:root:{hash8}`）；watch/watches/delete HTTP API（experimental，capped 16，idempotent per root）；**dev-server 管理**（DetectScripts + Start/Stop/Logs/List/Shutdown，环形日志，Windows 进程树击杀）+ HTTP scripts/dev-servers；junction/symlink escape fail-closed fix；43 测试 | project root 绑定 | M3 | 2026-07-27 watch+dev-server |
+| G17 | `internal/guard` | ⚠️ | WriteGuard + AST 重复检测 + guard.yaml + IndexTree + audit + check/index/**exempt** + **SQLite 豁免持久化**（`guard_exemptions.db`）+ stage/promote 链路；**deprecated_path 规则**（deprecated_path_globs，默认 warn）；**豁免审批流**（ExemptionRequest pending/approved/rejected，decide→GrantExemption，audit 双事件，HTTP exemption-requests）；49 测试 | 全量 shadow | M3 | 2026-07-27 |
 | — | 双方辩论 API | ✅ | create/round/resolve/export/stream | 保留并升级 | M4 | 不回退现有 API 直至兼容层 |
 
 ---
@@ -155,3 +155,4 @@
 | 2026-07-26 | **G20 agent backend**：AgentRegistry CRUD + SQLite `data/agents.db`；5 builtin prompted agents；Match/RenderInjection；23 测试 |
 | 2026-07-26 | **OpenAPI 230/230 对齐**：debate solutions、workspace watch、agent routes 全量覆盖；契约检查通过 |
 | 2026-07-26 | **WS topics**：新增 `workspace_event` topic（`workspace:root:{hash8}`）|
+| 2026-07-27 | **G17 豁免审批流**：ExemptionRequest pending/approved/rejected + HTTP；**G16 dev-server** 进程管理 + HTTP；**G20** SelectForStage + skill mounts + registry API；**G12** template JSON import/export/delete HTTP；**插件贡献点注册表** M6.1 切片；**前端 M1** 新壳（浅色默认+深色切换、mock 层、调色板对齐、侧栏展开、黑白简约 chrome） |
