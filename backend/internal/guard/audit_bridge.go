@@ -58,3 +58,20 @@ func (b *AuditBridge) RecordGuardDecision(ctx context.Context, absPath string, d
 		Details: details,
 	})
 }
+
+// RecordGuardEvent implements Auditor for generic guard actions (exemption
+// request/decision lifecycle).
+func (b *AuditBridge) RecordGuardEvent(ctx context.Context, action string, details map[string]interface{}) error {
+	if b == nil || b.log == nil {
+		return nil
+	}
+	return b.log.Log(ctx, &audit.AuditLogEntry{
+		EventType: audit.EventSecurity,
+		Severity:  audit.SeverityInfo,
+		Actor:     audit.AuditActor{Type: "system", ID: "guard"},
+		Resource:  audit.AuditResource{Type: "exemption_request"},
+		Action:    action,
+		Outcome:   audit.OutcomeSuccess,
+		Details:   details,
+	})
+}

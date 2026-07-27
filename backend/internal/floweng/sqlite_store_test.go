@@ -12,6 +12,7 @@ func TestSQLiteEnginePersistence(t *testing.T) {
 	if err != nil {
 		t.Skipf("sqlite unavailable (need CGO): %v", err)
 	}
+	t.Cleanup(func() { _ = eng.Close() })
 
 	flow, err := eng.Create(context.Background(), &CreateFlowRequest{
 		ProjectID:  "proj-sql",
@@ -29,6 +30,7 @@ func TestSQLiteEnginePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = eng2.Close() })
 	loaded, err := eng2.Get(context.Background(), flow.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)

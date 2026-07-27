@@ -1,10 +1,14 @@
 package guard
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // OpenExemptionStore attaches a durable SQLite store and reloads active exemptions.
@@ -18,6 +22,11 @@ func (e *Engine) OpenExemptionStore(dbPath string) error {
 		return err
 	}
 	loaded, err := store.loadActive(time.Now().UTC())
+	if err != nil {
+		_ = store.Close()
+		return err
+	}
+	loadedReqs, err := store.loadAllRequests()
 	if err != nil {
 		_ = store.Close()
 		return err
@@ -37,6 +46,12 @@ func (e *Engine) OpenExemptionStore(dbPath string) error {
 		}
 		ex.Path = normalizeExemptionPath(ex.Path)
 		e.exemptions[ex.Path] = ex
+	}
+	if e.exRequests == nil {
+		e.exRequests = make(map[string]ExemptionRequest)
+	}
+	for _, r := range loadedReqs {
+		e.exRequests[r.ID] = r
 	}
 	e.mu.Unlock()
 	return nil
@@ -222,4 +237,137 @@ func pathMatchesExemption(slashAbs, slashKey string) bool {
 		return true
 	}
 	return strings.HasSuffix(slashAbs, "/"+slashKey)
+}
+
+// ---------------------------------------------------------------------------
+// Exemption approval workflow
+// ---------------------------------------------------------------------------
+
+// RequestExemption creates a pending exemption request. The request must be
+// decided via DecideExemptionRequest before the exemption becomes active.
+func (e *Engine) RequestExemption(ctx context.Context, req ExemptionRequest) (*ExemptionRequest, error) {
+	if strings.TrimSpace(req.Path) == "" {
+		return nil, fmt.Errorf("exemption request path required")
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		return nil, fmt.Errorf("exemption request reason required")
+	}
+	if strings.TrimSpace(req.Requester) == "" {
+		return nil, fmt.Errorf("exemption request requester required")
+	}
+	req.ID = uuid.New().String()
+	req.Status = RequestPending
+	req.CreatedAt = time.Now().UTC()
+	if req.TTL <= 0 {
+		req.TTL = time.Hour
+	}
+
+	e.mu.Lock()
+	if e.exRequests == nil {
+		e.exRequests = make(map[string]ExemptionRequest)
+	}
+	if e.exStore != nil {
+		if err := e.exStore.putRequest(req); err != nil {
+			e.mu.Unlock()
+			return nil, err
+		}
+	}
+	e.exRequests[req.ID] = req
+	e.mu.Unlock()
+
+	e.mu.RLock()
+	auditor := e.auditor
+	e.mu.RUnlock()
+	if auditor != nil {
+		_ = auditor.RecordGuardEvent(ctx, "guard.exemption_requested", map[string]interface{}{
+			"request_id": req.ID,
+			"path":       req.Path,
+			"rule_id":    string(req.RuleID),
+			"requester":  req.Requester,
+			"reason":     req.Reason,
+		})
+	}
+	cp := req
+	return &cp, nil
+}
+
+// DecideExemptionRequest approves or rejects a pending request. On approval
+// the existing GrantExemption path is called so exemption normalization,
+// persistence, and in-memory activation happen exactly as for direct grants.
+func (e *Engine) DecideExemptionRequest(ctx context.Context, id string, approve bool, decidedBy, reason string) (*ExemptionRequest, error) {
+	e.mu.Lock()
+	req, ok := e.exRequests[id]
+	if !ok {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("exemption request not found: %s", id)
+	}
+	if req.Status != RequestPending {
+		e.mu.Unlock()
+		return nil, fmt.Errorf("exemption request already decided: %s (status %s)", id, req.Status)
+	}
+	now := time.Now().UTC()
+	if approve {
+		req.Status = RequestApproved
+	} else {
+		req.Status = RequestRejected
+	}
+	req.DecidedBy = decidedBy
+	req.DecideReason = reason
+	req.DecidedAt = now
+	if e.exStore != nil {
+		if err := e.exStore.putRequest(req); err != nil {
+			e.mu.Unlock()
+			return nil, err
+		}
+	}
+	e.exRequests[id] = req
+	e.mu.Unlock()
+
+	if approve {
+		rules := []RuleID(nil)
+		if req.RuleID != "" {
+			rules = []RuleID{req.RuleID}
+		}
+		if err := e.GrantExemption(Exemption{
+			Path:      req.Path,
+			Rules:     rules,
+			Reason:    fmt.Sprintf("approved request %s: %s", id, req.Reason),
+			ExpiresAt: now.Add(req.TTL),
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	e.mu.RLock()
+	auditor := e.auditor
+	e.mu.RUnlock()
+	if auditor != nil {
+		_ = auditor.RecordGuardEvent(ctx, "guard.exemption_decided", map[string]interface{}{
+			"request_id": req.ID,
+			"path":       req.Path,
+			"status":     string(req.Status),
+			"decided_by": decidedBy,
+			"reason":     reason,
+		})
+	}
+	cp := req
+	return &cp, nil
+}
+
+// ListExemptionRequests returns requests filtered by status (empty = all),
+// ordered newest-first.
+func (e *Engine) ListExemptionRequests(status RequestStatus) []ExemptionRequest {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	out := make([]ExemptionRequest, 0, len(e.exRequests))
+	for _, r := range e.exRequests {
+		if status != "" && r.Status != status {
+			continue
+		}
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out
 }

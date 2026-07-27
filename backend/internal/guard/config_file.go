@@ -13,8 +13,9 @@ type fileConfig struct {
 		Severity string                 `yaml:"severity"`
 		Params   map[string]interface{} `yaml:"params"`
 	} `yaml:"rules"`
-	DeniedPathGlobs []string `yaml:"denied_path_globs"`
-	MaxFileBytes    int      `yaml:"max_file_bytes"`
+	DeniedPathGlobs     []string `yaml:"denied_path_globs"`
+	DeprecatedPathGlobs []string `yaml:"deprecated_path_globs"`
+	MaxFileBytes        int      `yaml:"max_file_bytes"`
 }
 
 // LoadConfigFile reads a guard YAML config. Missing file returns default config + nil error? No — returns error for missing.
@@ -33,6 +34,9 @@ func LoadConfigFile(path string) (*Config, error) {
 	}
 	if len(fc.DeniedPathGlobs) > 0 {
 		cfg.DeniedPathGlobs = append([]string(nil), fc.DeniedPathGlobs...)
+	}
+	if len(fc.DeprecatedPathGlobs) > 0 {
+		cfg.DeprecatedPathGlobs = append([]string(nil), fc.DeprecatedPathGlobs...)
 	}
 	if cfg.Rules == nil {
 		cfg.Rules = map[RuleID]RuleConfig{}

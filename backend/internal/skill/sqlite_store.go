@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -57,11 +58,83 @@ CREATE TABLE IF NOT EXISTS skills (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_skills_name ON skills(name);
+CREATE TABLE IF NOT EXISTS skill_versions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  skill_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  archived_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_id);
 `)
 	if err != nil {
 		return fmt.Errorf("init skill schema: %w", err)
 	}
 	return nil
+}
+
+// archiveVersion inserts a snapshot of sk into skill_versions and returns its row id.
+func (s *sqliteSkillStore) archiveVersion(sk *Skill, archivedAt time.Time) (int64, error) {
+	if sk == nil || sk.ID == "" {
+		return 0, fmt.Errorf("skill id required")
+	}
+	payload, err := json.Marshal(sk)
+	if err != nil {
+		return 0, err
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO skill_versions (skill_id, version, payload, archived_at) VALUES (?, ?, ?, ?)`,
+		sk.ID, sk.Version, string(payload), archivedAt.UTC().UnixMilli(),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// pruneVersions keeps only the newest keep snapshots for skillID.
+func (s *sqliteSkillStore) pruneVersions(skillID string, keep int) error {
+	_, err := s.db.Exec(`
+DELETE FROM skill_versions
+WHERE skill_id = ?
+  AND id NOT IN (
+    SELECT id FROM skill_versions WHERE skill_id = ? ORDER BY id DESC LIMIT ?
+  )`, skillID, skillID, keep)
+	return err
+}
+
+// loadAllVersions returns every archived snapshot ordered oldest-first per skill.
+func (s *sqliteSkillStore) loadAllVersions() ([]SkillVersion, error) {
+	rows, err := s.db.Query(`SELECT id, skill_id, version, payload, archived_at FROM skill_versions ORDER BY skill_id ASC, id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SkillVersion, 0)
+	for rows.Next() {
+		var (
+			rowID          int64
+			skillID        string
+			version        string
+			payload        string
+			archivedMillis int64
+		)
+		if err := rows.Scan(&rowID, &skillID, &version, &payload, &archivedMillis); err != nil {
+			return nil, err
+		}
+		var sk Skill
+		if err := json.Unmarshal([]byte(payload), &sk); err != nil {
+			return nil, err
+		}
+		out = append(out, SkillVersion{
+			RowID:      rowID,
+			SkillID:    skillID,
+			Version:    version,
+			ArchivedAt: time.UnixMilli(archivedMillis).UTC(),
+			Skill:      cloneSkill(&sk),
+		})
+	}
+	return out, rows.Err()
 }
 
 func (s *sqliteSkillStore) Close() error {

@@ -1,5 +1,6 @@
 # Example project policy — copy to .codeflow/guard.yaml
 # Loaded by codeflow-server via guard.TryLoadConfigFile.
+# 完整字段参见 internal/guard/config_file.go fileConfig。
 
 max_file_bytes: 2097152
 
@@ -12,16 +13,26 @@ denied_path_globs:
   - "**/id_rsa.pub"
   - "secrets/**"
 
+# deprecated_path_globs：写入时触发 warn（不阻止），提示迁移到新路径。
+deprecated_path_globs:
+  - "src/legacy/**"
+  - "packages/gui/src/stores/**"
+
 rules:
+  # 严重程度三级：error（阻止写入）、warn（通过但记录）、off（跳过规则）
   stacked_naming:
     severity: error
   denied_path:
     severity: error
+  deprecated_path:
+    severity: warn
   max_file_bytes:
     severity: error
   empty_path:
     severity: error
   binary_exec_write:
+    # 开发环境可降级为 warn 以便调试脚本
     severity: warn
   duplicate_symbol:
-    severity: error
+    # 大型仓库重复符号检测可关闭
+    severity: off

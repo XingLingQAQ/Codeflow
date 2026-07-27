@@ -31,11 +31,43 @@ export interface ProjectListParams {
 
 const getBase = () => API_ENDPOINTS.projects;
 
-export function listProjects(params?: ProjectListParams, signal?: AbortSignal) {
+export async function listProjects(params?: ProjectListParams, signal?: AbortSignal) {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore, showMockNotice } = await import('../src/mocks');
+    if (isMockActive()) {
+      await jitter();
+      showMockNotice();
+      const store = await getMockStore();
+      const projects = [...store.MOCK_PROJECTS];
+      return { projects, total: projects.length, has_more: false };
+    }
+  }
   return get<ProjectListResponse>(getBase(), params as Record<string, string | number | undefined>, signal);
 }
 
-export function createProject(input: ProjectCreateInput, signal?: AbortSignal) {
+export async function createProject(input: ProjectCreateInput, signal?: AbortSignal) {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../src/mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      const now = Date.now() / 1000;
+      const p: Project = {
+        id: 'proj-mock-' + Math.random().toString(36).slice(2, 8),
+        title: input.title,
+        description: input.description,
+        status: 'active',
+        progress: 0,
+        tags: input.tags,
+        git_branch: input.git_branch,
+        created_at: now,
+        updated_at: now,
+        last_active: now,
+      };
+      (store.MOCK_PROJECTS as Project[]).unshift(p);
+      return p;
+    }
+  }
   return post<Project>(getBase(), input, signal);
 }
 

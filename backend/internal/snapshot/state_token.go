@@ -64,8 +64,8 @@ func parseRecoverableState(kind, value string) (*RecoverableState, error) {
 		return nil, fmt.Errorf("invalid %s state token: %w", kind, err)
 	}
 
-	if state.SchemaVersion < 1 {
-		return nil, fmt.Errorf("%w: unsupported schema_version %d", ErrNotRestorable, state.SchemaVersion)
+	if state.SchemaVersion < 1 || state.SchemaVersion > recoverableSchemaVersion {
+		return nil, fmt.Errorf("%w: unsupported schema_version %d (supported: %d)", ErrNotRestorable, state.SchemaVersion, recoverableSchemaVersion)
 	}
 	if state.Kind != "" && state.Kind != kind {
 		return nil, fmt.Errorf("invalid %s state token: kind mismatch (got %q)", kind, state.Kind)
@@ -85,7 +85,10 @@ func parseRecoverableState(kind, value string) (*RecoverableState, error) {
 		return nil, fmt.Errorf("%w: blob storage not supported in PR-4", ErrNotRestorable)
 	}
 
-	if state.Digest != "" && len(state.Payload) > 0 {
+	if len(state.Payload) > 0 {
+		if state.Digest == "" {
+			return nil, fmt.Errorf("%s state missing digest for non-empty payload", kind)
+		}
 		sum := sha256.Sum256(state.Payload)
 		expected := fmt.Sprintf("sha256:%x", sum)
 		if state.Digest != expected {

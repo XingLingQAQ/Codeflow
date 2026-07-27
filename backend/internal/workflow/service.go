@@ -174,7 +174,6 @@ func enrichSummaryWithFlows(ctx context.Context, projectID string, summary *Work
 	}
 }
 
-
 func enrichSummaryWithDebates(ctx context.Context, projectID string, summary *WorkflowSummary) {
 	if summary == nil {
 		return
@@ -269,6 +268,46 @@ func collectFlowengTimelineEvents(ctx context.Context, projectID string) []Workf
 	return out
 }
 
+// collectFlowengReplayEvents adapts floweng FlowEvent → WorkflowReplayEvent for
+// replay playback (query adapter, project-scoped). It mirrors
+// collectFlowengTimelineEvents but emits replay-shaped rows. HasEngine guards
+// against lazily constructing an engine during a read-only replay; nil is
+// returned when no engine is wired or the project has no flows, so replay never
+// fails on floweng absence.
+func collectFlowengReplayEvents(ctx context.Context, projectID string) []WorkflowReplayEvent {
+	if !floweng.HasEngine() {
+		return nil
+	}
+	eng := floweng.GetEngine()
+	if eng == nil {
+		return nil
+	}
+	flows, err := eng.List(ctx, projectID)
+	if err != nil || len(flows) == 0 {
+		return nil
+	}
+	out := make([]WorkflowReplayEvent, 0)
+	for _, flow := range flows {
+		if flow == nil {
+			continue
+		}
+		for _, ev := range flow.Events {
+			out = append(out, WorkflowReplayEvent{
+				ID:        "floweng-" + ev.ID,
+				Type:      ev.Type,
+				Lane:      "floweng",
+				Speaker:   "floweng",
+				Message:   ev.Message,
+				Evidence:  fmt.Sprintf("flow:%s", flow.ID),
+				Status:    string(flow.Status),
+				Timestamp: ev.Timestamp.UnixMilli(),
+				ProjectID: projectID,
+			})
+		}
+	}
+	return out
+}
+
 func (s *Service) GetReplay(ctx context.Context, projectID, requestedSessionID string) (*WorkflowReplay, error) {
 	snapshot, err := s.loadProjectSnapshot(ctx, projectID)
 	if err != nil {
@@ -294,6 +333,18 @@ func (s *Service) GetReplay(ctx context.Context, projectID, requestedSessionID s
 	}
 
 	replayEvents, traceCount := buildReplayEvents(traceResp, auditEntries)
+	// G14: merge floweng runtime events into the replay stream so playback is not
+	// limited to conversation trace + audit. Re-sort the combined set with the same
+	// (timestamp, id) ordering buildReplayEvents applies.
+	if flowengEvents := collectFlowengReplayEvents(ctx, projectID); len(flowengEvents) > 0 {
+		replayEvents = append(replayEvents, flowengEvents...)
+		sort.Slice(replayEvents, func(i, j int) bool {
+			if replayEvents[i].Timestamp == replayEvents[j].Timestamp {
+				return replayEvents[i].ID < replayEvents[j].ID
+			}
+			return replayEvents[i].Timestamp < replayEvents[j].Timestamp
+		})
+	}
 	return &WorkflowReplay{
 		ProjectID:    projectID,
 		SessionID:    sessionID,

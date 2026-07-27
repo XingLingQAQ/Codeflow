@@ -41,7 +41,8 @@ const browser = await chromium.launch({ headless });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
 await mark('home_loaded', async () => {
-  await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+  const legacyUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'shell=legacy';
+  await page.goto(legacyUrl, { waitUntil: 'domcontentloaded' });
   await page.getByText('What would you like to build?').first().waitFor({ timeout: 10000 });
   await page.screenshot({ path: path.join(artifactsDir, 'ui-e2e-home.png'), fullPage: true });
 });

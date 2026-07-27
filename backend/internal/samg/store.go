@@ -361,6 +361,9 @@ func (s *InMemoryTripleStore) ExportGraph(ctx context.Context) (*JsonLdGraph, er
 	for _, triple := range s.triples {
 		triples = append(triples, triple)
 	}
+	sort.Slice(triples, func(i, j int) bool {
+		return triples[i].ID < triples[j].ID
+	})
 
 	return &JsonLdGraph{
 		Context: JsonLdContext{
@@ -414,14 +417,17 @@ func (s *InMemoryTripleStore) GetStats(ctx context.Context) (*GraphMetadata, err
 
 func (s *InMemoryTripleStore) getStatsLocked() (*GraphMetadata, error) {
 	predicates := make(map[string]struct{})
+	var latestUpdate int64
 	for _, triple := range s.triples {
 		predicates[triple.Predicate] = struct{}{}
+		if triple.Timestamp > latestUpdate {
+			latestUpdate = triple.Timestamp
+		}
 	}
 
-	now := time.Now().UnixMilli()
 	return &GraphMetadata{
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		CreatedAt:      latestUpdate,
+		UpdatedAt:      latestUpdate,
 		TripleCount:    len(s.triples),
 		EntityCount:    len(s.entities),
 		PredicateCount: len(predicates),

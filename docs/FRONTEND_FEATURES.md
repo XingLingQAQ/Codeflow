@@ -2,6 +2,57 @@
 
 > 说明：当前默认产品前端已裁决为 `apps/workbench`（`@codeflow/workbench`；历史 `codeflow_template` 已于 PR-3 删除；G01 已 rename desktop→workbench）。本文档记录的是 `packages/gui` 历史组件资产，不再代表默认浏览器、E2E、Tauri 或交付入口。
 
+---
+
+## Workbench 新 Shell（2026-07-27）
+
+> 以下描述 `apps/workbench` 当前实际可运行的前端主线。
+
+### 信息架构（路由）
+
+| 路由 | 页面 |
+|------|------|
+| `/` | Dashboard（首页看板） |
+| `/projects` | 项目列表 |
+| `/workbench/:projectId/:stage` | Workbench 阶段画布 |
+| `/flows` | Flow 列表 |
+| `/agents` | Agent 面板 |
+| `/plugins` | 插件管理 |
+| `/config` `/config/:section` | 配置面板 |
+| `/settings` | 系统设置 |
+
+### 启动门控与开屏
+
+`AppRoot` → `StartupGate` → `AppShell`。StartupGate 在后端健康检查通过前显示开屏（splash），后端不可达时自动激活 dev-only mock 层（见下方）。
+
+### 设计系统
+
+- **Design tokens**：`apps/workbench/src/ui/theme.css`，`@theme` + CSS custom properties
+- **字体**：Space Grotesk（display）、Inter（sans）、JetBrains Mono（mono）
+- **配色**：accent 渐变 `#7C5CFF → #22D3EE`，状态色（success/warn/danger）双主题不变
+- **主题**：光为默认（`--color-base: #ffffff`），暗主题（graphite dark）通过 `html.dark` 切换（`--color-base: #0a0c10`），已着陆，含 toggle 切换
+- **Glassmorphism**：`.glass` 组件层（`backdrop-filter: blur(16px) saturate(140%)`）
+- **动效**：`shimmer`、`flow-sheen`、`pulse-dot`、`ring-pulse`、`rise`、`cf-pop`、`cf-slide-up`，均遵守 `prefers-reduced-motion`
+
+### Workbench 工作台
+
+- **FlowProgress**：横向阶段进度条，含 stage-dot + shimmer 动画（活跃阶段）、ring-pulse（选中）
+- **七个阶段画布**：`idea` → `design` → `planning` → `research` → `coding` → `review` → `submit`。每个画布懒加载（`React.lazy`），通过 `StageCanvasHost` + `AnimatePresence` 渲染，画布间 morph 过渡
+- **AgentCompanion**：右侧可折叠伴侣面板，布局 store（`useLayoutStore`）管理折叠状态，可拖拽调整宽度
+- **命令面板**：`Cmd+K` / `Ctrl+K` 全局唤出 `CommandPalette`
+
+### Dev-Only Mock 层
+
+- `apps/workbench/src/mocks/`：fixture 数据 + 按 service-bridge 模块分离的 mock 实现
+- 激活条件：`StartupGate` 检测后端不可达时自动注入；仅 dev 构建包含，生产排除
+- 覆盖：projects / flows / templates / workspace / guard / agents
+
+### 历史 Legacy Console
+
+旧版 `packages/gui` Console 仍可通过 `?shell=legacy` 查询参数访问。
+
+---
+
 ## 概述
 
 本文档覆盖的历史 GUI 组件资产基于 **React + TypeScript** 构建，主要沉淀在 `packages/gui`。当前默认产品前端为 `apps/workbench`，它承接浏览器与 Tauri/sidecar 双模式工作台。

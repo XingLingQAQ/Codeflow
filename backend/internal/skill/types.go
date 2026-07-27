@@ -71,6 +71,17 @@ type MatchResult struct {
 	Hits  []string `json:"hits,omitempty"`
 }
 
+// SkillVersion is an archived snapshot of a skill captured before an Update.
+// RowID identifies the snapshot for rollback (monotonic per registry / SQLite
+// autoincrement). Skill holds the full prior payload.
+type SkillVersion struct {
+	RowID      int64     `json:"row_id"`
+	SkillID    string    `json:"skill_id"`
+	Version    string    `json:"version"`
+	ArchivedAt time.Time `json:"archived_at"`
+	Skill      *Skill    `json:"skill"`
+}
+
 // Registry is the skill asset service.
 type Registry interface {
 	Create(ctx context.Context, req *CreateRequest) (*Skill, error)
@@ -86,4 +97,9 @@ type Registry interface {
 	RenderInjection(ctx context.Context, req *MatchRequest) (string, error)
 	// ImportMarkdownDir loads *.md files as skills (frontmatter optional).
 	ImportMarkdownDir(ctx context.Context, dir string) (int, error)
+	// ListVersions returns archived prior versions of a skill, newest first.
+	ListVersions(ctx context.Context, skillID string) ([]SkillVersion, error)
+	// RollbackVersion restores an archived snapshot (by row id) as a new update,
+	// which in turn archives the current state. Builtins cannot be rolled back.
+	RollbackVersion(ctx context.Context, skillID string, versionRowID int64) (*Skill, error)
 }

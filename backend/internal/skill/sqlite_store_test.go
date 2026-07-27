@@ -12,6 +12,7 @@ func TestSQLiteRegistryPersistence(t *testing.T) {
 	if err != nil {
 		t.Skipf("sqlite unavailable: %v", err)
 	}
+	defer reg.Close()
 
 	// builtins seeded on empty db
 	list, err := reg.List(context.Background())
@@ -30,6 +31,7 @@ func TestSQLiteRegistryPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer reg2.Close()
 	got, err := reg2.Get(context.Background(), created.ID)
 	if err != nil || got.Name != "Persist Me" {
 		t.Fatalf("reload got=%+v err=%v", got, err)

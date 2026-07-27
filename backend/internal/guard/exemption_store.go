@@ -55,11 +55,60 @@ CREATE TABLE IF NOT EXISTS exemptions (
   payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_exemptions_expires ON exemptions(expires_at);
+CREATE TABLE IF NOT EXISTS exemption_requests (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_exreq_status ON exemption_requests(status);
 `)
 	if err != nil {
 		return fmt.Errorf("init guard exemption schema: %w", err)
 	}
 	return nil
+}
+
+func (s *sqliteExemptionStore) putRequest(req ExemptionRequest) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("exemption store not open")
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`
+INSERT INTO exemption_requests (id, status, payload, created_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+  status=excluded.status,
+  payload=excluded.payload
+`, req.ID, string(req.Status), string(payload), req.CreatedAt.UTC().UnixMilli())
+	return err
+}
+
+func (s *sqliteExemptionStore) loadAllRequests() ([]ExemptionRequest, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT payload FROM exemption_requests ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ExemptionRequest, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var req ExemptionRequest
+		if err := json.Unmarshal([]byte(payload), &req); err != nil {
+			return nil, err
+		}
+		out = append(out, req)
+	}
+	return out, rows.Err()
 }
 
 func (s *sqliteExemptionStore) Close() error {

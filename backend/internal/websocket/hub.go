@@ -199,6 +199,10 @@ const TopicFlowEvent = "flow_event"
 // TopicDebateEvent is the hub topic for debate lifecycle updates.
 const TopicDebateEvent = "debate_event"
 
+// TopicWorkspaceEvent is the hub topic for workspace file-change events
+// (created/modified/deleted). Per-root fan-out uses workspace.WorkspaceTopicForRoot.
+const TopicWorkspaceEvent = "workspace_event"
+
 // BroadcastToTopic sends a message only to clients subscribed to topic.
 // SessionID on the message is ignored for routing (topic fan-out only).
 func (h *Hub) BroadcastToTopic(topic string, msg *Message) {

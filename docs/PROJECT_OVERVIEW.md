@@ -86,7 +86,13 @@
 - 热切换支持
 - 模型状态监控
 
-### 6. 安全与合规
+### 6. Generator/Critic 辩论校验
+- 多轮 Generator-Critic 对抗式验证
+- 冲突检测与解决
+- 多方参与（2~N Party，per-party model/channel 绑定）
+- SQLite 持久化（durable write-through）
+
+### 7. 安全与合规
 - PII 脱敏与加密存储
 - 不可变审计日志
 - 哈希链完整性验证

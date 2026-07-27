@@ -148,6 +148,14 @@ func (s *FSService) Resolve(root, rel string) (string, error) {
 			cur = resolved
 			continue
 		}
+		// Reparse points that are not symlinks (Windows junctions / mount points)
+		// are reported as irregular. EvalSymlinks cannot reliably resolve them to a
+		// real path, yet the OS transparently redirects reads/writes through them —
+		// a no-privilege sandbox escape. Fail closed. (On Unix regular files/dirs are
+		// never irregular, so this only affects genuine reparse points.)
+		if fi.Mode()&os.ModeIrregular != 0 {
+			return "", fmt.Errorf("path escapes project root: %s", rel)
+		}
 		absNext, err := filepath.Abs(next)
 		if err != nil {
 			return "", err

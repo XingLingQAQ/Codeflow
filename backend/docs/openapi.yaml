@@ -77,6 +77,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
 
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check (reports component wiring)
+      responses:
+        '200':
+          description: Server is ready
+        '503':
+          description: One or more required components are not ready
+
+  /metrics:
+    get:
+      tags: [Health]
+      summary: Request metrics snapshot
+      responses:
+        '200':
+          description: Trace and metrics snapshot
+
   /api/v1/memory/items:
     get:
       tags: [Memory]
@@ -392,6 +410,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentListResponse'
+    post:
+      tags: [Agents]
+      summary: Create agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role]
+              properties:
+                name: { type: string }
+                role: { type: string }
+                model: { type: string }
+                session_id: { type: string }
+      responses:
+        '201':
+          description: Agent created
+        '400':
+          description: Invalid request body
+
+  /api/v1/agents/{id}:
+    get:
+      tags: [Agents]
+      summary: Get agent by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent detail
+        '404':
+          description: Agent not found
+    put:
+      tags: [Agents]
+      summary: Update agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                role: { type: string }
+                status: { type: string }
+                model: { type: string }
+                session_id: { type: string }
+      responses:
+        '200':
+          description: Agent updated
+        '404':
+          description: Agent not found
+    delete:
+      tags: [Agents]
+      summary: Delete agent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent deleted
+        '404':
+          description: Agent not found
 
   /api/v1/agents/{id}/logs:
     get:
@@ -415,6 +509,321 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentLogsResponse'
+
+  /api/v1/agents/registry:
+    get:
+      tags: [Agents]
+      summary: List agent registry assets
+      x-codeflow-experimental: true
+      parameters:
+        - name: stage
+          in: query
+          schema:
+            type: string
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [main, coder, sub, critic, researcher]
+        - name: source
+          in: query
+          schema:
+            type: string
+            enum: [builtin, user, plugin]
+      responses:
+        '200':
+          description: Agent asset list
+        '503':
+          description: Agent registry not available
+    post:
+      tags: [Agents]
+      summary: Create an agent registry asset
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role_base]
+              properties:
+                name: { type: string }
+                role_base:
+                  type: string
+                  enum: [main, coder, sub, critic, researcher]
+                avatar: { type: string }
+                description: { type: string }
+                version: { type: string }
+                source:
+                  type: string
+                  enum: [user, plugin]
+                system_prompt: { type: string }
+                binding:
+                  type: object
+                  properties:
+                    model: { type: string }
+                    channel: { type: string }
+                    temperature: { type: number }
+                    max_tokens: { type: integer }
+                mounts:
+                  type: object
+                  properties:
+                    mcp_tools:
+                      type: array
+                      items: { type: string }
+                    skills:
+                      type: array
+                      items: { type: string }
+                stage_tags:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: Agent asset created
+        '400':
+          description: Invalid request body
+        '503':
+          description: Agent registry not available
+
+  /api/v1/agents/registry/{id}:
+    get:
+      tags: [Agents]
+      summary: Get agent registry asset by ID
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent asset detail
+        '404':
+          description: Agent asset not found
+        '503':
+          description: Agent registry not available
+    patch:
+      tags: [Agents]
+      summary: Update agent registry asset
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                avatar: { type: string }
+                description: { type: string }
+                version: { type: string }
+                role_base:
+                  type: string
+                  enum: [main, coder, sub, critic, researcher]
+                system_prompt: { type: string }
+                binding: { type: object }
+                mounts: { type: object }
+                stage_tags:
+                  type: array
+                  items: { type: string }
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Agent asset updated
+        '404':
+          description: Agent asset not found
+        '409':
+          description: Builtin agent cannot be modified
+        '503':
+          description: Agent registry not available
+    delete:
+      tags: [Agents]
+      summary: Delete agent registry asset
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent asset deleted
+        '404':
+          description: Agent asset not found
+        '409':
+          description: Builtin agent cannot be deleted
+        '503':
+          description: Agent registry not available
+
+  /api/v1/agents/registry/{id}/usage:
+    post:
+      tags: [Agents]
+      summary: Increment usage counter for an agent asset
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Usage incremented
+        '404':
+          description: Agent asset not found
+        '503':
+          description: Agent registry not available
+
+  /api/v1/agents/registry/{id}/score:
+    post:
+      tags: [Agents]
+      summary: Set quality score for an agent asset
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [score]
+              properties:
+                score:
+                  type: number
+                  format: double
+      responses:
+        '200':
+          description: Score updated
+        '404':
+          description: Agent asset not found
+        '503':
+          description: Agent registry not available
+
+  /api/v1/integrations:
+    get:
+      tags: [Integrations]
+      summary: List registered integrations
+      responses:
+        '200':
+          description: Integration list
+    post:
+      tags: [Integrations]
+      summary: Register a governed integration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manifest:
+                  type: object
+                  description: Integration manifest (name, version, endpoints)
+                signature:
+                  type: object
+                  description: Manifest signature envelope
+                policy:
+                  type: object
+                  description: Governance policy (permissions, limits)
+                actor:
+                  type: object
+                  description: Audit actor performing the registration
+      responses:
+        '201':
+          description: Integration registered
+        '400':
+          description: Invalid manifest
+        '403':
+          description: Permission denied
+
+  /api/v1/integrations/{id}:
+    get:
+      tags: [Integrations]
+      summary: Get integration by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Integration detail
+        '404':
+          description: Integration not found
+
+  /api/v1/integrations/{id}/invoke:
+    post:
+      tags: [Integrations]
+      summary: Invoke a registered integration
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actor:
+                  type: object
+                  description: Audit actor performing the invocation
+                payload:
+                  description: Arbitrary invocation payload
+                session_id: { type: string }
+                description: { type: string }
+                tags:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: Invocation result
+        '404':
+          description: Integration not found
+
+  /api/v1/integrations/{id}/replay:
+    post:
+      tags: [Integrations]
+      summary: Restore snapshot and replay an invocation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actor:
+                  type: object
+                  description: Audit actor performing the replay
+                invocation_id: { type: string }
+      responses:
+        '200':
+          description: Replay result (restore evidence and new invocation)
+        '404':
+          description: Integration or invocation not found
 
   /api/v1/conversations/{sessionId}/trace:
     get:
@@ -698,6 +1107,30 @@ paths:
         '200':
           description: Conflict resolved
 
+  /api/v1/debates/{id}/solutions:
+    post:
+      tags: [Debates]
+      summary: Propose a solution in a debate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeSolutionRequest'
+      responses:
+        '201':
+          description: Solution proposed
+        '404':
+          description: Debate not found
+        '409':
+          description: Debate not in progress
+
   /api/v1/debates/{id}/select-solution:
     post:
       tags: [Debates]
@@ -791,6 +1224,61 @@ paths:
       responses:
         '201':
           description: Plan created
+
+  /api/v1/plans/{id}:
+    get:
+      tags: [Plans]
+      summary: Get plan by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plan detail
+        '404':
+          description: Plan not found
+    put:
+      tags: [Plans]
+      summary: Update plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string }
+                status: { type: string }
+                metadata: { type: object }
+      responses:
+        '200':
+          description: Plan updated
+        '404':
+          description: Plan not found
+    delete:
+      tags: [Plans]
+      summary: Delete plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Plan deleted
+        '404':
+          description: Plan not found
 
   /api/v1/plans/{id}/tasks:
     get:
@@ -3248,6 +3736,68 @@ paths:
           description: Template detail
         '404':
           description: Unknown template
+    delete:
+      tags: [Flows]
+      summary: Delete a custom flow template
+      x-codeflow-experimental: true
+      parameters:
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template deleted
+        '404':
+          description: Unknown custom template
+        '409':
+          description: Cannot delete built-in template
+
+  /api/v1/flows/templates/{tid}/export:
+    get:
+      tags: [Flows]
+      summary: Export template as JSON (CustomTemplate shape)
+      x-codeflow-experimental: true
+      parameters:
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template JSON (Content-Type application/json)
+        '404':
+          description: Unknown template
+
+  /api/v1/flows/templates/import:
+    post:
+      tags: [Flows]
+      summary: Import a custom flow template from JSON
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, stages]
+              properties:
+                id: { type: string }
+                stages:
+                  type: array
+                  items: { type: object }
+                loops:
+                  type: array
+                  items: { type: object }
+      responses:
+        '201':
+          description: Template imported (returns id)
+        '400':
+          description: Invalid template JSON or validation error
+        '409':
+          description: Cannot override built-in template
 
   /api/v1/flows:
     get:
@@ -3827,6 +4377,179 @@ paths:
         '403':
           description: Blocked by guard
 
+  /api/v1/workspace/watch:
+    post:
+      tags: [Workspace]
+      summary: Start (or reuse) a filesystem watcher for a project root
+      description: Polls the project root and broadcasts created/modified/deleted events on the per-root websocket topic. Idempotent per resolved root (an existing watch is returned) and capped per process.
+      x-codeflow-experimental: true
+      parameters:
+        - name: X-Codeflow-Workspace-Root
+          in: header
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                root: { type: string }
+                interval_ms:
+                  type: integer
+                  description: Poll cadence in ms, clamped to [250, 60000] (default 2000)
+      responses:
+        '201':
+          description: Watch created (watch_id, root, topic, interval_ms)
+        '200':
+          description: Existing watch for this resolved root (idempotent)
+        '400':
+          description: Root missing or invalid
+        '409':
+          description: Active workspace watch limit reached
+        '503':
+          description: Workspace service unavailable
+    delete:
+      tags: [Workspace]
+      summary: Stop and remove a filesystem watcher
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: query
+          description: Watch id (also accepted as JSON body watch_id)
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                watch_id: { type: string }
+      responses:
+        '200':
+          description: Watch stopped
+        '400':
+          description: Watch id missing
+        '404':
+          description: Unknown watch id
+        '503':
+          description: Workspace service unavailable
+
+  /api/v1/workspace/watches:
+    get:
+      tags: [Workspace]
+      summary: List active filesystem watchers
+      x-codeflow-experimental: true
+      responses:
+        '200':
+          description: Active watch entries (watch_id, root, topic, interval_ms, created_at)
+        '503':
+          description: Workspace service unavailable
+
+  /api/v1/workspace/scripts:
+    get:
+      tags: [Workspace]
+      summary: Detect npm scripts from package.json
+      x-codeflow-experimental: true
+      parameters:
+        - name: root
+          in: query
+          schema:
+            type: string
+        - name: X-Codeflow-Workspace-Root
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Script list (name, command)
+        '503':
+          description: Workspace service unavailable
+
+  /api/v1/workspace/dev-servers:
+    get:
+      tags: [Workspace]
+      summary: List managed dev-server processes
+      x-codeflow-experimental: true
+      responses:
+        '200':
+          description: Dev-server handle list
+        '503':
+          description: Workspace service unavailable
+    post:
+      tags: [Workspace]
+      summary: Start a dev-server for a workspace script
+      description: Idempotent per (root, script); returns the existing handle if already running. Capped per process.
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [script]
+              properties:
+                root: { type: string }
+                script: { type: string }
+      responses:
+        '201':
+          description: Dev-server started
+        '200':
+          description: Existing dev-server returned (idempotent)
+        '400':
+          description: Root or script invalid
+        '409':
+          description: Dev-server limit reached
+        '503':
+          description: Workspace service unavailable
+    delete:
+      tags: [Workspace]
+      summary: Stop a managed dev-server
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: query
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string }
+      responses:
+        '200':
+          description: Dev-server stopped
+        '404':
+          description: Unknown dev-server id
+        '503':
+          description: Workspace service unavailable
+
+  /api/v1/workspace/dev-servers/{id}/logs:
+    get:
+      tags: [Workspace]
+      summary: Get dev-server log output
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tail
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Log lines
+        '404':
+          description: Unknown dev-server id
+        '503':
+          description: Workspace service unavailable
+
   # ==================== Skills (experimental) ====================
   /api/v1/skills:
     get:
@@ -3977,6 +4700,53 @@ paths:
         '409':
           description: Builtin skill cannot be deleted
 
+  /api/v1/skills/{id}/versions:
+    get:
+      tags: [Skills]
+      summary: List archived versions of a skill
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Archived skill versions (newest first)
+        '404':
+          description: Skill not found
+
+  /api/v1/skills/{id}/rollback:
+    post:
+      tags: [Skills]
+      summary: Roll back a skill to an archived version
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version_row_id]
+              properties:
+                version_row_id:
+                  type: integer
+                  format: int64
+      responses:
+        '200':
+          description: Skill restored to archived version
+        '404':
+          description: Skill or version not found
+        '409':
+          description: Builtin skill cannot be rolled back
+
   # ==================== Guard (experimental) ====================
   /api/v1/guard/config:
     get:
@@ -4082,6 +4852,79 @@ paths:
       responses:
         '200':
           description: Exemption list
+        '503':
+          description: Guard engine unavailable
+
+  /api/v1/guard/exemption-requests:
+    post:
+      tags: [Guard]
+      summary: Submit an exemption request for approval
+      x-codeflow-experimental: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, reason, requester]
+              properties:
+                path: { type: string }
+                rule_id: { type: string }
+                reason: { type: string }
+                requester: { type: string }
+                ttl_seconds: { type: integer }
+      responses:
+        '201':
+          description: Exemption request created (status pending)
+        '400':
+          description: Invalid request body
+        '503':
+          description: Guard engine unavailable
+    get:
+      tags: [Guard]
+      summary: List exemption requests
+      x-codeflow-experimental: true
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+      responses:
+        '200':
+          description: Exemption request list
+        '503':
+          description: Guard engine unavailable
+
+  /api/v1/guard/exemption-requests/{id}/decide:
+    post:
+      tags: [Guard]
+      summary: Approve or reject an exemption request
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                decided_by: { type: string }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Exemption request decided
+        '404':
+          description: Request not found
+        '409':
+          description: Request already decided (not pending)
         '503':
           description: Guard engine unavailable
 
@@ -4547,6 +5390,13 @@ components:
           type: string
         max_rounds:
           type: integer
+        parties:
+          type: array
+          description: >-
+            2..N participants; synthesized from generator/critic/mediator when
+            omitted. Each party may override model and channel bindings.
+          items:
+            $ref: '#/components/schemas/PartyConfig'
 
     Debate:
       type: object
@@ -4561,6 +5411,10 @@ components:
           type: string
         current_round:
           type: integer
+        rounds:
+          type: array
+          items:
+            $ref: '#/components/schemas/DebateRound'
         conflicts:
           type: array
           items:
@@ -4569,6 +5423,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Solution'
+        parties:
+          type: array
+          description: >-
+            2..N participants; synthesized from generator/critic/mediator when
+            omitted.
+          items:
+            $ref: '#/components/schemas/PartyConfig'
 
     Conflict:
       type: object
@@ -4596,6 +5457,57 @@ components:
         score:
           type: number
 
+    PartyConfig:
+      type: object
+      required: [agent_id]
+      description: >-
+        A debate participant. 2..N parties form the debate roster; synthesized
+        from generator/critic/mediator when omitted on create.
+      properties:
+        agent_id:
+          type: string
+        role:
+          type: string
+        model:
+          type: string
+        channel:
+          type: string
+
+    PartyContribution:
+      type: object
+      description: A single participant utterance within a debate round.
+      properties:
+        agent_id:
+          type: string
+        role:
+          type: string
+        content:
+          type: string
+        timestamp:
+          type: integer
+          format: int64
+
+    DebateRound:
+      type: object
+      properties:
+        round:
+          type: integer
+        generator_output:
+          type: string
+        critic_feedback:
+          type: string
+        started_at:
+          type: integer
+          format: int64
+        completed_at:
+          type: integer
+          format: int64
+        contributions:
+          type: array
+          description: N-party generalized view of round utterances (mirrors generator/critic output).
+          items:
+            $ref: '#/components/schemas/PartyContribution'
+
     NextRoundRequest:
       type: object
       properties:
@@ -4617,6 +5529,29 @@ components:
       properties:
         solution_id:
           type: string
+
+    ProposeSolutionRequest:
+      type: object
+      required: [proposed_by, role, title, description]
+      properties:
+        proposed_by:
+          type: string
+        role:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        code:
+          type: string
+        pros:
+          type: array
+          items:
+            type: string
+        cons:
+          type: array
+          items:
+            type: string
 
     PlanListResponse:
       type: object

@@ -26,6 +26,7 @@ const (
 	RuleEmptyPath       RuleID = "empty_path"
 	RuleBinaryExecWrite RuleID = "binary_exec_write"
 	RuleDuplicateSymbol RuleID = "duplicate_symbol"
+	RuleDeprecatedPath  RuleID = "deprecated_path"
 )
 
 // Exemption grants a temporary path-level bypass for selected rules.
@@ -48,6 +49,9 @@ type Config struct {
 	Rules map[RuleID]RuleConfig `json:"rules" yaml:"rules"`
 	// DeniedPathGlobs are slash-style globs relative to project root (e.g. ".env", "**/*.key").
 	DeniedPathGlobs []string `json:"denied_path_globs" yaml:"denied_path_globs"`
+	// DeprecatedPathGlobs mark modules that should not be appended to; writes to a
+	// matching path raise the deprecated_path rule (default warn, empty = disabled).
+	DeprecatedPathGlobs []string `json:"deprecated_path_globs" yaml:"deprecated_path_globs"`
 	// MaxFileBytes rejects writes larger than this when rule is error (0 = use default).
 	MaxFileBytes int `json:"max_file_bytes" yaml:"max_file_bytes"`
 }
@@ -70,6 +74,33 @@ type Decision struct {
 // Auditor receives denied/warned write attempts (optional; audit package may wrap).
 type Auditor interface {
 	RecordGuardDecision(ctx context.Context, absPath string, decision Decision) error
+	RecordGuardEvent(ctx context.Context, action string, details map[string]interface{}) error
+}
+
+// RequestStatus tracks exemption-request lifecycle.
+type RequestStatus string
+
+const (
+	RequestPending  RequestStatus = "pending"
+	RequestApproved RequestStatus = "approved"
+	RequestRejected RequestStatus = "rejected"
+)
+
+// ExemptionRequest is an agent's explicit ask for a temporary rule bypass.
+// It must be approved by a human (or privileged caller) before the exemption
+// becomes active.
+type ExemptionRequest struct {
+	ID           string        `json:"id"`
+	Path         string        `json:"path"`
+	RuleID       RuleID        `json:"rule_id,omitempty"`
+	Reason       string        `json:"reason"`
+	Requester    string        `json:"requester"`
+	Status       RequestStatus `json:"status"`
+	DecidedBy    string        `json:"decided_by,omitempty"`
+	DecideReason string        `json:"decide_reason,omitempty"`
+	TTL          time.Duration `json:"ttl"`
+	CreatedAt    time.Time     `json:"created_at"`
+	DecidedAt    time.Time     `json:"decided_at,omitempty"`
 }
 
 // Service evaluates write policy.

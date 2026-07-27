@@ -237,10 +237,13 @@ ISC
 
 | Package | Role |
 |---|---|
-| internal/floweng | Flow state machine + SQLite + stages/gates/artifacts/events + WS topics |
-| internal/workspace | Sandbox FS: list/read/stat/write + stage/promote-all/discard-all |
-| internal/guard | WriteGuard, AST dups, guard.yaml, durable exemptions, rules/config APIs |
-| internal/skill | Registry SQLite: CRUD/match/inject/import/export |
+| internal/floweng | Flow state machine + SQLite + stages/gates/escalation/artifacts/restore + WS topics |
+| internal/workspace | Sandbox FS: list/read/stat/write + stage/promote-all/discard-all + file watcher + dev-server |
+| internal/guard | WriteGuard, AST dups, deprecated_path, guard.yaml, durable exemptions + approval, rules/config APIs |
+| internal/skill | Registry SQLite: CRUD/match/inject/import/export + version history |
+| internal/agent | Registry SQLite: builtin prompts, stage-recommendation API |
+| internal/debate | Durable SQLite: multi-party groundwork, contributions, write-through persistence |
+| internal/snapshot | Capture/restore + consistency verification |
 | internal/summarize | Single summarize package (API + engine) |
 | internal/websocket | Hub with session + multi-topic subscribe (`flow_event`, `debate_event`) |
 | internal/workflow | Overview/timeline; floweng + debate counts |
@@ -249,6 +252,8 @@ Data defaults under `CODEFLOW_DATA_DIR` or `./data`:
 
 - `floweng.db` — flow documents
 - `skills.db` — skill registry
+- `debates.db` — debate documents
+- `agents.db` — agent registry
 - `guard_exemptions.db` — temporary path exemptions
 - `audit/` — file audit logs
 

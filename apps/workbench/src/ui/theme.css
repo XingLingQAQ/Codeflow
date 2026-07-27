@@ -1,0 +1,208 @@
+/*
+ * CodeFlow 2.0 design tokens — light default + dark (graphite) theme.
+ * Light is the default; add .dark on <html> for the graphite dark theme.
+ * Accent gradient (#7C5CFF → #22D3EE) and status colors are identical in both.
+ */
+
+@theme {
+  /* Surface scale — LIGHT defaults (overridden in html.dark) */
+  --color-base: #ffffff;
+  --color-panel: #f8fafc;
+  --color-raised: #f1f5f9;
+  --color-hover: #e2e8f0;
+
+  /* Ink (text) scale */
+  --color-ink: #0f172a;
+  --color-ink-dim: #475569;
+  --color-ink-mute: #94a3b8;
+
+  /* Hairline borders */
+  --color-line: rgba(15, 23, 42, 0.08);
+  --color-line-strong: rgba(15, 23, 42, 0.12);
+
+  /* Interactive surface tints (semi-transparent overlays that adapt to theme) */
+  --color-tint: rgba(15, 23, 42, 0.04);
+  --color-tint-hover: rgba(15, 23, 42, 0.06);
+  --color-tint-active: rgba(15, 23, 42, 0.08);
+
+  /* Accent + status — identical in both themes */
+  --color-accent: #7c5cff;
+  --color-accent-2: #22d3ee;
+  --color-success: #34d399;
+  --color-warn: #fbbf24;
+  --color-danger: #f87171;
+
+  /* Type families */
+  --font-display: "Space Grotesk", "Inter", "Noto Sans SC", system-ui, sans-serif;
+  --font-sans: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Signature motion */
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-flow: flow-sheen 3s linear infinite;
+  --animate-pulse-dot: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-ring: ring-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-rise: rise 0.4s cubic-bezier(0.32, 0.72, 0, 1) both;
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes flow-sheen {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.82); }
+  }
+  @keyframes ring-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(124, 92, 255, 0.45); }
+    70% { box-shadow: 0 0 0 10px rgba(124, 92, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(124, 92, 255, 0); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* Theme-aware runtime vars (not Tailwind utilities — used in component CSS + inline styles) */
+:root {
+  --grad-signature: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
+  --grad-signature-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.10), rgba(34, 211, 238, 0.10));
+  --glass-bg: rgba(255, 255, 255, 0.75);
+  --glass-border: rgba(15, 23, 42, 0.06);
+  /* Monochrome primary button: black bg + white text on light theme */
+  --btn-primary-bg: #0f172a;
+  --btn-primary-fg: #ffffff;
+  --btn-primary-hover: #1e293b;
+  --glow-accent: none;
+  --ease-flow: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-1: 150ms;
+  --dur-2: 250ms;
+  --dur-3: 400ms;
+  --skeleton-a: rgba(0, 0, 0, 0.04);
+  --skeleton-b: rgba(0, 0, 0, 0.08);
+  --scrollbar-thumb: rgba(15, 23, 42, 0.12);
+  --scrollbar-hover: rgba(15, 23, 42, 0.22);
+  --dialog-overlay: rgba(0, 0, 0, 0.25);
+}
+
+/* ---- Graphite dark theme ---- */
+html.dark {
+  --color-base: #0a0c10;
+  --color-panel: #0f1218;
+  --color-raised: #151a23;
+  --color-hover: #1c2330;
+  --color-ink: #e8ecf4;
+  --color-ink-dim: #9aa4b8;
+  --color-ink-mute: #5c6780;
+  --color-line: rgba(255, 255, 255, 0.07);
+  --color-line-strong: rgba(255, 255, 255, 0.12);
+  --color-tint: rgba(255, 255, 255, 0.05);
+  --color-tint-hover: rgba(255, 255, 255, 0.06);
+  --color-tint-active: rgba(255, 255, 255, 0.08);
+  --grad-signature-soft: linear-gradient(135deg, rgba(124, 92, 255, 0.16), rgba(34, 211, 238, 0.16));
+  --glass-bg: rgba(15, 18, 24, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  /* Monochrome primary button: white bg + black text on dark theme (inverted) */
+  --btn-primary-bg: #ffffff;
+  --btn-primary-fg: #0f172a;
+  --btn-primary-hover: #e2e8f0;
+  --glow-accent: none;
+  --skeleton-a: rgba(255, 255, 255, 0.03);
+  --skeleton-b: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.09);
+  --scrollbar-hover: rgba(255, 255, 255, 0.18);
+  --dialog-overlay: rgba(0, 0, 0, 0.55);
+}
+
+/* App root skin — only applied when the new shell mounts (body.cf-app). */
+.cf-app {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-base);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+.cf-app ::selection {
+  background: rgba(124, 92, 255, 0.32);
+  color: #fff;
+}
+
+.cf-app ::-webkit-scrollbar { width: 8px; height: 8px; }
+.cf-app ::-webkit-scrollbar-track { background: transparent; }
+.cf-app ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.cf-app ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
+
+@layer components {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--glass-border);
+  }
+
+  .text-gradient {
+    background: var(--grad-signature);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .flow-sheen {
+    background: linear-gradient(90deg, #7c5cff 0%, #22d3ee 45%, #7c5cff 90%);
+    background-size: 200% 100%;
+    animation: var(--animate-flow);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      var(--skeleton-a) 25%,
+      var(--skeleton-b) 37%,
+      var(--skeleton-a) 63%
+    );
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+  }
+}
+
+@keyframes cf-pop {
+  from { opacity: 0; transform: scale(0.96) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes cf-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cf-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cf-app :focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-base), 0 0 0 4px rgba(124, 92, 255, 0.7);
+  border-radius: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-app *,
+  .cf-app *::before,
+  .cf-app *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

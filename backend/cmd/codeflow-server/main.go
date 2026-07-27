@@ -12,6 +12,7 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api"
+	"github.com/codeflow/backend/internal/api/handlers"
 	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/bootstrap"
 	"github.com/codeflow/backend/internal/commander"
@@ -100,6 +101,7 @@ func run() error {
 	}
 	defer func() { _ = flowEngine.Close() }()
 	flowEngine.SetEventNotifier(floweng.NewWSNotifier(nil))
+	flowEngine.SetSnapshotRestorer(floweng.NewDefaultSnapshotRestorer(snapshotSvc))
 	skillReg, err := skill.NewSQLiteRegistry(durableDBPath("skills.db"))
 	if err != nil {
 		return fmt.Errorf("init skill sqlite: %w", err)
@@ -134,10 +136,35 @@ func run() error {
 		}
 	}
 	wsSvc := workspace.NewFSService(guardEng)
+	defer handlers.ShutdownWorkspaceWatches()
+	defer handlers.ShutdownWorkspaceDevServers()
 	if roots := parseAllowedWorkspaceRoots(); len(roots) > 0 {
 		wsSvc.SetAllowedRoots(roots)
 		fmt.Printf("✓ Workspace roots restricted to %d path(s)\n", len(roots))
 	}
+	debateMgr, debateClose := initDebateManager()
+	defer debateClose()
+	agentReg, agentRegClose := initAgentRegistry()
+	defer agentRegClose()
+	flowEngine.SetGateEscalationHandler(floweng.GateEscalationFunc(
+		func(ctx context.Context, flow *floweng.Flow, stage *floweng.Stage, gate *floweng.Gate, reason string) {
+			title := fmt.Sprintf("Gate escalation: %s", stage.Name)
+			input := fmt.Sprintf("gate %s rejected (on_fail=escalate_to_debate): %s", gate.ID, reason)
+			d, err := debateMgr.CreateDebate(ctx, &debate.DebateCreateRequest{
+				Title:        title,
+				GeneratorID:  "builtin-code-artisan",
+				CriticID:     "builtin-red-critic",
+				InitialInput: input,
+				FlowID:       flow.ID,
+				StageID:      stage.ID,
+			})
+			if err != nil {
+				log.Printf("[floweng] gate escalation debate failed: flow=%s stage=%s gate=%s err=%v", flow.ID, stage.ID, gate.ID, err)
+				return
+			}
+			log.Printf("[floweng] gate escalation debate created: debate=%s flow=%s stage=%s gate=%s", d.ID, flow.ID, stage.ID, gate.ID)
+		},
+	))
 	services := bootstrap.Services{
 		Config:    configSvc,
 		Agent:     agentSvc,
@@ -145,12 +172,13 @@ func run() error {
 		Project:   projectSvc,
 		Context:   contextSvc,
 		Snapshot:  snapshotSvc,
-		Debate:    debate.NewInMemoryDebateManager(),
+		Debate:    debateMgr,
 		Summarize: summarize.NewSummarizerService(),
 		Floweng:   flowEngine,
 		Guard:     guardEng,
 		Workspace: wsSvc,
 		Skill:     skillReg,
+		AgentRegistry: agentReg,
 	}
 	if err := services.Apply(); err != nil {
 		return err
@@ -282,6 +310,32 @@ func initContextService() (ctxsvc.IContextService, func(), error) {
 		return nil, func() {}, fmt.Errorf("init context sqlite service: %w", err)
 	}
 	return svc, closeFunc(svc), nil
+}
+
+// initDebateManager opens the durable debate store, degrading to an in-memory
+// manager (with a warning) when the database cannot be opened so the server
+// still boots. Debate history is non-critical to startup.
+func initDebateManager() (debate.IDebateManager, func()) {
+	dbPath := durableDBPath("debates.db")
+	mgr, err := debate.NewSQLiteDebateManager(dbPath)
+	if err != nil {
+		log.Printf("warning: debate sqlite store unavailable (%v); using in-memory debate manager", err)
+		return debate.NewInMemoryDebateManager(), func() {}
+	}
+	return mgr, closeFunc(mgr)
+}
+
+// initAgentRegistry opens the durable agent registry, degrading to an in-memory
+// registry (with a warning) when the database cannot be opened so the server
+// still boots. Agent asset history is non-critical to startup.
+func initAgentRegistry() (agent.AgentRegistry, func()) {
+	dbPath := durableDBPath("agents.db")
+	reg, err := agent.NewSQLiteAgentRegistry(dbPath)
+	if err != nil {
+		log.Printf("warning: agent registry sqlite store unavailable (%v); using in-memory agent registry", err)
+		return agent.NewInMemoryAgentRegistry(), func() {}
+	}
+	return reg, closeFunc(reg)
 }
 
 func closeFunc(c closer) func() {

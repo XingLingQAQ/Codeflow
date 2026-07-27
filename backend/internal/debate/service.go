@@ -34,6 +34,23 @@ const (
 	RoleMediator  AgentRole = "mediator"
 )
 
+// PartyConfig binds a debate participant to a role and optional model/channel.
+// Roles are free-form so a debate may involve more than the three built-in roles.
+type PartyConfig struct {
+	AgentID string    `json:"agent_id"`
+	Role    AgentRole `json:"role"`
+	Model   string    `json:"model,omitempty"`
+	Channel string    `json:"channel,omitempty"`
+}
+
+// PartyContribution is a single participant's utterance within a round.
+type PartyContribution struct {
+	AgentID   string    `json:"agent_id"`
+	Role      AgentRole `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp int64     `json:"timestamp"`
+}
+
 // ConflictSeverity 冲突严重程度
 type ConflictSeverity string
 
@@ -55,56 +72,63 @@ const (
 
 // Debate 辩论会话
 type Debate struct {
-	ID            string                 `json:"id"`
-	Title         string                 `json:"title"`
-	Description   string                 `json:"description,omitempty"`
-	Status        DebateStatus           `json:"status"`
-	CurrentRound  int                    `json:"current_round"`
-	MaxRounds     int                    `json:"max_rounds"`
-	GeneratorID   string                 `json:"generator_id"`
-	CriticID      string                 `json:"critic_id"`
-	MediatorID    string                 `json:"mediator_id,omitempty"`
+	ID           string       `json:"id"`
+	Title        string       `json:"title"`
+	Description  string       `json:"description,omitempty"`
+	Status       DebateStatus `json:"status"`
+	CurrentRound int          `json:"current_round"`
+	MaxRounds    int          `json:"max_rounds"`
+	GeneratorID  string       `json:"generator_id"`
+	CriticID     string       `json:"critic_id"`
+	MediatorID   string       `json:"mediator_id,omitempty"`
 	// FlowID / StageID optionally bind this debate to a floweng stage (M4 FK).
-	FlowID        string                 `json:"flow_id,omitempty"`
-	StageID       string                 `json:"stage_id,omitempty"`
-	Rounds        []*DebateRound         `json:"rounds"`
-	Conflicts     []*Conflict            `json:"conflicts"`
-	Solutions     []*Solution            `json:"solutions"`
-	SelectedSolution string              `json:"selected_solution,omitempty"`
-	CreatedAt     int64                  `json:"created_at"`
-	UpdatedAt     int64                  `json:"updated_at"`
-	ResolvedAt    int64                  `json:"resolved_at,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	FlowID           string                 `json:"flow_id,omitempty"`
+	StageID          string                 `json:"stage_id,omitempty"`
+	Rounds           []*DebateRound         `json:"rounds"`
+	Conflicts        []*Conflict            `json:"conflicts"`
+	Solutions        []*Solution            `json:"solutions"`
+	SelectedSolution string                 `json:"selected_solution,omitempty"`
+	CreatedAt        int64                  `json:"created_at"`
+	UpdatedAt        int64                  `json:"updated_at"`
+	ResolvedAt       int64                  `json:"resolved_at,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	// Parties generalizes the two-party (generator/critic[/mediator]) model to
+	// 2..N participants. Synthesized from the generator/critic/mediator IDs when
+	// not supplied so every debate exposes a uniform participant view.
+	Parties []PartyConfig `json:"parties,omitempty"`
 }
 
 // DebateRound 辩论轮次
 type DebateRound struct {
-	Number         int       `json:"number"`
-	GeneratorInput string    `json:"generator_input"`
+	Number          int      `json:"number"`
+	GeneratorInput  string   `json:"generator_input"`
 	GeneratorOutput string   `json:"generator_output,omitempty"`
-	CriticFeedback string    `json:"critic_feedback,omitempty"`
-	ConflictsFound []string  `json:"conflicts_found,omitempty"` // conflict IDs
-	StartedAt      int64     `json:"started_at"`
-	CompletedAt    int64     `json:"completed_at,omitempty"`
+	CriticFeedback  string   `json:"critic_feedback,omitempty"`
+	ConflictsFound  []string `json:"conflicts_found,omitempty"` // conflict IDs
+	StartedAt       int64    `json:"started_at"`
+	CompletedAt     int64    `json:"completed_at,omitempty"`
+	// Contributions mirrors generator/critic output into a generalized N-party
+	// shape; new consumers read this instead of the two named fields above.
+	Contributions []PartyContribution `json:"contributions,omitempty"`
 }
 
 // Conflict 冲突
 type Conflict struct {
-	ID          string                 `json:"id"`
-	DebateID    string                 `json:"debate_id"`
-	RoundNumber int                    `json:"round_number"`
-	Type        string                 `json:"type"` // logic, syntax, semantic, style, security
-	Severity    ConflictSeverity       `json:"severity"`
-	Status      ConflictStatus         `json:"status"`
-	Description string                 `json:"description"`
-	Location    string                 `json:"location,omitempty"` // file:line or code snippet
-	GeneratorView string               `json:"generator_view,omitempty"`
-	CriticView    string               `json:"critic_view,omitempty"`
-	Resolution    string               `json:"resolution,omitempty"`
-	ResolvedBy    string               `json:"resolved_by,omitempty"`
-	CreatedAt   int64                  `json:"created_at"`
-	ResolvedAt  int64                  `json:"resolved_at,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID            string                 `json:"id"`
+	DebateID      string                 `json:"debate_id"`
+	RoundNumber   int                    `json:"round_number"`
+	Type          string                 `json:"type"` // logic, syntax, semantic, style, security
+	Severity      ConflictSeverity       `json:"severity"`
+	Status        ConflictStatus         `json:"status"`
+	Description   string                 `json:"description"`
+	Location      string                 `json:"location,omitempty"` // file:line or code snippet
+	GeneratorView string                 `json:"generator_view,omitempty"`
+	CriticView    string                 `json:"critic_view,omitempty"`
+	Resolution    string                 `json:"resolution,omitempty"`
+	ResolvedBy    string                 `json:"resolved_by,omitempty"`
+	CreatedAt     int64                  `json:"created_at"`
+	ResolvedAt    int64                  `json:"resolved_at,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Solution 解决方案
@@ -125,40 +149,44 @@ type Solution struct {
 
 // AuditReport 审计报告
 type AuditReport struct {
-	DebateID       string      `json:"debate_id"`
-	Title          string      `json:"title"`
-	Status         DebateStatus `json:"status"`
-	TotalRounds    int         `json:"total_rounds"`
-	TotalConflicts int         `json:"total_conflicts"`
-	ResolvedConflicts int      `json:"resolved_conflicts"`
-	OpenConflicts  int         `json:"open_conflicts"`
-	Solutions      []*Solution `json:"solutions"`
-	SelectedSolution string    `json:"selected_solution,omitempty"`
-	Timeline       []TimelineEvent `json:"timeline"`
-	GeneratedAt    int64       `json:"generated_at"`
+	DebateID          string          `json:"debate_id"`
+	Title             string          `json:"title"`
+	Status            DebateStatus    `json:"status"`
+	TotalRounds       int             `json:"total_rounds"`
+	TotalConflicts    int             `json:"total_conflicts"`
+	ResolvedConflicts int             `json:"resolved_conflicts"`
+	OpenConflicts     int             `json:"open_conflicts"`
+	Solutions         []*Solution     `json:"solutions"`
+	SelectedSolution  string          `json:"selected_solution,omitempty"`
+	Timeline          []TimelineEvent `json:"timeline"`
+	GeneratedAt       int64           `json:"generated_at"`
 }
 
 // TimelineEvent 时间线事件
 type TimelineEvent struct {
-	Timestamp   int64  `json:"timestamp"`
-	Type        string `json:"type"` // round_start, round_end, conflict_found, conflict_resolved, solution_proposed
-	Description string `json:"description"`
-	ActorID     string `json:"actor_id,omitempty"`
+	Timestamp   int64     `json:"timestamp"`
+	Type        string    `json:"type"` // round_start, round_end, conflict_found, conflict_resolved, solution_proposed
+	Description string    `json:"description"`
+	ActorID     string    `json:"actor_id,omitempty"`
 	ActorRole   AgentRole `json:"actor_role,omitempty"`
 }
 
 // DebateCreateRequest 创建辩论请求
 type DebateCreateRequest struct {
-	Title       string                 `json:"title" binding:"required"`
-	Description string                 `json:"description,omitempty"`
-	GeneratorID string                 `json:"generator_id" binding:"required"`
-	CriticID    string                 `json:"critic_id" binding:"required"`
-	MediatorID  string                 `json:"mediator_id,omitempty"`
-	MaxRounds   int                    `json:"max_rounds,omitempty"` // default 5
-	InitialInput string                `json:"initial_input" binding:"required"`
-	FlowID      string                 `json:"flow_id,omitempty"`
-	StageID     string                 `json:"stage_id,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Title        string                 `json:"title" binding:"required"`
+	Description  string                 `json:"description,omitempty"`
+	GeneratorID  string                 `json:"generator_id" binding:"required"`
+	CriticID     string                 `json:"critic_id" binding:"required"`
+	MediatorID   string                 `json:"mediator_id,omitempty"`
+	MaxRounds    int                    `json:"max_rounds,omitempty"` // default 5
+	InitialInput string                 `json:"initial_input" binding:"required"`
+	FlowID       string                 `json:"flow_id,omitempty"`
+	StageID      string                 `json:"stage_id,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	// Parties optionally declares 2..N participants with per-party model/channel
+	// binding. When omitted, parties are synthesized from the generator/critic/
+	// mediator IDs above. Party roles are free-form.
+	Parties []PartyConfig `json:"parties,omitempty"`
 }
 
 // NextRoundRequest 下一轮请求
@@ -180,13 +208,13 @@ type SelectSolutionRequest struct {
 
 // ProposeSolutionRequest 提出方案请求
 type ProposeSolutionRequest struct {
-	ProposedBy  string   `json:"proposed_by" binding:"required"`
+	ProposedBy  string    `json:"proposed_by" binding:"required"`
 	Role        AgentRole `json:"role" binding:"required"`
-	Title       string   `json:"title" binding:"required"`
-	Description string   `json:"description" binding:"required"`
-	Code        string   `json:"code,omitempty"`
-	Pros        []string `json:"pros,omitempty"`
-	Cons        []string `json:"cons,omitempty"`
+	Title       string    `json:"title" binding:"required"`
+	Description string    `json:"description" binding:"required"`
+	Code        string    `json:"code,omitempty"`
+	Pros        []string  `json:"pros,omitempty"`
+	Cons        []string  `json:"cons,omitempty"`
 }
 
 // DebateListRequest 辩论列表请求
@@ -230,6 +258,10 @@ type IDebateManager interface {
 // ErrNotFound is returned when a debate or nested entity is missing.
 var ErrNotFound = errors.New("debate not found")
 
+// ErrInvalidRequest is returned when the caller supplies invalid input
+// (e.g. party validation failures). Handlers map this to HTTP 400.
+var ErrInvalidRequest = errors.New("invalid request")
+
 // InMemoryDebateManager 内存实现的辩论管理器
 type InMemoryDebateManager struct {
 	mu      sync.RWMutex
@@ -253,6 +285,11 @@ func (m *InMemoryDebateManager) CreateDebate(ctx context.Context, req *DebateCre
 		maxRounds = 5
 	}
 
+	parties, err := resolveParties(req)
+	if err != nil {
+		return nil, err
+	}
+
 	now := time.Now().Unix()
 	debate := &Debate{
 		ID:           uuid.New().String(),
@@ -271,11 +308,12 @@ func (m *InMemoryDebateManager) CreateDebate(ctx context.Context, req *DebateCre
 			GeneratorInput: req.InitialInput,
 			StartedAt:      now,
 		}},
-		Conflicts:  make([]*Conflict, 0),
-		Solutions:  make([]*Solution, 0),
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		Metadata:   req.Metadata,
+		Conflicts: make([]*Conflict, 0),
+		Solutions: make([]*Solution, 0),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  req.Metadata,
+		Parties:   parties,
 	}
 
 	m.debates[debate.ID] = debate
@@ -371,6 +409,12 @@ func (m *InMemoryDebateManager) NextRound(ctx context.Context, debateID string, 
 	currentRound.GeneratorOutput = req.GeneratorOutput
 	currentRound.CriticFeedback = req.CriticFeedback
 	currentRound.CompletedAt = now
+	// Legacy 2-party path: mirror the two named outputs into the generalized
+	// N-party contribution log. Multi-party debates use AppendContribution.
+	currentRound.Contributions = append(currentRound.Contributions,
+		PartyContribution{AgentID: debate.GeneratorID, Role: RoleGenerator, Content: req.GeneratorOutput, Timestamp: now},
+		PartyContribution{AgentID: debate.CriticID, Role: RoleCritic, Content: req.CriticFeedback, Timestamp: now},
+	)
 
 	// 检测冲突
 	conflicts := m.DetectConflicts(req.GeneratorOutput, req.CriticFeedback)
@@ -535,7 +579,7 @@ func (m *InMemoryDebateManager) ResolveConflict(ctx context.Context, debateID, c
 			c.Status = ConflictStatusResolved
 			c.ResolvedAt = time.Now().Unix()
 			debate.UpdatedAt = time.Now().Unix()
-			return c, nil
+			return cloneConflict(c), nil
 		}
 	}
 
@@ -569,7 +613,7 @@ func (m *InMemoryDebateManager) ProposeSolution(ctx context.Context, debateID st
 	debate.Solutions = append(debate.Solutions, solution)
 	debate.UpdatedAt = time.Now().Unix()
 
-	return solution, nil
+	return cloneSolution(solution), nil
 }
 
 // calculateSolutionScore 计算方案评分
@@ -582,6 +626,47 @@ func (m *InMemoryDebateManager) calculateSolutionScore(req *ProposeSolutionReque
 		return 0.5
 	}
 	return float64(prosCount) / float64(total)
+}
+
+// AppendContribution appends an N-party contribution to the current round.
+// It is a concrete method (not on IDebateManager) so the interface stays stable
+// while multi-party runtime matures.
+func (m *InMemoryDebateManager) AppendContribution(ctx context.Context, debateID string, c PartyContribution) (*Debate, error) {
+	if strings.TrimSpace(c.Content) == "" {
+		return nil, fmt.Errorf("contribution content must not be empty: %w", ErrInvalidRequest)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	debate, ok := m.debates[debateID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	if debate.Status != DebateStatusInProgress {
+		return nil, errors.New("debate is not in progress")
+	}
+
+	partyFound := false
+	for _, p := range debate.Parties {
+		if p.AgentID == c.AgentID {
+			partyFound = true
+			break
+		}
+	}
+	if !partyFound {
+		return nil, fmt.Errorf("agent %s is not a party of this debate: %w", c.AgentID, ErrInvalidRequest)
+	}
+
+	now := time.Now().Unix()
+	if c.Timestamp == 0 {
+		c.Timestamp = now
+	}
+	currentRound := debate.Rounds[len(debate.Rounds)-1]
+	currentRound.Contributions = append(currentRound.Contributions, c)
+	debate.UpdatedAt = now
+
+	return cloneDebate(debate), nil
 }
 
 // SelectSolution 选择方案
@@ -612,7 +697,7 @@ func (m *InMemoryDebateManager) SelectSolution(ctx context.Context, debateID str
 	debate.ResolvedAt = now
 	debate.UpdatedAt = now
 
-	return debate, nil
+	return cloneDebate(debate), nil
 }
 
 // ExportReport 导出审计报告
@@ -770,6 +855,9 @@ func cloneDebate(d *Debate) *Debate {
 		return nil
 	}
 	cp := *d
+	if d.Parties != nil {
+		cp.Parties = append([]PartyConfig(nil), d.Parties...)
+	}
 	if d.Rounds != nil {
 		cp.Rounds = make([]*DebateRound, len(d.Rounds))
 		for i, r := range d.Rounds {
@@ -780,45 +868,56 @@ func cloneDebate(d *Debate) *Debate {
 			if r.ConflictsFound != nil {
 				rc.ConflictsFound = append([]string(nil), r.ConflictsFound...)
 			}
+			if r.Contributions != nil {
+				rc.Contributions = append([]PartyContribution(nil), r.Contributions...)
+			}
 			cp.Rounds[i] = &rc
 		}
 	}
 	if d.Conflicts != nil {
 		cp.Conflicts = make([]*Conflict, len(d.Conflicts))
 		for i, c := range d.Conflicts {
-			if c == nil {
-				continue
-			}
-			cc := *c
-			if c.Metadata != nil {
-				cc.Metadata = copyMap(c.Metadata)
-			}
-			cp.Conflicts[i] = &cc
+			cp.Conflicts[i] = cloneConflict(c)
 		}
 	}
 	if d.Solutions != nil {
 		cp.Solutions = make([]*Solution, len(d.Solutions))
 		for i, sol := range d.Solutions {
-			if sol == nil {
-				continue
-			}
-			sc := *sol
-			if sol.Pros != nil {
-				sc.Pros = append([]string(nil), sol.Pros...)
-			}
-			if sol.Cons != nil {
-				sc.Cons = append([]string(nil), sol.Cons...)
-			}
-			if sol.Metadata != nil {
-				sc.Metadata = copyMap(sol.Metadata)
-			}
-			cp.Solutions[i] = &sc
+			cp.Solutions[i] = cloneSolution(sol)
 		}
 	}
 	if d.Metadata != nil {
 		cp.Metadata = copyMap(d.Metadata)
 	}
 	return &cp
+}
+
+func cloneConflict(c *Conflict) *Conflict {
+	if c == nil {
+		return nil
+	}
+	cc := *c
+	if c.Metadata != nil {
+		cc.Metadata = copyMap(c.Metadata)
+	}
+	return &cc
+}
+
+func cloneSolution(s *Solution) *Solution {
+	if s == nil {
+		return nil
+	}
+	sc := *s
+	if s.Pros != nil {
+		sc.Pros = append([]string(nil), s.Pros...)
+	}
+	if s.Cons != nil {
+		sc.Cons = append([]string(nil), s.Cons...)
+	}
+	if s.Metadata != nil {
+		sc.Metadata = copyMap(s.Metadata)
+	}
+	return &sc
 }
 
 func copyMap(in map[string]interface{}) map[string]interface{} {
@@ -830,4 +929,40 @@ func copyMap(in map[string]interface{}) map[string]interface{} {
 		out[k] = v
 	}
 	return out
+}
+
+// resolveParties returns the explicit parties (validated) or, when none are
+// supplied, a synthesized 2..3 party view from the generator/critic/mediator IDs.
+func resolveParties(req *DebateCreateRequest) ([]PartyConfig, error) {
+	if len(req.Parties) > 0 {
+		if err := validateParties(req.Parties); err != nil {
+			return nil, err
+		}
+		return append([]PartyConfig(nil), req.Parties...), nil
+	}
+	parties := []PartyConfig{
+		{AgentID: req.GeneratorID, Role: RoleGenerator},
+		{AgentID: req.CriticID, Role: RoleCritic},
+	}
+	if req.MediatorID != "" {
+		parties = append(parties, PartyConfig{AgentID: req.MediatorID, Role: RoleMediator})
+	}
+	return parties, nil
+}
+
+func validateParties(parties []PartyConfig) error {
+	if len(parties) < 2 {
+		return fmt.Errorf("a debate requires at least 2 parties: %w", ErrInvalidRequest)
+	}
+	seen := make(map[string]bool, len(parties))
+	for _, p := range parties {
+		if strings.TrimSpace(p.AgentID) == "" {
+			return fmt.Errorf("party agent_id must not be empty: %w", ErrInvalidRequest)
+		}
+		if seen[p.AgentID] {
+			return fmt.Errorf("duplicate party agent_id: %s: %w", p.AgentID, ErrInvalidRequest)
+		}
+		seen[p.AgentID] = true
+	}
+	return nil
 }

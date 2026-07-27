@@ -59,6 +59,18 @@ const (
 	GatePhaseExit  GatePhase = "exit"
 )
 
+// GateOnFail is the policy applied when a gate blocks or is rejected (design §2).
+type GateOnFail string
+
+const (
+	// GateOnFailBlock halts the stage until the gate passes. It is the
+	// zero-value semantics: an empty OnFail is treated as block.
+	GateOnFailBlock GateOnFail = "block"
+	// GateOnFailEscalateDebate additionally signals that a debate should be
+	// opened to resolve the block; the stage still halts on waiting_gate.
+	GateOnFailEscalateDebate GateOnFail = "escalate_to_debate"
+)
+
 // ArtifactStatus tracks artifact freshness after loops.
 type ArtifactStatus string
 
@@ -66,6 +78,12 @@ const (
 	ArtifactStatusDraft    ArtifactStatus = "draft"
 	ArtifactStatusApproved ArtifactStatus = "approved"
 	ArtifactStatusStale    ArtifactStatus = "stale"
+)
+
+// Artifact author values for Artifact.CreatedBy (design §2 created_by).
+const (
+	ArtifactCreatorAgent = "agent"
+	ArtifactCreatorUser  = "user"
 )
 
 // TemplateID names a built-in or registered flow template.
@@ -105,10 +123,13 @@ type Stage struct {
 
 // Gate is an enter/exit check on a stage.
 type Gate struct {
-	ID     string    `json:"id"`
-	Phase  GatePhase `json:"phase"`
-	Kind   GateKind  `json:"kind"`
-	Passed bool      `json:"passed"`
+	ID     string     `json:"id"`
+	Phase  GatePhase  `json:"phase"`
+	Kind   GateKind   `json:"kind"`
+	OnFail GateOnFail `json:"on_fail,omitempty"`
+	// Config carries gate parameters (e.g. test pass-rate threshold, approver).
+	Config map[string]string `json:"config,omitempty"`
+	Passed bool              `json:"passed"`
 }
 
 // LoopEdge allows jumping from one stage type back to an earlier type.
@@ -124,6 +145,8 @@ type Artifact struct {
 	Type    string         `json:"type"`
 	Version int            `json:"version"`
 	Status  ArtifactStatus `json:"status"`
+	// CreatedBy records the author: "agent", "user", or "" when unspecified.
+	CreatedBy string `json:"created_by,omitempty"`
 	// ContentRef is an optional storage pointer (path, blob id, URI).
 	ContentRef string    `json:"content_ref,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -173,9 +196,24 @@ type SnapshotCreator interface {
 	CreateStageSnapshot(ctx context.Context, flow *Flow, stage *Stage, sessionID string) (snapshotID string, err error)
 }
 
+// SnapshotRestorer is optional; when set, Loop restores the target stage's
+// completion snapshot before rolling flow state back (design §4-5 回跳基于阶段快照).
+// A restore error aborts the loop with the flow left unchanged.
+type SnapshotRestorer interface {
+	RestoreStageSnapshot(ctx context.Context, flow *Flow, target *Stage, snapshotID string) error
+}
+
 // EventNotifier is optional; receives each appended flow event for buses (WS, etc.).
 type EventNotifier interface {
 	OnFlowEvent(flow *Flow, event FlowEvent)
+}
+
+// ExecutionGuard is optional; when set, stage transitions (Advance/Loop) refuse
+// to run while a write/git transaction is in flight (design §4 阶段切换持锁).
+// Busy reports whether a transition is currently disallowed and, if so, a
+// human-readable reason surfaced in the returned error.
+type ExecutionGuard interface {
+	Busy() (busy bool, reason string)
 }
 
 // GateDecisionRequest approves or rejects a gate.

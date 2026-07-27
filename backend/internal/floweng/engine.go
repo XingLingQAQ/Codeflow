@@ -12,10 +12,13 @@ import (
 // InMemoryEngine is the Flow state machine. Despite the historical name it can
 // back onto any FlowStore (memory default, or SQLite via NewSQLiteEngine).
 type InMemoryEngine struct {
-	mu        sync.Mutex
-	store     FlowStore
-	snapshots SnapshotCreator // optional
-	notifier  EventNotifier   // optional
+	mu         sync.Mutex
+	store      FlowStore
+	snapshots  SnapshotCreator        // optional
+	restorer   SnapshotRestorer       // optional
+	notifier   EventNotifier          // optional
+	guard      ExecutionGuard         // optional
+	escalation GateEscalationHandler  // optional
 }
 
 // NewInMemoryEngine creates an engine with an in-process memory store.
@@ -65,11 +68,35 @@ func (e *InMemoryEngine) SetSnapshotCreator(s SnapshotCreator) {
 	e.snapshots = s
 }
 
+// SetSnapshotRestorer attaches or replaces the loop-time snapshot restore hook.
+func (e *InMemoryEngine) SetSnapshotRestorer(r SnapshotRestorer) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.restorer = r
+}
+
 // SetEventNotifier attaches or replaces the event bus hook (e.g. WebSocket).
 func (e *InMemoryEngine) SetEventNotifier(n EventNotifier) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.notifier = n
+}
+
+// SetExecutionGuard attaches or replaces the stage-transition lock (design §4).
+// When set, Advance and Loop refuse to run while the guard reports busy.
+func (e *InMemoryEngine) SetExecutionGuard(g ExecutionGuard) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.guard = g
+}
+
+// SetGateEscalationHandler attaches or replaces the callback invoked when a
+// gate with on_fail=escalate_to_debate is rejected. The handler receives cloned
+// data and must not block; errors are its own concern (fire-and-forget).
+func (e *InMemoryEngine) SetGateEscalationHandler(h GateEscalationHandler) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.escalation = h
 }
 
 // Create instantiates a Flow from a built-in template.
@@ -107,6 +134,8 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 				ID:     uuid.New().String(),
 				Phase:  g.Phase,
 				Kind:   g.Kind,
+				OnFail: g.OnFail,
+				Config: cloneStringMap(g.Config),
 				Passed: false,
 			}
 		}
@@ -122,10 +151,15 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 		})
 	}
 	flow.Stages = stages
-	e.appendEvent(flow, "flow.created", "", fmt.Sprintf("created template=%s project=%s", tmpl.ID, req.ProjectID))
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	e.appendEvent(flow, "flow.created", "", fmt.Sprintf("created template=%s project=%s", tmpl.ID, req.ProjectID))
+	// Evaluate enter gates on the initially-active first stage: an unpassed
+	// human/agent enter gate starts the flow on waiting_gate.
+	e.applyEnterGates(flow, 0)
+
 	if err := e.store.Put(flow); err != nil {
 		return nil, err
 	}
@@ -192,6 +226,10 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 		return nil, fmt.Errorf("stage is not active: %s", req.ExpectedStageID)
 	}
 
+	if err := e.checkExecutionGuard(); err != nil {
+		return nil, err
+	}
+
 	if err := passExitGates(stage); err != nil {
 		// persist waiting_gate status
 		flow.UpdatedAt = time.Now().UTC()
@@ -223,6 +261,7 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	} else {
 		flow.Stages[next].Status = StageStatusActive
 		e.appendEvent(flow, "stage.active", flow.Stages[next].ID, fmt.Sprintf("activated type=%s", flow.Stages[next].Type))
+		e.applyEnterGates(flow, next)
 	}
 
 	flow.UpdatedAt = time.Now().UTC()
@@ -271,6 +310,7 @@ func (e *InMemoryEngine) Skip(ctx context.Context, flowID string, req *SkipReque
 			if flow.Stages[i].Status == StageStatusPending {
 				flow.Stages[i].Status = StageStatusActive
 				e.appendEvent(flow, "stage.active", flow.Stages[i].ID, fmt.Sprintf("activated type=%s", flow.Stages[i].Type))
+				e.applyEnterGates(flow, i)
 				activated = true
 				break
 			}
@@ -323,6 +363,22 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 		return nil, fmt.Errorf("loop from stage must be active or done")
 	}
 
+	if err := e.checkExecutionGuard(); err != nil {
+		return nil, err
+	}
+
+	// Snapshot-based rollback (design §4-5): restore the target stage's
+	// completion snapshot before mutating any flow state. A restore failure
+	// aborts the loop with the flow left untouched.
+	if e.restorer != nil {
+		if snapID := flow.Stages[toIdx].SnapshotID; snapID != "" {
+			if err := e.restorer.RestoreStageSnapshot(ctx, flow, &flow.Stages[toIdx], snapID); err != nil {
+				return nil, fmt.Errorf("restore stage snapshot: %w", err)
+			}
+			e.appendEvent(flow, "flow.restored", to.ID, fmt.Sprintf("restored snapshot %s for %s", snapID, to.Type))
+		}
+	}
+
 	for i := range flow.Artifacts {
 		artStageIdx := stageIndexByID(flow, flow.Artifacts[i].StageID)
 		if artStageIdx >= toIdx {
@@ -350,6 +406,7 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 		reason = "loop"
 	}
 	e.appendEvent(flow, "flow.loop", to.ID, fmt.Sprintf("loop %s→%s reason=%s", from.Type, to.Type, reason))
+	e.applyEnterGates(flow, toIdx)
 
 	flow.UpdatedAt = time.Now().UTC()
 	if err := e.store.Put(flow); err != nil {
@@ -386,6 +443,7 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 		return nil, err
 	}
 	found := false
+	escalatedStageIdx := -1
 	for si := range flow.Stages {
 		for gi := range flow.Stages[si].Gates {
 			g := &flow.Stages[si].Gates[gi]
@@ -403,10 +461,16 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 					stage.Status = StageStatusActive
 				}
 				e.appendEvent(flow, "gate.approved", stage.ID, fmt.Sprintf("gate %s approved: %s", gateID, req.Reason))
+				e.applyEnterGates(flow, si)
 			} else {
 				g.Passed = false
 				stage.Status = StageStatusWaitingGate
 				e.appendEvent(flow, "gate.rejected", stage.ID, fmt.Sprintf("gate %s rejected: %s", gateID, req.Reason))
+				if g.OnFail == GateOnFailEscalateDebate {
+					e.appendEvent(flow, "gate.escalate_debate", stage.ID,
+						fmt.Sprintf("gate %s escalate to debate: %s", gateID, req.Reason))
+					escalatedStageIdx = si
+				}
 			}
 		}
 	}
@@ -416,6 +480,22 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 	flow.UpdatedAt = time.Now().UTC()
 	if err := e.store.Put(flow); err != nil {
 		return nil, err
+	}
+	if e.escalation != nil && escalatedStageIdx >= 0 {
+		s := flow.Stages[escalatedStageIdx]
+		sCopy := s
+		sCopy.Gates = append([]Gate(nil), s.Gates...)
+		for gi := range sCopy.Gates {
+			sCopy.Gates[gi].Config = cloneStringMap(sCopy.Gates[gi].Config)
+		}
+		var gCopy Gate
+		for _, g := range sCopy.Gates {
+			if g.ID == gateID {
+				gCopy = g
+				break
+			}
+		}
+		e.escalation.OnGateEscalation(ctx, cloneFlow(flow), &sCopy, &gCopy, req.Reason)
 	}
 	return cloneFlow(flow), nil
 }
@@ -450,7 +530,19 @@ func (e *InMemoryEngine) Abort(ctx context.Context, flowID, reason string) (*Flo
 }
 
 // AttachArtifact records a draft artifact on a stage (contentRef optional).
+// The author is left unspecified; use AttachArtifactBy to record it.
 func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, artType, contentRef string) (*Artifact, error) {
+	return e.AttachArtifactBy(ctx, flowID, stageID, artType, contentRef, "")
+}
+
+// AttachArtifactBy records a draft artifact and its author. createdBy must be
+// "" (unspecified), ArtifactCreatorAgent, or ArtifactCreatorUser.
+func (e *InMemoryEngine) AttachArtifactBy(ctx context.Context, flowID, stageID, artType, contentRef, createdBy string) (*Artifact, error) {
+	switch createdBy {
+	case "", ArtifactCreatorAgent, ArtifactCreatorUser:
+	default:
+		return nil, fmt.Errorf("invalid created_by %q (want %q, %q, or empty)", createdBy, ArtifactCreatorAgent, ArtifactCreatorUser)
+	}
 	if artType == "" {
 		artType = "generic"
 	}
@@ -475,6 +567,7 @@ func (e *InMemoryEngine) AttachArtifact(ctx context.Context, flowID, stageID, ar
 		Type:       artType,
 		Version:    ver,
 		Status:     ArtifactStatusDraft,
+		CreatedBy:  createdBy,
 		ContentRef: contentRef,
 		CreatedAt:  time.Now().UTC(),
 	}
@@ -588,7 +681,66 @@ func passExitGates(stage *Stage) error {
 		case GateKindHumanApproval, GateKindAgentCheck:
 			if !g.Passed {
 				stage.Status = StageStatusWaitingGate
+				if g.OnFail == GateOnFailEscalateDebate {
+					return fmt.Errorf("stage %s blocked on %s gate %s (escalation to debate suggested)", stage.Type, g.Kind, g.ID)
+				}
 				return fmt.Errorf("stage %s blocked on %s gate %s", stage.Type, g.Kind, g.ID)
+			}
+		default:
+			g.Passed = true
+		}
+	}
+	return nil
+}
+
+// checkExecutionGuard fails the caller when an ExecutionGuard reports busy.
+// Callers hold e.mu; the guard must not re-enter the engine.
+func (e *InMemoryEngine) checkExecutionGuard() error {
+	if e.guard == nil {
+		return nil
+	}
+	if busy, reason := e.guard.Busy(); busy {
+		if reason == "" {
+			reason = "busy"
+		}
+		return fmt.Errorf("stage transition locked: %s", reason)
+	}
+	return nil
+}
+
+// applyEnterGates evaluates enter-phase gates on a stage that has just been
+// activated. Auto enter gates pass immediately; the first unpassed human/agent
+// enter gate parks the stage on waiting_gate and emits gate.waiting. The
+// transition that activated the stage is unaffected (it still succeeded).
+func (e *InMemoryEngine) applyEnterGates(flow *Flow, idx int) {
+	if idx < 0 || idx >= len(flow.Stages) {
+		return
+	}
+	stage := &flow.Stages[idx]
+	if stage.Status != StageStatusActive {
+		return
+	}
+	if g := firstBlockingEnterGate(stage); g != nil {
+		stage.Status = StageStatusWaitingGate
+		e.appendEvent(flow, "gate.waiting", stage.ID,
+			fmt.Sprintf("stage %s waiting on %s enter gate %s", stage.Type, g.Kind, g.ID))
+	}
+}
+
+// firstBlockingEnterGate passes auto enter gates and returns the first unpassed
+// human/agent enter gate (nil if none blocks the stage).
+func firstBlockingEnterGate(stage *Stage) *Gate {
+	for i := range stage.Gates {
+		g := &stage.Gates[i]
+		if g.Phase != GatePhaseEnter {
+			continue
+		}
+		switch g.Kind {
+		case GateKindAuto:
+			g.Passed = true
+		case GateKindHumanApproval, GateKindAgentCheck:
+			if !g.Passed {
+				return g
 			}
 		default:
 			g.Passed = true
@@ -604,10 +756,27 @@ func cloneFlow(f *Flow) *Flow {
 	cp := *f
 	cp.Stages = append([]Stage(nil), f.Stages...)
 	for i := range cp.Stages {
-		cp.Stages[i].Gates = append([]Gate(nil), f.Stages[i].Gates...)
+		gates := append([]Gate(nil), f.Stages[i].Gates...)
+		for gi := range gates {
+			gates[gi].Config = cloneStringMap(gates[gi].Config)
+		}
+		cp.Stages[i].Gates = gates
 	}
 	cp.Loops = append([]LoopEdge(nil), f.Loops...)
 	cp.Artifacts = append([]Artifact(nil), f.Artifacts...)
 	cp.Events = append([]FlowEvent(nil), f.Events...)
 	return &cp
+}
+
+// cloneStringMap returns a shallow copy of m (nil stays nil) so callers never
+// share a gate Config map with engine-internal state.
+func cloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

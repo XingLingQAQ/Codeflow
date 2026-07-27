@@ -89,3 +89,34 @@ func TestProposeSolutionRouteRejectsInvalidRequest(t *testing.T) {
 	assert.False(t, resp.Success)
 	assert.Contains(t, resp.Error, "Invalid request body")
 }
+
+func TestCreateDebateWithOnePartyReturns400(t *testing.T) {
+	router, _ := setupDebateRouteTest(t)
+
+	body, err := json.Marshal(debate.DebateCreateRequest{
+		Title:        "bad parties",
+		GeneratorID:  "g",
+		CriticID:     "c",
+		InitialInput: "go",
+		Parties: []debate.PartyConfig{
+			{AgentID: "solo", Role: debate.RoleGenerator},
+		},
+	})
+	require.NoError(t, err)
+
+	req, err := http.NewRequest(http.MethodPost, "/api/v1/debates", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var resp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.Success)
+	assert.Contains(t, resp.Error, "at least 2 parties")
+}

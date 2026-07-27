@@ -37,7 +37,8 @@ type Services struct {
 	Floweng    floweng.Engine
 	Workspace  workspace.Service
 	Guard      guard.Service
-	Skill      skill.Registry
+	Skill          skill.Registry
+	AgentRegistry  agent.AgentRegistry
 }
 
 // Validate checks that every required service dependency has been provided.
@@ -79,6 +80,9 @@ func (s Services) Validate() error {
 	if s.Skill == nil {
 		missing = append(missing, "skill")
 	}
+	if s.AgentRegistry == nil {
+		missing = append(missing, "agent_registry")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing bootstrap services: %v", missing)
 	}
@@ -102,6 +106,7 @@ func (s Services) Apply() error {
 	workspace.SetService(s.Workspace)
 	guard.SetService(s.Guard)
 	skill.SetRegistry(s.Skill)
+	agent.SetAgentRegistry(s.AgentRegistry)
 	// Keep workspace write path forced through the same guard instance when possible.
 	if fs, ok := s.Workspace.(*workspace.FSService); ok {
 		if ge, ok := s.Guard.(*guard.Engine); ok {
@@ -127,4 +132,5 @@ func (s Services) Reset() {
 	workspace.SetService(nil)
 	guard.SetService(nil)
 	skill.SetRegistry(nil)
+	agent.SetAgentRegistry(nil)
 }

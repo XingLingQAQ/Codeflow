@@ -48,3 +48,19 @@ make test-coverage COVERAGE_OUT=coverage.out COVERAGE_HTML=coverage.html COVERAG
 GitHub Actions 可使用 `nx-ci.yml` 的 workflow badge 展示覆盖率报告生成状态；动态覆盖率百分比 badge 需要接入 Codecov、Coveralls 或 GitHub Pages 后，由 `backend/coverage.txt` 与前端 coverage summary 自动生成。
 
 当前仓库先保留本地命令、CI artifact 与目标徽章入口，避免在未配置外部覆盖率服务时生成无法自动更新的静态百分比。
+
+## 后端模块测试计数快照
+
+> 更新：2026-07-26（`go test -race` 全绿，`CGO_ENABLED=1`）
+
+| 模块 | 测试函数数 | 备注 |
+|------|-----------|------|
+| `internal/floweng` | 53 | Gate.OnFail / enter gates / ExecutionGuard / template 注册验证 / loop restore |
+| `internal/api/handlers` | 165 | 路由 + OpenAPI 契约 230/230 |
+| `internal/guard` | 35 | deprecated_path 规则 + severity override + exemption lifecycle + IndexTree/CheckAndCommit |
+| `internal/workspace` | 28 | polling Watcher + WSNotifier + junction escape + staging 强化 |
+| `internal/skill` | 27 | 版本历史 cap/rollback/persistence + frontmatter edge + match edge + import reimport |
+| `internal/debate` | 26 | SQLite 持久化 + N 方数据模型 + clone fixes |
+| `internal/workflow` | 5 | 观测桥 |
+
+总计后端 `internal/` 核心模块约 **339** 个测试函数（不含 `internal/snapshot`、`internal/audit` 等辅助包）。

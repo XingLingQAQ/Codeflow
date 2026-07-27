@@ -76,6 +76,8 @@ docs/
 │   ├── workbench-and-shell.md
 │   ├── agent-quality-system.md
 │   ├── frontend-experience.md
+│   ├── guard-policy.example.yaml
+│   ├── plugin-system.md
 │   └── early/                         # 早期设计归档（Historical）
 ├── plans/                             # 实施计划
 └── requirements/                      # 需求文档

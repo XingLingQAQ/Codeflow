@@ -119,6 +119,9 @@ func (s *Server) setupRoutes() {
 		{
 			flows.GET("/templates", handlers.ListFlowTemplates)
 				flows.GET("/templates/:tid", handlers.GetFlowTemplate)
+				flows.GET("/templates/:tid/export", handlers.ExportFlowTemplate)
+				flows.DELETE("/templates/:tid", handlers.DeleteFlowTemplate)
+			flows.POST("/templates/import", handlers.ImportFlowTemplate)
 			flows.POST("", handlers.CreateFlow)
 			flows.GET("", handlers.ListFlows)
 			flows.GET("/:id", handlers.GetFlow)
@@ -152,6 +155,15 @@ func (s *Server) setupRoutes() {
 				ws.POST("/promote-all", handlers.PromoteAllWorkspace)
 				ws.POST("/discard", handlers.DiscardWorkspaceStaged)
 				ws.POST("/discard-all", handlers.DiscardAllWorkspaceStaged)
+				// File watcher (experimental): static paths only, no param routes in this group.
+				ws.GET("/watches", handlers.ListWorkspaceWatches)
+				ws.POST("/watch", handlers.CreateWorkspaceWatch)
+				ws.DELETE("/watch", handlers.DeleteWorkspaceWatch)
+				ws.GET("/scripts", handlers.DetectWorkspaceScripts)
+				ws.GET("/dev-servers", handlers.ListWorkspaceDevServers)
+				ws.POST("/dev-servers", handlers.StartWorkspaceDevServer)
+				ws.DELETE("/dev-servers", handlers.DeleteWorkspaceDevServer)
+				ws.GET("/dev-servers/:id/logs", handlers.GetWorkspaceDevServerLogs)
 		}
 
 		// Skill registry (experimental: M5.0 minimal)
@@ -167,6 +179,8 @@ func (s *Server) setupRoutes() {
 			skills.GET("/:id", handlers.GetSkill)
 			skills.PATCH("/:id", handlers.UpdateSkill)
 			skills.DELETE("/:id", handlers.DeleteSkill)
+				skills.GET("/:id/versions", handlers.ListSkillVersions)
+				skills.POST("/:id/rollback", handlers.RollbackSkillVersion)
 		}
 
 		// Guard policy (experimental)
@@ -180,6 +194,9 @@ func (s *Server) setupRoutes() {
 			guardAPI.POST("/exempt", handlers.GuardExempt)
 				guardAPI.GET("/exemptions", handlers.GuardListExemptions)
 				guardAPI.DELETE("/exempt", handlers.GuardClearExemption)
+				guardAPI.POST("/exemption-requests", handlers.CreateExemptionRequest)
+				guardAPI.GET("/exemption-requests", handlers.ListExemptionRequests)
+				guardAPI.POST("/exemption-requests/:id/decide", handlers.DecideExemptionRequest)
 		}
 
 		// Memory routes
@@ -268,6 +285,18 @@ func (s *Server) setupRoutes() {
 		{
 			agents.GET("", handlers.GetAgents)
 			agents.POST("", handlers.CreateAgent)
+			// Agent registry (experimental: G20 asset store)
+			agentReg := agents.Group("/registry")
+			agentReg.Use(middleware.Experimental("agent-registry"))
+			{
+				agentReg.GET("", handlers.ListRegistryAgents)
+				agentReg.POST("", handlers.CreateRegistryAgent)
+				agentReg.GET("/:id", handlers.GetRegistryAgent)
+				agentReg.PATCH("/:id", handlers.UpdateRegistryAgent)
+				agentReg.DELETE("/:id", handlers.DeleteRegistryAgent)
+				agentReg.POST("/:id/usage", handlers.IncrementRegistryAgentUsage)
+				agentReg.POST("/:id/score", handlers.SetRegistryAgentScore)
+			}
 			agents.GET("/:id", handlers.GetAgent)
 			agents.PUT("/:id", handlers.UpdateAgent)
 			agents.DELETE("/:id", handlers.DeleteAgent)

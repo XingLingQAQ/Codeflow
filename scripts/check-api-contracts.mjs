@@ -256,6 +256,19 @@ const requiredOperations = [
   ['/api/v1/workflows/{projectId}/replay', 'GET'],
   ['/api/v1/debates', 'GET'],
   ['/api/v1/debates', 'POST'],
+  ['/api/v1/debates/{id}/solutions', 'POST'],
+  ['/api/v1/agents', 'POST'],
+  ['/api/v1/agents/{id}', 'GET'],
+  ['/api/v1/agents/{id}', 'PUT'],
+  ['/api/v1/agents/{id}', 'DELETE'],
+  ['/api/v1/integrations', 'GET'],
+  ['/api/v1/integrations', 'POST'],
+  ['/api/v1/integrations/{id}', 'GET'],
+  ['/api/v1/integrations/{id}/invoke', 'POST'],
+  ['/api/v1/integrations/{id}/replay', 'POST'],
+  ['/api/v1/plans/{id}', 'GET'],
+  ['/api/v1/plans/{id}', 'PUT'],
+  ['/api/v1/plans/{id}', 'DELETE'],
   // Experimental: floweng / workspace / skill / guard
   ['/api/v1/flows/templates', 'GET'],
   ['/api/v1/flows/templates/{tid}', 'GET'],
@@ -286,6 +299,9 @@ const requiredOperations = [
   ['/api/v1/workspace/promote-all', 'POST'],
   ['/api/v1/workspace/discard', 'POST'],
   ['/api/v1/workspace/discard-all', 'POST'],
+  ['/api/v1/workspace/watch', 'POST'],
+  ['/api/v1/workspace/watch', 'DELETE'],
+  ['/api/v1/workspace/watches', 'GET'],
   ['/api/v1/skills', 'GET'],
   ['/api/v1/skills', 'POST'],
   ['/api/v1/skills/match', 'POST'],
@@ -295,6 +311,15 @@ const requiredOperations = [
   ['/api/v1/skills/{id}', 'GET'],
   ['/api/v1/skills/{id}', 'PATCH'],
   ['/api/v1/skills/{id}', 'DELETE'],
+  ['/api/v1/skills/{id}/versions', 'GET'],
+  ['/api/v1/skills/{id}/rollback', 'POST'],
+  ['/api/v1/agents/registry', 'GET'],
+  ['/api/v1/agents/registry', 'POST'],
+  ['/api/v1/agents/registry/{id}', 'GET'],
+  ['/api/v1/agents/registry/{id}', 'PATCH'],
+  ['/api/v1/agents/registry/{id}', 'DELETE'],
+  ['/api/v1/agents/registry/{id}/usage', 'POST'],
+  ['/api/v1/agents/registry/{id}/score', 'POST'],
   ['/api/v1/guard/config', 'GET'],
   ['/api/v1/guard/rules', 'GET'],
   ['/api/v1/guard/check', 'POST'],
@@ -302,6 +327,17 @@ const requiredOperations = [
   ['/api/v1/guard/exempt', 'POST'],
   ['/api/v1/guard/exempt', 'DELETE'],
   ['/api/v1/guard/exemptions', 'GET'],
+  ['/api/v1/guard/exemption-requests', 'POST'],
+  ['/api/v1/guard/exemption-requests', 'GET'],
+  ['/api/v1/guard/exemption-requests/{id}/decide', 'POST'],
+  ['/api/v1/workspace/scripts', 'GET'],
+  ['/api/v1/workspace/dev-servers', 'GET'],
+  ['/api/v1/workspace/dev-servers', 'POST'],
+  ['/api/v1/workspace/dev-servers', 'DELETE'],
+  ['/api/v1/workspace/dev-servers/{id}/logs', 'GET'],
+  ['/api/v1/flows/templates/{tid}/export', 'GET'],
+  ['/api/v1/flows/templates/import', 'POST'],
+  ['/api/v1/flows/templates/{tid}', 'DELETE'],
 ];
 
 const failures = [];
@@ -319,8 +355,8 @@ for (const [pathName, method] of requiredOperations) {
   }
 }
 
-const minPathCount = 132;
-const minOperationCount = 166;
+const minPathCount = 156;
+const minOperationCount = 204;
 if (operations.size < minPathCount) {
   failures.push({ id: 'openapi-path-count', missing: [`at least ${minPathCount} paths, got ${operations.size}`] });
 }

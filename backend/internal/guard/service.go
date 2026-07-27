@@ -24,6 +24,8 @@ type Engine struct {
 	exemptions map[string]Exemption
 	// exStore optionally persists exemptions across process restarts.
 	exStore *sqliteExemptionStore
+	// exRequests stores exemption approval requests keyed by ID.
+	exRequests map[string]ExemptionRequest
 }
 
 // NewEngine creates a guard engine with defaults merged over cfg.
@@ -56,6 +58,7 @@ func defaultConfig() Config {
 			RuleEmptyPath:       {Severity: SeverityError},
 			RuleBinaryExecWrite: {Severity: SeverityWarn},
 				RuleDuplicateSymbol: {Severity: SeverityError},
+			RuleDeprecatedPath: {Severity: SeverityWarn},
 		},
 		DeniedPathGlobs: []string{
 			".env",
@@ -76,6 +79,9 @@ func mergeConfig(base, over Config) Config {
 	}
 	if len(over.DeniedPathGlobs) > 0 {
 		out.DeniedPathGlobs = append([]string(nil), over.DeniedPathGlobs...)
+	}
+	if len(over.DeprecatedPathGlobs) > 0 {
+		out.DeprecatedPathGlobs = append([]string(nil), over.DeprecatedPathGlobs...)
 	}
 	if out.Rules == nil {
 		out.Rules = map[RuleID]RuleConfig{}
@@ -225,6 +231,21 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 				violations = append(violations, Violation{
 					Rule: RuleDeniedPath, Severity: sev,
 					Message: fmt.Sprintf("path matches denied glob %q", g),
+					Path:    absPath, At: now,
+				})
+				break
+			}
+		}
+	}
+
+	if sev := severity(cfg, RuleDeprecatedPath); sev != SeverityOff && !e.isExempt(absPath, RuleDeprecatedPath) {
+		rel := filepath.ToSlash(base)
+		full := filepath.ToSlash(absPath)
+		for _, g := range cfg.DeprecatedPathGlobs {
+			if matchDenied(g, rel) || matchDenied(g, full) {
+				violations = append(violations, Violation{
+					Rule: RuleDeprecatedPath, Severity: sev,
+					Message: fmt.Sprintf("path matches deprecated module glob %q; module is deprecated, modify its replacement instead of appending here", g),
 					Path:    absPath, At: now,
 				})
 				break

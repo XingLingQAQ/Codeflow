@@ -4,12 +4,58 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CodeFlow Workspace</title>
+    <script>
+      // Pre-paint theme class — runs before first render to prevent flash.
+      // Reads localStorage synchronously; default is light.
+      (function() {
+        var t = 'light';
+        try { t = localStorage.getItem('codeflow.theme') || 'light'; } catch(e) {}
+        var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+        document.documentElement.style.backgroundColor = dark ? '#0A0C10' : '#FFFFFF';
+        window.__CF_DARK = dark;
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+      #cf-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+      }
+      /* Splash adapts to resolved theme via the __CF_DARK flag set above */
+      html:not(.dark) #cf-splash { background: #FFFFFF; color: #475569; }
+      html:not(.dark) #cf-splash .cf-word { color: #0F172A; }
+      html.dark #cf-splash { background: #0A0C10; color: #9AA4B8; }
+      html.dark #cf-splash .cf-word { color: #E8ECF4; }
+      #cf-splash svg { width: 52px; height: 52px; }
+      #cf-splash .cf-word { margin-top: 14px; font-size: 18px; font-weight: 700; }
+      #cf-splash .cf-hint { margin-top: 22px; font-size: 12px; opacity: 0.5; }
+      @keyframes cf-draw { to { stroke-dashoffset: 0; } }
+      #cf-splash .cf-path {
+        stroke-dasharray: 120; stroke-dashoffset: 120;
+        animation: cf-draw 1.2s cubic-bezier(0.32,0.72,0,1) forwards;
+      }
+    </style>
 </head>
-  <body class="bg-slate-50 text-slate-900 font-sans antialiased overflow-hidden">
+  <body class="antialiased overflow-hidden">
+    <div id="cf-splash" aria-hidden="true">
+      <svg viewBox="0 0 32 32" fill="none">
+        <defs>
+          <linearGradient id="sg" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#7C5CFF"/><stop offset="1" stop-color="#22D3EE"/>
+          </linearGradient>
+        </defs>
+        <path class="cf-path" d="M8.5 10.5C8.5 6.9 23.5 6.6 23.5 12.4C23.5 18.2 8.5 17.6 8.5 23.4C8.5 27.4 23.5 27.2 23.5 23.4" stroke="url(#sg)" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="8.5" cy="10.5" r="2.7" fill="#7C5CFF"/>
+        <circle cx="23.5" cy="23.4" r="2.7" fill="#22D3EE"/>
+      </svg>
+      <div class="cf-word">Code<span style="background:linear-gradient(135deg,#7C5CFF,#22D3EE);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Flow</span></div>
+      <div class="cf-hint">正在启动…</div>
+    </div>
     <div id="root"></div>
-  <script type="module" src="/index.tsx"></script>
-</body>
+    <script type="module" src="/index.tsx"></script>
+  </body>
 </html>

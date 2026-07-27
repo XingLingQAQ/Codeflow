@@ -23,7 +23,7 @@ func CreateDebate(c *gin.Context) {
 	svc := debate.GetDebateManager()
 	result, err := svc.CreateDebate(c.Request.Context(), &req)
 	if err != nil {
-		respondInternalError(c, "create debate", err)
+		mapDebateError(c, "create debate", err)
 		return
 	}
 
@@ -255,6 +255,10 @@ func mapDebateError(c *gin.Context, op string, err error) {
 	}
 	if errors.Is(err, debate.ErrNotFound) || strings.Contains(err.Error(), "not found") {
 		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, debate.ErrInvalidRequest) {
+		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if strings.Contains(err.Error(), "not in progress") || strings.Contains(err.Error(), "already") {
