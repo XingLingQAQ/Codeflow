@@ -6,6 +6,7 @@ import { RouteProgress } from './RouteProgress';
 import { CommandPalette } from './CommandPalette';
 import { Spinner } from '../ui/Spinner';
 import { useShellStore } from '../stores/shell';
+import { useLayoutStore } from '../stores/layout';
 import { fadeSlide } from '../lib/motion';
 import { DEFAULT_STAGE } from '../stages/stageMeta';
 
@@ -27,6 +28,18 @@ function routeGroup(pathname: string): string {
 function WorkbenchRedirect() {
   const { projectId } = useParams();
   return <Navigate to={`/workbench/${projectId}/${DEFAULT_STAGE}`} replace />;
+}
+
+/** Bare /workbench: jump back to the last visited workbench, else pick a project. */
+function WorkbenchIndexRedirect() {
+  const lastProjectId = useLayoutStore((s) => s.lastProjectId);
+  const lastStage = useLayoutStore((s) => s.lastStage);
+  return (
+    <Navigate
+      to={lastProjectId ? `/workbench/${lastProjectId}/${lastStage}` : '/projects'}
+      replace
+    />
+  );
 }
 
 function PageFallback() {
@@ -72,6 +85,7 @@ export function AppShell() {
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/workbench/:projectId/:stage" element={<Workbench />} />
                 <Route path="/workbench/:projectId" element={<WorkbenchRedirect />} />
+                <Route path="/workbench" element={<WorkbenchIndexRedirect />} />
                 <Route path="/flows" element={<Flows />} />
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/plugins" element={<Plugins />} />

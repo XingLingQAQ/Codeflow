@@ -15,11 +15,19 @@ export function DialogContent({
 }: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { showClose?: boolean }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[var(--dialog-overlay)] backdrop-blur-[2px] animate-[cf-fade_200ms_var(--ease-flow)]" />
+      <DialogPrimitive.Overlay
+        className={cn(
+          'fixed inset-0 z-50 bg-[var(--dialog-overlay)] backdrop-blur-[2px]',
+          'data-[state=open]:animate-[cf-fade_250ms_var(--ease-flow)]',
+          'data-[state=closed]:animate-[cf-fade-out_150ms_var(--ease-flow)_forwards]',
+        )}
+      />
       <DialogPrimitive.Content
         className={cn(
           'glass fixed left-1/2 top-1/2 z-50 w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-5 shadow-2xl',
-          'animate-[cf-pop_250ms_var(--ease-flow)] focus:outline-none',
+          'data-[state=open]:animate-[cf-pop_250ms_var(--ease-flow)]',
+          'data-[state=closed]:animate-[cf-pop-out_150ms_var(--ease-flow)_forwards]',
+          'focus:outline-none',
           className,
         )}
         {...props}
@@ -27,8 +35,8 @@ export function DialogContent({
         {children}
         {showClose && (
           <DialogPrimitive.Close
-            aria-label="Close"
-            className="absolute right-3.5 top-3.5 grid size-7 place-items-center rounded-lg text-ink-mute transition hover:bg-white/10 hover:text-ink"
+            aria-label="关闭"
+            className="absolute right-3.5 top-3.5 grid size-7 place-items-center rounded-lg text-ink-mute transition hover:bg-tint-active hover:text-ink"
           >
             <X size={16} />
           </DialogPrimitive.Close>

@@ -1,51 +1,63 @@
+import { useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { GripVertical, GitFork } from 'lucide-react';
-import { Card, Button, Skeleton, Badge } from '../ui';
+import { GitFork, ListChecks } from 'lucide-react';
+import { Card, Button, EmptyState, Tooltip } from '../ui';
+import { ArtifactCard } from './ArtifactCard';
+import { useProjectFlow } from '../lib/queries';
 import { staggerContainer, staggerItem } from '../lib/motion';
 
 const COLS = [
-  { label: 'P0 — 关键', count: 3, tone: 'text-danger' },
-  { label: 'P1 — 重要', count: 2, tone: 'text-warn' },
-  { label: 'P2 — 可选', count: 2, tone: 'text-ink-dim' },
+  { label: 'P0 — 关键', tone: 'text-danger' },
+  { label: 'P1 — 重要', tone: 'text-warn' },
+  { label: 'P2 — 可选', tone: 'text-ink-dim' },
 ] as const;
 
-function TaskCard() {
-  return (
-    <Card className="group flex items-start gap-2 p-3">
-      <GripVertical size={14} className="mt-0.5 shrink-0 text-ink-mute/40 transition-colors group-hover:text-ink-mute" />
-      <div className="min-w-0 flex-1">
-        <Skeleton className="h-3.5 w-4/5" />
-        <div className="mt-2 flex items-center gap-2">
-          <span className="inline-block size-2 rounded-full bg-ink-mute/30" />
-          <Skeleton className="h-2.5 w-16" />
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 export default function PlanningCanvas() {
+  const { projectId = '' } = useParams<{ projectId: string }>();
+  const { flow } = useProjectFlow(projectId);
+  const planningStage = flow?.stages.find((s) => s.type === 'planning');
+  const artifacts = (flow?.artifacts ?? []).filter((a) => a.stage_id === planningStage?.id);
+
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="flex h-full flex-col p-5">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="font-display text-lg font-bold text-ink">任务看板</h2>
-        <Button variant="ghost" size="sm"><GitFork size={14} /> 依赖图</Button>
+        <Tooltip content="任务依赖图将随看板一起在 M4 交付" side="left">
+          <span>
+            <Button variant="ghost" size="sm" disabled>
+              <GitFork size={14} /> 依赖图
+            </Button>
+          </span>
+        </Tooltip>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-3 gap-4">
-        {COLS.map((col) => (
-          <motion.div key={col.label} variants={staggerItem} className="flex flex-col">
-            <div className="mb-3 flex items-center gap-2">
-              <span className={`text-[13px] font-semibold ${col.tone}`}>{col.label}</span>
-              <Badge>{col.count}</Badge>
+
+      {artifacts.length > 0 && (
+        <motion.div variants={staggerItem} className="mb-4 space-y-2">
+          {artifacts.map((a) => (
+            <ArtifactCard key={a.id} artifact={a} />
+          ))}
+        </motion.div>
+      )}
+
+      <motion.div variants={staggerItem} className="relative min-h-0 flex-1">
+        <div className="grid h-full grid-cols-3 gap-4">
+          {COLS.map((col) => (
+            <div key={col.label} className="flex flex-col">
+              <div className="mb-3 flex items-center gap-2">
+                <span className={`text-[13px] font-semibold ${col.tone}`}>{col.label}</span>
+              </div>
+              <Card className="flex-1 border-dashed bg-transparent" />
             </div>
-            <div className="flex-1 space-y-2.5 overflow-auto">
-              {Array.from({ length: col.count }).map((_, i) => (
-                <TaskCard key={i} />
-              ))}
-            </div>
-          </motion.div>
-        ))}
-      </div>
+          ))}
+        </div>
+        <div className="absolute inset-0 grid place-items-center">
+          <EmptyState
+            icon={<ListChecks size={20} />}
+            title="看板任务即将到来"
+            description="任务卡片来自 plan.md 的结构化分解（M4）。当前阶段的规划文档可在上方产物卡片查看。"
+          />
+        </div>
+      </motion.div>
     </motion.div>
   );
 }

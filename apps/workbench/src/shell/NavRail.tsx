@@ -4,11 +4,12 @@ import {
   Search, Command as CommandIcon, Sun, Moon, Monitor,
   PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
-import { NAV_ITEMS } from './nav';
+import { NAV_ITEMS, resolveNavPath } from './nav';
 import { LogoTile, Wordmark } from './Logo';
 import { Tooltip } from '../ui/Tooltip';
 import { Kbd } from '../ui/Kbd';
 import { cn } from '../lib/cn';
+import { modLabel } from '../lib/platform';
 import { useShellStore, type ThemeMode, resolveIsDark } from '../stores/shell';
 import { useLayoutStore } from '../stores/layout';
 import { EASE_FLOW } from '../lib/motion';
@@ -28,11 +29,7 @@ export function NavRail() {
   const toggleNavRail = useLayoutStore((s) => s.toggleNavRail);
 
   const goto = (item: (typeof NAV_ITEMS)[number]) => {
-    if (item.key === 'workbench') {
-      navigate(lastProjectId ? `/workbench/${lastProjectId}/${lastStage}` : '/projects');
-      return;
-    }
-    navigate(item.path);
+    navigate(resolveNavPath(item, { projectId: lastProjectId, stage: lastStage }));
   };
 
   return (
@@ -123,7 +120,8 @@ export function NavRail() {
           label="命令面板"
           tooltip={
             <span className="flex items-center gap-1.5">
-              命令面板 <Kbd>⌘K</Kbd>
+              命令面板 <Kbd>{modLabel()}</Kbd>
+              <Kbd>K</Kbd>
             </span>
           }
         />

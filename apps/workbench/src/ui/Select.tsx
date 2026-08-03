@@ -40,7 +40,9 @@ export function SelectContent({
       <SelectPrimitive.Content
         position={position}
         className={cn(
-          'glass z-50 overflow-hidden rounded-xl p-1 shadow-xl animate-[cf-pop_180ms_var(--ease-flow)]',
+          'glass z-50 overflow-hidden rounded-xl p-1 shadow-xl',
+          'data-[state=open]:animate-[cf-pop_150ms_var(--ease-flow)]',
+          'data-[state=closed]:animate-[cf-pop-out_150ms_var(--ease-flow)_forwards]',
           position === 'popper' && 'w-[var(--radix-select-trigger-width)]',
           className,
         )}

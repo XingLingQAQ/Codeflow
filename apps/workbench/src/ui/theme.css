@@ -37,6 +37,19 @@
   --font-sans: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
+  /* Small type scale for dense chrome (10/11/12/13/15). Use in new code;
+     migrate legacy text-[NNpx] opportunistically. */
+  --text-3xs: 10px;
+  --text-3xs--line-height: 14px;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 18px;
+  --text-13: 13px;
+  --text-13--line-height: 20px;
+  --text-15: 15px;
+  --text-15--line-height: 22px;
+
   /* Signature motion */
   --animate-shimmer: shimmer 1.6s linear infinite;
   --animate-flow: flow-sheen 3s linear infinite;
@@ -171,15 +184,28 @@ html.dark .cf-app ::selection {
     background-size: 200% 100%;
     animation: var(--animate-shimmer);
   }
+
+  /* Tabular figures for counters, stats, times — keeps digit columns stable. */
+  .nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 @keyframes cf-pop {
   from { opacity: 0; transform: scale(0.96) translateY(4px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+@keyframes cf-pop-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.97) translateY(3px); }
+}
 @keyframes cf-fade {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+@keyframes cf-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 @keyframes cf-slide-up {
   from { opacity: 0; transform: translateY(8px); }
@@ -192,6 +218,11 @@ html.dark .cf-app ::selection {
   border-radius: 6px;
 }
 
+/*
+ * Reduced motion: the OS preference and the in-app switch (html.cf-reduced,
+ * synced from the shell store) share the same rules. motion/react JS
+ * animations are tamed separately via <MotionConfig reducedMotion>.
+ */
 @media (prefers-reduced-motion: reduce) {
   .cf-app *,
   .cf-app *::before,
@@ -200,4 +231,12 @@ html.dark .cf-app ::selection {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+html.cf-reduced .cf-app *,
+html.cf-reduced .cf-app *::before,
+html.cf-reduced .cf-app *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
 }

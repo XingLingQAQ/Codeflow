@@ -5,6 +5,7 @@ import { STAGES, STAGE_STATUS_LABEL, stageTone } from '../stages/stageMeta';
 import type { Stage } from '../services-bridge/flows';
 import { useLayoutStore } from '../stores/layout';
 import { IconButton, StatusPill, Tooltip } from '../ui';
+import { StageActions } from './StageActions';
 import { cn } from '../lib/cn';
 import { EASE_FLOW } from '../lib/motion';
 
@@ -78,6 +79,9 @@ export function FlowRail({ projectId, stages = [] }: FlowRailProps) {
           );
         })}
       </nav>
+
+      {/* Current-stage lifecycle: advance / skip / loop / gate approval. */}
+      {!collapsed && <StageActions projectId={projectId} />}
     </aside>
   );
 }

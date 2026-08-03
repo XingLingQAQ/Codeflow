@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { FolderKanban, Workflow, ShieldAlert, Activity, Plus, ArrowRight, GitBranch } from 'lucide-react';
 import { PageShell, SectionTitle } from './PageShell';
-import { Card, Button, StatusPill, EmptyState, Skeleton, Badge } from '../../ui';
+import { Card, Button, StatusPill, EmptyState, Skeleton, Badge, Dialog, DialogContent, DialogTitle, DialogDescription } from '../../ui';
 import { MiniFlow } from '../../stages/MiniFlow';
 import { useProjects, useFlows } from '../../lib/queries';
 import { useLayoutStore } from '../../stores/layout';
@@ -32,14 +33,18 @@ export default function Dashboard() {
   const setLoc = useLayoutStore((s) => s.setWorkbenchLocation);
   const projectsQ = useProjects();
   const flowsQ = useFlows();
+  const [gatesOpen, setGatesOpen] = useState(false);
 
   const projects = projectsQ.data?.projects ?? [];
   const flows = flowsQ.data?.items ?? [];
   const activeFlows = flows.filter((f) => f.status === 'active');
-  const pendingGates = flows.reduce(
-    (n, f) => n + f.stages.filter((s) => s.status === 'waiting_gate').length,
-    0,
+  const waitingGates = flows.flatMap((f) =>
+    f.stages
+      .filter((s) => s.status === 'waiting_gate')
+      .map((s) => ({ flow: f, stage: s })),
   );
+  const pendingGates = waitingGates.length;
+  const projectTitle = (id: string) => projects.find((p) => p.id === id)?.title ?? id.slice(0, 8);
 
   const openProject = (p: Project) => {
     setLoc(p.id, 'idea');
@@ -68,21 +73,64 @@ export default function Dashboard() {
       <motion.div variants={staggerItem} className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((s) => {
           const Icon = s.icon;
+          const clickable = s.label === '待审批 Gate' && pendingGates > 0;
           return (
-            <Card key={s.label} className="p-4">
+            <Card
+              key={s.label}
+              className="p-4"
+              interactive={clickable}
+              onClick={clickable ? () => setGatesOpen(true) : undefined}
+              title={clickable ? '查看等待审批的 Gate' : undefined}
+            >
               <div className="flex items-center justify-between">
                 <span className="text-[13px] text-ink-dim">{s.label}</span>
                 <span className={cn('grid size-8 place-items-center rounded-lg', statIconWrap[s.tone])}>
                   <Icon size={16} />
                 </span>
               </div>
-              <div className="mt-2 font-display text-3xl font-bold text-ink">
+              <div className="nums mt-2 font-display text-3xl font-bold text-ink">
                 {loading ? <Skeleton className="h-8 w-12" /> : s.value}
               </div>
             </Card>
           );
         })}
       </motion.div>
+
+      {/* Waiting gates list with deep links into the approval dialog. */}
+      <Dialog open={gatesOpen} onOpenChange={setGatesOpen}>
+        <DialogContent className="w-[min(92vw,460px)]">
+          <DialogTitle>待审批 Gate</DialogTitle>
+          <DialogDescription>
+            以下阶段在等待 Gate 决策，点击直达工作台并打开审批面板。
+          </DialogDescription>
+          <ul className="mt-4 space-y-2">
+            {waitingGates.map(({ flow, stage }) => (
+              <li key={`${flow.id}-${stage.id}`}>
+                <Card
+                  interactive
+                  className="flex items-center justify-between gap-3 px-3.5 py-2.5"
+                  onClick={() => {
+                    setGatesOpen(false);
+                    setLoc(flow.project_id, stage.type);
+                    navigate(`/workbench/${flow.project_id}/${stage.type}?gate=1`);
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-medium text-ink">{projectTitle(flow.project_id)}</p>
+                    <p className="mt-0.5 text-[11px] text-ink-mute">
+                      阶段「{stage.name}」 · {flow.template_id}
+                    </p>
+                  </div>
+                  <ArrowRight size={14} className="shrink-0 text-ink-mute" />
+                </Card>
+              </li>
+            ))}
+            {waitingGates.length === 0 && (
+              <li className="text-[12px] text-ink-mute">当前没有等待审批的 Gate。</li>
+            )}
+          </ul>
+        </DialogContent>
+      </Dialog>
 
       <motion.div variants={staggerItem} className="mt-9">
         <div className="mb-3 flex items-center justify-between">

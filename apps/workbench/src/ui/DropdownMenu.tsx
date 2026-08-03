@@ -17,7 +17,9 @@ export function DropdownMenuContent({
         align={align}
         sideOffset={sideOffset}
         className={cn(
-          'glass z-50 min-w-44 rounded-xl p-1.5 shadow-xl animate-[cf-pop_180ms_var(--ease-flow)]',
+          'glass z-50 min-w-44 rounded-xl p-1.5 shadow-xl',
+          'data-[state=open]:animate-[cf-pop_150ms_var(--ease-flow)]',
+          'data-[state=closed]:animate-[cf-pop-out_150ms_var(--ease-flow)_forwards]',
           className,
         )}
         {...props}

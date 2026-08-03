@@ -30,11 +30,13 @@ export function Tooltip({ content, children, side = 'right', align = 'center', s
           sideOffset={sideOffset}
           className={cn(
             'glass z-[60] rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink shadow-lg',
-            'animate-[cf-pop_150ms_var(--ease-flow)]',
+            'data-[state=delayed-open]:animate-[cf-pop_150ms_var(--ease-flow)]',
+            'data-[state=instant-open]:animate-[cf-fade_150ms_var(--ease-flow)]',
+            'data-[state=closed]:animate-[cf-fade-out_150ms_var(--ease-flow)_forwards]',
           )}
         >
           {content}
-          <TooltipPrimitive.Arrow className="fill-white/[0.08]" />
+          <TooltipPrimitive.Arrow className="fill-[var(--glass-border)]" />
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>

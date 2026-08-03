@@ -4,11 +4,19 @@ import { cn } from '../lib/cn';
 interface ResizeHandleProps {
   direction: 'horizontal' | 'vertical';
   onResize: (delta: number) => void;
+  /** Fired with true on drag start and false on release — lets the panel skip its slide transition while resizing. */
+  onDragStateChange?: (dragging: boolean) => void;
   onDoubleClick?: () => void;
   className?: string;
 }
 
-export function ResizeHandle({ direction, onResize, onDoubleClick, className }: ResizeHandleProps) {
+export function ResizeHandle({
+  direction,
+  onResize,
+  onDragStateChange,
+  onDoubleClick,
+  className,
+}: ResizeHandleProps) {
   const dragging = useRef(false);
   const lastPos = useRef(0);
 
@@ -18,8 +26,9 @@ export function ResizeHandle({ direction, onResize, onDoubleClick, className }: 
       e.currentTarget.setPointerCapture(e.pointerId);
       dragging.current = true;
       lastPos.current = direction === 'horizontal' ? e.clientX : e.clientY;
+      onDragStateChange?.(true);
     },
-    [direction],
+    [direction, onDragStateChange],
   );
 
   const onPointerMove = useCallback(
@@ -34,8 +43,9 @@ export function ResizeHandle({ direction, onResize, onDoubleClick, className }: 
   );
 
   const onPointerUp = useCallback(() => {
+    if (dragging.current) onDragStateChange?.(false);
     dragging.current = false;
-  }, []);
+  }, [onDragStateChange]);
 
   const isH = direction === 'horizontal';
 
@@ -47,7 +57,7 @@ export function ResizeHandle({ direction, onResize, onDoubleClick, className }: 
       onDoubleClick={onDoubleClick}
       className={cn(
         'group relative z-10 flex-shrink-0 select-none',
-        isH ? 'w-1.5 cursor-col-resize' : 'h-1.5 cursor-row-resize',
+        isH ? 'h-full w-1.5 cursor-col-resize' : 'h-1.5 w-full cursor-row-resize',
         className,
       )}
     >

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
+export type MotionPref = 'system' | 'reduce' | 'full';
 
 interface ShellState {
   commandOpen: boolean;
@@ -11,6 +12,11 @@ interface ShellState {
   setMock: (v: boolean) => void;
   themeMode: ThemeMode;
   setThemeMode: (m: ThemeMode) => void;
+  motionPref: MotionPref;
+  setMotionPref: (p: MotionPref) => void;
+  /** Live WebSocket connection state (driven by services-bridge/ws). */
+  wsConnected: boolean;
+  setWsConnected: (v: boolean) => void;
 }
 
 function loadThemeMode(): ThemeMode {
@@ -21,6 +27,16 @@ function loadThemeMode(): ThemeMode {
     /* ignore */
   }
   return 'light';
+}
+
+function loadMotionPref(): MotionPref {
+  try {
+    const stored = localStorage.getItem('codeflow.motion');
+    if (stored === 'system' || stored === 'reduce' || stored === 'full') return stored;
+  } catch {
+    /* ignore */
+  }
+  return 'system';
 }
 
 export const useShellStore = create<ShellState>((set) => ({
@@ -40,6 +56,18 @@ export const useShellStore = create<ShellState>((set) => ({
     }
     applyThemeClass(themeMode);
   },
+  motionPref: loadMotionPref(),
+  setMotionPref: (motionPref) => {
+    set({ motionPref });
+    try {
+      localStorage.setItem('codeflow.motion', motionPref);
+    } catch {
+      /* ignore */
+    }
+    applyMotionClass(motionPref);
+  },
+  wsConnected: false,
+  setWsConnected: (wsConnected) => set({ wsConnected }),
 }));
 
 export function resolveIsDark(mode: ThemeMode): boolean {
@@ -51,4 +79,15 @@ export function resolveIsDark(mode: ThemeMode): boolean {
 export function applyThemeClass(mode: ThemeMode): void {
   const dark = resolveIsDark(mode);
   document.documentElement.classList.toggle('dark', dark);
+}
+
+export function resolveReducedMotion(pref: MotionPref): boolean {
+  if (pref === 'reduce') return true;
+  if (pref === 'full') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Sync html.cf-reduced so the CSS side (theme.css) follows the preference too. */
+export function applyMotionClass(pref: MotionPref): void {
+  document.documentElement.classList.toggle('cf-reduced', resolveReducedMotion(pref));
 }

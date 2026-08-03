@@ -157,20 +157,226 @@ export async function listFlowTemplates(signal?: AbortSignal) {
   return get<{ items: FlowTemplateInfo[]; ids: string[]; total: number }>(`${base()}/templates`, undefined, signal);
 }
 
-export function advanceStage(flowId: string, stageId: string, signal?: AbortSignal) {
+// ---- Stage lifecycle (advance / skip / loop / gate decisions) ----
+//
+// Mock branches mirror backend/internal/floweng/engine.go semantics: advance
+// blocks on unpassed human/agent exit gates (stage → waiting_gate), snapshots
+// the completed stage, then activates the next pending stage and applies its
+// enter gates; loop resets later stages and marks artifacts stale. Mutations
+// clone-and-replace the fixture flow so React Query consumers see fresh
+// object identities after invalidation.
+
+type MockStore = Awaited<ReturnType<typeof import('../mocks').getMockStore>>;
+
+let mockEventSeq = 0;
+function pushMockEvent(flow: Flow, type: string, stageId: string, message: string): void {
+  flow.events = [
+    ...(flow.events ?? []),
+    {
+      id: `ev-mock-${Date.now().toString(36)}-${(++mockEventSeq).toString(36)}`,
+      type,
+      stage_id: stageId || undefined,
+      message,
+      timestamp: new Date().toISOString(),
+    },
+  ];
+}
+
+async function withMockFlow(
+  store: MockStore,
+  flowId: string,
+  mutate: (flow: Flow) => void,
+): Promise<Flow> {
+  const flows = store.MOCK_FLOWS as Flow[];
+  const idx = flows.findIndex((f) => f.id === flowId);
+  if (idx === -1) throw new Error(`flow not found: ${flowId}`);
+  const flow = structuredClone(flows[idx]);
+  mutate(flow);
+  flow.updated_at = new Date().toISOString();
+  flows[idx] = flow;
+  return flow;
+}
+
+function activateNextStage(flow: Flow, fromIndex: number): void {
+  const next = flow.stages.find((s, i) => i > fromIndex && s.status === 'pending');
+  if (!next) {
+    flow.status = 'completed';
+    pushMockEvent(flow, 'flow.completed', '', '全部阶段已完成');
+    return;
+  }
+  next.status = 'active';
+  pushMockEvent(flow, 'stage.active', next.id, `进入阶段：${next.name}`);
+  const enterGate = next.gates?.find((g) => g.phase === 'enter' && g.kind !== 'auto' && !g.passed);
+  next.gates?.forEach((g) => {
+    if (g.phase === 'enter' && g.kind === 'auto') g.passed = true;
+  });
+  if (enterGate) {
+    next.status = 'waiting_gate';
+    pushMockEvent(flow, 'gate.waiting', next.id, `阶段「${next.name}」等待进入审批`);
+  }
+}
+
+export async function advanceStage(flowId: string, stageId: string, signal?: AbortSignal) {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      let blocked: string | null = null;
+      const flow = await withMockFlow(store, flowId, (f) => {
+        if (f.status !== 'active') throw new Error(`工作流未激活：${f.status}`);
+        const si = f.stages.findIndex((s) => s.id === stageId);
+        if (si === -1) throw new Error(`阶段不存在：${stageId}`);
+        const stage = f.stages[si];
+        if (stage.status !== 'active') throw new Error(`阶段未处于进行中：${stage.status}`);
+        const blocking = stage.gates?.find(
+          (g) => g.phase === 'exit' && g.kind !== 'auto' && !g.passed,
+        );
+        if (blocking) {
+          stage.status = 'waiting_gate';
+          pushMockEvent(f, 'gate.waiting', stage.id, `阶段「${stage.name}」等待出口 Gate 审批`);
+          blocked = `阶段「${stage.name}」被 Gate 拦截，需要人工审批后才能推进`;
+          return;
+        }
+        stage.gates?.forEach((g) => {
+          if (g.phase === 'exit' && g.kind === 'auto') g.passed = true;
+        });
+        stage.status = 'done';
+        stage.snapshot_id = stage.snapshot_id ?? `snap-${Math.random().toString(36).slice(2, 7)}`;
+        pushMockEvent(f, 'stage.done', stage.id, `完成阶段：${stage.name}`);
+        activateNextStage(f, si);
+      });
+      if (blocked) throw new Error(blocked);
+      return flow;
+    }
+  }
   return post<Flow>(`${base()}/${flowId}/stages/${stageId}/advance`, {}, signal);
 }
 
-export function skipStage(flowId: string, stageId: string, signal?: AbortSignal) {
+export async function skipStage(flowId: string, stageId: string, signal?: AbortSignal) {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      return withMockFlow(store, flowId, (f) => {
+        if (f.status !== 'active') throw new Error(`工作流未激活：${f.status}`);
+        const si = f.stages.findIndex((s) => s.id === stageId);
+        if (si === -1) throw new Error(`阶段不存在：${stageId}`);
+        const stage = f.stages[si];
+        if (!stage.optional) throw new Error(`阶段「${stage.name}」不是可选阶段，无法跳过`);
+        if (stage.status !== 'pending' && stage.status !== 'active') {
+          throw new Error(`当前状态不可跳过：${stage.status}`);
+        }
+        const wasActive = stage.status === 'active';
+        stage.status = 'skipped';
+        pushMockEvent(f, 'stage.skipped', stage.id, `跳过可选阶段：${stage.name}`);
+        if (wasActive) activateNextStage(f, si);
+      });
+    }
+  }
   return post<Flow>(`${base()}/${flowId}/stages/${stageId}/skip`, {}, signal);
 }
 
-export function loopFlow(
+export async function loopFlow(
   flowId: string,
   fromStageId: string,
   toStageId: string,
   reason?: string,
   signal?: AbortSignal,
 ) {
-  return post<Flow>(`${base()}/${flowId}/loop`, { from_stage_id: fromStageId, to_stage_id: toStageId, reason }, signal);
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      return withMockFlow(store, flowId, (f) => {
+        if (f.status !== 'active') throw new Error(`工作流未激活：${f.status}`);
+        const fromIdx = f.stages.findIndex((s) => s.id === fromStageId);
+        const toIdx = f.stages.findIndex((s) => s.id === toStageId);
+        if (fromIdx === -1 || toIdx === -1) throw new Error('回环阶段不存在');
+        if (toIdx >= fromIdx) throw new Error('回环目标必须是更早的阶段');
+        const from = f.stages[fromIdx];
+        const to = f.stages[toIdx];
+        // Later stages reset to pending, snapshots and gate passes cleared.
+        for (let i = toIdx + 1; i < f.stages.length; i++) {
+          const st = f.stages[i];
+          if (st.status === 'done' || st.status === 'active' || st.status === 'waiting_gate') {
+            st.status = 'pending';
+            st.snapshot_id = undefined;
+            st.gates?.forEach((g) => {
+              g.passed = false;
+            });
+          }
+        }
+        to.status = 'active';
+        to.snapshot_id = undefined;
+        to.gates?.forEach((g) => {
+          g.passed = false;
+        });
+        f.artifacts?.forEach((a) => {
+          const artIdx = f.stages.findIndex((s) => s.id === a.stage_id);
+          if (artIdx >= toIdx) a.status = 'stale';
+        });
+        pushMockEvent(
+          f,
+          'flow.loop',
+          to.id,
+          `回环 ${from.name} → ${to.name}${reason ? `：${reason}` : ''}`,
+        );
+      });
+    }
+  }
+  return post<Flow>(
+    `${base()}/${flowId}/loop`,
+    { from_stage_id: fromStageId, to_stage_id: toStageId, reason },
+    signal,
+  );
+}
+
+/** POST /flows/:id/gates/:gid/decide — approve or reject a waiting gate. */
+export async function decideGate(
+  flowId: string,
+  gateId: string,
+  decision: 'approve' | 'reject',
+  reason?: string,
+  signal?: AbortSignal,
+) {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      return withMockFlow(store, flowId, (f) => {
+        let found = false;
+        for (const stage of f.stages) {
+          for (const g of stage.gates ?? []) {
+            if (g.id !== gateId) continue;
+            found = true;
+            if (stage.status !== 'active' && stage.status !== 'waiting_gate') {
+              throw new Error(`Gate 所在阶段未激活：${stage.status}`);
+            }
+            if (decision === 'approve') {
+              g.passed = true;
+              if (stage.status === 'waiting_gate') stage.status = 'active';
+              pushMockEvent(f, 'gate.approved', stage.id, `Gate ${gateId} 已批准${reason ? `：${reason}` : ''}`);
+            } else {
+              g.passed = false;
+              stage.status = 'waiting_gate';
+              pushMockEvent(f, 'gate.rejected', stage.id, `Gate ${gateId} 被驳回${reason ? `：${reason}` : ''}`);
+              if (g.on_fail === 'escalate_to_debate') {
+                pushMockEvent(f, 'gate.escalate_debate', stage.id, `Gate ${gateId} 已升级为多方辩论`);
+              }
+            }
+          }
+        }
+        if (!found) throw new Error(`Gate 不存在：${gateId}`);
+      });
+    }
+  }
+  return post<Flow>(
+    `${base()}/${flowId}/gates/${gateId}/decide`,
+    { approved: decision === 'approve', reason },
+    signal,
+  );
 }

@@ -28,3 +28,19 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'config', label: '配置', path: '/config', icon: SlidersHorizontal, match: (p) => p.startsWith('/config') },
   { key: 'settings', label: '设置', path: '/settings', icon: Settings, match: (p) => p.startsWith('/settings') },
 ];
+
+/**
+ * Concrete navigation target for a nav item. The workbench entry is special:
+ * it needs a project + stage, so it resolves to the last visited workbench
+ * location (or the project list when there is no history). Used by NavRail,
+ * the command palette, and the /workbench index redirect so all three agree.
+ */
+export function resolveNavPath(
+  item: Pick<NavItem, 'key' | 'path'>,
+  last: { projectId?: string; stage: string },
+): string {
+  if (item.key === 'workbench') {
+    return last.projectId ? `/workbench/${last.projectId}/${last.stage}` : '/projects';
+  }
+  return item.path;
+}

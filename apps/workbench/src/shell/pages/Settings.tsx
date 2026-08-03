@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Palette, Keyboard, ShieldCheck, FlaskConical, TerminalSquare, Sun, Moon, Monitor } from 'lucide-react';
 import { PageShell, SectionTitle } from './PageShell';
-import { Card, CardBody, Switch, Kbd, Button, Badge } from '../../ui';
+import { Card, CardBody, Switch, Kbd, Button } from '../../ui';
 import { staggerItem } from '../../lib/motion';
+import { modLabel } from '../../lib/platform';
 import { useShellStore, type ThemeMode } from '../../stores/shell';
 
 function switchToLegacy() {
@@ -20,7 +22,7 @@ function Row({ title, desc, control }: { title: string; desc: string; control: R
     <div className="flex items-center justify-between gap-4 border-b border-line py-3.5 last:border-0">
       <div>
         <div className="text-[13px] font-medium text-ink">{title}</div>
-        <div className="mt-0.5 text-[12px] text-ink-dim">{desc}</div>
+        <div className="mt-0.5 text-[12px] leading-relaxed text-ink-dim">{desc}</div>
       </div>
       {control}
     </div>
@@ -28,23 +30,33 @@ function Row({ title, desc, control }: { title: string; desc: string; control: R
 }
 
 export default function Settings() {
-  const [reducedMotion, setReducedMotion] = useState(false);
   const [autoSnapshot, setAutoSnapshot] = useState(true);
   const [livePreview, setLivePreview] = useState(false);
   const themeMode = useShellStore((s) => s.themeMode);
   const setThemeMode = useShellStore((s) => s.setThemeMode);
+  const motionPref = useShellStore((s) => s.motionPref);
+  const setMotionPref = useShellStore((s) => s.setMotionPref);
+  const { hash } = useLocation();
 
+  // Palette section jumps land here as /settings#appearance etc.
+  useEffect(() => {
+    if (!hash) return;
+    const el = document.getElementById(hash.slice(1));
+    if (el) el.scrollIntoView({ block: 'start' });
+  }, [hash]);
+
+  const mod = modLabel();
   const shortcuts: { keys: string[]; label: string }[] = [
-    { keys: ['⌘', 'K'], label: '命令面板' },
-    { keys: ['⌘', 'B'], label: '折叠 Flow Rail' },
-    { keys: ['⌘', 'J'], label: '底部面板' },
-    { keys: ['⌘', '\\'], label: 'Agent 伴侣' },
+    { keys: [mod, 'K'], label: '命令面板' },
+    { keys: [mod, 'B'], label: '折叠 / 展开阶段栏' },
+    { keys: [mod, 'J'], label: '折叠 / 展开底部面板' },
+    { keys: [mod, '\\'], label: '折叠 / 展开 Agent 伴侣' },
   ];
 
   return (
     <PageShell title="设置" subtitle="外观、快捷键、隐私审计与实验性开关" maxWidth="max-w-3xl">
       <motion.div variants={staggerItem} className="space-y-8">
-        <section>
+        <section id="appearance">
           <SectionTitle>
             <span className="flex items-center gap-2">
               <Palette size={14} /> 外观
@@ -79,14 +91,19 @@ export default function Settings() {
               />
               <Row
                 title="减少动效"
-                desc="降低流程动画与过渡强度，尊重系统的 reduced-motion 设置"
-                control={<Switch checked={reducedMotion} onCheckedChange={setReducedMotion} />}
+                desc="将界面过渡与流程动画降级为瞬时切换；「跟随系统」时遵循操作系统的 reduced-motion 设置"
+                control={
+                  <Switch
+                    checked={motionPref === 'reduce'}
+                    onCheckedChange={(on) => setMotionPref(on ? 'reduce' : 'system')}
+                  />
+                }
               />
             </CardBody>
           </Card>
         </section>
 
-        <section>
+        <section id="shortcuts">
           <SectionTitle>
             <span className="flex items-center gap-2">
               <Keyboard size={14} /> 快捷键
@@ -112,7 +129,7 @@ export default function Settings() {
           </Card>
         </section>
 
-        <section>
+        <section id="experimental">
           <SectionTitle>
             <span className="flex items-center gap-2">
               <FlaskConical size={14} /> 实验性开关
