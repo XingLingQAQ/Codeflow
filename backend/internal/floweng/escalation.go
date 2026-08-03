@@ -3,10 +3,11 @@ package floweng
 import "context"
 
 // GateEscalationHandler is an optional callback invoked after a gate rejection
-// with on_fail=escalate_to_debate is persisted. Implementations must be fast or
-// dispatch async themselves — the call is synchronous under the engine lock and
-// the handler's return value is not checked (fire-and-forget). The flow, stage,
-// and gate arguments are clones; mutating them has no effect on engine state.
+// with on_fail=escalate_to_debate is persisted. The call is synchronous from
+// DecideGate's caller perspective, but it runs after the engine lock is released
+// so implementations may safely re-enter the engine. The flow, stage, and gate
+// arguments are independent clones; mutating them has no effect on engine state
+// or on the other callback arguments. The handler's return value is not checked.
 type GateEscalationHandler interface {
 	OnGateEscalation(ctx context.Context, flow *Flow, stage *Stage, gate *Gate, reason string)
 }

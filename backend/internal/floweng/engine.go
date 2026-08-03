@@ -14,11 +14,11 @@ import (
 type InMemoryEngine struct {
 	mu         sync.Mutex
 	store      FlowStore
-	snapshots  SnapshotCreator        // optional
-	restorer   SnapshotRestorer       // optional
-	notifier   EventNotifier          // optional
-	guard      ExecutionGuard         // optional
-	escalation GateEscalationHandler  // optional
+	snapshots  SnapshotCreator       // optional
+	restorer   SnapshotRestorer      // optional
+	notifier   EventNotifier         // optional
+	guard      ExecutionGuard        // optional
+	escalation GateEscalationHandler // optional
 }
 
 // NewInMemoryEngine creates an engine with an in-process memory store.
@@ -92,7 +92,8 @@ func (e *InMemoryEngine) SetExecutionGuard(g ExecutionGuard) {
 
 // SetGateEscalationHandler attaches or replaces the callback invoked when a
 // gate with on_fail=escalate_to_debate is rejected. The handler receives cloned
-// data and must not block; errors are its own concern (fire-and-forget).
+// data and runs synchronously after the decision is persisted and e.mu released;
+// errors are its own concern.
 func (e *InMemoryEngine) SetGateEscalationHandler(h GateEscalationHandler) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -435,12 +436,40 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 		return nil, fmt.Errorf("approved is required")
 	}
 
+	// Keep the state transition, event append, persistence, handler selection,
+	// and callback snapshots atomic. Dispatch only after releasing e.mu so a
+	// handler can safely re-enter the engine and a slow handler does not stall
+	// unrelated flow operations. The callback itself remains synchronous from
+	// the DecideGate caller's perspective.
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	flow, err := e.store.Get(flowID)
+	result, escalation, err := e.decideGateLocked(flowID, gateID, req)
+	e.mu.Unlock()
 	if err != nil {
 		return nil, err
+	}
+	if escalation != nil {
+		escalation.handler.OnGateEscalation(ctx, escalation.flow, escalation.stage, escalation.gate, escalation.reason)
+	}
+	return result, nil
+}
+
+// gateEscalationDispatch is a fully detached callback invocation captured while
+// e.mu is held. None of its mutable arguments share state with the engine or
+// with one another.
+type gateEscalationDispatch struct {
+	handler GateEscalationHandler
+	flow    *Flow
+	stage   *Stage
+	gate    *Gate
+	reason  string
+}
+
+// decideGateLocked applies and persists a decision and prepares any escalation
+// callback for post-unlock dispatch. The caller must hold e.mu.
+func (e *InMemoryEngine) decideGateLocked(flowID, gateID string, req *GateDecisionRequest) (*Flow, *gateEscalationDispatch, error) {
+	flow, err := e.store.Get(flowID)
+	if err != nil {
+		return nil, nil, err
 	}
 	found := false
 	escalatedStageIdx := -1
@@ -453,7 +482,7 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 			found = true
 			stage := &flow.Stages[si]
 			if stage.Status != StageStatusActive && stage.Status != StageStatusWaitingGate {
-				return nil, fmt.Errorf("gate stage is not active: %s", stage.Status)
+				return nil, nil, fmt.Errorf("gate stage is not active: %s", stage.Status)
 			}
 			if *req.Approved {
 				g.Passed = true
@@ -475,29 +504,33 @@ func (e *InMemoryEngine) DecideGate(ctx context.Context, flowID, gateID string, 
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("gate not found: %s", gateID)
+		return nil, nil, fmt.Errorf("gate not found: %s", gateID)
 	}
 	flow.UpdatedAt = time.Now().UTC()
 	if err := e.store.Put(flow); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if e.escalation != nil && escalatedStageIdx >= 0 {
-		s := flow.Stages[escalatedStageIdx]
-		sCopy := s
-		sCopy.Gates = append([]Gate(nil), s.Gates...)
-		for gi := range sCopy.Gates {
-			sCopy.Gates[gi].Config = cloneStringMap(sCopy.Gates[gi].Config)
-		}
-		var gCopy Gate
-		for _, g := range sCopy.Gates {
-			if g.ID == gateID {
-				gCopy = g
-				break
-			}
-		}
-		e.escalation.OnGateEscalation(ctx, cloneFlow(flow), &sCopy, &gCopy, req.Reason)
+
+	result := cloneFlow(flow)
+	if e.escalation == nil || escalatedStageIdx < 0 {
+		return result, nil, nil
 	}
-	return cloneFlow(flow), nil
+
+	stageCopy := cloneStage(flow.Stages[escalatedStageIdx])
+	var gateCopy Gate
+	for i := range stageCopy.Gates {
+		if stageCopy.Gates[i].ID == gateID {
+			gateCopy = cloneGate(stageCopy.Gates[i])
+			break
+		}
+	}
+	return result, &gateEscalationDispatch{
+		handler: e.escalation,
+		flow:    cloneFlow(flow),
+		stage:   &stageCopy,
+		gate:    &gateCopy,
+		reason:  req.Reason,
+	}, nil
 }
 
 // Abort terminates an active flow.
@@ -756,16 +789,25 @@ func cloneFlow(f *Flow) *Flow {
 	cp := *f
 	cp.Stages = append([]Stage(nil), f.Stages...)
 	for i := range cp.Stages {
-		gates := append([]Gate(nil), f.Stages[i].Gates...)
-		for gi := range gates {
-			gates[gi].Config = cloneStringMap(gates[gi].Config)
-		}
-		cp.Stages[i].Gates = gates
+		cp.Stages[i] = cloneStage(cp.Stages[i])
 	}
 	cp.Loops = append([]LoopEdge(nil), f.Loops...)
 	cp.Artifacts = append([]Artifact(nil), f.Artifacts...)
 	cp.Events = append([]FlowEvent(nil), f.Events...)
 	return &cp
+}
+
+func cloneStage(stage Stage) Stage {
+	stage.Gates = append([]Gate(nil), stage.Gates...)
+	for i := range stage.Gates {
+		stage.Gates[i] = cloneGate(stage.Gates[i])
+	}
+	return stage
+}
+
+func cloneGate(gate Gate) Gate {
+	gate.Config = cloneStringMap(gate.Config)
+	return gate
 }
 
 // cloneStringMap returns a shallow copy of m (nil stays nil) so callers never

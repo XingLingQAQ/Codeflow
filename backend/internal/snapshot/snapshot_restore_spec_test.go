@@ -268,7 +268,7 @@ func TestServiceRestorePartialFailureIsNonAtomic(t *testing.T) {
 	}
 	if _, err := graphSvc.ImportGraph(ctx, &samg.JsonLdGraph{
 		Context: samg.JsonLdContext{Vocab: "https://codeflow.ai/vocab/"},
-		ID: "codeflow:samg", Type: "Graph", Graph: []samg.Triple{seedTriple},
+		ID:      "codeflow:samg", Type: "Graph", Graph: []samg.Triple{seedTriple},
 	}); err != nil {
 		t.Fatalf("seed ImportGraph: %v", err)
 	}
@@ -307,14 +307,16 @@ func TestServiceRestorePartialFailureIsNonAtomic(t *testing.T) {
 	}
 	if _, err := graphSvc.ReplaceGraph(ctx, &samg.JsonLdGraph{
 		Context: samg.JsonLdContext{Vocab: "https://codeflow.ai/vocab/"},
-		ID: "codeflow:samg", Type: "Graph", Graph: []samg.Triple{mutTriple},
+		ID:      "codeflow:samg", Type: "Graph", Graph: []samg.Triple{mutTriple},
 	}); err != nil {
 		t.Fatalf("mutate ReplaceGraph: %v", err)
 	}
 
-	// Corrupt ONLY the graph token so graph restore fails with digest mismatch.
-	// snap is the stored pointer, so mutating it affects the service map directly.
-	snap.MemoryGraphVersion = tamperRecoverablePayload(t, snap.MemoryGraphVersion)
+	// Corrupt only the service's internal graph token. Public Create/Get/List
+	// results are detached copies and cannot mutate restore-critical state.
+	snapSvc.mu.Lock()
+	snapSvc.snapshots[snap.ID].MemoryGraphVersion = tamperRecoverablePayload(t, snapSvc.snapshots[snap.ID].MemoryGraphVersion)
+	snapSvc.mu.Unlock()
 
 	result, err := snapSvc.Restore(ctx, snap.ID)
 	if err != nil {

@@ -57,8 +57,8 @@ func defaultConfig() Config {
 			RuleMaxFileBytes:    {Severity: SeverityError},
 			RuleEmptyPath:       {Severity: SeverityError},
 			RuleBinaryExecWrite: {Severity: SeverityWarn},
-				RuleDuplicateSymbol: {Severity: SeverityError},
-			RuleDeprecatedPath: {Severity: SeverityWarn},
+			RuleDuplicateSymbol: {Severity: SeverityError},
+			RuleDeprecatedPath:  {Severity: SeverityWarn},
 		},
 		DeniedPathGlobs: []string{
 			".env",
@@ -202,9 +202,13 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 
 	now := time.Now().UTC()
 	violations := make([]Violation, 0)
+	exemption, hasExemption := e.matchingExemption(absPath)
+	isExempt := func(rule RuleID) bool {
+		return hasExemption && exemptionIncludesRule(exemption, rule)
+	}
 
 	base := filepath.Base(absPath)
-	if severity(cfg, RuleEmptyPath) != SeverityOff && !e.isExempt(absPath, RuleEmptyPath) {
+	if severity(cfg, RuleEmptyPath) != SeverityOff && !isExempt(RuleEmptyPath) {
 		if strings.TrimSpace(absPath) == "" || base == "." || base == string(filepath.Separator) {
 			violations = append(violations, Violation{
 				Rule: RuleEmptyPath, Severity: severity(cfg, RuleEmptyPath),
@@ -213,7 +217,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleStackedNaming); sev != SeverityOff && !e.isExempt(absPath, RuleStackedNaming) {
+	if sev := severity(cfg, RuleStackedNaming); sev != SeverityOff && !isExempt(RuleStackedNaming) {
 		if stackedNaming.MatchString(absPath) || stackedNaming.MatchString(base) {
 			violations = append(violations, Violation{
 				Rule: RuleStackedNaming, Severity: sev,
@@ -223,7 +227,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleDeniedPath); sev != SeverityOff && !e.isExempt(absPath, RuleDeniedPath) {
+	if sev := severity(cfg, RuleDeniedPath); sev != SeverityOff && !isExempt(RuleDeniedPath) {
 		rel := filepath.ToSlash(base)
 		full := filepath.ToSlash(absPath)
 		for _, g := range cfg.DeniedPathGlobs {
@@ -238,7 +242,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleDeprecatedPath); sev != SeverityOff && !e.isExempt(absPath, RuleDeprecatedPath) {
+	if sev := severity(cfg, RuleDeprecatedPath); sev != SeverityOff && !isExempt(RuleDeprecatedPath) {
 		rel := filepath.ToSlash(base)
 		full := filepath.ToSlash(absPath)
 		for _, g := range cfg.DeprecatedPathGlobs {
@@ -253,7 +257,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleMaxFileBytes); sev != SeverityOff && !e.isExempt(absPath, RuleMaxFileBytes) {
+	if sev := severity(cfg, RuleMaxFileBytes); sev != SeverityOff && !isExempt(RuleMaxFileBytes) {
 		max := cfg.MaxFileBytes
 		if max <= 0 {
 			max = defaultMaxFileBytes
@@ -267,7 +271,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleBinaryExecWrite); sev != SeverityOff && !e.isExempt(absPath, RuleBinaryExecWrite) {
+	if sev := severity(cfg, RuleBinaryExecWrite); sev != SeverityOff && !isExempt(RuleBinaryExecWrite) {
 		ext := strings.ToLower(filepath.Ext(absPath))
 		switch ext {
 		case ".exe", ".dll", ".so", ".dylib", ".bat", ".cmd", ".ps1":
@@ -279,7 +283,7 @@ func (e *Engine) Evaluate(ctx context.Context, absPath string, content []byte) D
 		}
 	}
 
-	if sev := severity(cfg, RuleDuplicateSymbol); sev != SeverityOff && !e.isExempt(absPath, RuleDuplicateSymbol) {
+	if sev := severity(cfg, RuleDuplicateSymbol); sev != SeverityOff && !isExempt(RuleDuplicateSymbol) {
 		e.mu.RLock()
 		symbols := e.symbols
 		e.mu.RUnlock()

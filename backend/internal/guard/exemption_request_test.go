@@ -173,6 +173,124 @@ func TestExemptionRequestValidationRejections(t *testing.T) {
 	}
 }
 
+func TestExemptionRequestApprovalExemptionWriteFailureIsAtomicAndRetryable(t *testing.T) {
+	e, dbPath := newDurableExemptionRequestEngine(t)
+	ctx := context.Background()
+	path := filepath.Join("proj", "atomic-exemption2.go")
+	req, err := e.RequestExemption(ctx, ExemptionRequest{
+		Path: path, RuleID: RuleStackedNaming, Reason: "need", Requester: "agent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	installExemptionStoreFailure(t, e, `
+CREATE TEMP TRIGGER fail_exemption_write
+BEFORE INSERT ON exemptions
+BEGIN
+  SELECT RAISE(FAIL, 'injected exemption write failure');
+END;`)
+	if _, err := e.DecideExemptionRequest(ctx, req.ID, true, "admin", "ok"); err == nil {
+		t.Fatal("expected injected exemption write failure")
+	}
+	assertPendingWithoutExemption(t, e, req.ID, path)
+	assertDurablePendingWithoutExemption(t, dbPath, req.ID)
+
+	if _, err := e.exStore.db.Exec(`DROP TRIGGER fail_exemption_write`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	decided, err := e.DecideExemptionRequest(ctx, req.ID, true, "admin", "retry")
+	if err != nil {
+		t.Fatalf("retry approval: %v", err)
+	}
+	if decided.Status != RequestApproved || len(e.ListExemptions()) != 1 {
+		t.Fatalf("retry did not atomically approve: request=%+v exemptions=%+v", decided, e.ListExemptions())
+	}
+}
+
+func TestExemptionRequestApprovalRequestWriteFailureRollsBackExemptionAndRetries(t *testing.T) {
+	e, dbPath := newDurableExemptionRequestEngine(t)
+	ctx := context.Background()
+	path := filepath.Join("proj", "atomic-request2.go")
+	req, err := e.RequestExemption(ctx, ExemptionRequest{
+		Path: path, RuleID: RuleStackedNaming, Reason: "need", Requester: "agent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	installExemptionStoreFailure(t, e, `
+CREATE TEMP TRIGGER fail_request_update
+BEFORE UPDATE ON exemption_requests
+BEGIN
+  SELECT RAISE(FAIL, 'injected request persistence failure');
+END;`)
+	if _, err := e.DecideExemptionRequest(ctx, req.ID, true, "admin", "ok"); err == nil {
+		t.Fatal("expected injected request persistence failure")
+	}
+	assertPendingWithoutExemption(t, e, req.ID, path)
+	assertDurablePendingWithoutExemption(t, dbPath, req.ID)
+
+	if _, err := e.exStore.db.Exec(`DROP TRIGGER fail_request_update`); err != nil {
+		t.Fatalf("drop failure trigger: %v", err)
+	}
+	decided, err := e.DecideExemptionRequest(ctx, req.ID, true, "admin", "retry")
+	if err != nil {
+		t.Fatalf("retry approval: %v", err)
+	}
+	if decided.Status != RequestApproved || len(e.ListExemptions()) != 1 {
+		t.Fatalf("retry did not atomically approve: request=%+v exemptions=%+v", decided, e.ListExemptions())
+	}
+}
+
+func newDurableExemptionRequestEngine(t *testing.T) (*Engine, string) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "guard_exemption_failure.db")
+	e := NewEngine(nil, nil)
+	if err := e.OpenExemptionStore(dbPath); err != nil {
+		t.Fatalf("open exemption store: %v", err)
+	}
+	t.Cleanup(func() { _ = e.CloseExemptionStore() })
+	return e, dbPath
+}
+
+func installExemptionStoreFailure(t *testing.T, e *Engine, statement string) {
+	t.Helper()
+	if _, err := e.exStore.db.Exec(statement); err != nil {
+		t.Fatalf("install failure trigger: %v", err)
+	}
+}
+
+func assertPendingWithoutExemption(t *testing.T, e *Engine, id, path string) {
+	t.Helper()
+	requests := e.ListExemptionRequests("")
+	if len(requests) != 1 || requests[0].ID != id || requests[0].Status != RequestPending {
+		t.Fatalf("failed approval changed in-memory request: %+v", requests)
+	}
+	if exemptions := e.ListExemptions(); len(exemptions) != 0 {
+		t.Fatalf("failed approval activated in-memory exemption: %+v", exemptions)
+	}
+	if err := e.BeforeWrite(context.Background(), path, []byte("package p\n")); err == nil {
+		t.Fatal("failed approval unexpectedly allowed guarded write")
+	}
+}
+
+func assertDurablePendingWithoutExemption(t *testing.T, dbPath, id string) {
+	t.Helper()
+	reopened := NewEngine(nil, nil)
+	if err := reopened.OpenExemptionStore(dbPath); err != nil {
+		t.Fatalf("open second exemption store: %v", err)
+	}
+	defer func() { _ = reopened.CloseExemptionStore() }()
+	requests := reopened.ListExemptionRequests("")
+	if len(requests) != 1 || requests[0].ID != id || requests[0].Status != RequestPending {
+		t.Fatalf("failed approval changed durable request: %+v", requests)
+	}
+	if exemptions := reopened.ListExemptions(); len(exemptions) != 0 {
+		t.Fatalf("failed approval left durable exemption: %+v", exemptions)
+	}
+}
+
 func TestExemptionRequestPersistenceAcrossReopen(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "guard_exreq.db")

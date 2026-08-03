@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,6 +66,105 @@ func TestSnapshotCreate(t *testing.T) {
 	// Verify creation time < 500ms
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("Snapshot creation took %v, exceeding 500ms threshold", elapsed)
+	}
+}
+
+func TestSnapshotCreateReturnsPrivateDeepCopy(t *testing.T) {
+	provider := &fakeSnapshotStateProvider{
+		gitHash: "git:private", conversation: "conversation:private",
+		vector: "vector:private", graph: "graph:private",
+	}
+	svc := NewInMemorySnapshotServiceWithProvider(provider)
+	ctx := context.Background()
+	tags := []string{"stable", "restore"}
+	req := &SnapshotCreateRequest{Description: "private", SessionID: "session-private", Tags: tags}
+
+	created, err := svc.Create(ctx, req)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Mutating either the request's slice or the full Create result must not
+	// alter the service's restore-critical record.
+	tags[0] = "request-mutated"
+	created.Tags[1] = "create-mutated"
+	created.GitHash = "git:mutated"
+	created.ConversationState = "conversation:mutated"
+	created.VectorPointer = "vector:mutated"
+	created.MemoryGraphVersion = "graph:mutated"
+
+	stored, err := svc.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got, want := stored.Tags, []string{"stable", "restore"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stored Tags = %#v, want %#v", got, want)
+	}
+	if stored.GitHash != provider.gitHash || stored.ConversationState != provider.conversation ||
+		stored.VectorPointer != provider.vector || stored.MemoryGraphVersion != provider.graph {
+		t.Fatalf("Create result mutated stored restore state: %+v", stored)
+	}
+
+	result, err := svc.Restore(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("Restore errors: %v", result.Errors)
+	}
+	if provider.restoreGit != provider.gitHash || provider.restoreConv != provider.conversation ||
+		provider.restoreVector != provider.vector || provider.restoreGraph != provider.graph {
+		t.Fatalf("Restore received mutated state: git=%q conversation=%q vector=%q graph=%q",
+			provider.restoreGit, provider.restoreConv, provider.restoreVector, provider.restoreGraph)
+	}
+}
+
+func TestSnapshotGetAndListReturnPrivateDeepCopies(t *testing.T) {
+	provider := &fakeSnapshotStateProvider{
+		gitHash: "git:private", conversation: "conversation:private",
+		vector: "vector:private", graph: "graph:private",
+	}
+	svc := NewInMemorySnapshotServiceWithProvider(provider)
+	ctx := context.Background()
+	created, err := svc.Create(ctx, &SnapshotCreateRequest{Tags: []string{"stable", "restore"}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := svc.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	got.Tags[0] = "get-mutated"
+	got.MemoryGraphVersion = "graph:get-mutated"
+
+	listed, err := svc.List(ctx, &SnapshotListOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listed.Items) != 1 {
+		t.Fatalf("List items = %d, want 1", len(listed.Items))
+	}
+	listed.Items[0].Tags[1] = "list-mutated"
+	listed.Items[0].VectorPointer = "vector:list-mutated"
+
+	again, err := svc.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get after mutations: %v", err)
+	}
+	if got, want := again.Tags, []string{"stable", "restore"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stored Tags = %#v, want %#v", got, want)
+	}
+	if again.VectorPointer != provider.vector || again.MemoryGraphVersion != provider.graph {
+		t.Fatalf("Get/List result mutated stored restore state: %+v", again)
+	}
+
+	listedAgain, err := svc.List(ctx, &SnapshotListOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("second List: %v", err)
+	}
+	if got, want := listedAgain.Items[0].Tags, []string{"stable", "restore"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("second List Tags = %#v, want %#v", got, want)
 	}
 }
 
@@ -707,7 +807,6 @@ func TestSnapshotEmptyRecoverableRestoreSucceeds(t *testing.T) {
 		}
 	}
 }
-
 
 func TestSnapshotTrueRestoreConversation(t *testing.T) {
 	ctx := context.Background()

@@ -65,6 +65,41 @@ type blockingRestoreProvider struct {
 	once    sync.Once
 }
 
+type slowCreateProvider struct {
+	delay time.Duration
+}
+
+func (p *slowCreateProvider) wait(ctx context.Context) error {
+	timer := time.NewTimer(p.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (p *slowCreateProvider) CaptureGitState(ctx context.Context) (string, error) {
+	if err := p.wait(ctx); err != nil {
+		return "", err
+	}
+	return "git-slow", nil
+}
+func (p *slowCreateProvider) CaptureConversationState(context.Context, string) (string, error) {
+	return "conversation-slow", nil
+}
+func (p *slowCreateProvider) CaptureVectorState(context.Context, string) (string, error) {
+	return "vector-slow", nil
+}
+func (p *slowCreateProvider) CaptureMemoryGraphState(context.Context) (string, error) {
+	return "graph-slow", nil
+}
+func (p *slowCreateProvider) RestoreGitState(context.Context, string) error          { return nil }
+func (p *slowCreateProvider) RestoreConversationState(context.Context, string) error { return nil }
+func (p *slowCreateProvider) RestoreVectorState(context.Context, string) error       { return nil }
+func (p *slowCreateProvider) RestoreMemoryGraphState(context.Context, string) error  { return nil }
+
 func (p *blockingRestoreProvider) CaptureGitState(context.Context) (string, error) {
 	return "git-hash", nil
 }
@@ -159,6 +194,89 @@ func TestConcurrentSnapshotOperationsAreRaceFree(t *testing.T) {
 	}
 	if atomic.LoadInt64(&provider.restores) == 0 {
 		t.Fatal("expected restore calls to have run")
+	}
+}
+
+func TestConcurrentReturnMutationDoesNotRaceInternalReaders(t *testing.T) {
+	provider := &countingStateProvider{}
+	svc := NewInMemorySnapshotServiceWithProvider(provider)
+	ctx := context.Background()
+	requestTags := []string{"stable", "restore"}
+	created, err := svc.Create(ctx, &SnapshotCreateRequest{SessionID: "s", Tags: requestTags})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	const iterations = 200
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			requestTags[0] = "request-mutated"
+			created.Tags[0] = "create-mutated"
+			created.VectorPointer = "create-mutated"
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			got, getErr := svc.Get(ctx, created.ID)
+			if getErr == nil {
+				got.Tags[0] = "get-mutated"
+				got.ConversationState = "get-mutated"
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			listed, listErr := svc.List(ctx, &SnapshotListOptions{Tags: []string{"stable"}, Limit: 1})
+			if listErr == nil && len(listed.Items) > 0 {
+				listed.Items[0].Tags[0] = "list-mutated"
+				listed.Items[0].MemoryGraphVersion = "list-mutated"
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			_, _ = svc.Restore(ctx, created.ID)
+		}
+	}()
+	wg.Wait()
+
+	stored, err := svc.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get after concurrency: %v", err)
+	}
+	if len(stored.Tags) != 2 || stored.Tags[0] != "stable" || stored.Tags[1] != "restore" {
+		t.Fatalf("stored Tags mutated: %#v", stored.Tags)
+	}
+	if stored.ConversationState != "conversation-token" || stored.VectorPointer != "vector-token" ||
+		stored.MemoryGraphVersion != "graph-token" {
+		t.Fatalf("stored restore state mutated: %+v", stored)
+	}
+}
+
+func TestSlowCreateCommitsAndReturnsSuccess(t *testing.T) {
+	svc := NewInMemorySnapshotServiceWithProvider(&slowCreateProvider{delay: 510 * time.Millisecond})
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, &SnapshotCreateRequest{Tags: []string{"slow"}})
+	if err != nil {
+		t.Fatalf("slow Create returned an error after insertion: %v", err)
+	}
+	if created == nil || created.ID == "" {
+		t.Fatalf("slow Create returned invalid snapshot: %+v", created)
+	}
+
+	stored, err := svc.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("slow-created snapshot was not committed: %v", err)
+	}
+	if stored.ID != created.ID || len(stored.Tags) != 1 || stored.Tags[0] != "slow" {
+		t.Fatalf("stored slow snapshot mismatch: %+v", stored)
 	}
 }
 

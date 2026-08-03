@@ -145,10 +145,18 @@ func (e *Engine) ListExemptions() []Exemption {
 }
 
 func (e *Engine) isExempt(absPath string, rule RuleID) bool {
+	ex, ok := e.matchingExemption(absPath)
+	return ok && exemptionIncludesRule(ex, rule)
+}
+
+// matchingExemption resolves the exemption for a path once. Evaluate uses this
+// once per decision rather than repeating path normalization and a map scan for
+// every enabled rule.
+func (e *Engine) matchingExemption(absPath string) (Exemption, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.exemptions == nil {
-		return false
+		return Exemption{}, false
 	}
 	key := normalizeExemptionPath(absPath)
 	ex, ok := e.exemptions[key]
@@ -170,15 +178,19 @@ func (e *Engine) isExempt(absPath string, rule RuleID) bool {
 		}
 	}
 	if !ok {
-		return false
+		return Exemption{}, false
 	}
 	if time.Now().UTC().After(ex.ExpiresAt) {
 		delete(e.exemptions, key)
 		if e.exStore != nil {
 			_ = e.exStore.delete(key)
 		}
-		return false
+		return Exemption{}, false
 	}
+	return ex, true
+}
+
+func exemptionIncludesRule(ex Exemption, rule RuleID) bool {
 	if len(ex.Rules) == 0 {
 		return true
 	}
@@ -291,9 +303,9 @@ func (e *Engine) RequestExemption(ctx context.Context, req ExemptionRequest) (*E
 	return &cp, nil
 }
 
-// DecideExemptionRequest approves or rejects a pending request. On approval
-// the existing GrantExemption path is called so exemption normalization,
-// persistence, and in-memory activation happen exactly as for direct grants.
+// DecideExemptionRequest approves or rejects a pending request. Approvals are
+// persisted as one transaction with their active exemption before either
+// in-memory view is updated, so failures leave the request pending and retryable.
 func (e *Engine) DecideExemptionRequest(ctx context.Context, id string, approve bool, decidedBy, reason string) (*ExemptionRequest, error) {
 	e.mu.Lock()
 	req, ok := e.exRequests[id]
@@ -305,7 +317,7 @@ func (e *Engine) DecideExemptionRequest(ctx context.Context, id string, approve 
 		e.mu.Unlock()
 		return nil, fmt.Errorf("exemption request already decided: %s (status %s)", id, req.Status)
 	}
-	now := time.Now().UTC()
+	decidedAt := time.Now().UTC()
 	if approve {
 		req.Status = RequestApproved
 	} else {
@@ -313,34 +325,47 @@ func (e *Engine) DecideExemptionRequest(ctx context.Context, id string, approve 
 	}
 	req.DecidedBy = decidedBy
 	req.DecideReason = reason
-	req.DecidedAt = now
-	if e.exStore != nil {
-		if err := e.exStore.putRequest(req); err != nil {
-			e.mu.Unlock()
-			return nil, err
-		}
-	}
-	e.exRequests[id] = req
-	e.mu.Unlock()
+	req.DecidedAt = decidedAt
 
+	var ex Exemption
 	if approve {
 		rules := []RuleID(nil)
 		if req.RuleID != "" {
 			rules = []RuleID{req.RuleID}
 		}
-		if err := e.GrantExemption(Exemption{
-			Path:      req.Path,
+		ex = Exemption{
+			Path:      normalizeExemptionPath(req.Path),
 			Rules:     rules,
 			Reason:    fmt.Sprintf("approved request %s: %s", id, req.Reason),
-			ExpiresAt: now.Add(req.TTL),
-		}); err != nil {
-			return nil, err
+			ExpiresAt: decidedAt.Add(req.TTL),
 		}
 	}
 
-	e.mu.RLock()
+	if e.exStore != nil {
+		var err error
+		if approve {
+			err = e.exStore.approveRequest(req, ex)
+		} else {
+			err = e.exStore.putRequest(req)
+		}
+		if err != nil {
+			e.mu.Unlock()
+			return nil, err
+		}
+	}
+	if e.exRequests == nil {
+		e.exRequests = make(map[string]ExemptionRequest)
+	}
+	e.exRequests[id] = req
+	if approve {
+		if e.exemptions == nil {
+			e.exemptions = make(map[string]Exemption)
+		}
+		e.exemptions[ex.Path] = ex
+	}
 	auditor := e.auditor
-	e.mu.RUnlock()
+	e.mu.Unlock()
+
 	if auditor != nil {
 		_ = auditor.RecordGuardEvent(ctx, "guard.exemption_decided", map[string]interface{}{
 			"request_id": req.ID,

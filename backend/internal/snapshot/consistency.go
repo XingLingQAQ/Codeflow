@@ -45,7 +45,11 @@ func (s *InMemorySnapshotService) VerifyConsistency(ctx context.Context, snapsho
 	}
 
 	s.mu.RLock()
-	snap, ok := s.snapshots[snapshotID]
+	stored, ok := s.snapshots[snapshotID]
+	var snap *Snapshot
+	if ok {
+		snap = cloneSnapshot(stored)
+	}
 	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("snapshot not found: %s", snapshotID)

@@ -73,11 +73,19 @@ func (s *sqliteExemptionStore) putRequest(req ExemptionRequest) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("exemption store not open")
 	}
+	return putExemptionRequest(s.db, req)
+}
+
+type exemptionStoreExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func putExemptionRequest(exec exemptionStoreExecer, req ExemptionRequest) error {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`
+	_, err = exec.Exec(`
 INSERT INTO exemption_requests (id, status, payload, created_at)
 VALUES (?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
@@ -122,6 +130,10 @@ func (s *sqliteExemptionStore) put(ex Exemption) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("exemption store not open")
 	}
+	return putExemption(s.db, ex)
+}
+
+func putExemption(exec exemptionStoreExecer, ex Exemption) error {
 	if ex.Path == "" {
 		return fmt.Errorf("exemption path required")
 	}
@@ -129,7 +141,7 @@ func (s *sqliteExemptionStore) put(ex Exemption) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec(`
+	_, err = exec.Exec(`
 INSERT INTO exemptions (path, expires_at, payload)
 VALUES (?, ?, ?)
 ON CONFLICT(path) DO UPDATE SET
@@ -137,6 +149,33 @@ ON CONFLICT(path) DO UPDATE SET
   payload=excluded.payload
 `, ex.Path, ex.ExpiresAt.UTC().UnixMilli(), string(payload))
 	return err
+}
+
+// approveRequest atomically persists the active exemption and the approved
+// request. Neither row is visible unless both writes succeed.
+func (s *sqliteExemptionStore) approveRequest(req ExemptionRequest, ex Exemption) (err error) {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("exemption store not open")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+	if err = putExemption(tx, ex); err != nil {
+		return fmt.Errorf("persist approved exemption: %w", err)
+	}
+	if err = putExemptionRequest(tx, req); err != nil {
+		return fmt.Errorf("persist approved exemption request: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit approved exemption request: %w", err)
+	}
+	return nil
 }
 
 func (s *sqliteExemptionStore) delete(path string) error {

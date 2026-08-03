@@ -73,18 +73,23 @@ func (s *InMemorySnapshotService) Create(ctx context.Context, req *SnapshotCreat
 		Description:        req.Description,
 		CreatedAt:          time.Now(),
 		SessionID:          req.SessionID,
-		Tags:               req.Tags,
+		Tags:               cloneStrings(req.Tags),
 	}
 
-	s.snapshots[snapshot.ID] = snapshot
+	// Keep the stored record private from both the request and the value returned
+	// to the caller. In particular, Tags must never share a backing array across
+	// the service boundary.
+	s.snapshots[snapshot.ID] = cloneSnapshot(snapshot)
 
-	// Ensure creation time < 500ms
+	// The 500ms target is operational telemetry, not a transactional failure.
+	// Once inserted, Create must report success so callers never retry or hide a
+	// snapshot that was actually committed.
 	elapsed := time.Since(startTime)
 	if elapsed > 500*time.Millisecond {
-		return snapshot, fmt.Errorf("snapshot creation took %v, exceeding 500ms threshold", elapsed)
+		log.Printf("[WARN] snapshot creation exceeded 500ms target: snapshot=%s elapsed=%v", snapshot.ID, elapsed)
 	}
 
-	return snapshot, nil
+	return cloneSnapshot(snapshot), nil
 }
 
 // List returns a paginated list of snapshots.
@@ -135,10 +140,10 @@ func (s *InMemorySnapshotService) List(ctx context.Context, opts *SnapshotListOp
 		end = total
 	}
 
-	// Convert to value slice
+	// Convert to detached value copies.
 	items := make([]Snapshot, 0, end-start)
 	for _, snap := range filtered[start:end] {
-		items = append(items, *snap)
+		items = append(items, *cloneSnapshot(snap))
 	}
 
 	hasMore := end < total
@@ -164,7 +169,7 @@ func (s *InMemorySnapshotService) Get(ctx context.Context, id string) (*Snapshot
 	if !ok {
 		return nil, fmt.Errorf("snapshot not found: %s", id)
 	}
-	return snap, nil
+	return cloneSnapshot(snap), nil
 }
 
 // Restore restores the system state from a snapshot.
@@ -173,7 +178,11 @@ func (s *InMemorySnapshotService) Restore(ctx context.Context, id string) (*Rest
 		ctx = context.Background()
 	}
 	s.mu.RLock()
-	snap, ok := s.snapshots[id]
+	stored, ok := s.snapshots[id]
+	var snap *Snapshot
+	if ok {
+		snap = cloneSnapshot(stored)
+	}
 	s.mu.RUnlock()
 
 	if !ok {
@@ -267,6 +276,24 @@ func (s *InMemorySnapshotService) restoreVectorState(ctx context.Context, pointe
 
 func (s *InMemorySnapshotService) restoreMemoryGraphState(ctx context.Context, version string) error {
 	return s.provider.RestoreMemoryGraphState(ctx, version)
+}
+
+func cloneSnapshot(snap *Snapshot) *Snapshot {
+	if snap == nil {
+		return nil
+	}
+	cloned := *snap
+	cloned.Tags = cloneStrings(snap.Tags)
+	return &cloned
+}
+
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
 }
 
 func (s *InMemorySnapshotService) hasAnyTag(snapshotTags, filterTags []string) bool {
