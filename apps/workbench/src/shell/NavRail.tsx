@@ -57,7 +57,7 @@ export function NavRail() {
               aria-current={active ? 'page' : undefined}
               className={cn(
                 'relative flex items-center rounded-xl transition-colors duration-200',
-                expanded ? 'h-9 gap-2.5 px-2.5' : 'size-11 justify-center',
+                expanded ? 'h-9 w-full gap-2.5 px-2.5' : 'size-11 justify-center',
                 active ? 'font-semibold text-ink' : 'text-ink-mute hover:text-ink hover:bg-tint',
               )}
             >
