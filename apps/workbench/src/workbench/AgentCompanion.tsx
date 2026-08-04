@@ -246,7 +246,7 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
               className={cn(
                 'inline-block rounded-full',
                 streaming
-                  ? 'animate-streamdot size-2.5 bg-[image:var(--grad-signature)] shadow-[0_0_6px_oklch(0.55_0.20_285/0.5)]'
+                  ? 'animate-streamdot size-2.5 bg-[image:var(--grad-signature)] shadow-[0_0_6px_oklch(0.80_0.11_205/0.55)]'
                   : 'size-2 bg-ink-mute/60',
               )}
             />

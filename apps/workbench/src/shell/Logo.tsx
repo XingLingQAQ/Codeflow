@@ -15,6 +15,10 @@ interface LogoMarkProps {
  * --grad-signature). This file pairs with the inline SVG stops below, so the
  * cobalt color correction flips BOTH places (theme.css :root + these two
  * constants) in one search-replace — do not re-introduce hex inlines.
+ *
+ * NOTE (08-04 colorize): the cobalt flip is a deferred decision — the
+ * #7c5cff→#22d3ee signature stays for now and must live ONLY here, in
+ * FlowProgress, and in the startup splash. Do not implement the flip.
  */
 const BRAND_FROM = 'var(--brand-from)';
 const BRAND_TO = 'var(--brand-to)';

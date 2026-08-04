@@ -1,6 +1,9 @@
 /*
- * CodeFlow 2.0 design tokens — warm "sophisticated color" system.
- * Light default + dark (indigo-graphite) theme via .dark on <html>.
+ * CodeFlow 2.0 design tokens — white-first neutral system (08-04 colorize).
+ * Light default + dark (neutral graphite) theme via .dark on <html>.
+ * All structural colors are hue-free or near-neutral cool greys (hue 260 @
+ * chroma ≤0.012 reads as grey); the only purple/cyan left in the build is the
+ * brand signature gradient, scoped to Logo / FlowProgress / startup splash.
  *
  * Architecture: every theme-sensitive color is a *runtime* CSS variable
  * (--color-*) flipped per theme. Tailwind v4 utilities (bg-surface, text-ink,
@@ -18,7 +21,7 @@
   --color-raised: var(--color-raised);
   --color-hover: var(--color-hover);
 
-  /* Ink (text) scale */
+  /* Ink (text) scale — cool-neutral slate greys, near-zero chroma, no hue-285 lavender */
   --color-ink: var(--color-ink);
   --color-ink-dim: var(--color-ink-dim);
   --color-ink-mute: var(--color-ink-mute);
@@ -33,10 +36,10 @@
   /* Semantic color system — value + what to ink/target on top of it */
   --color-primary: var(--color-primary);
   --color-on-primary: var(--color-on-primary);
-  --color-accent: var(--color-accent);    /* indigo text / dot tone */
+  --color-accent: var(--color-accent);    /* neutral dark-ink accent (post 08-04 colorize; cobalt flip pending) */
   --color-accent-2: var(--color-accent-2); /* cyan gradient endpoint */
-  --color-primary-soft: var(--color-primary-soft);   /* ~10% indigo wash */
-  --color-primary-weak: var(--color-primary-weak);   /* ~5% indigo wash */
+  --color-primary-soft: var(--color-primary-soft);   /* ~10% neutral slate wash */
+  --color-primary-weak: var(--color-primary-weak);   /* ~5% neutral slate wash */
   --color-info: var(--color-info);
   --color-info-strong: var(--color-info-strong);   /* darker same-hue text */
   --color-info-soft: var(--color-info-soft);
@@ -94,32 +97,34 @@
   }
 }
 
-/* ============ LIGHT — warm paper + indigo accent ============ */
+/* ============ LIGHT — white canvas + neutral slate ink ============ */
 :root {
-  --color-base: oklch(0.985 0.002 95);          /* warm off-white canvas */
-  --color-panel: oklch(0.955 0.006 285);        /* inset wells on paper */
-  --color-surface: oklch(1 0 0);                /* white cards */
-  --color-raised: oklch(1 0 0);                 /* legacy alias: fields read as white on paper */
-  --color-hover: oklch(0.965 0.003 285);
+  --color-base: oklch(0.973 0.004 260);         /* near-white cool-grey canvas */
+  --color-panel: oklch(0.955 0.004 260);        /* inset wells, neutral grey */
+  --color-surface: oklch(1 0 0);                /* pure-white cards */
+  --color-raised: oklch(1 0 0);                 /* legacy alias: fields read as white */
+  --color-hover: oklch(0.94 0.005 260);
 
-  --color-ink: oklch(0.25 0.02 285);
-  --color-ink-dim: oklch(0.50 0.02 285);
-  --color-ink-mute: oklch(0.56 0.018 285);
+  --color-ink: oklch(0.22 0.01 260);
+  --color-ink-dim: oklch(0.45 0.01 260);
+  --color-ink-mute: oklch(0.52 0.01 260);
 
-  --color-line: oklch(0.92 0.005 285);
-  --color-line-strong: oklch(0.855 0.012 285);
-  --color-tint: oklch(0.25 0.02 285 / 0.045);
-  --color-tint-hover: oklch(0.25 0.02 285 / 0.07);
-  --color-tint-active: oklch(0.25 0.02 285 / 0.10);
+  --color-line: oklch(0.91 0.004 260);
+  --color-line-strong: oklch(0.85 0.005 260);
+  --color-tint: oklch(0.22 0.01 260 / 0.045);
+  --color-tint-hover: oklch(0.22 0.01 260 / 0.07);
+  --color-tint-active: oklch(0.22 0.01 260 / 0.10);
 
-  --color-primary: oklch(0.55 0.20 285);
-  --color-primary-hover: oklch(0.50 0.205 285); /* primary button hover */
-  --color-primary-active: oklch(0.46 0.20 285);
+  /* Neutral primary (chosen 08-04 over a cobalt/teal midpoint): interactive
+     fills are dark slate ink on white; the cobalt flip may retint this later. */
+  --color-primary: oklch(0.34 0.012 260);
+  --color-primary-hover: oklch(0.29 0.012 260); /* primary button hover */
+  --color-primary-active: oklch(0.24 0.012 260);
   --color-on-primary: oklch(0.99 0 0);
-  --color-accent: oklch(0.545 0.21 285);
+  --color-accent: oklch(0.34 0.012 260);
   --color-accent-2: oklch(0.80 0.11 205);
-  --color-primary-soft: oklch(0.55 0.20 285 / 0.10);
-  --color-primary-weak: oklch(0.55 0.20 285 / 0.055);
+  --color-primary-soft: oklch(0.34 0.012 260 / 0.10);
+  --color-primary-weak: oklch(0.34 0.012 260 / 0.055);
 
   --color-info: oklch(0.60 0.12 230);
   --color-info-strong: oklch(0.50 0.14 240);
@@ -144,10 +149,10 @@
 
   /* Glass chrome (sidebar / topbar) */
   --glass-bg: oklch(1 0 0 / 0.72);
-  --glass-border: oklch(0.92 0.005 285);
+  --glass-border: oklch(0.91 0.004 260);
 
   /* Interactive field focus */
-  --field-focus: oklch(0.55 0.20 285);
+  --field-focus: oklch(0.34 0.012 260);
 
   --ease-flow: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-1: 150ms;
@@ -155,32 +160,32 @@
   --dur-3: 400ms;
   --skeleton-a: rgba(0, 0, 0, 0.04);
   --skeleton-b: rgba(0, 0, 0, 0.08);
-  --scrollbar-thumb: oklch(0.25 0.02 285 / 0.14);
-  --scrollbar-hover: oklch(0.25 0.02 285 / 0.26);
-  --dialog-overlay: oklch(0.20 0.02 285 / 0.35);
-  --glow-accent: 0 0 12px oklch(0.55 0.20 285 / 0.25);
+  --scrollbar-thumb: oklch(0.22 0.01 260 / 0.16);
+  --scrollbar-hover: oklch(0.22 0.01 260 / 0.28);
+  --dialog-overlay: oklch(0.19 0.005 260 / 0.38);
+  --glow-accent: 0 0 12px oklch(0.80 0.11 205 / 0.40);
 
   /* Card geometry + elevation (real depth: rest border + soft hover lift) */
   --cf-radius-card: 12px;
-  --elev-inset-bg: oklch(0.25 0.02 285 / 0.03);
-  --elev-inset-shadow: inset 0 1px 2px oklch(0.25 0.02 285 / 0.05);
+  --elev-inset-bg: oklch(0.22 0.01 260 / 0.03);
+  --elev-inset-shadow: inset 0 1px 2px oklch(0.22 0.01 260 / 0.05);
   --elev-rest-border: var(--color-line);
-  --elev-rest-shadow: 0 1px 2px oklch(0.50 0.02 285 / 0.05);
-  --elev-lift-border: oklch(0.85 0.01 285);
-  --elev-lift-shadow: 0 4px 12px oklch(0.50 0.02 285 / 0.08), 0 2px 4px oklch(0.50 0.02 285 / 0.05);
+  --elev-rest-shadow: 0 1px 2px oklch(0.32 0.01 260 / 0.06);
+  --elev-lift-border: oklch(0.85 0.005 260);
+  --elev-lift-shadow: 0 4px 12px oklch(0.32 0.01 260 / 0.08), 0 2px 4px oklch(0.32 0.01 260 / 0.05);
 }
 
-/* ============ DARK — indigo-tinted graphite ============ */
+/* ============ DARK — neutral graphite (hue-free greys, no indigo tint) ============ */
 html.dark {
-  --color-base: oklch(0.155 0.011 285);
-  --color-panel: oklch(0.165 0.011 285);
-  --color-surface: oklch(0.205 0.012 285);
-  --color-raised: oklch(0.225 0.012 285);
-  --color-hover: oklch(0.26 0.014 285);
+  --color-base: oklch(0.16 0 0);
+  --color-panel: oklch(0.17 0 0);
+  --color-surface: oklch(0.21 0 0);
+  --color-raised: oklch(0.23 0 0);
+  --color-hover: oklch(0.26 0 0);
 
-  --color-ink: oklch(0.93 0.006 285);
-  --color-ink-dim: oklch(0.78 0.012 285);
-  --color-ink-mute: oklch(0.645 0.014 285);
+  --color-ink: oklch(0.93 0 0);
+  --color-ink-dim: oklch(0.78 0 0);
+  --color-ink-mute: oklch(0.65 0 0);
 
   --color-line: oklch(1 0 0 / 0.075);
   --color-line-strong: oklch(1 0 0 / 0.13);
@@ -188,15 +193,16 @@ html.dark {
   --color-tint-hover: oklch(1 0 0 / 0.075);
   --color-tint-active: oklch(1 0 0 / 0.10);
 
-  /* Same accent family, lifted lightness for dark contrast */
-  --color-primary: oklch(0.70 0.17 283);
-  --color-primary-hover: oklch(0.76 0.16 283);
-  --color-primary-active: oklch(0.62 0.18 283);
-  --color-on-primary: oklch(0.17 0.02 285);
-  --color-accent: oklch(0.77 0.13 285);
+  /* Neutral primary (removed indigo 08-04): light-grey fills with dark-ink
+     foreground; the cobalt flip may retint this later. */
+  --color-primary: oklch(0.88 0 0);
+  --color-primary-hover: oklch(0.95 0 0);
+  --color-primary-active: oklch(0.78 0 0);
+  --color-on-primary: oklch(0.17 0 0);
+  --color-accent: oklch(0.88 0 0);
   --color-accent-2: oklch(0.85 0.09 205);
-  --color-primary-soft: oklch(0.72 0.16 285 / 0.16);
-  --color-primary-weak: oklch(0.72 0.16 285 / 0.08);
+  --color-primary-soft: oklch(0.88 0 0 / 0.16);
+  --color-primary-weak: oklch(0.88 0 0 / 0.08);
 
   --color-info: oklch(0.76 0.10 230);
   --color-info-strong: oklch(0.85 0.08 230);
@@ -211,17 +217,17 @@ html.dark {
   --color-danger-strong: oklch(0.82 0.14 22);
   --color-danger-soft: oklch(0.70 0.16 23 / 0.16);
 
-  --glass-bg: oklch(0.165 0.011 285 / 0.75);
+  --glass-bg: oklch(0.17 0 0 / 0.75);
   --glass-border: oklch(1 0 0 / 0.07);
 
-  --field-focus: oklch(0.70 0.17 283);
+  --field-focus: oklch(0.88 0 0);
 
   --skeleton-a: rgba(255, 255, 255, 0.04);
   --skeleton-b: rgba(255, 255, 255, 0.08);
   --scrollbar-thumb: oklch(1 0 0 / 0.11);
   --scrollbar-hover: oklch(1 0 0 / 0.20);
-  --dialog-overlay: oklch(0.10 0.01 285 / 0.65);
-  --glow-accent: 0 0 12px oklch(0.70 0.17 283 / 0.30);
+  --dialog-overlay: oklch(0.09 0 0 / 0.65);
+  --glow-accent: 0 0 12px oklch(0.85 0.09 205 / 0.40);
 
   --elev-inset-bg: oklch(1 0 0 / 0.025);
   --elev-inset-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
@@ -240,28 +246,16 @@ html.dark {
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
-  /* Warm paper: a whisper of indigo light rising from the bottom edge —
-     nearly invisible alone, but it gives glass surfaces something to refract. */
-  background-image: radial-gradient(
-    120% 60% at 50% 108%,
-    oklch(0.55 0.20 285 / 0.045),
-    transparent 60%
-  );
-}
-html.dark .cf-app {
-  background-image: radial-gradient(
-    120% 60% at 50% 108%,
-    oklch(0.70 0.17 283 / 0.06),
-    transparent 60%
-  );
+  /* White-first: the old indigo light rising from the bottom edge was removed
+     in the 08-04 colorize — chrome must read as clean white/near-grey. */
 }
 
 .cf-app ::selection {
-  background: oklch(0.55 0.20 285 / 0.18);
+  background: color-mix(in oklch, var(--color-ink) 18%, transparent);
   color: inherit;
 }
 html.dark .cf-app ::selection {
-  background: oklch(0.70 0.17 283 / 0.30);
+  background: color-mix(in oklch, var(--color-ink) 30%, transparent);
 }
 
 .cf-app ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -335,7 +329,7 @@ html.dark .cf-app ::selection {
     box-shadow:
       0 0 0 3px var(--color-base),
       0 0 0 5px var(--color-ink),
-      0 3px 8px oklch(0.25 0.02 285 / 0.28);
+      0 3px 8px oklch(0.22 0.01 260 / 0.28);
   }
   html.dark .ring-active {
     box-shadow:
@@ -367,9 +361,9 @@ html.dark .cf-app ::selection {
   }
 
   /* Intent micro-decoration:
-     - .card-accent-success: faint signature-gradient sheen at the top-left
-       corner for completed/success cards. Light theme only; dark stays quiet.
-       Opacity capped at ~0.10. */
+     - .card-accent-success: faint neutral-ink sheen at the top-left corner
+       for completed/success cards. Light theme only; dark stays quiet.
+       Purple never reaches decor: this is ink, not the signature gradient. */
   .card-accent-success {
     position: relative;
   }
@@ -382,8 +376,8 @@ html.dark .cf-app ::selection {
     height: 38%;
     pointer-events: none;
     border-top-left-radius: inherit;
-    background: var(--grad-signature);
-    opacity: 0.1;
+    background: var(--color-ink);
+    opacity: 0.08;
     /* Fade out fast so the sheen reads as a small corner tint, not a fill. */
     mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, transparent 70%);
     -webkit-mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, transparent 70%);

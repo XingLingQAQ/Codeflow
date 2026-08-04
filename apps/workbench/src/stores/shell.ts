@@ -81,7 +81,7 @@ export function applyThemeClass(mode: ThemeMode): void {
   document.documentElement.classList.toggle('dark', dark);
   // Keep the pre-paint inline background (index.html) in sync so the canvas
   // behind the splash/theme flash matches the resolved theme.
-  document.documentElement.style.backgroundColor = dark ? '#0A0C10' : '#FFFFFF';
+  document.documentElement.style.backgroundColor = dark ? '#141414' : '#F5F6F8';
 }
 
 export function resolveReducedMotion(pref: MotionPref): boolean {
