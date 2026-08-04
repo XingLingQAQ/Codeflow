@@ -109,8 +109,8 @@
   --color-ink-dim: oklch(0.45 0.01 260);
   --color-ink-mute: oklch(0.52 0.01 260);
 
-  --color-line: oklch(0.91 0.004 260);
-  --color-line-strong: oklch(0.85 0.005 260);
+  --color-line: oklch(0.885 0.004 260);
+  --color-line-strong: oklch(0.82 0.005 260);
   --color-tint: oklch(0.22 0.01 260 / 0.045);
   --color-tint-hover: oklch(0.22 0.01 260 / 0.07);
   --color-tint-active: oklch(0.22 0.01 260 / 0.10);
@@ -125,6 +125,16 @@
   --color-accent-2: oklch(0.80 0.11 205);
   --color-primary-soft: oklch(0.34 0.012 260 / 0.10);
   --color-primary-weak: oklch(0.34 0.012 260 / 0.055);
+
+  /* Primary button skin — consumed by Button.tsx, FlowRail, StageActions,
+     Settings and Switch via var(--btn-primary-*). These vars were expected
+     since the earlier colorize work but never defined at 5bc41f6, leaving
+     primary buttons rendering on a transparent fill; define them here from
+     the neutral primary ramp (no new hues introduced). */
+  --btn-primary-bg: var(--color-primary);
+  --btn-primary-bg-hover: var(--color-primary-hover);
+  --btn-primary-bg-active: var(--color-primary-active);
+  --btn-primary-fg: var(--color-on-primary);
 
   --color-info: oklch(0.60 0.12 230);
   --color-info-strong: oklch(0.50 0.14 240);
@@ -149,7 +159,7 @@
 
   /* Glass chrome (sidebar / topbar) */
   --glass-bg: oklch(1 0 0 / 0.72);
-  --glass-border: oklch(0.91 0.004 260);
+  --glass-border: oklch(0.885 0.004 260);
 
   /* Interactive field focus */
   --field-focus: oklch(0.34 0.012 260);
@@ -165,14 +175,21 @@
   --dialog-overlay: oklch(0.19 0.005 260 / 0.38);
   --glow-accent: 0 0 12px oklch(0.80 0.11 205 / 0.40);
 
-  /* Card geometry + elevation (real depth: rest border + soft hover lift) */
-  --cf-radius-card: 12px;
+  /* Card geometry + elevation. Structural move of the 08-04 bolder pass
+     ("极简白 + 强结构"): pure-white cards are dropped onto a cool-grey
+     (oklch 0.973) canvas, so geometry + a crisp hairline + a tight neutral
+     shadow carry the hierarchy. 16px radius = main content cards (read as
+     substantial modern UI objects); small chips/badges/rows stay at created
+     sizes (rounded-lg, 8px). Shadows stay hue-neutral — no indigo tint. */
+  --cf-radius-card: 16px;
   --elev-inset-bg: oklch(0.22 0.01 260 / 0.03);
   --elev-inset-shadow: inset 0 1px 2px oklch(0.22 0.01 260 / 0.05);
   --elev-rest-border: var(--color-line);
-  --elev-rest-shadow: 0 1px 2px oklch(0.32 0.01 260 / 0.06);
-  --elev-lift-border: oklch(0.85 0.005 260);
-  --elev-lift-shadow: 0 4px 12px oklch(0.32 0.01 260 / 0.08), 0 2px 4px oklch(0.32 0.01 260 / 0.05);
+  --elev-rest-shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.03);
+  /* Interactive-card hover ring: one step crisper than --color-line in each
+     theme (0.885 -> 0.82 light; deeper white-tint ring dark). */
+  --elev-lift-border: oklch(0.82 0.005 260);
+  --elev-lift-shadow: 0 4px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
 }
 
 /* ============ DARK — neutral graphite (hue-free greys, no indigo tint) ============ */
@@ -187,8 +204,11 @@ html.dark {
   --color-ink-dim: oklch(0.78 0 0);
   --color-ink-mute: oklch(0.65 0 0);
 
-  --color-line: oklch(1 0 0 / 0.075);
-  --color-line-strong: oklch(1 0 0 / 0.13);
+  /* Dark hairlines: elevated to the same levels the bolder pass set for the
+     rest/lift borders so panel edges (tabs, rails, composer) stop vanishing
+     into the graphite base. Surfaces themselves already carry separation. */
+  --color-line: oklch(1 0 0 / 0.10);
+  --color-line-strong: oklch(1 0 0 / 0.17);
   --color-tint: oklch(1 0 0 / 0.05);
   --color-tint-hover: oklch(1 0 0 / 0.075);
   --color-tint-active: oklch(1 0 0 / 0.10);
@@ -204,6 +224,11 @@ html.dark {
   --color-primary-soft: oklch(0.88 0 0 / 0.16);
   --color-primary-weak: oklch(0.88 0 0 / 0.08);
 
+  --btn-primary-bg: var(--color-primary);
+  --btn-primary-bg-hover: var(--color-primary-hover);
+  --btn-primary-bg-active: var(--color-primary-active);
+  --btn-primary-fg: var(--color-on-primary);
+
   --color-info: oklch(0.76 0.10 230);
   --color-info-strong: oklch(0.85 0.08 230);
   --color-info-soft: oklch(0.72 0.11 230 / 0.16);
@@ -218,7 +243,7 @@ html.dark {
   --color-danger-soft: oklch(0.70 0.16 23 / 0.16);
 
   --glass-bg: oklch(0.17 0 0 / 0.75);
-  --glass-border: oklch(1 0 0 / 0.07);
+  --glass-border: oklch(1 0 0 / 0.10);
 
   --field-focus: oklch(0.88 0 0);
 
@@ -231,10 +256,10 @@ html.dark {
 
   --elev-inset-bg: oklch(1 0 0 / 0.025);
   --elev-inset-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
-  --elev-rest-border: var(--color-line);
-  --elev-rest-shadow: 0 1px 2px oklch(0 0 0 / 0.35);
-  --elev-lift-border: oklch(1 0 0 / 0.15);
-  --elev-lift-shadow: 0 6px 16px oklch(0 0 0 / 0.45), 0 2px 4px oklch(0 0 0 / 0.40);
+  --elev-rest-border: oklch(1 0 0 / 0.12);
+  --elev-rest-shadow: 0 1px 2px oklch(0 0 0 / 0.5);
+  --elev-lift-border: oklch(1 0 0 / 0.2);
+  --elev-lift-shadow: 0 6px 20px oklch(0 0 0 / 0.58), 0 2px 6px oklch(0 0 0 / 0.5);
 }
 
 /* App root skin — only applied when the new shell mounts (body.cf-app). */
@@ -396,17 +421,45 @@ html.dark .cf-app ::selection {
 }
 
 /* Elevation utilities — tokens switch per theme, so hover lifts read as real
-   depth instead of a re-paint. Defined as real top-level @utility definitions
-   (cannot nest inside @layer) so variants like hover:shadow-cf-lift resolve
-   cleanly instead of chasing var() through Tailwind's shadow machinery. */
-@utility shadow-cf-rest {
-  box-shadow: var(--elev-rest-shadow);
+   depth instead of a re-paint. Resolved to literal values at build time (NOT
+   var() references): @utility bodies keep `0 0 0 / a` alpha var()s alive past
+   minification, which silently drops them — a static `box-shadow: var(--x)`
+   inside @utility never reaches the page; concrete values do. The tokens move
+   with the theme flip; the flattened values below duplicate them per theme. */
+html:not(.dark) .shadow-cf-rest {
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.03);
 }
-@utility shadow-cf-inset {
-  box-shadow: var(--elev-inset-shadow);
+html.dark .shadow-cf-rest {
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.5);
 }
-@utility shadow-cf-lift {
-  box-shadow: var(--elev-lift-shadow);
+html:not(.dark) .shadow-cf-inset {
+  box-shadow: inset 0 1px 2px oklch(0.22 0.01 260 / 0.05);
+}
+html.dark .shadow-cf-inset {
+  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
+}
+html:not(.dark) .shadow-cf-lift {
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
+}
+html.dark .shadow-cf-lift {
+  box-shadow: 0 6px 20px oklch(0 0 0 / 0.58), 0 2px 6px oklch(0 0 0 / 0.5);
+}
+
+/* Interactive-card hover state as a plain selector (NOT Tailwind variants):
+   Tailwind's variant escapes for `hover:shadow-cf-lift` / `hover:-translate-…`
+   do not resolve against plain rules, and the project's Tailwind 4.3.2 build
+   serialization loses those compound classes — the plain selector is the
+   reliable surface for "rest hairline → lift shadow + 1px rise" on white.
+   Interactive Cards opt in explicitly via the `card-interactive` class. */
+html:not(.dark) .card-interactive:hover {
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
+}
+html.dark .card-interactive:hover {
+  box-shadow: 0 6px 20px oklch(0 0 0 / 0.58), 0 2px 6px oklch(0 0 0 / 0.5);
+}
+.card-interactive:hover {
+  transform: translateY(-1px);
+  transition-property: background, border-color, transform, box-shadow;
 }
 
 /* Status surface utilities — small 10-18% alpha washes of each semantic hue
@@ -453,8 +506,19 @@ html.dark .cf-app ::selection {
 
 .cf-app :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-base), 0 0 0 4px var(--field-focus);
+  /* High-visibility ink ring: 2px canvas offset + 2px ink ring + 4px ink halo.
+     Reads on pure white (light) and on graphite (dark). */
+  box-shadow:
+    0 0 0 2px var(--color-base),
+    0 0 0 4px var(--field-focus),
+    0 0 0 8px oklch(0.34 0.012 260 / 0.1);
   border-radius: 6px;
+}
+html.dark .cf-app :focus-visible {
+  box-shadow:
+    0 0 0 2px var(--color-base),
+    0 0 0 4px var(--field-focus),
+    0 0 0 8px oklch(0.93 0 0 / 0.14);
 }
 
 /* Card-shaped focus ring: the global :focus-visible border-radius (6px) is

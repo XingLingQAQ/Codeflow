@@ -11,11 +11,16 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
     <div
       ref={ref}
       className={cn(
-        'rounded-xl border border-line',
-        raised ? 'bg-raised' : 'bg-panel',
+        // --cf-radius-card (16px light geometry) + crisp hairline + rest shadow:
+        // pure-white cards must hold their own against the grey canvas.
+        'card rounded-[var(--cf-radius-card)] border border-[var(--elev-rest-border)] shadow-cf-rest',
+        raised ? 'bg-raised' : 'bg-surface',
         interactive &&
-          'transition-[background,border-color,transform] duration-250 ease-[cubic-bezier(0.32,0.72,0,1)] ' +
-            'hover:border-line-strong hover:bg-hover cursor-pointer',
+          // card-interactive carries hover:translateY(-1px)+shadow via plain
+          // CSS (see theme.css) — Tailwind's hover:/translate variant escapes
+          // don't survive the 4.3.2 build on compound classes.
+          'card-interactive cursor-pointer transition duration-150 ease-[var(--ease-flow)] ' +
+            'hover:border-[var(--elev-lift-border)] hover:bg-hover',
         className,
       )}
       {...rest}

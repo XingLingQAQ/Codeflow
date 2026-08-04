@@ -207,7 +207,7 @@ export default function CodingCanvas() {
                 background: `conic-gradient(${overBudget ? 'var(--color-danger)' : 'var(--color-accent)'} ${ctxPct}%, var(--color-tint) 0)`,
               }}
             >
-              <div className="grid size-[58px] place-items-center rounded-full bg-panel">
+              <div className="grid size-[58px] place-items-center rounded-full bg-base">
                 <span className={`nums font-mono text-[12px] font-semibold ${overBudget ? 'text-danger' : 'text-ink'}`}>
                   {fmtTokens(ctxTokens)}
                 </span>

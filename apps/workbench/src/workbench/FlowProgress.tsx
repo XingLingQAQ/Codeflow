@@ -20,7 +20,7 @@ const nodeBase = 'relative z-10 grid place-items-center rounded-full font-displa
 
 const nodeStatus: Record<StageStatus, string> = {
   pending: 'border border-line bg-raised text-ink-mute',
-  active: 'ring-active border-2 border-ink bg-panel text-ink',
+  active: 'ring-active border-2 border-ink bg-surface text-ink',
   waiting_gate: 'ring-2 ring-warn/35 border-2 border-warn bg-warn-soft text-warn',
   done: 'bg-[image:var(--grad-signature)] text-white shadow-[0_1px_4px_oklch(0.80_0.11_205/0.40)]',
   skipped: 'bg-tint text-ink-mute line-through',

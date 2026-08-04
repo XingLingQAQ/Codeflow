@@ -13,12 +13,17 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 const base =
   'relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg font-medium ' +
   'transition-[transform,background,box-shadow,border-color,color] duration-150 ' +
-  'ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.97] select-none ' +
+  'ease-[var(--ease-flow)] active:scale-[0.97] select-none ' +
   'disabled:opacity-45 disabled:pointer-events-none';
 
 const variants: Record<ButtonVariant, string> = {
   primary:
-    'border border-transparent hover:brightness-[0.92] [background:var(--btn-primary-bg)] [color:var(--btn-primary-fg)]',
+    // Front the neutral primary ramp directly (the --btn-primary-* vars are
+    // aliases of these tokens, kept for the FlowRail/Settings index numerals).
+    // shadow-sm: the ink fill carries a touch of depth so the button reads as
+    // the page's most sure control on the white canvas.
+    'border shadow-sm transition-[filter] [background:var(--color-primary)] [color:var(--color-on-primary)] ' +
+      '[border-color:var(--color-primary-active)] hover:brightness-110',
   secondary:
     'bg-raised text-ink border border-line hover:bg-hover hover:border-line-strong',
   ghost: 'text-ink-dim hover:text-ink hover:bg-tint-hover',

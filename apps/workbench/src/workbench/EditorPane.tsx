@@ -185,7 +185,7 @@ export function EditorPane({ projectId, root }: EditorPaneProps) {
 
   if (tabs.length === 0) {
     return (
-      <div className="grid h-full place-items-center rounded-xl border border-line bg-panel">
+      <div className="card grid h-full place-items-center rounded-[var(--cf-radius-card)] border border-[var(--elev-rest-border)] bg-panel shadow-cf-rest">
         <EmptyState
           icon={<FileCode2 size={20} />}
           title="没有打开的文件"
@@ -196,7 +196,7 @@ export function EditorPane({ projectId, root }: EditorPaneProps) {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
+    <div className="card flex h-full flex-col overflow-hidden rounded-[var(--cf-radius-card)] border border-[var(--elev-rest-border)] bg-panel shadow-cf-rest">
       {/* Tab strip */}
       <div role="tablist" className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-1.5 pt-1.5">
         <AnimatePresence initial={false} mode="popLayout">
