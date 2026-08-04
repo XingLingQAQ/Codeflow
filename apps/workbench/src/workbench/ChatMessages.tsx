@@ -58,7 +58,7 @@ function MessageBody({ content, streaming }: { content: string; streaming: boole
         seg.type === 'code' ? (
           <pre
             key={i}
-            className="my-1.5 overflow-x-auto rounded-lg border border-line bg-base px-2.5 py-2 font-mono text-[12px] leading-relaxed text-ink-dim"
+            className="my-1.5 overflow-x-auto rounded-lg border border-line bg-hover px-2.5 py-2 font-mono text-[12px] leading-relaxed text-ink-dim"
           >
             {seg.text}
           </pre>

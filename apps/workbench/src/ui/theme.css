@@ -97,23 +97,27 @@
   }
 }
 
-/* ============ LIGHT — white canvas + neutral slate ink ============ */
+/* ============ LIGHT — true-white canvas + neutral slate ink ============ */
 :root {
-  --color-base: oklch(0.973 0.004 260);         /* near-white cool-grey canvas */
-  --color-panel: oklch(0.955 0.004 260);        /* inset wells, neutral grey */
+  /* True-white pass (08-04): base == panel == surface == #FFF. Separation is
+     no longer greyness of fill — it is the hairline (--color-line), the ink
+     alpha tints below, and hue-neutral elevation shadows. */
+  --color-base: oklch(1 0 0);                   /* pure-white canvas */
+  --color-panel: oklch(1 0 0);                  /* chrome: white, divided by hairlines */
   --color-surface: oklch(1 0 0);                /* pure-white cards */
-  --color-raised: oklch(1 0 0);                 /* legacy alias: fields read as white */
-  --color-hover: oklch(0.94 0.005 260);
+  --color-raised: oklch(0.985 0.004 260);       /* barely-grey fields/hover targets */
+  --color-hover: oklch(0.97 0.004 260);         /* hover tint stays visible on white */
 
   --color-ink: oklch(0.22 0.01 260);
   --color-ink-dim: oklch(0.45 0.01 260);
   --color-ink-mute: oklch(0.52 0.01 260);
 
-  --color-line: oklch(0.885 0.004 260);
+  --color-line: oklch(0.88 0.004 260);
   --color-line-strong: oklch(0.82 0.005 260);
-  --color-tint: oklch(0.22 0.01 260 / 0.045);
-  --color-tint-hover: oklch(0.22 0.01 260 / 0.07);
-  --color-tint-active: oklch(0.22 0.01 260 / 0.10);
+  /* Ink-alpha tints (not grey fills) so rails/cards read tinted on pure white. */
+  --color-tint: oklch(0.22 0.01 260 / 0.04);
+  --color-tint-hover: oklch(0.22 0.01 260 / 0.06);
+  --color-tint-active: oklch(0.22 0.01 260 / 0.08);
 
   /* Neutral primary (chosen 08-04 over a cobalt/teal midpoint): interactive
      fills are dark slate ink on white; the cobalt flip may retint this later. */
@@ -158,8 +162,8 @@
   --brand-to: #22d3ee;
 
   /* Glass chrome (sidebar / topbar) */
-  --glass-bg: oklch(1 0 0 / 0.72);
-  --glass-border: oklch(0.885 0.004 260);
+  --glass-bg: oklch(1 0 0 / 0.78);
+  --glass-border: oklch(0.88 0.004 260);
 
   /* Interactive field focus */
   --field-focus: oklch(0.34 0.012 260);
@@ -175,21 +179,20 @@
   --dialog-overlay: oklch(0.19 0.005 260 / 0.38);
   --glow-accent: 0 0 12px oklch(0.80 0.11 205 / 0.40);
 
-  /* Card geometry + elevation. Structural move of the 08-04 bolder pass
-     ("极简白 + 强结构"): pure-white cards are dropped onto a cool-grey
-     (oklch 0.973) canvas, so geometry + a crisp hairline + a tight neutral
+  /* Card geometry + elevation. True-white pass (08-04): base, panel and
+     surface are all #FFF, so geometry + a crisp hairline + a tight neutral
      shadow carry the hierarchy. 16px radius = main content cards (read as
      substantial modern UI objects); small chips/badges/rows stay at created
      sizes (rounded-lg, 8px). Shadows stay hue-neutral — no indigo tint. */
   --cf-radius-card: 16px;
-  --elev-inset-bg: oklch(0.22 0.01 260 / 0.03);
-  --elev-inset-shadow: inset 0 1px 2px oklch(0.22 0.01 260 / 0.05);
+  --elev-inset-bg: oklch(0 0 0 / 0.04);
+  --elev-inset-shadow: inset 0 1px 2px oklch(0 0 0 / 0.05);
   --elev-rest-border: var(--color-line);
-  --elev-rest-shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.03);
+  --elev-rest-shadow: 0 1px 2px oklch(0 0 0 / 0.06), 0 1px 3px oklch(0 0 0 / 0.05);
   /* Interactive-card hover ring: one step crisper than --color-line in each
-     theme (0.885 -> 0.82 light; deeper white-tint ring dark). */
+     theme (0.88 -> 0.82 light; deeper white-tint ring dark). */
   --elev-lift-border: oklch(0.82 0.005 260);
-  --elev-lift-shadow: 0 4px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
+  --elev-lift-shadow: 0 4px 16px oklch(0 0 0 / 0.08), 0 2px 4px oklch(0 0 0 / 0.06);
 }
 
 /* ============ DARK — neutral graphite (hue-free greys, no indigo tint) ============ */
@@ -272,7 +275,8 @@ html.dark {
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   /* White-first: the old indigo light rising from the bottom edge was removed
-     in the 08-04 colorize — chrome must read as clean white/near-grey. */
+     in the 08-04 colorize; the canvas itself is now pure #FFF — chrome must
+     read as clean white with hairline structure. */
 }
 
 .cf-app ::selection {
@@ -427,19 +431,19 @@ html.dark .cf-app ::selection {
    inside @utility never reaches the page; concrete values do. The tokens move
    with the theme flip; the flattened values below duplicate them per theme. */
 html:not(.dark) .shadow-cf-rest {
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.03);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.06), 0 1px 3px oklch(0 0 0 / 0.05);
 }
 html.dark .shadow-cf-rest {
   box-shadow: 0 1px 2px oklch(0 0 0 / 0.5);
 }
 html:not(.dark) .shadow-cf-inset {
-  box-shadow: inset 0 1px 2px oklch(0.22 0.01 260 / 0.05);
+  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.05);
 }
 html.dark .shadow-cf-inset {
   box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
 }
 html:not(.dark) .shadow-cf-lift {
-  box-shadow: 0 4px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.08), 0 2px 4px oklch(0 0 0 / 0.06);
 }
 html.dark .shadow-cf-lift {
   box-shadow: 0 6px 20px oklch(0 0 0 / 0.58), 0 2px 6px oklch(0 0 0 / 0.5);
@@ -452,7 +456,7 @@ html.dark .shadow-cf-lift {
    reliable surface for "rest hairline → lift shadow + 1px rise" on white.
    Interactive Cards opt in explicitly via the `card-interactive` class. */
 html:not(.dark) .card-interactive:hover {
-  box-shadow: 0 4px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.04);
+  box-shadow: 0 4px 16px oklch(0 0 0 / 0.08), 0 2px 4px oklch(0 0 0 / 0.06);
 }
 html.dark .card-interactive:hover {
   box-shadow: 0 6px 20px oklch(0 0 0 / 0.58), 0 2px 6px oklch(0 0 0 / 0.5);

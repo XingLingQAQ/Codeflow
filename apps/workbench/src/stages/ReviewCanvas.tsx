@@ -45,7 +45,7 @@ function SelectedDiff({ root, path }: { root: string; path: string }) {
         <span className="truncate font-mono text-[12px] text-ink-dim">{path}</span>
         {diff.ready && <DiffStat adds={diff.stats.adds} dels={diff.stats.dels} />}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-base">
+      <div className="min-h-0 flex-1 overflow-auto bg-hover">
         {diff.isLoading ? (
           <div className="grid h-full place-items-center">
             <Spinner size={18} />

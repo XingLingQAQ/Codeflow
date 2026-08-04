@@ -12,7 +12,7 @@
         try { t = localStorage.getItem('codeflow.theme') || 'light'; } catch(e) {}
         var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         if (dark) document.documentElement.classList.add('dark');
-        document.documentElement.style.backgroundColor = dark ? '#141414' : '#F5F6F8';
+        document.documentElement.style.backgroundColor = dark ? '#141414' : '#FFFFFF';
         window.__CF_DARK = dark;
       })();
     </script>
@@ -26,7 +26,7 @@
         font-family: 'Space Grotesk', 'Inter', system-ui, sans-serif;
       }
       /* Splash adapts to resolved theme via the __CF_DARK flag set above */
-      html:not(.dark) #cf-splash { background: #F5F6F8; color: #51565f; }
+      html:not(.dark) #cf-splash { background: #FFFFFF; color: #51565f; }
       html:not(.dark) #cf-splash .cf-word { color: #1a1b1f; }
       html.dark #cf-splash { background: #141414; color: #a1a1a8; }
       html.dark #cf-splash .cf-word { color: #ececee; }

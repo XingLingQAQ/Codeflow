@@ -52,7 +52,7 @@ function StagedDiffDialog({
           工作树 → 暂存副本
           {diff.ready && <DiffStat adds={diff.stats.adds} dels={diff.stats.dels} />}
         </DialogDescription>
-        <div className="mt-3 max-h-[62vh] overflow-auto rounded-lg border border-line bg-base">
+        <div className="mt-3 max-h-[62vh] overflow-auto rounded-lg border border-line bg-hover">
           {diff.isLoading ? (
             <div className="grid h-40 place-items-center">
               <Spinner size={18} />
