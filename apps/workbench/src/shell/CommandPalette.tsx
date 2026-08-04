@@ -13,6 +13,7 @@ import {
   PanelLeft,
   PanelRight,
   PanelBottom,
+  PanelsTopLeft,
   ArrowUpFromLine,
   MessageSquareX,
   Swords,
@@ -23,7 +24,7 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent } from '../ui/Dialog';
 import { Kbd } from '../ui/Kbd';
-import { NAV_ITEMS, resolveNavPath } from './nav';
+import { NAV_ITEMS, resolveNavPath, workbenchPath } from './nav';
 import { STAGES } from '../stages/stageMeta';
 import { useShellStore } from '../stores/shell';
 import { useLayoutStore } from '../stores/layout';
@@ -119,6 +120,20 @@ export function CommandPalette() {
                   </PaletteItem>
                 );
               })}
+              {lastProjectId && (
+                <PaletteItem
+                  onSelect={() =>
+                    run(() =>
+                      navigate(
+                        workbenchPath({ projectId: lastProjectId, stage: lastStage }),
+                      ),
+                    )
+                  }
+                >
+                  <PanelsTopLeft size={15} className="shrink-0 text-ink-dim" />
+                  <span>回到工作台</span>
+                </PaletteItem>
+              )}
             </Command.Group>
 
             {lastProjectId && (

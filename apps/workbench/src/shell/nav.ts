@@ -1,7 +1,6 @@
 import {
   Home,
   FolderKanban,
-  PanelsTopLeft,
   Workflow,
   Bot,
   Puzzle,
@@ -21,7 +20,6 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { key: 'dashboard', label: '总览', path: '/', icon: Home, match: (p) => p === '/' },
   { key: 'projects', label: '项目', path: '/projects', icon: FolderKanban, match: (p) => p.startsWith('/projects') },
-  { key: 'workbench', label: '工作台', path: '/workbench', icon: PanelsTopLeft, match: (p) => p.startsWith('/workbench') },
   { key: 'flows', label: '工作流', path: '/flows', icon: Workflow, match: (p) => p.startsWith('/flows') },
   { key: 'agents', label: 'Agent', path: '/agents', icon: Bot, match: (p) => p.startsWith('/agents') },
   { key: 'plugins', label: '插件', path: '/plugins', icon: Puzzle, match: (p) => p.startsWith('/plugins') },
@@ -43,4 +41,9 @@ export function resolveNavPath(
     return last.projectId ? `/workbench/${last.projectId}/${last.stage}` : '/projects';
   }
   return item.path;
+}
+
+/** Same resolution, exposed for callers that open the workbench directly. */
+export function workbenchPath(last: { projectId?: string; stage: string }): string {
+  return last.projectId ? `/workbench/${last.projectId}/${last.stage}` : '/projects';
 }
