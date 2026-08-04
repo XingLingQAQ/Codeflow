@@ -21,7 +21,7 @@ export default function PlanningCanvas() {
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="flex h-full flex-col p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-display text-lg font-bold text-ink">任务看板</h2>
+        <h2 className="font-display-13 text-ink">任务看板</h2>
         <Tooltip content="任务依赖图将随看板一起在 M4 交付" side="left">
           <span>
             <Button variant="ghost" size="sm" disabled>
@@ -44,7 +44,7 @@ export default function PlanningCanvas() {
           {COLS.map((col) => (
             <div key={col.label} className="flex flex-col">
               <div className="mb-3 flex items-center gap-2">
-                <span className={`text-[13px] font-semibold ${col.tone}`}>{col.label}</span>
+                <span className={`font-display-13 ${col.tone}`}>{col.label}</span>
               </div>
               <Card className="flex-1 border-dashed bg-transparent" />
             </div>

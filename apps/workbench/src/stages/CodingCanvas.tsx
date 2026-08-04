@@ -192,7 +192,7 @@ export default function CodingCanvas() {
               <button
                 type="button"
                 onClick={() => clearContext(projectId)}
-                className="text-[11px] text-ink-mute transition-colors hover:text-ink"
+                className="text-xs text-ink-mute transition-colors hover:text-ink"
               >
                 清空
               </button>
@@ -213,7 +213,7 @@ export default function CodingCanvas() {
                 </span>
               </div>
             </div>
-            <div className="min-w-0 flex-1 space-y-1 text-[11px] leading-relaxed text-ink-mute">
+            <div className="min-w-0 flex-1 space-y-1 text-xs leading-relaxed text-ink-mute">
               <p>
                 已选 <span className="nums font-medium text-ink-dim">{ctxEntries.length}</span> 个文件
               </p>
@@ -226,7 +226,7 @@ export default function CodingCanvas() {
           {ctxEntries.length > 0 && (
             <ul className="mt-2.5 max-h-20 space-y-0.5 overflow-y-auto border-t border-line pt-2">
               {ctxEntries.map(([path]) => (
-                <li key={path} className="truncate font-mono text-[11px] text-ink-mute" title={path}>
+                <li key={path} className="truncate font-mono text-xs text-ink-mute" title={path}>
                   {path}
                 </li>
               ))}
@@ -251,7 +251,7 @@ export default function CodingCanvas() {
             <span className="flex items-center gap-2 text-[12px] font-medium text-ink-dim">
               <Shield size={13} /> 守卫
             </span>
-            {rules.length > 0 && <span className="text-[11px] text-ink-mute">{rules.length} 条规则</span>}
+            {rules.length > 0 && <span className="text-xs text-ink-mute">{rules.length} 条规则</span>}
           </div>
           {guardQ.isError ? (
             <p className="mt-2 text-[12px] text-ink-mute">守卫服务未就绪</p>
@@ -268,7 +268,7 @@ export default function CodingCanvas() {
                 </div>
               ))}
               {deniedGlobs.length > 0 && (
-                <p className="border-t border-line pt-1.5 text-[11px] leading-relaxed text-ink-mute">
+                <p className="border-t border-line pt-1.5 text-xs leading-relaxed text-ink-mute">
                   受保护路径：{deniedGlobs.join('、')}
                 </p>
               )}

@@ -83,7 +83,7 @@ function GateDecisionPanel({ projectId, flow, stage, onDecided }: GateDecisionPa
         </Badge>
         <Badge tone="neutral">{GATE_PHASE_LABEL[gate.phase] ?? gate.phase} Gate</Badge>
         {gate.on_fail && (
-          <Badge tone={escalates ? 'danger' : 'neutral'} className="font-mono text-[10px]">
+          <Badge tone={escalates ? 'danger' : 'neutral'} className="px-1.5 py-px font-mono text-[11px]">
             on_fail: {gate.on_fail}
           </Badge>
         )}

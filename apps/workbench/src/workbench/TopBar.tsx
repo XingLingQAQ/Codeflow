@@ -71,7 +71,7 @@ export function TopBar({ projectId, projectTitle, flow, connected = false }: Top
       <div className="flex items-center gap-2">
         <span
           className={cn(
-            'flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px]',
+            'flex items-center gap-1.5 rounded-full px-2 py-1 text-xs',
             connected ? 'text-success' : 'text-ink-mute',
           )}
         >

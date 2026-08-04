@@ -98,7 +98,7 @@ function TerminalTab({ root }: { root: string }) {
           </li>
         ))}
       </ul>
-      <p className="shrink-0 border-t border-line px-3 py-1.5 text-[11px] leading-relaxed text-ink-mute">
+      <p className="shrink-0 border-t border-line px-3 py-1.5 text-xs leading-relaxed text-ink-mute">
         已探测 {scripts.length} 个脚本 · 启动/停止与日志接管将随 Live Preview（M6）交付
       </p>
     </div>
@@ -344,16 +344,16 @@ function ExemptionRow({
           {req.path}
         </span>
         {req.rule_id && (
-          <Badge tone="warn" className="shrink-0 font-mono text-[10px]">
+          <Badge tone="warn" className="shrink-0 px-1.5 py-px font-mono text-[11px]">
             {req.rule_id}
           </Badge>
         )}
       </div>
-      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-ink-dim" title={req.reason}>
+      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-ink-dim" title={req.reason}>
         {req.reason}
       </p>
       <div className="mt-1.5 flex items-center justify-between gap-2">
-        <span className="truncate text-[10px] text-ink-mute">
+        <span className="truncate text-2xs text-ink-mute">
           {req.requester} · {relTime(req.created_at)}
         </span>
         <span className="flex shrink-0 gap-1">
@@ -474,7 +474,7 @@ function GuardTab() {
             单文件写入上限 <span className="nums font-mono text-ink-dim">{Math.round(maxBytes / 1024)} KB</span>
           </p>
         )}
-        <p className="mt-2 text-[11px] leading-relaxed text-ink-mute">
+        <p className="mt-2 text-xs leading-relaxed text-ink-mute">
           所有写操作（含暂存应用）均经守卫检查；被拦截的操作会出现在「问题」页，豁免决策会写入「审计」页。
         </p>
       </section>

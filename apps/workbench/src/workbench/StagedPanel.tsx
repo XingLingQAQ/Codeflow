@@ -69,6 +69,7 @@ function StagedDiffDialog({
             variant="danger"
             size="sm"
             onClick={() => {
+              // Destructive: hand off to the confirm dialog before discarding.
               if (path) onDiscard(path);
               onClose();
             }}
@@ -106,6 +107,8 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
   const items = stagedQ.data?.items ?? [];
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
+  // Destructive actions confirm via the project Dialog (not window.confirm).
+  const [confirmDiscardPath, setConfirmDiscardPath] = useState<string | null>(null);
 
   const addAudit = useEditorStore((s) => s.addAudit);
   const addProblem = useEditorStore((s) => s.addProblem);
@@ -137,6 +140,9 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
       },
       onError: (err) => fail('应用', path, err),
     });
+
+  /** Request a destructive discard; the dialog confirm runs `discard`. */
+  const requestDiscard = (path: string) => setConfirmDiscardPath(path);
 
   const discard = (path: string) =>
     discardMut.mutate(path, {
@@ -181,11 +187,11 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
             ))}
           </div>
         ) : stagedQ.isError ? (
-          <p className="px-1 py-2 text-[12px] text-ink-mute">暂存区服务未就绪</p>
+          <p className="px-1 py-2 text-xs text-ink-dim">暂存区服务未就绪</p>
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center gap-1.5 px-2 py-5 text-center">
             <Inbox size={16} className="text-ink-mute/60" />
-            <p className="text-[12px] text-ink-mute">暂存区为空 — Ctrl+S 保存的修改会先进入这里</p>
+            <p className="text-xs text-ink-dim">暂存区为空 — Ctrl+S 保存的修改会先进入这里</p>
           </div>
         ) : (
           <ul className="space-y-1 py-0.5">
@@ -234,7 +240,7 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
                     type="button"
                     aria-label={`丢弃 ${it.path}`}
                     title="丢弃暂存"
-                    onClick={() => discard(it.path)}
+                    onClick={() => requestDiscard(it.path)}
                     className="rounded p-1 text-ink-mute transition-colors hover:bg-tint-active hover:text-danger"
                   >
                     <Undo2 size={13} />
@@ -249,7 +255,7 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
 
       {items.length > 0 && (
         <div className="flex shrink-0 items-center justify-between gap-2 border-t border-line pt-2">
-          <span className="nums text-[11px] text-ink-mute">{items.length} 个文件待应用</span>
+          <span className="nums text-xs text-ink-mute">{items.length} 个文件待应用</span>
           <span className="flex gap-1.5">
             <Button
               variant="ghost"
@@ -272,6 +278,31 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
           </span>
         </div>
       )}
+
+      {/* Per-file discard confirmation */}
+      <Dialog open={!!confirmDiscardPath} onOpenChange={(open) => !open && setConfirmDiscardPath(null)}>
+        <DialogContent className="w-[min(92vw,400px)]">
+          <DialogTitle>丢弃暂存</DialogTitle>
+          <DialogDescription>
+            将丢弃 <span className="font-mono">{confirmDiscardPath}</span> 的暂存副本，工作树不受影响，此操作不可撤销。
+          </DialogDescription>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setConfirmDiscardPath(null)}>
+              取消
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (confirmDiscardPath) discard(confirmDiscardPath);
+                setConfirmDiscardPath(null);
+              }}
+            >
+              <Undo2 size={13} /> 丢弃暂存
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Discard-all confirmation */}
       <Dialog open={confirmDiscardAll} onOpenChange={setConfirmDiscardAll}>
@@ -296,7 +327,7 @@ export function StagedPanel({ projectId, root, className }: StagedPanelProps) {
         path={diffPath}
         onClose={() => setDiffPath(null)}
         onPromote={promote}
-        onDiscard={discard}
+        onDiscard={requestDiscard}
       />
     </div>
   );

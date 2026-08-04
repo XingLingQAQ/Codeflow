@@ -31,8 +31,8 @@ export function Tooltip({ content, children, side = 'right', align = 'center', s
           className={cn(
             'glass z-[60] rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink shadow-lg',
             'data-[state=delayed-open]:animate-[cf-pop_150ms_var(--ease-flow)]',
-            'data-[state=instant-open]:animate-[cf-fade_150ms_var(--ease-flow)]',
-            'data-[state=closed]:animate-[cf-fade-out_150ms_var(--ease-flow)_forwards]',
+            'data-[state=instant-open]:animate-[cf-pop_150ms_var(--ease-flow)]',
+            'data-[state=closed]:animate-[cf-pop-out_150ms_var(--ease-flow)_forwards]',
           )}
         >
           {content}

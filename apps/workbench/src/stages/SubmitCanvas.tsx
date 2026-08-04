@@ -137,7 +137,7 @@ export default function SubmitCanvas() {
 
       <motion.div variants={staggerItem} className="flex w-72 shrink-0 flex-col gap-4">
         <Card className="p-4">
-          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-dim">
+          <div className="flex items-center gap-2 font-display-13 text-ink">
             <Camera size={14} /> 快照绑定
           </div>
           <div className="mt-3 text-center text-[12px] leading-relaxed text-ink-mute">
@@ -156,7 +156,7 @@ export default function SubmitCanvas() {
         </Card>
 
         <Card className="p-4">
-          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-dim">
+          <div className="flex items-center gap-2 font-display-13 text-ink">
             <GitCommitHorizontal size={14} /> 提交编排
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-ink-mute">

@@ -287,7 +287,7 @@ export function EditorPane({ projectId, root }: EditorPaneProps) {
       {/* Breadcrumb + actions */}
       {activePath && (
         <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-line px-3">
-          <div className="flex min-w-0 items-center gap-1 text-[11px] text-ink-mute">
+          <div className="flex min-w-0 items-center gap-1 text-xs text-ink-mute">
             {activePath.split('/').map((seg, i, arr) => (
               <span key={i} className="flex items-center gap-1">
                 <span className={cn('truncate', i === arr.length - 1 && 'text-ink-dim font-medium')}>{seg}</span>
@@ -302,7 +302,7 @@ export function EditorPane({ projectId, root }: EditorPaneProps) {
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
-            {dirty && <span className="text-[11px] text-ink-mute">未保存</span>}
+            {dirty && <span className="text-xs text-ink-mute">未保存</span>}
             <Button
               variant="ghost"
               size="sm"

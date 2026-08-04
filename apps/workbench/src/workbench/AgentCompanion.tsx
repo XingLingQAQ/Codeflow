@@ -58,18 +58,18 @@ function AgentMenuItem({
 }) {
   return (
     <DropdownMenuItem onSelect={onSelect} className={cn(selected && 'bg-tint-active text-ink')}>
-      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-tint text-[13px]">
+      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-tint text-13">
         {agent.avatar ?? '🤖'}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
-          <span className="truncate text-[13px] font-medium">{agent.name}</span>
-          <Badge tone="neutral" className="shrink-0 px-1.5 text-[10px]">
+          <span className="truncate text-13 font-medium">{agent.name}</span>
+          <Badge tone="neutral" className="shrink-0 px-1.5 py-px text-[11px]">
             {roleLabel(agent.role_base)}
           </Badge>
         </span>
         {agent.description && (
-          <span className="mt-0.5 block truncate text-[11px] text-ink-mute">{agent.description}</span>
+          <span className="mt-0.5 block truncate text-xs text-ink-mute">{agent.description}</span>
         )}
       </span>
     </DropdownMenuItem>
@@ -244,8 +244,10 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
           <span className="grid size-5 shrink-0 cursor-default place-items-center" aria-label="Agent 状态">
             <span
               className={cn(
-                'inline-block size-2 rounded-full',
-                streaming ? 'animate-pulse-dot bg-success' : 'bg-ink-mute/60',
+                'inline-block rounded-full',
+                streaming
+                  ? 'animate-streamdot size-2.5 bg-[image:var(--grad-signature)] shadow-[0_0_6px_oklch(0.55_0.20_285/0.5)]'
+                  : 'size-2 bg-ink-mute/60',
               )}
             />
           </span>
@@ -258,16 +260,16 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
               className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-tint"
               aria-label="切换 Agent"
             >
-              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-tint text-[13px]">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-tint text-13">
                 {currentAgent?.avatar ?? '🤖'}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="truncate text-[13px] font-medium text-ink">
+                  <span className="truncate text-13 font-medium text-ink">
                     {currentAgent?.name ?? 'Agent'}
                   </span>
                   {currentAgent && (
-                    <Badge tone="neutral" className="shrink-0 px-1.5 text-[10px]">
+                    <Badge tone="neutral" className="shrink-0 px-1.5 py-px text-[11px]">
                       {roleLabel(currentAgent.role_base)}
                     </Badge>
                   )}
@@ -351,7 +353,7 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
-          <span className="text-[11px] text-ink-mute">未注入文件 — 可在编码画布的文件树勾选</span>
+          <span className="text-xs text-ink-dim">未注入文件 — 可在编码画布的文件树勾选</span>
         )}
       </div>
 
@@ -380,7 +382,7 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
       {quote && (
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-tint px-3 py-1.5">
           <MessageSquareQuote size={13} className="shrink-0 text-ink-mute" />
-          <span className="nums min-w-0 flex-1 truncate font-mono text-[11px] text-ink-dim" title={quote.snippet}>
+          <span className="nums min-w-0 flex-1 truncate font-mono text-xs text-ink-dim" title={quote.snippet}>
             {quote.path}:L{quote.startLine}-L{quote.endLine}
           </span>
           <button

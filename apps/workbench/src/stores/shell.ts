@@ -79,6 +79,9 @@ export function resolveIsDark(mode: ThemeMode): boolean {
 export function applyThemeClass(mode: ThemeMode): void {
   const dark = resolveIsDark(mode);
   document.documentElement.classList.toggle('dark', dark);
+  // Keep the pre-paint inline background (index.html) in sync so the canvas
+  // behind the splash/theme flash matches the resolved theme.
+  document.documentElement.style.backgroundColor = dark ? '#0A0C10' : '#FFFFFF';
 }
 
 export function resolveReducedMotion(pref: MotionPref): boolean {

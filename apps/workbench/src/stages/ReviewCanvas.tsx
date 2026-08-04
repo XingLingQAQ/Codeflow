@@ -130,7 +130,7 @@ export default function ReviewCanvas() {
           </Card>
         </div>
         <Card className="p-3.5">
-          <div className="flex items-center gap-2 text-[12px] font-medium text-ink-dim">
+          <div className="flex items-center gap-2 font-display-13 text-ink">
             <Swords size={14} /> 辩论
           </div>
           <p className="mt-2 text-[12px] leading-relaxed text-ink-mute">

@@ -88,7 +88,7 @@ export function ChatComposer({ disabled, streaming, placeholder, onSend, onStop 
           </Button>
         )}
       </div>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-mute">
+      <p className="mt-1.5 text-xs leading-relaxed text-ink-mute">
         Enter 发送 · Shift+Enter 换行{streaming ? ' · Esc 停止' : ''}
       </p>
     </div>

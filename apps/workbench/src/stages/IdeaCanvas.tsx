@@ -64,7 +64,7 @@ export default function IdeaCanvas() {
   return (
     <motion.div variants={staggerContainer} initial="initial" animate="animate" className="flex h-full gap-5 p-5">
       <motion.div variants={staggerItem} className="flex flex-[3] flex-col gap-4">
-        <h2 className="font-display text-lg font-bold text-ink">意图澄清</h2>
+        <h2 className="font-display-13 text-ink">意图澄清</h2>
         <Textarea
           rows={8}
           value={draft}
@@ -73,7 +73,7 @@ export default function IdeaCanvas() {
           className="min-h-48 flex-1 text-[15px] leading-relaxed"
         />
         <div className="flex items-center justify-end gap-3">
-          {draft && <span className="text-[11px] text-ink-mute">草稿已本地保存</span>}
+          {draft && <span className="text-xs text-ink-mute">草稿已本地保存</span>}
           <Tooltip content={advanceHint ?? '完成意图澄清并推进到下一阶段'} side="top">
             <span>
               <Button

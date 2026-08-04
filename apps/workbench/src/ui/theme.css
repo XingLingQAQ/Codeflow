@@ -1,40 +1,58 @@
 /*
- * CodeFlow 2.0 design tokens — light default + dark (graphite) theme.
- * Light is the default; add .dark on <html> for the graphite dark theme.
- * Accent gradient (#7C5CFF → #22D3EE) and status colors are identical in both.
+ * CodeFlow 2.0 design tokens — warm "sophisticated color" system.
+ * Light default + dark (indigo-graphite) theme via .dark on <html>.
+ *
+ * Architecture: every theme-sensitive color is a *runtime* CSS variable
+ * (--color-*) flipped per theme. Tailwind v4 utilities (bg-surface, text-ink,
+ * border-line, bg-surface-info ...) reference those vars, so ONE source of
+ * truth drives both themes. Status ramps exist as full var pairs
+ * (--color-status / -soft / -weak / -strong) → bg-surface-*, text-ink-*,
+ * border-line-*, bg-*-badge.
  */
 
-@theme {
+@theme inline {
   /* Surface scale — LIGHT defaults (overridden in html.dark) */
-  --color-base: #ffffff;
-  --color-panel: #f8fafc;
-  --color-raised: #f1f5f9;
-  --color-hover: #e2e8f0;
+  --color-base: var(--color-base);             /* warm paper canvas */
+  --color-panel: var(--color-panel);
+  --color-surface: var(--color-surface);       /* white cards on paper */
+  --color-raised: var(--color-raised);
+  --color-hover: var(--color-hover);
 
   /* Ink (text) scale */
-  --color-ink: #0f172a;
-  --color-ink-dim: #475569;
-  --color-ink-mute: #94a3b8;
+  --color-ink: var(--color-ink);
+  --color-ink-dim: var(--color-ink-dim);
+  --color-ink-mute: var(--color-ink-mute);
 
-  /* Hairline borders */
-  --color-line: rgba(15, 23, 42, 0.08);
-  --color-line-strong: rgba(15, 23, 42, 0.12);
+  /* Hairline borders + interactive surface tints */
+  --color-line: var(--color-line);
+  --color-line-strong: var(--color-line-strong);
+  --color-tint: var(--color-tint);
+  --color-tint-hover: var(--color-tint-hover);
+  --color-tint-active: var(--color-tint-active);
 
-  /* Interactive surface tints (semi-transparent overlays that adapt to theme) */
-  --color-tint: rgba(15, 23, 42, 0.04);
-  --color-tint-hover: rgba(15, 23, 42, 0.06);
-  --color-tint-active: rgba(15, 23, 42, 0.08);
+  /* Semantic color system — value + what to ink/target on top of it */
+  --color-primary: var(--color-primary);
+  --color-on-primary: var(--color-on-primary);
+  --color-accent: var(--color-accent);    /* indigo text / dot tone */
+  --color-accent-2: var(--color-accent-2); /* cyan gradient endpoint */
+  --color-primary-soft: var(--color-primary-soft);   /* ~10% indigo wash */
+  --color-primary-weak: var(--color-primary-weak);   /* ~5% indigo wash */
+  --color-info: var(--color-info);
+  --color-info-strong: var(--color-info-strong);   /* darker same-hue text */
+  --color-info-soft: var(--color-info-soft);
+  --color-success: var(--color-success);
+  --color-success-strong: var(--color-success-strong);
+  --color-success-soft: var(--color-success-soft);
+  --color-warn: var(--color-warn);
+  --color-warn-strong: var(--color-warn-strong);
+  --color-warn-soft: var(--color-warn-soft);
+  --color-danger: var(--color-danger);
+  --color-danger-strong: var(--color-danger-strong);
+  --color-danger-soft: var(--color-danger-soft);
 
-  /* Accent + status — identical in both themes */
-  --color-accent: #7c5cff;
-  --color-accent-2: #22d3ee;
-  --color-success: #34d399;
-  --color-warn: #fbbf24;
-  --color-danger: #f87171;
-
-  /* Type families */
-  --font-display: "Space Grotesk", "Inter", "Noto Sans SC", system-ui, sans-serif;
-  --font-sans: "Inter", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+  /* Type families — Public Sans leads; JetBrains Mono for code. */
+  --font-display: "Public Sans", "Noto Sans SC", system-ui, sans-serif;
+  --font-sans: "Public Sans", "Noto Sans SC", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
   /* Small type scale for dense chrome (10/11/12/13/15). Use in new code;
@@ -47,6 +65,8 @@
   --text-xs--line-height: 18px;
   --text-13: 13px;
   --text-13--line-height: 20px;
+  --text-14: 14px;
+  --text-14--line-height: 21px;
   --text-15: 15px;
   --text-15--line-height: 22px;
 
@@ -74,53 +94,141 @@
   }
 }
 
-/* Theme-aware runtime vars (not Tailwind utilities — used in component CSS + inline styles) */
+/* ============ LIGHT — warm paper + indigo accent ============ */
 :root {
+  --color-base: oklch(0.985 0.002 95);          /* warm off-white canvas */
+  --color-panel: oklch(0.955 0.006 285);        /* inset wells on paper */
+  --color-surface: oklch(1 0 0);                /* white cards */
+  --color-raised: oklch(1 0 0);                 /* legacy alias: fields read as white on paper */
+  --color-hover: oklch(0.965 0.003 285);
+
+  --color-ink: oklch(0.25 0.02 285);
+  --color-ink-dim: oklch(0.50 0.02 285);
+  --color-ink-mute: oklch(0.56 0.018 285);
+
+  --color-line: oklch(0.92 0.005 285);
+  --color-line-strong: oklch(0.855 0.012 285);
+  --color-tint: oklch(0.25 0.02 285 / 0.045);
+  --color-tint-hover: oklch(0.25 0.02 285 / 0.07);
+  --color-tint-active: oklch(0.25 0.02 285 / 0.10);
+
+  --color-primary: oklch(0.55 0.20 285);
+  --color-primary-hover: oklch(0.50 0.205 285); /* primary button hover */
+  --color-primary-active: oklch(0.46 0.20 285);
+  --color-on-primary: oklch(0.99 0 0);
+  --color-accent: oklch(0.545 0.21 285);
+  --color-accent-2: oklch(0.80 0.11 205);
+  --color-primary-soft: oklch(0.55 0.20 285 / 0.10);
+  --color-primary-weak: oklch(0.55 0.20 285 / 0.055);
+
+  --color-info: oklch(0.60 0.12 230);
+  --color-info-strong: oklch(0.50 0.14 240);
+  --color-info-soft: oklch(0.60 0.12 230 / 0.11);
+  --color-success: oklch(0.60 0.15 155);
+  --color-success-strong: oklch(0.47 0.11 162);
+  --color-success-soft: oklch(0.60 0.15 155 / 0.12);
+  --color-warn: oklch(0.65 0.18 55);
+  --color-warn-strong: oklch(0.52 0.13 60);
+  --color-warn-soft: oklch(0.65 0.18 55 / 0.12);
+  --color-danger: oklch(0.58 0.20 25);
+  --color-danger-strong: oklch(0.50 0.19 25);
+  --color-danger-soft: oklch(0.58 0.20 25 / 0.10);
+
+  /* Brand signature — the ONLY gradient in the chrome (FlowProgress/logo).
+     Runtime color values are flipped only by the upcoming cobalt color
+     correction; every consumer must read these tokens/vars, never inline. */
   --grad-signature: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
-  --glass-bg: rgba(255, 255, 255, 0.75);
-  --glass-border: rgba(15, 23, 42, 0.06);
-  /* Monochrome primary button: black bg + white text on light theme */
-  --btn-primary-bg: #0f172a;
-  --btn-primary-fg: #ffffff;
-  --btn-primary-hover: #1e293b;
-  --glow-accent: none;
+  --grad-signature-sheen: linear-gradient(90deg, #7c5cff 0%, #22d3ee 45%, #7c5cff 90%);
+  --brand-from: #7c5cff;
+  --brand-to: #22d3ee;
+
+  /* Glass chrome (sidebar / topbar) */
+  --glass-bg: oklch(1 0 0 / 0.72);
+  --glass-border: oklch(0.92 0.005 285);
+
+  /* Interactive field focus */
+  --field-focus: oklch(0.55 0.20 285);
+
   --ease-flow: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-1: 150ms;
   --dur-2: 250ms;
   --dur-3: 400ms;
   --skeleton-a: rgba(0, 0, 0, 0.04);
   --skeleton-b: rgba(0, 0, 0, 0.08);
-  --scrollbar-thumb: rgba(15, 23, 42, 0.12);
-  --scrollbar-hover: rgba(15, 23, 42, 0.22);
-  --dialog-overlay: rgba(0, 0, 0, 0.25);
+  --scrollbar-thumb: oklch(0.25 0.02 285 / 0.14);
+  --scrollbar-hover: oklch(0.25 0.02 285 / 0.26);
+  --dialog-overlay: oklch(0.20 0.02 285 / 0.35);
+  --glow-accent: 0 0 12px oklch(0.55 0.20 285 / 0.25);
+
+  /* Card geometry + elevation (real depth: rest border + soft hover lift) */
+  --cf-radius-card: 12px;
+  --elev-inset-bg: oklch(0.25 0.02 285 / 0.03);
+  --elev-inset-shadow: inset 0 1px 2px oklch(0.25 0.02 285 / 0.05);
+  --elev-rest-border: var(--color-line);
+  --elev-rest-shadow: 0 1px 2px oklch(0.50 0.02 285 / 0.05);
+  --elev-lift-border: oklch(0.85 0.01 285);
+  --elev-lift-shadow: 0 4px 12px oklch(0.50 0.02 285 / 0.08), 0 2px 4px oklch(0.50 0.02 285 / 0.05);
 }
 
-/* ---- Graphite dark theme ---- */
+/* ============ DARK — indigo-tinted graphite ============ */
 html.dark {
-  --color-base: #0a0c10;
-  --color-panel: #0f1218;
-  --color-raised: #151a23;
-  --color-hover: #1c2330;
-  --color-ink: #e8ecf4;
-  --color-ink-dim: #9aa4b8;
-  --color-ink-mute: #5c6780;
-  --color-line: rgba(255, 255, 255, 0.07);
-  --color-line-strong: rgba(255, 255, 255, 0.12);
-  --color-tint: rgba(255, 255, 255, 0.05);
-  --color-tint-hover: rgba(255, 255, 255, 0.06);
-  --color-tint-active: rgba(255, 255, 255, 0.08);
-  --glass-bg: rgba(15, 18, 24, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  /* Monochrome primary button: white bg + black text on dark theme (inverted) */
-  --btn-primary-bg: #ffffff;
-  --btn-primary-fg: #0f172a;
-  --btn-primary-hover: #e2e8f0;
-  --glow-accent: none;
-  --skeleton-a: rgba(255, 255, 255, 0.03);
+  --color-base: oklch(0.155 0.011 285);
+  --color-panel: oklch(0.165 0.011 285);
+  --color-surface: oklch(0.205 0.012 285);
+  --color-raised: oklch(0.225 0.012 285);
+  --color-hover: oklch(0.26 0.014 285);
+
+  --color-ink: oklch(0.93 0.006 285);
+  --color-ink-dim: oklch(0.78 0.012 285);
+  --color-ink-mute: oklch(0.645 0.014 285);
+
+  --color-line: oklch(1 0 0 / 0.075);
+  --color-line-strong: oklch(1 0 0 / 0.13);
+  --color-tint: oklch(1 0 0 / 0.05);
+  --color-tint-hover: oklch(1 0 0 / 0.075);
+  --color-tint-active: oklch(1 0 0 / 0.10);
+
+  /* Same accent family, lifted lightness for dark contrast */
+  --color-primary: oklch(0.70 0.17 283);
+  --color-primary-hover: oklch(0.76 0.16 283);
+  --color-primary-active: oklch(0.62 0.18 283);
+  --color-on-primary: oklch(0.17 0.02 285);
+  --color-accent: oklch(0.77 0.13 285);
+  --color-accent-2: oklch(0.85 0.09 205);
+  --color-primary-soft: oklch(0.72 0.16 285 / 0.16);
+  --color-primary-weak: oklch(0.72 0.16 285 / 0.08);
+
+  --color-info: oklch(0.76 0.10 230);
+  --color-info-strong: oklch(0.85 0.08 230);
+  --color-info-soft: oklch(0.72 0.11 230 / 0.16);
+  --color-success: oklch(0.76 0.14 158);
+  --color-success-strong: oklch(0.86 0.11 158);
+  --color-success-soft: oklch(0.71 0.13 158 / 0.16);
+  --color-warn: oklch(0.80 0.15 75);
+  --color-warn-strong: oklch(0.88 0.12 80);
+  --color-warn-soft: oklch(0.76 0.15 70 / 0.16);
+  --color-danger: oklch(0.74 0.17 22);
+  --color-danger-strong: oklch(0.82 0.14 22);
+  --color-danger-soft: oklch(0.70 0.16 23 / 0.16);
+
+  --glass-bg: oklch(0.165 0.011 285 / 0.75);
+  --glass-border: oklch(1 0 0 / 0.07);
+
+  --field-focus: oklch(0.70 0.17 283);
+
+  --skeleton-a: rgba(255, 255, 255, 0.04);
   --skeleton-b: rgba(255, 255, 255, 0.08);
-  --scrollbar-thumb: rgba(255, 255, 255, 0.09);
-  --scrollbar-hover: rgba(255, 255, 255, 0.18);
-  --dialog-overlay: rgba(0, 0, 0, 0.55);
+  --scrollbar-thumb: oklch(1 0 0 / 0.11);
+  --scrollbar-hover: oklch(1 0 0 / 0.20);
+  --dialog-overlay: oklch(0.10 0.01 285 / 0.65);
+  --glow-accent: 0 0 12px oklch(0.70 0.17 283 / 0.30);
+
+  --elev-inset-bg: oklch(1 0 0 / 0.025);
+  --elev-inset-shadow: inset 0 1px 2px oklch(0 0 0 / 0.35);
+  --elev-rest-border: var(--color-line);
+  --elev-rest-shadow: 0 1px 2px oklch(0 0 0 / 0.35);
+  --elev-lift-border: oklch(1 0 0 / 0.15);
+  --elev-lift-shadow: 0 6px 16px oklch(0 0 0 / 0.45), 0 2px 4px oklch(0 0 0 / 0.40);
 }
 
 /* App root skin — only applied when the new shell mounts (body.cf-app). */
@@ -132,14 +240,28 @@ html.dark {
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
+  /* Warm paper: a whisper of indigo light rising from the bottom edge —
+     nearly invisible alone, but it gives glass surfaces something to refract. */
+  background-image: radial-gradient(
+    120% 60% at 50% 108%,
+    oklch(0.55 0.20 285 / 0.045),
+    transparent 60%
+  );
+}
+html.dark .cf-app {
+  background-image: radial-gradient(
+    120% 60% at 50% 108%,
+    oklch(0.70 0.17 283 / 0.06),
+    transparent 60%
+  );
 }
 
 .cf-app ::selection {
-  background: rgba(15, 23, 42, 0.16);
+  background: oklch(0.55 0.20 285 / 0.18);
   color: inherit;
 }
 html.dark .cf-app ::selection {
-  background: rgba(255, 255, 255, 0.18);
+  background: oklch(0.70 0.17 283 / 0.30);
 }
 
 .cf-app ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -153,11 +275,18 @@ html.dark .cf-app ::selection {
 .cf-app ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
 
 @layer components {
+  /* Glass chrome: frosted panel + hairline, for sidebar/topbar overlays. */
   .glass {
     background: var(--glass-bg);
-    backdrop-filter: blur(16px) saturate(140%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
     border: 1px solid var(--glass-border);
+  }
+  /* Edge-only glass for fixed chrome (hairline on one side only). */
+  .glass-edge {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
   }
 
   .text-gradient {
@@ -169,7 +298,7 @@ html.dark .cf-app ::selection {
   }
 
   .flow-sheen {
-    background: linear-gradient(90deg, #7c5cff 0%, #22d3ee 45%, #7c5cff 90%);
+    background: var(--grad-signature-sheen);
     background-size: 200% 100%;
     animation: var(--animate-flow);
   }
@@ -189,6 +318,122 @@ html.dark .cf-app ::selection {
   .nums {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Canvas-stage headers: display face, one step up from body chrome. */
+  .font-display-13 {
+    font-family: var(--font-display);
+    font-size: var(--text-13);
+    line-height: var(--text-13--line-height);
+    font-weight: 600;
+  }
+
+  /* Bolder active/streaming affordances (monochrome-friendly):
+     - .ring-active: layered ink ring + soft lift for the current flow stage.
+     - .caret-streaming: high-contrast signature-gradient cursor, brand-scoped.
+     - .animate-streamdot: oversized pulse for the chat "generating" header dot. */
+  .ring-active {
+    box-shadow:
+      0 0 0 3px var(--color-base),
+      0 0 0 5px var(--color-ink),
+      0 3px 8px oklch(0.25 0.02 285 / 0.28);
+  }
+  html.dark .ring-active {
+    box-shadow:
+      0 0 0 3px var(--color-base),
+      0 0 0 5px var(--color-ink),
+      0 3px 10px oklch(0 0 0 / 0.5);
+  }
+  .caret-streaming {
+    background: var(--grad-signature);
+    animation: caret-blink 1s var(--ease-flow) infinite;
+  }
+  .animate-streamdot {
+    animation: streamdot 1.4s var(--ease-flow) infinite;
+  }
+  @keyframes caret-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+  @keyframes streamdot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.72); }
+  }
+
+  /* All metric text (stats, version numbers, times, diff counts) gets tabular
+     figures globally so columns stay stable without per-site .nums classes. */
+  .font-mono,
+  time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Intent micro-decoration:
+     - .card-accent-success: faint signature-gradient sheen at the top-left
+       corner for completed/success cards. Light theme only; dark stays quiet.
+       Opacity capped at ~0.10. */
+  .card-accent-success {
+    position: relative;
+  }
+  .card-accent-success::before {
+    content: "";
+    position: absolute;
+    top: -1px;
+    left: -1px;
+    width: 44%;
+    height: 38%;
+    pointer-events: none;
+    border-top-left-radius: inherit;
+    background: var(--grad-signature);
+    opacity: 0.1;
+    /* Fade out fast so the sheen reads as a small corner tint, not a fill. */
+    mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, transparent 70%);
+    -webkit-mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.9) 0%, transparent 70%);
+  }
+  html.dark .card-accent-success::before {
+    content: none;
+  }
+
+  /* - .card-accent-waiting: warm amber vertical bar for rows blocked on a
+       waiting_gate stage. */
+  .card-accent-waiting {
+    box-shadow:
+      inset 2px 0 0 var(--color-warn),
+      var(--elev-rest-shadow);
+  }
+}
+
+/* Elevation utilities — tokens switch per theme, so hover lifts read as real
+   depth instead of a re-paint. Defined as real top-level @utility definitions
+   (cannot nest inside @layer) so variants like hover:shadow-cf-lift resolve
+   cleanly instead of chasing var() through Tailwind's shadow machinery. */
+@utility shadow-cf-rest {
+  box-shadow: var(--elev-rest-shadow);
+}
+@utility shadow-cf-inset {
+  box-shadow: var(--elev-inset-shadow);
+}
+@utility shadow-cf-lift {
+  box-shadow: var(--elev-lift-shadow);
+}
+
+/* Status surface utilities — small 10-18% alpha washes of each semantic hue
+   over the theme canvas (the "colored chip" look of modern dashboards). */
+@utility bg-surface-primary {
+  background-color: var(--color-primary-weak);
+}
+@utility bg-primary-soft {
+  background-color: var(--color-primary-soft);
+}
+@utility bg-surface-info {
+  background-color: var(--color-info-soft);
+}
+@utility bg-surface-success {
+  background-color: var(--color-success-soft);
+}
+@utility bg-surface-warn {
+  background-color: var(--color-warn-soft);
+}
+@utility bg-surface-danger {
+  background-color: var(--color-danger-soft);
 }
 
 @keyframes cf-pop {
@@ -214,8 +459,14 @@ html.dark .cf-app ::selection {
 
 .cf-app :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-base), 0 0 0 4px rgba(124, 92, 255, 0.7);
+  box-shadow: 0 0 0 2px var(--color-base), 0 0 0 4px var(--field-focus);
   border-radius: 6px;
+}
+
+/* Card-shaped focus ring: the global :focus-visible border-radius (6px) is
+   tuned for small controls; cards keep their own corner geometry instead. */
+.cf-app .card:focus-visible {
+  border-radius: var(--cf-radius-card);
 }
 
 /*

@@ -37,7 +37,7 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
         <Badge tone={STATUS_TONE[artifact.status] ?? 'neutral'}>
           {STATUS_LABEL[artifact.status] ?? artifact.status}
         </Badge>
-        <span className="text-[10px] text-ink-mute">{relTime(artifact.created_at)}</span>
+        <span className="text-2xs text-ink-mute">{relTime(artifact.created_at)}</span>
       </div>
     </Card>
   );

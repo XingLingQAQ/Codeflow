@@ -16,13 +16,13 @@ interface FlowProgressProps {
   className?: string;
 }
 
-const nodeBase = 'relative z-10 grid place-items-center rounded-full font-display text-xs font-bold';
+const nodeBase = 'relative z-10 grid place-items-center rounded-full font-display text-13 font-bold';
 
 const nodeStatus: Record<StageStatus, string> = {
   pending: 'border border-line bg-raised text-ink-mute',
-  active: 'border-2 border-ink bg-panel text-ink',
-  waiting_gate: 'border-2 border-warn bg-panel text-warn',
-  done: 'bg-[image:var(--grad-signature)] text-white',
+  active: 'ring-active border-2 border-ink bg-panel text-ink',
+  waiting_gate: 'ring-2 ring-warn/35 border-2 border-warn bg-warn-soft text-warn',
+  done: 'bg-[image:var(--grad-signature)] text-white shadow-[0_1px_4px_oklch(0.55_0.20_285/0.35)]',
   skipped: 'bg-tint text-ink-mute line-through',
 };
 
@@ -66,7 +66,9 @@ export function FlowProgress({ projectId, flow, stages, className }: FlowProgres
 
         return (
           <div key={meta.type} className="flex items-center">
-            {i > 0 && <div className={cn('h-0.5 w-8 transition-colors lg:w-12', segClass(prevStatus!, status))} />}
+            {i > 0 && (
+              <div className={cn('h-[3px] w-8 rounded-full transition-colors lg:w-12', segClass(prevStatus!, status))} />
+            )}
             <Tooltip
               side="bottom"
               content={
@@ -80,7 +82,7 @@ export function FlowProgress({ projectId, flow, stages, className }: FlowProgres
                   {artifacts.length > 0 && (
                     <span className="mt-1 block border-t border-line pt-1 text-ink-mute">
                       {artifacts.map((a) => (
-                        <span key={a.id} className="block truncate font-mono text-[11px]">
+                        <span key={a.id} className="block truncate font-mono text-2xs">
                           {a.type} · v{a.version} · {a.status}
                         </span>
                       ))}
@@ -101,11 +103,15 @@ export function FlowProgress({ projectId, flow, stages, className }: FlowProgres
                 data-stage={meta.type}
                 data-state={status}
                 aria-label={`${meta.label} (${status})`}
-                className={cn(nodeBase, 'size-8 lg:size-9', nodeStatus[status])}
+                className={cn(
+                  nodeBase,
+                  status === 'active' || status === 'waiting_gate' ? 'size-9 lg:size-10' : 'size-8 lg:size-9',
+                  nodeStatus[status],
+                )}
               >
                 {status === 'done' ? (
                   <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 500, damping: 25 }}>
-                    <Check size={15} strokeWidth={3} />
+                    <Check size={17} strokeWidth={3.5} />
                   </motion.span>
                 ) : (
                   meta.index

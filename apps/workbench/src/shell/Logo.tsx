@@ -9,6 +9,16 @@ interface LogoMarkProps {
   className?: string;
 }
 
+/**
+ * Signature gradient endpoints — read from the theme tokens defined in
+ * ui/theme.css (--brand-from / --brand-to; the same stops that build
+ * --grad-signature). This file pairs with the inline SVG stops below, so the
+ * cobalt color correction flips BOTH places (theme.css :root + these two
+ * constants) in one search-replace — do not re-introduce hex inlines.
+ */
+const BRAND_FROM = 'var(--brand-from)';
+const BRAND_TO = 'var(--brand-to)';
+
 /** Signature flow glyph: an S-curve threading two nodes, gradient stroke. */
 export function LogoMark({ size = 28, draw = false, className }: LogoMarkProps) {
   return (
@@ -22,8 +32,8 @@ export function LogoMark({ size = 28, draw = false, className }: LogoMarkProps) 
     >
       <defs>
         <linearGradient id="cf-logo-grad" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#7C5CFF" />
-          <stop offset="1" stopColor="#22D3EE" />
+          <stop stopColor={BRAND_FROM} />
+          <stop offset="1" stopColor={BRAND_TO} />
         </linearGradient>
       </defs>
       <motion.path
@@ -39,7 +49,7 @@ export function LogoMark({ size = 28, draw = false, className }: LogoMarkProps) 
         cx="8.5"
         cy="10.5"
         r="2.7"
-        fill="#7C5CFF"
+        fill={BRAND_FROM}
         initial={draw ? { scale: 0 } : false}
         animate={draw ? { scale: 1 } : undefined}
         transition={{ delay: 0.15, duration: 0.4, ease: EASE_FLOW }}
@@ -49,7 +59,7 @@ export function LogoMark({ size = 28, draw = false, className }: LogoMarkProps) 
         cx="23.5"
         cy="23.4"
         r="2.7"
-        fill="#22D3EE"
+        fill={BRAND_TO}
         initial={draw ? { scale: 0 } : false}
         animate={draw ? { scale: 1 } : undefined}
         transition={{ delay: 0.9, duration: 0.4, ease: EASE_FLOW }}

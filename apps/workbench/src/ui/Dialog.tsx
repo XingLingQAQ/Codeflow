@@ -18,14 +18,14 @@ export function DialogContent({
       <DialogPrimitive.Overlay
         className={cn(
           'fixed inset-0 z-50 bg-[var(--dialog-overlay)] backdrop-blur-[2px]',
-          'data-[state=open]:animate-[cf-fade_250ms_var(--ease-flow)]',
+          'data-[state=open]:animate-[cf-fade_150ms_var(--ease-flow)]',
           'data-[state=closed]:animate-[cf-fade-out_150ms_var(--ease-flow)_forwards]',
         )}
       />
       <DialogPrimitive.Content
         className={cn(
           'glass fixed left-1/2 top-1/2 z-50 w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-5 shadow-2xl',
-          'data-[state=open]:animate-[cf-pop_250ms_var(--ease-flow)]',
+          'data-[state=open]:animate-[cf-pop_150ms_var(--ease-flow)]',
           'data-[state=closed]:animate-[cf-pop-out_150ms_var(--ease-flow)_forwards]',
           'focus:outline-none',
           className,

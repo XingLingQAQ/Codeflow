@@ -58,14 +58,14 @@ export function NavRail() {
               className={cn(
                 'relative flex items-center rounded-xl transition-colors duration-200',
                 expanded ? 'h-9 gap-2.5 px-2.5' : 'size-11 justify-center',
-                active ? 'text-ink' : 'text-ink-mute hover:text-ink hover:bg-tint',
+                active ? 'font-semibold text-ink' : 'text-ink-mute hover:text-ink hover:bg-tint',
               )}
             >
               {active && (
                 <motion.span
                   layoutId="nav-active"
                   transition={{ duration: 0.3, ease: EASE_FLOW }}
-                  className="absolute inset-0 rounded-xl border border-line-strong bg-tint-active"
+                  className="absolute inset-0 rounded-xl border border-ink/25 bg-tint-active"
                 />
               )}
               {active && (
@@ -73,13 +73,13 @@ export function NavRail() {
                   layoutId="nav-active-bar"
                   transition={{ duration: 0.3, ease: EASE_FLOW }}
                   className={cn(
-                    'absolute top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-ink',
+                    'absolute top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-full bg-ink shadow-[0_0_0_1px_var(--color-base)]',
                     expanded ? '-left-2' : '-left-2',
                   )}
                 />
               )}
-              <Icon size={19} className="relative shrink-0" strokeWidth={2} />
-              {expanded && <span className="relative truncate text-[13px] font-medium">{item.label}</span>}
+              <Icon size={19} className="relative shrink-0" strokeWidth={active ? 2.5 : 2} />
+              {expanded && <span className="relative truncate text-13 font-medium">{item.label}</span>}
             </button>
           );
           return expanded ? (
@@ -158,7 +158,7 @@ function RailButton({ expanded, onClick, ariaLabel, icon, label, tooltip }: Rail
       )}
     >
       <span className="shrink-0">{icon}</span>
-      {expanded && <span className="truncate text-[13px] font-medium">{label}</span>}
+      {expanded && <span className="truncate text-13 font-medium">{label}</span>}
     </button>
   );
   return expanded ? btn : <Tooltip content={tooltip} side="right">{btn}</Tooltip>;

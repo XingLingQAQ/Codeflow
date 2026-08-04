@@ -39,7 +39,7 @@ export function StatusBar({ projectId, stage, stageSlug, currentStage, connected
       : 'ok';
 
   return (
-    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-line bg-panel px-3 text-[11px] text-ink-mute">
+    <footer className="flex h-6 shrink-0 items-center justify-between border-t border-line bg-panel px-3 text-xs text-ink-mute">
       <div className="flex items-center gap-4">
         <span>{stage ?? '—'}</span>
         {model && <span className="border-l border-line pl-4">模型 {model}</span>}
@@ -53,11 +53,14 @@ export function StatusBar({ projectId, stage, stageSlug, currentStage, connected
         {import.meta.env.DEV && mock && (
           <span className="rounded bg-warn/15 px-1.5 py-px font-mono text-[10px] font-bold text-warn">MOCK</span>
         )}
-        <span className="nums font-mono text-[10px]" title={snapshotId ? `阶段快照 ${snapshotId}` : '当前阶段尚未绑定快照'}>
+        <span className="nums font-mono text-2xs" title={snapshotId ? `阶段快照 ${snapshotId}` : '当前阶段尚未绑定快照'}>
           快照 {snapshotId ? snapshotId.slice(0, 10) : '—'}
         </span>
         <span
-          className="flex items-center gap-1.5"
+          className={cn(
+            'flex items-center gap-1.5 rounded-full px-2 py-px',
+            guardState === 'pending' && 'bg-warn-soft text-warn ring-1 ring-inset ring-warn/40',
+          )}
           title={
             guardState === 'off'
               ? '守卫服务未启用（实验特性）'
@@ -69,17 +72,17 @@ export function StatusBar({ projectId, stage, stageSlug, currentStage, connected
           守卫
           <span
             className={cn(
-              'inline-block size-1.5 rounded-full',
-              guardState === 'off' && 'bg-ink-mute/50',
-              guardState === 'pending' && 'bg-warn',
-              guardState === 'ok' && 'bg-success',
+              'inline-block rounded-full',
+              guardState === 'off' && 'size-1.5 bg-ink-mute/50',
+              guardState === 'pending' && 'size-2 bg-warn',
+              guardState === 'ok' && 'size-1.5 bg-success',
             )}
           />
           {guardState === 'off' && <span>未启用</span>}
-          {guardState === 'pending' && <span className="nums text-warn">{pendingExemptions}</span>}
+          {guardState === 'pending' && <span className="nums font-semibold">{pendingExemptions}</span>}
         </span>
-        <span className="flex items-center gap-1.5">
-          <span className={cn('inline-block size-1.5 rounded-full', connected ? 'bg-success' : 'bg-danger')} />
+        <span className="flex items-center gap-1.5 px-2">
+          <span className={cn('inline-block size-2 rounded-full', connected ? 'bg-success' : 'bg-danger')} />
           {connected ? '已连接' : '离线'}
         </span>
       </div>

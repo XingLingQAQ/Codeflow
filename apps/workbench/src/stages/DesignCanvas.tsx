@@ -43,7 +43,7 @@ export default function DesignCanvas() {
           <Card className="flex flex-1 flex-col overflow-hidden">
             <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
               <GitFork size={14} className="text-ink-mute" />
-              <span className="text-[12px] font-medium text-ink-dim">架构图</span>
+              <span className="font-display-13 text-ink">架构图</span>
             </div>
             <div className="flex flex-1 items-center justify-center">
               <EmptyState
@@ -64,7 +64,7 @@ export default function DesignCanvas() {
             </Button>
           </span>
         </Tooltip>
-        <span className="text-[11px] leading-relaxed text-ink-mute">
+        <span className="text-xs leading-relaxed text-ink-mute">
           设计分歧可升级为多方辩论；Gate 驳回时按 on_fail 策略自动升级。
         </span>
       </div>

@@ -46,7 +46,7 @@ function parseFences(content: string): ContentSegment[] {
 }
 
 function StreamingCaret() {
-  return <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse rounded-full bg-ink align-middle" />;
+  return <span className="caret-streaming ml-0.5 inline-block h-3.5 w-[2.5px] rounded-full align-middle" />;
 }
 
 function MessageBody({ content, streaming }: { content: string; streaming: boolean }) {
@@ -107,7 +107,7 @@ export function ChatMessages({ messages, agentById, onRetry }: ChatMessagesProps
                 <div className="max-w-[85%] rounded-xl rounded-br-sm bg-tint-active px-3 py-2 text-[13px] leading-relaxed text-ink">
                   <MessageBody content={m.content} streaming={false} />
                   {m.ctx && m.ctx.files.length > 0 && (
-                    <div className="mt-1 text-right text-[10px] text-ink-mute">
+                    <div className="mt-1 text-right text-2xs text-ink-mute">
                       已附带 {m.ctx.files.length} 个文件上下文
                     </div>
                   )}
@@ -123,7 +123,7 @@ export function ChatMessages({ messages, agentById, onRetry }: ChatMessagesProps
                 {agent?.avatar ?? '🤖'}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-baseline gap-2 text-[11px] text-ink-mute">
+                <div className="mb-1 flex items-baseline gap-2 text-xs text-ink-mute">
                   <span className="font-medium text-ink-dim">{agent?.name ?? 'Agent'}</span>
                   <span className="nums">{relTime(m.at)}</span>
                   {m.status === 'stopped' && <span>已停止</span>}
