@@ -65,7 +65,16 @@ export function NavRail() {
                 <motion.span
                   layoutId="nav-active"
                   transition={{ duration: 0.3, ease: EASE_FLOW }}
-                  className="absolute inset-0 rounded-xl border border-ink/25 bg-tint-active"
+                  className={cn(
+                    'absolute rounded-xl border border-ink/25 bg-tint-active will-change-transform',
+                    // During shared-layout transitions, pairing the pill with the
+                    // left bar produces the cleanest trajectory when the pill's
+                    // box equals the underlying button in expanded mode
+                    // (top/left 0, w/h 100%): delta fr -> de becomes offset-only
+                    // and neither element ever picks up a cross-axis size scale.
+                    // Collapsed keeps the original inset-0 translate-only shape.
+                    expanded ? 'left-0 top-0 h-full w-full' : 'inset-0',
+                  )}
                 />
               )}
               {active && (
