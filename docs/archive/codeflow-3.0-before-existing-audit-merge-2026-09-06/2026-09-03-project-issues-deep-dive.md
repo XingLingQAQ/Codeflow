@@ -6,7 +6,7 @@
 > 依据：现行设计与计划、`backend/internal/*` 与 `apps/workbench/src/*` 可读工作树；早期记录中的 92 文件是当时快照，不能视为当前改动数量。  
 > 配套：同目录下的 [codeflow-3.0-redesign.md](codeflow-3.0-redesign.md) 与 [2026-09-03-codeflow-3.0-implementation-plan.md](2026-09-03-codeflow-3.0-implementation-plan.md)  
 > 约定：每一条问题都写清「现象 / 证据 / 影响 / 根因 / 处置方向」。凡是根据代码核实的写「已核实」，凡是推断的写「推断」。
-> 复审同步：2026-09-07，I-01–I-70 裁定见实施计划 §26.2，现有功能 E-01–E-14 见本文 §16 和计划 §26.4/§31；共 77 张任务卡、231 个步骤。缺口、收窄、设计选择、合并修复分开记录；编写计划不代表完成代码或测试。
+> 复审同步：2026-09-06，逐条裁定和证据入口见实施计划 §26.2；72 张任务卡、216 个步骤及依赖/派发模板见 §28–§30。缺口、收窄、设计选择、合并修复分开记录；编写计划不代表完成代码或测试。
 
 ---
 
@@ -609,59 +609,7 @@ I-01 至 I-70 的编号保持不变；逐条“缺口/收窄/设计/合并”裁
 | 复用已有能力 | T0.07/T0.08 复用 handshake/auth；T1.08/T1.10 复用进程/路径规则；T3.03 复用 planner；T9.02 迁旧 shadow 索引 | 新入口已接通且旧行为回归通过 |
 | 执行与交付分离 | Run completed、Task waiting_review、MergeOperation applied 分别保存 | 执行成功但合入失败时状态及主树正确 |
 | 凭据边界 | T2.04–T2.06 的隔离视图、可信 runner、钥匙串；不自动入站还原 | 模型接收器和文件/网络探针均无项目 secret |
-| 可派发粒度 | 每张卡 a/b/c，合计 77 卡/231 步；§29 给前置/锁/回收，§30 给完整提示和分组，§31 汇总 E 问题闸门 | 每个步骤有实际文件、接口、断言及验证回执 |
+| 可派发粒度 | 每张卡 a/b/c，合计 72 卡/216 步；§29 给前置/锁/回收，§30 给完整提示和分组 | 每个步骤有实际文件、接口、断言及验证回执 |
 | 可执行验证 | workbench test discovery、SQLite 实测、适用环境的 race、fake/真实 provider 分开 | 实际测试数量、skip 原因和平台证据 |
 
 原版三文件继续保存在 `docs/archive/codeflow-3.0-original-2026-09-05/`，本次细化前副本在 `docs/archive/codeflow-3.0-plan-before-dispatch-review-2026-09-06/`；修改只发生在当前文档目录。
-
-## 16. 现有功能完整性二次审查（E-01 至 E-14）
-
-本节将 2026-09-06 的现有功能专项审查合并进 3.0 问题清单，合并完成日期为 2026-09-07。E 编号表示当前已经存在的接口、服务或页面问题，不代表新增 Run/ExecBackend 等规划能力缺失；后续修复状态以本目录三文档为准。[专项审查副本](../../reviews/2026-09-06-existing-features-completeness-audit.md) 保留审查时的完整叙述，不维护第二份任务状态。现有功能的 P1 问题必须修复，未交付的可选控件只能按明确禁用/不可用契约处理。
-
-证据来自 2026-09-06 可读工作树（包括尚未提交的源码），属于静态调用链确认；本次合并没有动态复现、运行测试或修改产品源码。库接口缺陷不等于默认 UI 已接通该能力，后续任务必须分别记录真实入口和验证范围。
-
-| 编号 | 级别 | 功能 | 代码证据 | 问题结论 | 3.0 责任卡 |
-|---|---|---|---|---|---|
-| E-01 | P1 | 工作流回放 | `backend/internal/workflow/service.go:GetReplay` | 未验证 session 属于 project；可混入其他项目 trace、audit、Agent | T13.01 |
-| E-02 | P1 | 原子记忆更新/删除 | `backend/internal/memory/atomic_service.go:Update/Delete` | 正文和向量分步提交，索引失败后没有持久修复回执 | T13.02 |
-| E-03 | P1 | Skill 版本归档 | `backend/internal/skill/registry.go:Update` | 当前版本与旧版本分开写，崩溃窗口会丢失可回滚历史 | T13.03 |
-| E-04 | P2 | 模型流式响应 | `backend/internal/adapters/{claude,openai,gemini}.go:Stream` | scanner/JSON/EOF 出错仍可能发送 Done+stop，部分输出被当成成功 | T13.04 |
-| E-05 | P2 | 模型流取消 | 同上 `ch <- chunk` | 消费者停止读取后发送阻塞，ctx 取消无法释放 goroutine | T13.04 |
-| E-06 | P2 | HTTP 摘要 | `backend/internal/summarize/service.go`、`handlers/summarize.go` | 生产入口使用演示关键词摘要，保留条数和 target_tokens 未兑现 | T13.04 |
-| E-07 | P2 | 文本压缩边界 | `summarize/service.go:splitPoint/summarizeText` | 比例越界可 panic，按字节截断中文会破坏 UTF-8 | T13.04 |
-| E-08 | P2 | Skill 回滚 | `skill/registry.go:RollbackVersion` | nil 同时表示“不修改”和“恢复为空”，空 triggers/stage tags 无法恢复 | T13.03 |
-| E-09 | P2 | PAPI 持久化 | `config/service.go:Define/HotSwap/DeletePAPI` | 先改内存再写库；失败或并发覆盖造成内存与数据库分叉 | T13.03 |
-| E-10 | P2 | PAPI 类别冲突 | `config/papi.go:ResolveByCategory/DetectConflicts` | 解析 EqualFold、冲突检测区分大小写；map 遍历导致选择不稳定 | T13.03 |
-| E-11 | P2 | 原子记忆过滤分页 | `memory/atomic_service.go:Search` | 先截 TopK 再做 tag/time/folder 过滤，存在匹配项时可能返回空页 | T13.02 |
-| E-12 | P2 | 原子记忆热度衰减 | `memory/atomic_service.go:ApplyHeatDecay` | 忽略逐行 Exec 错误，返回计划行数而非实际成功数 | T13.02 |
-| E-13 | P2 | 设置实验开关 | `apps/workbench/src/shell/pages/Settings.tsx` | autoSnapshot/livePreview 只有组件 useState，离页即丢且不影响功能 | T13.05 |
-| E-14 | P2 | Git 状态/差异解析 | `backend/internal/git/manager.go:execGit/Status/DiffBetween` | TrimSpace、固定列和 Fields 破坏首字符、空格路径、rename old/new path | T13.05 |
-
-### 16.1 P1 数据和项目边界
-
-**E-01：回放必须先验证归属。** `GetReplay` 接受调用方提供的 session ID 后直接查询 trace/audit；当项目没有 session 时 `loadRelevantAgents` 还会退回全部 Agent。A 项目的 replay URL 传 B 会话时会构成混合回放。修复在 workflow service 内按项目权威关系过滤；显式请求不属于该项目的会话应拒绝，项目自身无会话则返回空关联集合，不能把 projectID 仅当响应标签。
-
-**E-02：正文是权威事实，向量是可修复派生物。** 当前 Update/Delete 先提交正文，再单独操作向量文件；失败会形成正文已改/索引缺失或正文已删/向量残留。修复使用持久同步意图、可重入重建和删除补偿；两个 SQLite 文件之间不宣称单事务，重启后必须能解释并修复中间态。
-
-**E-03：Skill 当前版与历史必须同事务。** `skills` 和 `skill_versions` 的写入、裁剪目前是独立 Exec，崩溃可能丢旧版本，补偿错误还被忽略。修复在 skills.db 内使用同一事务，事务成功后再更新内存；达到历史上限时也要保持裁剪和当前版一致。
-
-### 16.2 现有 API 和配置正确性
-
-**E-04/E-05：流结束和取消必须有事实语义。** 三个 API adapter 都无条件发送 Done/stop，忽略 scanner.Err、provider error 和发送阻塞。修复统一 `completed/error/cancelled` 结果，通道发送选择 ctx.Done，关闭 body 和 goroutine 可验证；不能用“收到部分 delta”推断成功。
-
-**E-06/E-07：摘要接口必须兑现公开参数并保护 Unicode。** `preserve_recent` 和 `target_tokens` 目前没有真正控制输出；字符串按字节切分，非法比例可导致负下标。修复需统一 HTTP handler 的 4xx 参数校验、字符/token 边界和实际压缩统计；若仍使用本地启发式，响应必须声明模式和限制，不能保留“生产中使用 LLM”的隐式承诺。
-
-**E-08/E-10：回滚和类别解析必须兑现实际行为。** Skill 更新请求中 nil 表示“不修改”，回滚却需要明确设置空集合；从无触发词版本添加触发词后回滚，不能只恢复正文。PAPI 类别在写入、冲突检查和解析时使用同一规范化规则；backend/Backend 不应检测无冲突、解析时却随机命中两者。
-
-**E-09：PAPI 变更必须先持久化后发布内存。** 当前 `DefinePAPIVariable`、`HotSwapPAPI`、`DeletePAPIVariable` 先修改 manager，再调用数据库写入；失败会返回错误但留下临时内存事实，并发写可让最后写入者与内存顺序相反。修复需要同一配置级锁/版本 CAS、事务写库和成功后替换内存快照，不能只给 SQL 加锁。
-
-**E-11/E-12：记忆查询和批处理必须以实际结果为准。** 条件过滤要在候选扩展或数据库过滤后再分页，不能固定 TopK 后丢弃；衰减循环必须检查每行执行和 rows.Err，失败时回滚或返回明确部分结果。
-
-**E-13/E-14：已有用户控件不能伪装成已生效。** 设置页实验开关要么连接真实配置并在重载后恢复，要么禁用并显示待交付状态；GitManager 要使用 NUL/结构化格式解析状态、重命名和带空格路径，不得用 TrimSpace/Fields 猜文件名。
-
-### 16.3 合并规则
-
-1. E 问题修复属于现有功能硬化，不能等待新 Run 系统才验证；T13 卡可复用现有接口和测试夹具，但必须在真实当前入口覆盖。
-2. E-01 的项目 scope、E-02/E-03 的事务一致性、E-04/E-05 的流资源释放属于 P1/P2 发布闸门；任何失败都不能用新增功能通过来掩盖。
-3. 审查报告中的“建议回归”是待实施测试，当前不表示已通过。代码、测试和文档完成状态由实施计划 §29/§30 的回收格式记录。
-4. 合并前副本在 `docs/archive/codeflow-3.0-before-existing-audit-merge-2026-09-06/`；既有原版和本次合并前副本均不覆盖。E 编号继续保留来源，不把同一问题再编号成一组重复的 I 问题。

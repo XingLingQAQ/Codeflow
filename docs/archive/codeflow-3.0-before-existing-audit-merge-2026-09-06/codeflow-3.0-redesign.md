@@ -3,9 +3,9 @@
 > 状态：Draft（提议）  
 > 创建：2026-09-03  
 > 取代：[2026-06-12-overall-roadmap.md](../2026-06-12-overall-roadmap.md) 的产品定位部分；[flow-engine.md](../flow-engine.md) §2–§5；[agent-quality-system.md](../agent-quality-system.md) §1–§3；[workbench-and-shell.md](../workbench-and-shell.md) §2–§3（本文接受后上述文档标 Superseded 并链回此处）  
-> 问题依据：同目录下的 [2026-09-03-project-issues-deep-dive.md](2026-09-03-project-issues-deep-dive.md)（原问题 `I-xx`，现有功能专项问题 `E-xx`）  
+> 问题依据：同目录下的 [2026-09-03-project-issues-deep-dive.md](2026-09-03-project-issues-deep-dive.md)（引用格式 `I-xx`）  
 > 实施：同目录下的 [2026-09-03-codeflow-3.0-implementation-plan.md](2026-09-03-codeflow-3.0-implementation-plan.md)
-> 复审同步：2026-09-07，对齐实施计划 v3.0-dispatch-4；纳入 E-01–E-14，合计 77 张任务卡、231 个派发步骤。现有功能修复约束见本文 §18，派发见计划 §28–§31。本文描述目标设计，不表示代码已实现。
+> 复审同步：2026-09-06，对齐实施计划 v3.0-dispatch-3；72 张任务卡、216 个派发步骤见计划 §28–§30。本文描述目标设计，不表示代码已实现。
 
 ---
 
@@ -334,14 +334,11 @@ Agent 资产是唯一配置单位。保留旧 Version 标签，新增不可变 `
 | agent (runtime) | 重写为 Run 服务 |
 | agent (registry) | 资产模型扩展 backend / model_policy / fit |
 | debate | 改服务端执行 |
-| memory / samg | 原子记忆先按 T13.02 修同步、过滤和衰减，再加来源、确认和 MCP |
+| memory / samg | 加来源、置信度、待确认区；MCP 暴露 |
 | privacy | 拆为 Vault + PII |
 | hooks | 内部事件机制；触发点接 ExecBackend 事件 |
-| adapters | 保留 API 直连；T13.04 先修终结/取消，不能以新 CLI 适配器替代旧库回归 |
-| audit / project | 保留；workflow 聚合与项目回放按 T13.01 验证归属 |
-| config / skill | 保留；T13.03 修 PAPI 持久化/类别解析、Skill 事务/完整回滚 |
-| summarize | T13.04 接通真实 HTTP 摘要行为，兑现参数、统计及 Unicode 边界 |
-| git / 设置页 | T13.05 修状态/差异解析和无效实验开关，已有方法不代表无需回归 |
+| adapters | 只用于 API 直连角色 |
+| audit / config / project / skill | 保留 |
 | blackboard / votes / isolation(RBAC) / mapagent / integrations / disclosure | 冻结（见计划 §2） |
 | packages/* | 遗留，不再维护 |
 
@@ -570,39 +567,4 @@ Run 创建冻结 binding revision、dirty/未跟踪文件的 base_manifest_hash 
 4. 最后开放多后端、书签、外部连接和深层语义守卫；每个扩展必须复用本节契约。
 
 5. 运行事实先进入单一 `codeflow.db`，旧域以引用快照衔接；Flow 在任务流阶段逐域冻结/复制/校验/切换，S12 收剩余旧域。跨旧 SQLite 文件不承诺双写原子，文件审计链通过幂等 outbox 投递。
-6. 实际执行顺序以实施计划 §29 的 231 节点依赖图为准；补录的 S13 现有功能修复在 S0 基线可用后按依赖提前执行。§30 派发提示必须包含具体文件、上游签名、实施顺序、验收命令与停止条件。
-
-## 18. 现有功能完整性闸门（E-01 至 E-14）
-
-3.0 的“保留/复用”只决定模块归属，不证明当前行为已经正确。E 问题是已存在 HTTP、库接口和界面控件的缺陷，与新增 Run 能力分别验收；全部问题来源、复现前提见问题文档 §16，修复卡见实施计划 T13.01–T13.05。
-
-### 18.1 项目与数据事实
-
-| 问题 | 设计约束 | 交付证据 |
-|---|---|---|
-| E-01 | workflow 先验证 project 与 session 的权威关系，再读 trace/audit；无会话项目返回空关联集合，不回退全局 Agent | A 项目的回放不能夹入 B 会话；空项目 overview/timeline/replay 均不扩展范围 |
-| E-02 | atomic memory 正文库是权威源；正文 revision/删除标记与索引同步意图同库提交，向量另行幂等同步，失败留下可恢复状态 | 向量删除/写入故障和重启后可恢复；已删正文不能因残留向量重现 |
-| E-03 | skills.db 内当前版、历史归档、保留裁剪同事务，提交成功后才发布内存；不得忽略补偿失败 | 任一故障点旧版可读/可回滚，达到 20 条历史上限也一致 |
-| E-08 | Skill 的 PATCH 不带字段表示不改；rollback 明确恢复该版本的触发词和阶段集合，空集合是有效值 | 不仅正文恢复，Match/Inject 结果也恢复；启用状态是否随版本恢复须明示，不能隐式扩大权限 |
-| E-09/E-10 | PAPI 同一变更在服务层串行或 CAS，持久化成功后发布不可变内存快照；类别统一 trim+大小写规范，冲突不能随机选择 | 写入失败不生效，并发后重开一致；历史重叠类别能诊断，不静默改映射 |
-| E-11/E-12 | 原子记忆先按条件确定可见候选，再排序分页；批量衰减检查逐行执行、rows.Err 与事务提交 | 低排名的合法匹配不会因 TopK 被隐藏；衰减失败不返回全量成功计数 |
-
-索引同步与旧域迁移复用同一权威模型。S13 可以先在旧正文库新增同步回执；S12 迁移时必须迁走尚未完成的回执/删除标记，不能从“业务表已复制”推断向量一致。公开 HTTP 仍保留旧 envelope，新增同步状态等字段须由 Schema 明确，不顺便把所有旧接口改为 Run API。
-
-### 18.2 流式与摘要结果
-
-1. E-04：旧 API adapter 的协议完成、异常 EOF、扫描失败、provider error 和取消分别表达。StreamChunk 的 Done 只能表示流已终结，不能单独表示成功；兼容增加 terminal_status/error/finish_reason 等字段时必须迁完已有消费者。只有验证成功终结才把完整 assistant 消息加入成功历史。
-2. E-05：所有 delta/终结帧发送均可被 context 取消。正常消费时返回唯一终结结果；调用者已取消并停止读取时优先关闭 body/退出 goroutine，不能为强送取消帧继续阻塞。有限缓冲不是资源释放证明。
-3. E-06：HTTP 摘要必须使用实际的消息保留和预算策略，preserve_recent/target_tokens 影响结果；返回实际计量与算法模式。先复用现有 Compressor/TokenCounter，但必须逐项核验它们是否满足 HTTP 契约，不能仅换构造器。默认本地提取无需模型费用，不宣称具备未经验证的语义总结。
-4. E-07：比例越界、负数或不可能满足的预算返回字段错误；UTF-8 只在合法字符/消息边界裁剪。现有字符/token 估算必须标 estimated；保留区已超过目标预算时返回明确预算不足，不静默破坏保留内容。
-
-以上约束针对 `backend/internal/adapters` 和 `/summarize/*` 的现有能力。未来 ExecBackend 的事件协议、暂停/恢复或 CLI smoke 不能替代这组回归。
-
-### 18.3 Git 和设置状态
-
-- E-14：机器读取 Git 文件列表使用 NUL 分隔协议；stdout 保留原始字节，stderr 单独记录。Status 处理 index/worktree 双列，DiffBetween 处理 R/C 分数和 old/new 两路径；中文、空格以及平台允许的换行路径不能按空白分割。已有无 Git 场景仍返回实际错误/不支持状态，不制造空成功。
-- E-13：当前 autoSnapshot/livePreview 没有真实配置消费者，默认移除可编辑假开关或禁用并标明不可用。只有实际能力、持久配置和消费者一并接通才能启用；不为关闭 E-13 提前实现后置 Live Preview。主题/动效等已接 store 的设置继续按其既有行为验收。
-
-### 18.4 接受条件
-
-T13.01–T13.05 均有已接受回执后，T12.04 才能确认现有功能闸门。P1 数据/归属问题必须修复并验证，不能仅写“已知限制”；未配置的可选功能可以明确不可用，但只能按相应契约关闭该控件问题，不能记成功能已交付。静态审查、代码完成、fake 协议回归和真实 provider 结果分别记录。
+6. 实际执行顺序以实施计划 §29 的 216 节点依赖图为准，不能按本节的产品顺序省略前置。§30 派发提示必须包含具体文件、上游签名、实施顺序、验收命令与停止条件。
