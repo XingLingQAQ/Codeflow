@@ -8,7 +8,7 @@
  * - agent: 使用后端 MemoryAgent /agent/context API（默认）
  * - local: 使用前端 PassiveRAG 本地检索（兼容回退）
  */
-import { HookEvent } from './types.js';
+import { HookEvent, getMessageText } from './types.js';
 const DEFAULT_CONFIG = {
     enabled: true,
     position: 'prepend',
@@ -114,7 +114,7 @@ export class MemoryInjectionHook {
     extractLastUserMessage(payload) {
         for (let i = payload.messages.length - 1; i >= 0; i--) {
             if (payload.messages[i].role === 'user') {
-                return payload.messages[i].content;
+                return getMessageText(payload.messages[i].content);
             }
         }
         return null;

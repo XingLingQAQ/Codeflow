@@ -9,6 +9,8 @@ import {
   Trash2,
   X,
   FileCode2,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
 import {
   Badge,
@@ -38,6 +40,7 @@ import { roleLabel, type AgentInfo } from '../services-bridge/agents';
 import { relTime } from '../lib/format';
 import { cn } from '../lib/cn';
 import type { StageType } from '../services-bridge/flows';
+import { agentSelectionKey, resolveAgentSelection } from './agentSelection';
 
 const HISTORY_WINDOW = 12;
 
@@ -45,6 +48,7 @@ export interface AgentCompanionProps {
   projectId: string;
   stage: StageType;
   stageName?: string;
+  assignedAgentId?: string;
 }
 
 function AgentMenuItem({
@@ -76,24 +80,21 @@ function AgentMenuItem({
   );
 }
 
-export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionProps) {
+export function AgentCompanion({ projectId, stage, stageName, assignedAgentId }: AgentCompanionProps) {
   const agentsQ = useAgents();
-  const agents = useMemo(() => agentsQ.data ?? [], [agentsQ.data]);
+  const agents = useMemo(() => (agentsQ.data ?? []).filter((agent) => agent.enabled !== false), [agentsQ.data]);
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
   const recommended = useMemo(() => agents.filter((a) => a.stage_tags?.includes(stage)), [agents, stage]);
   const others = useMemo(() => agents.filter((a) => !a.stage_tags?.includes(stage)), [agents, stage]);
 
-  const chosenId = useChatStore((s) => s.agentByStage[stage]);
+  const selectionKey = agentSelectionKey(projectId, stage);
+  const chosenId = useChatStore((s) => s.agentByStage[selectionKey]);
   const setAgentForStage = useChatStore((s) => s.setAgentForStage);
-  const currentAgent = (chosenId && agentById.get(chosenId)) || recommended[0] || agents[0];
-
-  // Stage-following selection: without a remembered choice, the first agent
-  // recommended for this stage becomes active (its system prompt follows).
-  useEffect(() => {
-    if (!chosenId && recommended.length > 0) {
-      setAgentForStage(stage, recommended[0].id);
-    }
-  }, [chosenId, recommended, stage, setAgentForStage]);
+  const selection = useMemo(
+    () => resolveAgentSelection({ agents, chosenId, assignedAgentId, stage }),
+    [agents, assignedAgentId, chosenId, stage],
+  );
+  const currentAgent = selection.agent;
 
   const messages = useChatStore((s) => s.messagesByProject[projectId]) ?? [];
   const streamingId = useChatStore((s) => s.streamingId);
@@ -273,12 +274,27 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
                       {roleLabel(currentAgent.role_base)}
                     </Badge>
                   )}
+                  {selection.source === 'flow' && (
+                    <Badge tone="accent" className="shrink-0 px-1.5 py-px text-[11px]">
+                      流程指定
+                    </Badge>
+                  )}
                 </span>
               </span>
               <ChevronDown size={13} className="shrink-0 text-ink-mute" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
+            {chosenId && (
+              <>
+                <DropdownMenuLabel>选择策略</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => setAgentForStage(projectId, stage, undefined)}>
+                  <RotateCcw size={14} className="shrink-0 text-ink-mute" />
+                  恢复跟随{assignedAgentId ? '流程指定' : '阶段推荐'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             {recommended.length > 0 && (
               <>
                 <DropdownMenuLabel>推荐 · {stageName ?? stage}阶段</DropdownMenuLabel>
@@ -287,7 +303,7 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
                     key={a.id}
                     agent={a}
                     selected={a.id === currentAgent?.id}
-                    onSelect={() => setAgentForStage(stage, a.id)}
+                    onSelect={() => setAgentForStage(projectId, stage, a.id)}
                   />
                 ))}
               </>
@@ -301,7 +317,7 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
                     key={a.id}
                     agent={a}
                     selected={a.id === currentAgent?.id}
-                    onSelect={() => setAgentForStage(stage, a.id)}
+                    onSelect={() => setAgentForStage(projectId, stage, a.id)}
                   />
                 ))}
               </>
@@ -320,6 +336,13 @@ export function AgentCompanion({ projectId, stage, stageName }: AgentCompanionPr
           </IconButton>
         </Tooltip>
       </div>
+
+      {selection.notice && (
+        <div role="status" className="flex shrink-0 items-start gap-2 border-b border-warn/25 bg-warn/10 px-3 py-2 text-xs leading-relaxed text-warn">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          <span>{selection.notice}</span>
+        </div>
+      )}
 
       {/* Context chips: stage + injected files */}
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-3 py-1.5">

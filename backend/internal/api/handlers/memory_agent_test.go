@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/codeflow/backend/internal/dbx"
 	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/samg"
 )
@@ -72,7 +71,7 @@ func setupMemoryAgentHandlerDeps(t *testing.T) memoryAgentHandlerDeps {
 	tmpDir := t.TempDir()
 	archive := memory.NewSQLiteRawArchive(filepath.Join(tmpDir, "raw_archive.db"))
 
-	db, err := sql.Open("sqlite3", filepath.Join(tmpDir, "atomic_memory.db"))
+	db, err := dbx.Open(filepath.Join(tmpDir, "atomic_memory.db"), dbx.WithWAL(false), dbx.WithForeignKeys(false), dbx.WithBusyTimeout(0))
 	if err != nil {
 		t.Fatalf("open atomic memory db failed: %v", err)
 	}

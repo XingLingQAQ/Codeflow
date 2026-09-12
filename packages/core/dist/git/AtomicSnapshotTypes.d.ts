@@ -58,6 +58,10 @@ export interface AtomicSnapshot {
         trigger: SnapshotTrigger;
         parentSnapshotId?: string;
         tags?: string[];
+        sessionId?: string;
+        taskId?: string;
+        agentId?: string;
+        codeChangeEventIds?: string[];
     };
 }
 /**
@@ -100,11 +104,17 @@ export interface SnapshotValidation {
     graphValid: boolean;
     errors: string[];
 }
+export interface CreateAtomicSnapshotOptions {
+    sessionId?: string;
+    taskId?: string;
+    agentId?: string;
+    codeChangeEventIds?: string[];
+}
 /**
  * 原子快照管理器接口
  */
 export interface IAtomicSnapshotManager {
-    createSnapshot(description?: string, trigger?: SnapshotTrigger): Promise<AtomicSnapshot>;
+    createSnapshot(description?: string, trigger?: SnapshotTrigger, options?: CreateAtomicSnapshotOptions): Promise<AtomicSnapshot>;
     getSnapshot(id: string): Promise<AtomicSnapshot | null>;
     listSnapshots(limit?: number): Promise<AtomicSnapshot[]>;
     findSnapshotByGitHash(gitHash: string): Promise<AtomicSnapshot | null>;

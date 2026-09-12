@@ -8,6 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/codeflow/backend/internal/agent"
+	"github.com/codeflow/backend/internal/memory"
+	"github.com/codeflow/backend/internal/samg"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,13 +18,18 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-func setupTestServer() *Server {
+func setupTestServer() *authenticatedTestServer {
+	agent.SetAgentService(agent.NewInMemoryAgentService())
+	memory.SetMemoryService(memory.NewInMemoryService())
+	memory.SetPreflightService(memory.NewMemoryPreflightService())
+	samg.SetSAMGService(samg.NewSAMGService(nil))
 	config := &Config{
 		Port:            "8080",
-		AllowedOrigins:  []string{"*"},
+		AuthToken:       testAuthToken,
+		AllowedOrigins:  []string{"http://localhost:3000"},
 		EnableDebugMode: false,
 	}
-	return NewServer(config)
+	return &authenticatedTestServer{server: NewServer(config)}
 }
 
 // TestHealthCheck tests GET /health endpoint

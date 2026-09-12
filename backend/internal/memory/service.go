@@ -291,18 +291,3 @@ func (s *InMemoryService) ReplaceItems(ctx context.Context, sessionID string, it
 	}
 	return nil
 }
-
-var defaultMemoryService IMemoryService
-
-// GetMemoryService 获取记忆服务实例
-func GetMemoryService() IMemoryService {
-	if defaultMemoryService == nil {
-		defaultMemoryService = NewInMemoryService()
-	}
-	return defaultMemoryService
-}
-
-// SetMemoryService 设置记忆服务实例 (用于测试)
-func SetMemoryService(svc IMemoryService) {
-	defaultMemoryService = svc
-}

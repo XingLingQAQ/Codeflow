@@ -1,0 +1,235 @@
+<title>项目页重设计 · A 修订版</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #ececea; color: #1c1c1a;
+    font-family: "Public Sans", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased; line-height: 1.6;
+  }
+  .page { max-width: 1200px; margin: 0 auto; padding: 52px 24px 120px; }
+  .page > header h1 { font-size: 28px; font-weight: 750; letter-spacing: -.02em; }
+  .page > header p { color: #6f6f6a; margin-top: 6px; font-size: 14px; max-width: 56em; }
+  .pick {
+    display: inline-block; margin-top: 14px; font-size: 13px; background: #fff;
+    border-radius: 12px; padding: 8px 16px; color: #44443f; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .pick b { font-weight: 700; }
+
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ================= 应用框架 ================= */
+  .frame {
+    height: 700px; margin-top: 32px; border-radius: 24px; overflow: hidden;
+display: grid; grid-template-columns: 212px 1fr;
+    background: #f1f0ec; color: #26251f;
+    box-shadow: 0 2px 6px rgba(20,20,15,.06), 0 24px 64px rgba(20,20,15,.10);
+    font-size: 13px; user-select: none;
+  }
+
+  /* 侧边栏：悬浮岛导航 + 实体分割线 */
+  .side {
+  display: flex; flex-direction: column; padding: 18px 12px;
+    border-right: 1px solid #e2e1db; background: #f1f0ec;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 4px 10px 16px; }
+.brand .mk { width: 24px; height: 24px; border-radius: 8px; flex: none; background: #26251f; position: relative; color: #f1f0ec; }
+  .brand .mk::after {
+    content: ""; position: absolute; inset: 0; border-radius: 8px;
+    background:
+radial-gradient(circle at 30% 68%, currentColor 2.2px, transparent 2.6px),
+      radial-gradient(circle at 70% 32%, currentColor 2.2px, transparent 2.6px);
+  }
+  .brand .nm { font-weight: 700; font-size: 14px; letter-spacing: -.01em; }
+  .sep { height: 1px; background: #e2e1db; margin: 6px 10px 12px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nv { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; color: #75746c; }
+  .nv svg { flex: none; opacity: .75; }
+  .nv:hover { background: rgba(38,37,31,.05); }
+  .nv.on { background: #fff; color: #26251f; font-weight: 600; box-shadow: 0 1px 3px rgba(38,37,31,.08); }
+  .side .foot {
+    margin-top: auto; padding: 12px 12px 2px; font-size: 11.5px; color: #92918a;
+    display: flex; align-items: center; gap: 7px; border-top: 1px solid #e2e1db;
+  }
+  .side .foot .cd { width: 7px; height: 7px; border-radius: 999px; background: #3fa060; flex: none; }
+
+  /* 主区 */
+  .main { min-width: 0; overflow: hidden; display: flex; flex-direction: column; padding: 26px 28px 0 24px; }
+  .m-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 4px 4px 20px 6px; }
+  .m-head h1 { font-size: 25px; font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
+  .m-head p { font-size: 13px; margin-top: 5px; color: #92918a; }
+  .newbtn {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600;
+    padding: 9px 18px; border-radius: 14px; white-space: nowrap; background: #26251f; color: #f6f5f1;
+  }
+  .newbtn::before { content: "+"; font-weight: 500; font-size: 15px; line-height: 1; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; overflow: hidden; padding: 2px 2px 26px; }
+
+  /* ================= 项目卡（信息加厚版） ================= */
+  .pc {
+    background: #fff; border-radius: 20px; padding: 19px 21px 16px;
+    display: flex; flex-direction: column; box-shadow: 0 1px 2px rgba(38,37,31,.04);
+  }
+  .pc:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+
+  .pc .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .pc h3 { font-size: 16.5px; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+  .pc h3 i { width: 7px; height: 7px; border-radius: 999px; flex: none; }
+  /* 阶段驻留地：文字描述当前站，不做任何条 */
+  .stage {
+    font-size: 11.5px; color: #75746c; background: #f4f3ef; border-radius: 999px;
+    padding: 4px 12px; white-space: nowrap; flex: none;
+  }
+  .stage b { color: #26251f; font-weight: 650; }
+
+  .pc .ds { color: #75746c; font-size: 12.5px; margin-top: 7px; line-height: 1.65; }
+
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+  .tag { font-size: 10.5px; color: #92918a; background: #f4f3ef; border-radius: 999px; padding: 2px 9px; }
+
+  /* 事实行：快照 / 守卫 / 待审 gate / 分支 —— 全部真实状态，取不到就不显示 */
+  .facts {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 7px 14px;
+    margin-top: 14px; padding-top: 13px; border-top: 1px solid #f0efe9;
+    font-size: 11.5px; color: #75746c;
+  }
+  .facts .f { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .facts .f svg { flex: none; opacity: .6; }
+  .facts .f span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .facts .f b { color: #26251f; font-weight: 600; }
+  .facts .f.warn { color: #8a5a13; }
+  .facts .f.warn b { color: #8a5a13; }
+
+  .pc .meta {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 12px; color: #a5a49c; font-size: 11px;
+  }
+  .gate-cta {
+    font-size: 11px; font-weight: 650; color: #26251f;
+    background: #f4f3ef; border-radius: 999px; padding: 4px 12px;
+  }
+
+  @media (max-width: 900px) {
+    .frame { grid-template-columns: 176px 1fr; height: auto; }
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  .closing {
+    margin-top: 40px; background: #fff; border-radius: 20px; padding: 22px 26px;
+    font-size: 14px; color: #44443f; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .closing b { color: #1c1c1a; }
+  .closing ul { margin: 8px 0 0 18px; }
+  .closing li { margin-top: 4px; font-size: 13.5px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>「项目」页 · A 方案修订版</h1>
+    <p>按审核意见修改：① 侧边栏加实体分割线（右缘 + 品牌下方 + 底部连接区）；② 卡片信息加厚——标签、快照数、守卫状态、待审 Gate、分支、最后活跃全部上卡；③ 移除一切进度条——阶段驻留地用文字胶囊表达（「编码 · 第 5 站」），不暗示完成度。</p>
+    <span class="pick">审核方式：回复「通过」或继续提意见</span>
+  </header>
+
+  <div class="frame">
+    <aside class="side">
+      <div class="brand"><span class="mk"></span><span class="nm">CodeFlow</span></div>
+      <div class="sep"></div>
+      <nav class="nav">
+ <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>总览</span>
+  <span class="nv on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>项目</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h6m2-5l-4 4m4 6l-4-4"/></svg>工作流</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 7V3M8 13h.01M16 13h.01"/></svg>Agent</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6m0 0a3 3 0 103 3h6M12 9a3 3 0 013 3"/></svg>插件</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h10M18 8h2M4 16h2M10 16h10M14 5v6M8 13v6"/></svg>配置</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10l2 2M19 5l-2 2M7 17l-2 2"/></svg>设置</span>
+      </nav>
+    <div class="foot"><span class="cd"></span>已连接 · 本地后端</div>
+    </aside>
+
+    <main class="main">
+      <div class="m-head">
+        <div><h1>项目</h1><p>4 个项目 · 2 个进行中 · 1 个 Gate 待审</p></div>
+        <span class="newbtn">新建项目</span>
+      </div>
+
+ <div class="grid">
+        <!-- Nebula Console：进行中 + 待审 gate -->
+        <div class="pc">
+          <div class="head">
+          <h3><i style="background:#3fa060"></i>Nebula Console</h3>
+       <span class="stage">驻留 <b>编码</b> · 第 5 站</span>
+          </div>
+  <p class="ds">下一代星云管理控制台，支持实时监控与自动扩缩容。</p>
+   <div class="tags"><span class="tag">frontend</span><span class="tag">react</span><span class="tag">typescript</span></div>
+     <div class="facts">
+            <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12m0 0a3 3 0 103 3m-3-3a3 3 0 013-3h6a3 3 0 003-3V3"/></svg><span class="mono">feat/nebula-ui</span></span>
+   <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span>快照 <b class="num">12</b> · 最新 <span class="mono num">SNAP-0047</span></span></span>
+      <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg><span>守卫 <b>3 项通过</b></span></span>
+        <span class="f warn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4m0 4h.01"/></svg><span>Gate <b>1 项待审</b></span></span>
+</div>
+      <div class="meta"><span class="num">1 小时前活跃</span><span class="gate-cta">去审批 →</span></div>
+    </div>
+
+        <!-- 数据管线重构 -->
+    <div class="pc">
+          <div class="head">
+            <h3><i style="background:#3fa060"></i>数据管线重构</h3>
+         <span class="stage">驻留 <b>规划</b> · 第 3 站</span>
+        </div>
+          <p class="ds">将批量 ETL 管线迁移至流式处理架构，提升实时性与容错能力。</p>
+ <div class="tags"><span class="tag">backend</span><span class="tag">go</span><span class="tag">streaming</span></div>
+  <div class="facts">
+    <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12m0 0a3 3 0 103 3m-3-3a3 3 0 013-3h6a3 3 0 003-3V3"/></svg><span class="mono">refactor/pipeline</span></span>
+     <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span>快照 <b class="num">5</b> · 最新 <span class="mono num">SNAP-0031</span></span></span>
+   <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg><span>守卫 <b>全部通过</b></span></span>
+   <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 7V3M8 13h.01M16 13h.01"/></svg><span>Agent <b>规划伴侣</b> 值守</span></span>
+          </div>
+          <div class="meta"><span class="num">2 小时前活跃</span></div>
+        </div>
+
+  <!-- 移动端伴侣：规划中，还没开始 -->
+     <div class="pc">
+          <div class="head">
+            <h3><i style="background:#c9a13d"></i>移动端伴侣</h3>
+            <span class="stage">待启程 · <b>意图</b>站</span>
+          </div>
+          <p class="ds">远程审批与 Agent 对话的手机伴侣端，支持配对与推送通知。</p>
+          <div class="tags"><span class="tag">mobile</span><span class="tag">react-native</span></div>
+          <div class="facts">
+      <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span>尚无快照</span></span>
+            <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg><span>守卫未启动</span></span>
+    </div>
+      <div class="meta"><span class="num">2 天前创建</span></div>
+        </div>
+
+        <!-- 旧系统归档 -->
+        <div class="pc" style="opacity:.62">
+     <div class="head">
+    <h3><i style="background:#b4b3ab"></i>旧系统归档</h3>
+            <span class="stage">已<b>提交</b> · 全程走完</span>
+ </div>
+          <p class="ds">遗留 PHP 系统迁移完成后的代码归档与文档沉淀。</p>
+          <div class="tags"><span class="tag">legacy</span><span class="tag">php</span></div>
+     <div class="facts">
+         <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12m0 0a3 3 0 103 3m-3-3a3 3 0 013-3h6a3 3 0 003-3V3"/></svg><span class="mono">legacy</span></span>
+          <span class="f"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span>快照 <b class="num">28</b> · 已封存</span></span>
+   </div>
+          <div class="meta"><span class="num">30 天前归档</span></div>
+     </div>
+   </div>
+ </main>
+  </div>
+
+  <div class="closing">
+    <b>本轮改动清单：</b>
+    <ul>
+      <li>侧边栏：右缘 1px 分割线（#E2E1DB），品牌名下方与底部连接状态区各加一条横向分割线，导航悬浮岛样式保留。</li>
+      <li>卡片信息加厚：新增「事实行」两列栅格——分支、快照数 + 最新快照编号、守卫状态、待审 Gate / 值守 Agent，全部对应后端真实字段，取不到的项直接隐藏（零虚假数据原则）。</li>
+      <li>进度条全部移除：阶段驻留地改为右上角文字胶囊（「驻留编码 · 第 5 站」「待启程」「全程走完」），只陈述位置，不暗示项目完成百分比。</li>
+      <li>有待审 Gate 的项目：事实行琥珀色提示 + 右下角「去审批」快捷入口，这是项目列表页最高价值的行动点。</li>
+    </ul>
+  </div>
+</div>

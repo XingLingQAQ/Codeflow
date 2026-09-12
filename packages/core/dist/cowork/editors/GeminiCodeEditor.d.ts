@@ -1,10 +1,11 @@
 /**
  * Gemini Code Editor
- * 基于 GeminiAdapter 实现 ICodeEditor 接口
- * 复用 Claude Editor 的 Prompt 模板
+ * 同时支持 Gemini API adapter 与 cowork Gemini CLI adapter
  */
 import { ICodeEditor, EditResult, Diff } from '../types.js';
 import { GeminiAdapter } from '../../adapters/GeminiAdapter.js';
+import { GeminiCLIAdapter } from '../adapters/GeminiCLIAdapter.js';
+export type GeminiEditorAdapter = GeminiAdapter | GeminiCLIAdapter;
 /**
  * Gemini Editor 配置
  */
@@ -30,9 +31,10 @@ interface BackupRecord {
 export declare class GeminiCodeEditor implements ICodeEditor {
     readonly name = "gemini-editor";
     private adapter;
+    private executor;
     private config;
     private backupStack;
-    constructor(adapter: GeminiAdapter, config?: GeminiEditorConfig);
+    constructor(adapter: GeminiEditorAdapter, config?: GeminiEditorConfig);
     /**
      * 编辑单个文件
      */
@@ -61,6 +63,10 @@ export declare class GeminiCodeEditor implements ICodeEditor {
      * 清理所有备份
      */
     clearBackups(): Promise<void>;
+    getAdapter(): GeminiEditorAdapter;
+    getConfig(): GeminiEditorConfig;
+    private createPromptExecutor;
+    private executePrompt;
     private resolvePath;
     private backup;
     private emptyDiff;

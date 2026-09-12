@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api/middleware"
 	"github.com/codeflow/backend/internal/audit"
 	ctxsvc "github.com/codeflow/backend/internal/context"
@@ -15,9 +16,11 @@ import (
 	"github.com/codeflow/backend/internal/guard"
 	"github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/isolation"
+	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/privacy"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/workspace"
 	"github.com/gin-gonic/gin"
@@ -52,7 +55,10 @@ func ReadinessCheck(c *gin.Context) {
 		"planner":   readinessComponent{Ready: planner.HasPlanner(), Required: true},
 		"project":   readinessComponent{Ready: project.HasProjectService(), Required: true},
 		"context":   readinessComponent{Ready: ctxsvc.HasContextService(), Required: true},
-		"audit":     readinessComponent{Ready: audit.HasAuditService(), Required: false},
+		"audit":     readinessComponent{Ready: audit.HasAuditService(), Required: true},
+		"agent":     readinessComponent{Ready: agent.HasAgentService(), Required: true},
+		"memory":    readinessComponent{Ready: memory.HasMemoryService(), Required: true},
+		"samg":      readinessComponent{Ready: samg.HasSAMGService(), Required: true},
 		"hooks":     readinessComponent{Ready: hooks.HasHookManager(), Required: false},
 		"privacy":   readinessComponent{Ready: privacy.HasPrivacyService(), Required: false},
 		"isolation": readinessComponent{Ready: isolation.HasIsolationService(), Required: false},
@@ -64,7 +70,7 @@ func ReadinessCheck(c *gin.Context) {
 	}
 
 	ready := true
-	for _, name := range []string{"planner", "project", "context"} {
+	for _, name := range []string{"planner", "project", "context", "audit", "agent", "memory", "samg"} {
 		component := components[name].(readinessComponent)
 		if component.Required && !component.Ready {
 			ready = false

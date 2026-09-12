@@ -161,6 +161,7 @@ type InMemoryAgentService struct {
 	logs          map[string][]*AgentLog // agentID -> logs
 	conversations map[string]*Conversation
 	traces        map[string]*CallTrace
+	store         agentRuntimeStore
 }
 
 // NewInMemoryAgentService 创建内存智能体服务
@@ -265,6 +266,9 @@ func (s *InMemoryAgentService) UpdateAgent(ctx context.Context, id string, req *
 		agent.SessionID = strings.TrimSpace(*req.SessionID)
 	}
 	agent.LastActiveAt = time.Now().Unix()
+	if err := s.persistLocked(ctx); err != nil {
+		return nil, err
+	}
 	return agent, nil
 }
 
@@ -278,7 +282,7 @@ func (s *InMemoryAgentService) DeleteAgent(ctx context.Context, id string) error
 	}
 	delete(s.agents, id)
 	delete(s.logs, id)
-	return nil
+	return s.persistLocked(ctx)
 }
 
 // GetAgentLogs 获取智能体日志
@@ -374,7 +378,7 @@ func (s *InMemoryAgentService) StopConversation(ctx context.Context, sessionID s
 		}
 	}
 
-	return nil
+	return s.persistLocked(ctx)
 }
 
 // RetryConversation 重试对话
@@ -398,13 +402,16 @@ func (s *InMemoryAgentService) RetryConversation(ctx context.Context, sessionID 
 		}
 	}
 
-	return nil
+	return s.persistLocked(ctx)
 }
 
 // RegisterAgent 注册智能体
 func (s *InMemoryAgentService) RegisterAgent(agent *Agent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if agent == nil {
+		return
+	}
 
 	if agent.ID == "" {
 		agent.ID = uuid.New().String()
@@ -431,6 +438,7 @@ func (s *InMemoryAgentService) RegisterAgent(agent *Agent) {
 			}
 		}
 	}
+	_ = s.persistLocked(context.Background())
 }
 
 // UpdateAgentStatus 更新智能体状态
@@ -442,6 +450,7 @@ func (s *InMemoryAgentService) UpdateAgentStatus(agentID string, status AgentSta
 		agent.Status = status
 		agent.LastActiveAt = time.Now().Unix()
 	}
+	_ = s.persistLocked(context.Background())
 }
 
 // AddLog 添加日志
@@ -467,6 +476,7 @@ func (s *InMemoryAgentService) AddLog(agentID string, level string, message stri
 	if len(s.logs[agentID]) > 1000 {
 		s.logs[agentID] = s.logs[agentID][len(s.logs[agentID])-1000:]
 	}
+	_ = s.persistLocked(context.Background())
 }
 
 // StartTrace 开始追踪
@@ -479,6 +489,7 @@ func (s *InMemoryAgentService) StartTrace(sessionID string, agentID string, tool
 		AgentID:   agentID,
 		ToolName:  toolName,
 		Input:     input,
+		SessionID: sessionID,
 		Status:    "running",
 		StartTime: time.Now().UnixMilli(),
 		Children:  make([]*CallTrace, 0),
@@ -502,6 +513,7 @@ func (s *InMemoryAgentService) StartTrace(sessionID string, agentID string, tool
 		}
 	}
 
+	_ = s.persistLocked(context.Background())
 	return trace.ID
 }
 
@@ -516,6 +528,7 @@ func (s *InMemoryAgentService) EndTrace(traceID string, output string, status st
 		trace.EndTime = time.Now().UnixMilli()
 		trace.Duration = trace.EndTime - trace.StartTime
 	}
+	_ = s.persistLocked(context.Background())
 }
 
 // RestoreConversationTrace restores agents, conversation, and traces for a session from a snapshot payload.
@@ -552,7 +565,7 @@ func (s *InMemoryAgentService) RestoreConversationTrace(ctx context.Context, ses
 	}
 
 	if trace == nil {
-		return nil
+		return s.persistLocked(ctx)
 	}
 
 	now := time.Now().Unix()
@@ -594,7 +607,7 @@ func (s *InMemoryAgentService) RestoreConversationTrace(ctx context.Context, ses
 		TraceRoot:    root,
 		MessageCount: 0,
 	}
-	return nil
+	return s.persistLocked(ctx)
 }
 
 func registerTraceTree(traces map[string]*CallTrace, node *CallTrace, sessionID string) {
@@ -616,19 +629,50 @@ func registerTraceTree(traces map[string]*CallTrace, node *CallTrace, sessionID 
 }
 
 // 全局服务实例
-var defaultAgentService IAgentService
+var (
+	defaultAgentService IAgentService
+	defaultAgentMu      sync.RWMutex
+)
 
 // GetAgentService 获取智能体服务实例
 func GetAgentService() IAgentService {
-	if defaultAgentService == nil {
-		defaultAgentService = NewInMemoryAgentService()
-	}
+	defaultAgentMu.RLock()
+	defer defaultAgentMu.RUnlock()
 	return defaultAgentService
 }
 
 // SetAgentService 设置智能体服务实例
 func SetAgentService(svc IAgentService) {
+	defaultAgentMu.Lock()
+	defer defaultAgentMu.Unlock()
 	defaultAgentService = svc
+}
+
+// HasAgentService reports whether the compatibility accessor was explicitly configured.
+func HasAgentService() bool {
+	defaultAgentMu.RLock()
+	defer defaultAgentMu.RUnlock()
+	return defaultAgentService != nil
+}
+
+func (s *InMemoryAgentService) persistLocked(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	return s.store.Save(ctx, s.agents, s.logs, s.conversations, s.traces)
+}
+
+// Close flushes the current runtime state and releases durable storage.
+func (s *InMemoryAgentService) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.store == nil {
+		return nil
+	}
+	if err := s.persistLocked(context.Background()); err != nil {
+		return err
+	}
+	return s.store.Close()
 }
 
 func isValidAgentRole(role AgentRole) bool {

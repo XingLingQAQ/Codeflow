@@ -1,12 +1,14 @@
 import { EventEmitter } from 'events';
-import { IHookManager, RequestPayload, AIResponse, StreamChunk, Context, DecisionSkeleton, Message, ExecResult, SnapshotID, MemoryMatch, HookEvent, HookHandler, TaskExecutionContext, TaskExecutionResult, TaskFailureContext } from './types.js';
+import { IHookManager, RequestPayload, AIResponse, StreamChunk, Context, DecisionSkeleton, Message, ExecResult, SnapshotID, MemoryMatch, HookEvent, HookHandler, TaskExecutionContext, TaskExecutionResult, TaskFailureContext, CodeChangeEventRecorder, HookRuntimeControls } from './types.js';
 /**
  * Hook Bus 事件系统实现
  * 基于 EventEmitter 的事件订阅/发布机制
  */
 export declare class HookManager extends EventEmitter implements IHookManager {
     private handlers;
-    constructor();
+    private readonly codeChangeEventRecorder?;
+    private controls;
+    constructor(codeChangeEventRecorder?: CodeChangeEventRecorder, controls?: HookRuntimeControls);
     private initializeHandlers;
     /**
      * 注册 Hook 处理器
@@ -16,6 +18,9 @@ export declare class HookManager extends EventEmitter implements IHookManager {
      * 注销 Hook 处理器
      */
     unregister<T, R>(event: HookEvent, handler: HookHandler<T, R>): void;
+    setControls(controls: HookRuntimeControls): void;
+    getControls(): Readonly<Required<HookRuntimeControls>>;
+    private isEventAllowed;
     /**
      * 执行 Hook 处理器链
      */
@@ -68,6 +73,8 @@ export declare class HookManager extends EventEmitter implements IHookManager {
      * 任务级 Hook: 任务完成后（更新用户画像、同步意图文档）
      */
     hook_on_task_complete(result: TaskExecutionResult): Promise<void>;
+    private determineExecEventType;
+    private appendCodeChangeEvent;
     /**
      * 清理所有处理器
      */

@@ -5,6 +5,8 @@ export type OpenApiMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
 export interface OpenApiOperationMap {
   'get_health': { method: 'GET'; path: '/health' };
+  'get_ready': { method: 'GET'; path: '/ready' };
+  'get_metrics': { method: 'GET'; path: '/metrics' };
   'get_api_v1_memory_items': { method: 'GET'; path: '/api/v1/memory/items' };
   'post_api_v1_memory_items': { method: 'POST'; path: '/api/v1/memory/items' };
   'patch_api_v1_memory_items_by_id': { method: 'PATCH'; path: '/api/v1/memory/items/{id}' };
@@ -22,7 +24,23 @@ export interface OpenApiOperationMap {
   'post_api_v1_context_presets': { method: 'POST'; path: '/api/v1/context/presets' };
   'delete_api_v1_context_presets_by_id': { method: 'DELETE'; path: '/api/v1/context/presets/{id}' };
   'get_api_v1_agents': { method: 'GET'; path: '/api/v1/agents' };
+  'post_api_v1_agents': { method: 'POST'; path: '/api/v1/agents' };
+  'get_api_v1_agents_by_id': { method: 'GET'; path: '/api/v1/agents/{id}' };
+  'put_api_v1_agents_by_id': { method: 'PUT'; path: '/api/v1/agents/{id}' };
+  'delete_api_v1_agents_by_id': { method: 'DELETE'; path: '/api/v1/agents/{id}' };
   'get_api_v1_agents_by_id_logs': { method: 'GET'; path: '/api/v1/agents/{id}/logs' };
+  'get_api_v1_agents_registry': { method: 'GET'; path: '/api/v1/agents/registry' };
+  'post_api_v1_agents_registry': { method: 'POST'; path: '/api/v1/agents/registry' };
+  'get_api_v1_agents_registry_by_id': { method: 'GET'; path: '/api/v1/agents/registry/{id}' };
+  'patch_api_v1_agents_registry_by_id': { method: 'PATCH'; path: '/api/v1/agents/registry/{id}' };
+  'delete_api_v1_agents_registry_by_id': { method: 'DELETE'; path: '/api/v1/agents/registry/{id}' };
+  'post_api_v1_agents_registry_by_id_usage': { method: 'POST'; path: '/api/v1/agents/registry/{id}/usage' };
+  'post_api_v1_agents_registry_by_id_score': { method: 'POST'; path: '/api/v1/agents/registry/{id}/score' };
+  'get_api_v1_integrations': { method: 'GET'; path: '/api/v1/integrations' };
+  'post_api_v1_integrations': { method: 'POST'; path: '/api/v1/integrations' };
+  'get_api_v1_integrations_by_id': { method: 'GET'; path: '/api/v1/integrations/{id}' };
+  'post_api_v1_integrations_by_id_invoke': { method: 'POST'; path: '/api/v1/integrations/{id}/invoke' };
+  'post_api_v1_integrations_by_id_replay': { method: 'POST'; path: '/api/v1/integrations/{id}/replay' };
   'get_api_v1_conversations_by_sessionid_trace': { method: 'GET'; path: '/api/v1/conversations/{sessionId}/trace' };
   'post_api_v1_conversations_by_sessionid_stop': { method: 'POST'; path: '/api/v1/conversations/{sessionId}/stop' };
   'post_api_v1_conversations_by_sessionid_retry': { method: 'POST'; path: '/api/v1/conversations/{sessionId}/retry' };
@@ -34,15 +52,20 @@ export interface OpenApiOperationMap {
   'post_api_v1_votes': { method: 'POST'; path: '/api/v1/votes' };
   'get_api_v1_votes_by_id': { method: 'GET'; path: '/api/v1/votes/{id}' };
   'post_api_v1_votes_by_id_cast': { method: 'POST'; path: '/api/v1/votes/{id}/cast' };
+  'get_api_v1_debates': { method: 'GET'; path: '/api/v1/debates' };
   'post_api_v1_debates': { method: 'POST'; path: '/api/v1/debates' };
   'get_api_v1_debates_by_id': { method: 'GET'; path: '/api/v1/debates/{id}' };
   'post_api_v1_debates_by_id_next_round': { method: 'POST'; path: '/api/v1/debates/{id}/next-round' };
   'post_api_v1_debates_by_id_conflicts_by_cid_resolve': { method: 'POST'; path: '/api/v1/debates/{id}/conflicts/{cid}/resolve' };
+  'post_api_v1_debates_by_id_solutions': { method: 'POST'; path: '/api/v1/debates/{id}/solutions' };
   'post_api_v1_debates_by_id_select_solution': { method: 'POST'; path: '/api/v1/debates/{id}/select-solution' };
   'get_api_v1_debates_by_id_export': { method: 'GET'; path: '/api/v1/debates/{id}/export' };
   'get_api_v1_debates_by_id_stream': { method: 'GET'; path: '/api/v1/debates/{id}/stream' };
   'get_api_v1_plans': { method: 'GET'; path: '/api/v1/plans' };
   'post_api_v1_plans': { method: 'POST'; path: '/api/v1/plans' };
+  'get_api_v1_plans_by_id': { method: 'GET'; path: '/api/v1/plans/{id}' };
+  'put_api_v1_plans_by_id': { method: 'PUT'; path: '/api/v1/plans/{id}' };
+  'delete_api_v1_plans_by_id': { method: 'DELETE'; path: '/api/v1/plans/{id}' };
   'get_api_v1_plans_by_id_tasks': { method: 'GET'; path: '/api/v1/plans/{id}/tasks' };
   'post_api_v1_plans_by_id_tasks': { method: 'POST'; path: '/api/v1/plans/{id}/tasks' };
   'patch_api_v1_plans_by_id_tasks_by_tid': { method: 'PATCH'; path: '/api/v1/plans/{id}/tasks/{tid}' };
@@ -80,6 +103,9 @@ export interface OpenApiOperationMap {
   'get_api_v1_projects_by_id': { method: 'GET'; path: '/api/v1/projects/{id}' };
   'put_api_v1_projects_by_id': { method: 'PUT'; path: '/api/v1/projects/{id}' };
   'delete_api_v1_projects_by_id': { method: 'DELETE'; path: '/api/v1/projects/{id}' };
+  'get_api_v1_projects_by_id_stream': { method: 'GET'; path: '/api/v1/projects/{id}/stream' };
+  'post_api_v1_projects_by_id_restore': { method: 'POST'; path: '/api/v1/projects/{id}/restore' };
+  'post_api_v1_projects_by_id_bind_workspace': { method: 'POST'; path: '/api/v1/projects/{id}/bind-workspace' };
   'get_api_v1_projects_by_id_plans': { method: 'GET'; path: '/api/v1/projects/{id}/plans' };
   'post_api_v1_projects_by_id_plans': { method: 'POST'; path: '/api/v1/projects/{id}/plans' };
   'delete_api_v1_projects_by_id_plans_by_planid': { method: 'DELETE'; path: '/api/v1/projects/{id}/plans/{planId}' };
@@ -170,253 +196,2309 @@ export interface OpenApiOperationMap {
   'get_api_v1_samg_graph_export': { method: 'GET'; path: '/api/v1/samg/graph/export' };
   'post_api_v1_samg_graph_import': { method: 'POST'; path: '/api/v1/samg/graph/import' };
   'get_api_v1_samg_stats': { method: 'GET'; path: '/api/v1/samg/stats' };
+  'get_api_v1_flows_templates': { method: 'GET'; path: '/api/v1/flows/templates' };
+  'get_api_v1_flows_templates_by_tid': { method: 'GET'; path: '/api/v1/flows/templates/{tid}' };
+  'delete_api_v1_flows_templates_by_tid': { method: 'DELETE'; path: '/api/v1/flows/templates/{tid}' };
+  'get_api_v1_flows_templates_by_tid_export': { method: 'GET'; path: '/api/v1/flows/templates/{tid}/export' };
+  'post_api_v1_flows_templates_import': { method: 'POST'; path: '/api/v1/flows/templates/import' };
+  'get_api_v1_flows': { method: 'GET'; path: '/api/v1/flows' };
+  'post_api_v1_flows': { method: 'POST'; path: '/api/v1/flows' };
+  'get_api_v1_flows_by_id': { method: 'GET'; path: '/api/v1/flows/{id}' };
+  'delete_api_v1_flows_by_id': { method: 'DELETE'; path: '/api/v1/flows/{id}' };
+  'get_api_v1_flows_by_id_events': { method: 'GET'; path: '/api/v1/flows/{id}/events' };
+  'get_api_v1_flows_by_id_active_stage': { method: 'GET'; path: '/api/v1/flows/{id}/active-stage' };
+  'get_api_v1_flows_by_id_gates': { method: 'GET'; path: '/api/v1/flows/{id}/gates' };
+  'get_api_v1_flows_by_id_stages': { method: 'GET'; path: '/api/v1/flows/{id}/stages' };
+  'get_api_v1_flows_by_id_artifacts': { method: 'GET'; path: '/api/v1/flows/{id}/artifacts' };
+  'get_api_v1_flows_by_id_artifacts_by_aid': { method: 'GET'; path: '/api/v1/flows/{id}/artifacts/{aid}' };
+  'patch_api_v1_flows_by_id_artifacts_by_aid': { method: 'PATCH'; path: '/api/v1/flows/{id}/artifacts/{aid}' };
+  'post_api_v1_flows_by_id_abort': { method: 'POST'; path: '/api/v1/flows/{id}/abort' };
+  'post_api_v1_flows_by_id_stages_by_sid_artifacts': { method: 'POST'; path: '/api/v1/flows/{id}/stages/{sid}/artifacts' };
+  'get_api_v1_flows_by_id_stages_by_sid': { method: 'GET'; path: '/api/v1/flows/{id}/stages/{sid}' };
+  'post_api_v1_flows_by_id_stages_by_sid_advance': { method: 'POST'; path: '/api/v1/flows/{id}/stages/{sid}/advance' };
+  'post_api_v1_flows_by_id_stages_by_sid_skip': { method: 'POST'; path: '/api/v1/flows/{id}/stages/{sid}/skip' };
+  'post_api_v1_flows_by_id_loop': { method: 'POST'; path: '/api/v1/flows/{id}/loop' };
+  'post_api_v1_flows_by_id_gates_by_gid_decide': { method: 'POST'; path: '/api/v1/flows/{id}/gates/{gid}/decide' };
+  'get_api_v1_workspace_list': { method: 'GET'; path: '/api/v1/workspace/list' };
+  'get_api_v1_workspace_read': { method: 'GET'; path: '/api/v1/workspace/read' };
+  'get_api_v1_workspace_stat': { method: 'GET'; path: '/api/v1/workspace/stat' };
+  'get_api_v1_workspace_staged': { method: 'GET'; path: '/api/v1/workspace/staged' };
+  'post_api_v1_workspace_promote': { method: 'POST'; path: '/api/v1/workspace/promote' };
+  'post_api_v1_workspace_promote_all': { method: 'POST'; path: '/api/v1/workspace/promote-all' };
+  'post_api_v1_workspace_discard': { method: 'POST'; path: '/api/v1/workspace/discard' };
+  'post_api_v1_workspace_discard_all': { method: 'POST'; path: '/api/v1/workspace/discard-all' };
+  'post_api_v1_workspace_write': { method: 'POST'; path: '/api/v1/workspace/write' };
+  'post_api_v1_workspace_watch': { method: 'POST'; path: '/api/v1/workspace/watch' };
+  'delete_api_v1_workspace_watch': { method: 'DELETE'; path: '/api/v1/workspace/watch' };
+  'get_api_v1_workspace_watches': { method: 'GET'; path: '/api/v1/workspace/watches' };
+  'get_api_v1_workspace_scripts': { method: 'GET'; path: '/api/v1/workspace/scripts' };
+  'get_api_v1_workspace_dev_servers': { method: 'GET'; path: '/api/v1/workspace/dev-servers' };
+  'post_api_v1_workspace_dev_servers': { method: 'POST'; path: '/api/v1/workspace/dev-servers' };
+  'delete_api_v1_workspace_dev_servers': { method: 'DELETE'; path: '/api/v1/workspace/dev-servers' };
+  'get_api_v1_workspace_dev_servers_by_id_logs': { method: 'GET'; path: '/api/v1/workspace/dev-servers/{id}/logs' };
+  'get_api_v1_skills': { method: 'GET'; path: '/api/v1/skills' };
+  'post_api_v1_skills': { method: 'POST'; path: '/api/v1/skills' };
+  'post_api_v1_skills_import': { method: 'POST'; path: '/api/v1/skills/import' };
+  'get_api_v1_skills_export': { method: 'GET'; path: '/api/v1/skills/export' };
+  'post_api_v1_skills_match': { method: 'POST'; path: '/api/v1/skills/match' };
+  'post_api_v1_skills_inject': { method: 'POST'; path: '/api/v1/skills/inject' };
+  'get_api_v1_skills_by_id': { method: 'GET'; path: '/api/v1/skills/{id}' };
+  'patch_api_v1_skills_by_id': { method: 'PATCH'; path: '/api/v1/skills/{id}' };
+  'delete_api_v1_skills_by_id': { method: 'DELETE'; path: '/api/v1/skills/{id}' };
+  'get_api_v1_skills_by_id_versions': { method: 'GET'; path: '/api/v1/skills/{id}/versions' };
+  'post_api_v1_skills_by_id_rollback': { method: 'POST'; path: '/api/v1/skills/{id}/rollback' };
+  'get_api_v1_guard_config': { method: 'GET'; path: '/api/v1/guard/config' };
+  'get_api_v1_guard_rules': { method: 'GET'; path: '/api/v1/guard/rules' };
+  'post_api_v1_guard_check': { method: 'POST'; path: '/api/v1/guard/check' };
+  'post_api_v1_guard_index': { method: 'POST'; path: '/api/v1/guard/index' };
+  'post_api_v1_guard_exempt': { method: 'POST'; path: '/api/v1/guard/exempt' };
+  'delete_api_v1_guard_exempt': { method: 'DELETE'; path: '/api/v1/guard/exempt' };
+  'get_api_v1_guard_exemptions': { method: 'GET'; path: '/api/v1/guard/exemptions' };
+  'post_api_v1_guard_exemption_requests': { method: 'POST'; path: '/api/v1/guard/exemption-requests' };
+  'get_api_v1_guard_exemption_requests': { method: 'GET'; path: '/api/v1/guard/exemption-requests' };
+  'post_api_v1_guard_exemption_requests_by_id_decide': { method: 'POST'; path: '/api/v1/guard/exemption-requests/{id}/decide' };
+  'post_api_v1_projects_by_pid_runs': { method: 'POST'; path: '/api/v1/projects/{pid}/runs' };
+  'get_api_v1_projects_by_pid_runs_by_rid_events': { method: 'GET'; path: '/api/v1/projects/{pid}/runs/{rid}/events' };
+  'get_api_v1_projects_by_pid_commands_by_command_id': { method: 'GET'; path: '/api/v1/projects/{pid}/commands/{command_id}' };
+}
+
+export interface Response {
+  success?: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface HealthResponse {
+  success?: boolean;
+  data?: { status?: string; version?: string; };
+}
+
+export interface MemoryItem {
+  id?: string;
+  content?: string;
+  type?: 'stm' | 'ltm';
+  status?: 'active' | 'archived' | 'pending_archive' | 'pending_delete';
+  session_id?: string;
+  message_index?: number;
+  timestamp?: number;
+  heat?: number;
+  surprise?: number;
+  tags?: string[];
+  source?: 'user' | 'assistant' | 'system';
+  is_permanent?: boolean;
+  archived_at?: number;
+}
+
+export interface MemoryListResponse {
+  items?: MemoryItem[];
+  total?: number;
+  has_more?: boolean;
+  next_offset?: number;
+}
+
+export interface MemoryCreateRequest {
+  content: string;
+  type?: 'stm' | 'ltm';
+  session_id?: string;
+  source?: 'user' | 'assistant' | 'system';
+  tags?: string[];
+  is_permanent?: boolean;
+}
+
+export interface MemoryUpdateRequest {
+  tags?: string[];
+  is_permanent?: boolean;
+}
+
+export interface MemoryListEnvelope {
+  success?: boolean;
+  data?: MemoryListResponse;
+  error?: string;
+}
+
+export interface MemoryItemEnvelope {
+  success?: boolean;
+  data?: MemoryItem;
+  error?: string;
+}
+
+export interface MemoryDeleteResponse {
+  deleted?: boolean;
+  id?: string;
+}
+
+export interface MemoryDeleteEnvelope {
+  success?: boolean;
+  data?: MemoryDeleteResponse;
+  error?: string;
+}
+
+export interface VectorSearchRequest {
+  query: string;
+  limit?: number;
+  threshold?: number;
+}
+
+export interface FulltextSearchRequest {
+  query: string;
+  highlight?: boolean;
+  limit?: number;
+}
+
+export interface GraphSearchRequest {
+  subject?: string;
+  predicate?: string;
+  object?: string;
+  limit?: number;
+}
+
+export interface HybridSearchRequest {
+  query: string;
+  vector_weight?: number;
+  fulltext_weight?: number;
+  graph_weight?: number;
+  limit?: number;
+}
+
+export interface SearchResponse {
+  results?: Array<Record<string, unknown>>;
+  total?: number;
+}
+
+export interface GraphSearchResponse {
+  triples?: Array<{ subject?: string; predicate?: string; object?: string; score?: number; }>;
+}
+
+export interface FileTreeResponse {
+  root?: FileNode;
+}
+
+export interface FileNode {
+  name?: string;
+  path?: string;
+  is_dir?: boolean;
+  children?: FileNode[];
+}
+
+export interface ASTRequest {
+  file_path: string;
+  language?: string;
+}
+
+export interface ASTResponse {
+  symbols?: ASTSymbol[];
+}
+
+export interface ASTSymbol {
+  name?: string;
+  kind?: string;
+  start_line?: number;
+  end_line?: number;
+}
+
+export interface TokenRequest {
+  content: string;
+  model?: string;
+}
+
+export interface TokenResponse {
+  count?: number;
+}
+
+export interface PresetCreateRequest {
+  name: string;
+  files?: string[];
+  patterns?: string[];
+}
+
+export interface AgentListResponse {
+  agents?: Agent[];
+}
+
+export interface Agent {
+  id?: string;
+  name?: string;
+  status?: string;
+  model?: string;
+  started_at?: number;
+}
+
+export interface AgentLogsResponse {
+  logs?: LogEntry[];
+}
+
+export interface LogEntry {
+  timestamp?: number;
+  level?: string;
+  message?: string;
+}
+
+export interface CallTraceResponse {
+  trace?: CallNode[];
+}
+
+export interface CallNode {
+  id?: string;
+  parent_id?: string;
+  agent_id?: string;
+  action?: string;
+  started_at?: number;
+  ended_at?: number;
+}
+
+export interface EntryListResponse {
+  entries?: Entry[];
+  total?: number;
+}
+
+export interface Entry {
+  id?: string;
+  type?: 'state' | 'proposal' | 'decision' | 'artifact';
+  content?: string;
+  author?: string;
+  version?: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface EntryCreateRequest {
+  type: 'state' | 'proposal' | 'decision' | 'artifact';
+  content: string;
+  author?: string;
+}
+
+export interface EntryUpdateRequest {
+  content?: string;
+}
+
+export interface VoteCreateRequest {
+  entry_id: string;
+  title: string;
+  options: string[];
+  threshold?: number;
+  expires_in?: number;
+}
+
+export interface VoteResponse {
+  id?: string;
+  entry_id?: string;
+  title?: string;
+  status?: string;
+  votes?: Record<string, unknown>;
+  consensus_reached?: boolean;
+}
+
+export interface VoteCastRequest {
+  voter: string;
+  option: string;
+}
+
+export interface DebateCreateRequest {
+  title: string;
+  topic: string;
+  max_rounds?: number;
+  parties?: PartyConfig[];
+}
+
+export interface Debate {
+  id?: string;
+  title?: string;
+  topic?: string;
+  status?: string;
+  current_round?: number;
+  rounds?: DebateRound[];
+  conflicts?: Conflict[];
+  solutions?: Solution[];
+  parties?: PartyConfig[];
+}
+
+export interface Conflict {
+  id?: string;
+  type?: string;
+  severity?: string;
+  description?: string;
+  resolution?: string;
+}
+
+export interface Solution {
+  id?: string;
+  title?: string;
+  description?: string;
+  score?: number;
+}
+
+export interface PartyConfig {
+  agent_id: string;
+  role?: string;
+  model?: string;
+  channel?: string;
+}
+
+export interface PartyContribution {
+  agent_id?: string;
+  role?: string;
+  content?: string;
+  timestamp?: number;
+}
+
+export interface DebateRound {
+  round?: number;
+  generator_output?: string;
+  critic_feedback?: string;
+  started_at?: number;
+  completed_at?: number;
+  contributions?: PartyContribution[];
+}
+
+export interface NextRoundRequest {
+  generator_output?: string;
+  critic_feedback?: string;
+}
+
+export interface ResolveConflictRequest {
+  resolution: string;
+}
+
+export interface SelectSolutionRequest {
+  solution_id: string;
+}
+
+export interface ProposeSolutionRequest {
+  proposed_by: string;
+  role: string;
+  title: string;
+  description: string;
+  code?: string;
+  pros?: string[];
+  cons?: string[];
+}
+
+export interface PlanListResponse {
+  plans?: Plan[];
+  total?: number;
+  has_more?: boolean;
+}
+
+export interface Plan {
+  id?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  task_count?: number;
+  completed_count?: number;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface PlanCreateRequest {
+  title: string;
+  description?: string;
+}
+
+export interface TaskListResponse {
+  tasks?: Task[];
+  total?: number;
+}
+
+export interface Task {
+  id?: string;
+  plan_id?: string;
+  title?: string;
+  description?: string;
+  status?: 'pending' | 'in_progress' | 'completed' | 'blocked' | 'cancelled';
+  priority?: 'P0' | 'P1' | 'P2' | 'P3';
+  model?: string;
+  order?: number;
+  dependencies?: string[];
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface TaskCreateRequest {
+  title: string;
+  description?: string;
+  priority?: 'P0' | 'P1' | 'P2' | 'P3';
+  model?: string;
+  dependencies?: string[];
+}
+
+export interface TaskUpdateRequest {
+  title?: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+  model?: string;
+  dependencies?: string[];
+}
+
+export interface TaskReorderRequest {
+  new_order: number;
+}
+
+export interface BatchModelRequest {
+  task_ids: string[];
+  model: string;
+}
+
+export interface BatchModelResponse {
+  updated?: number;
+  failed?: string[];
+}
+
+export interface Snapshot {
+  id?: string;
+  git_hash?: string;
+  conversation_state?: string;
+  vector_pointer?: string;
+  memory_graph_version?: string;
+  description?: string;
+  created_at?: string;
+  session_id?: string;
+  tags?: string[];
+}
+
+export interface SnapshotCreateRequest {
+  description?: string;
+  session_id?: string;
+  tags?: string[];
+}
+
+export interface SnapshotListResponse {
+  items?: Snapshot[];
+  total?: number;
+  has_more?: boolean;
+  next_offset?: number;
+}
+
+export interface PreflightRequest {
+  query: string;
+  max_results?: number;
+  min_score?: number;
+  sources?: string[];
+}
+
+export interface PreflightResponse {
+  matches?: MemoryMatch[];
+  duration_ms?: number;
+}
+
+export interface MemoryMatch {
+  id?: string;
+  content?: string;
+  source?: string;
+  strength?: 'strong' | 'weak';
+  score?: number;
+  keywords?: string[];
+}
+
+export interface SuggestionsResponse {
+  suggestions?: MemoryMatch[];
+}
+
+export interface InjectRequest {
+  context_id: string;
+  memory_id?: string;
+  memory_ids?: string[];
+}
+
+export interface APIChannelPublic {
+  id: string;
+  name: string;
+  provider: 'anthropic' | 'openai' | 'google' | 'custom';
+  base_url?: string;
+  enabled: boolean;
+  secret_ref?: string;
+  secret_status: 'missing' | 'configured';
+  masked_value?: string;
+  secret_version?: number;
+  secret_updated_at?: number;
+}
+
+export interface APIChannelWrite {
+  id: string;
+  name?: string;
+  provider: 'anthropic' | 'openai' | 'google' | 'custom';
+  api_key?: string;
+  delete_secret?: boolean;
+  base_url?: string;
+  enabled: boolean;
+}
+
+export interface GlobalConfig {
+  default_model?: string;
+  api_pool?: APIChannelPublic[];
+  public_mcp?: string[];
+  summary_threshold?: number;
+  max_retries?: number;
+  timeout?: number;
+}
+
+export interface GlobalConfigWrite {
+  default_model?: string;
+  api_pool?: APIChannelWrite[];
+  public_mcp?: string[];
+  summary_threshold?: number;
+  max_retries?: number;
+  timeout?: number;
+}
+
+export interface SessionConfig {
+  session_id?: string;
+  mode?: 'development' | 'research' | 'creative';
+  override_model?: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface RoleConfig {
+  model?: string;
+  temperature?: number;
+  top_p?: number;
+  api_channel?: string;
+  mcp_tools?: string[];
+  system_prompt?: string;
+}
+
+export interface ResolvedConfig {
+  model?: string;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  api_channel?: APIChannelPublic;
+  mcp_tools?: string[];
+  system_prompt?: string;
+  timeout?: number;
+  max_retries?: number;
+}
+
+export interface GlobalConfigEnvelope {
+  success?: boolean;
+  data?: GlobalConfig;
+  error?: string;
+}
+
+export interface SessionConfigEnvelope {
+  success?: boolean;
+  data?: SessionConfig;
+  error?: string;
+}
+
+export interface RoleConfigEnvelope {
+  success?: boolean;
+  data?: RoleConfig;
+  error?: string;
+}
+
+export interface ResolvedConfigEnvelope {
+  success?: boolean;
+  data?: ResolvedConfig;
+  error?: string;
+}
+
+export interface PAPIVariable {
+  name?: string;
+  value?: string;
+  category?: string;
+  description?: string;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface PAPIVariableListResponse {
+  variables?: PAPIVariable[];
+}
+
+export interface PAPIVariableCreateRequest {
+  name: string;
+  value: string;
+  category?: string;
+  description?: string;
+}
+
+export interface PAPIVariableUpdateRequest {
+  value?: string;
+  category?: string;
+  description?: string;
+}
+
+export interface PAPIResolveRequest {
+  category: string;
+  context?: Record<string, unknown>;
+}
+
+export interface PAPIHotSwapRequest {
+  name: string;
+  new_value: string;
+  session_id?: string;
+}
+
+export interface Hook {
+  name?: string;
+  type?: string;
+  enabled?: boolean;
+  priority?: number;
+  timeout_ms?: number;
+  retry_count?: number;
+}
+
+export interface HookListResponse {
+  hooks?: Hook[];
+}
+
+export interface HookConfigRequest {
+  enabled?: boolean;
+  priority?: number;
+  timeout_ms?: number;
+  retry_count?: number;
+}
+
+export interface HookTriggerRequest {
+  payload?: Record<string, unknown>;
+}
+
+export interface SummarizeConversationRequest {
+  messages: Array<Record<string, unknown>>;
+  max_length?: number;
+}
+
+export interface SummarizeResponse {
+  summary?: string;
+  original_tokens?: number;
+  summary_tokens?: number;
+  compression_ratio?: number;
+}
+
+export interface CompressContextRequest {
+  content: string;
+  threshold?: number;
+}
+
+export interface CompressResponse {
+  compressed?: string;
+  summary_part?: string;
+  original_part?: string;
+  compression_ratio?: number;
+}
+
+export interface SkeletonRequest {
+  content: string;
+}
+
+export interface SkeletonResponse {
+  skeleton?: { architecture_decisions?: string[]; unfixed_bugs?: string[]; variable_definitions?: string[]; file_changes?: string[]; };
+}
+
+export interface AuditLog {
+  id?: string;
+  timestamp?: number;
+  event_type?: string;
+  actor?: string;
+  resource?: string;
+  action?: string;
+  details?: Record<string, unknown>;
+  hash?: string;
+  prev_hash?: string;
+}
+
+export interface AuditLogResponse {
+  logs?: AuditLog[];
+  total?: number;
+}
+
+export interface AuditVerifyRequest {
+  start_id?: string;
+  end_id?: string;
+}
+
+export interface AuditVerifyResponse {
+  valid?: boolean;
+  verified_count?: number;
+  first_invalid_id?: string;
+}
+
+export interface EncryptRequest {
+  plaintext: string;
+  method?: 'standard' | 'chain';
+  policy?: PrivacyPolicy;
+}
+
+export interface EncryptResponse {
+  method: 'standard' | 'chain';
+  encrypted_data?: EncryptedData;
+  chain_encrypted?: ChainEncryptedData;
+}
+
+export interface DecryptRequest {
+  method: 'standard' | 'chain';
+  encrypted_data?: EncryptedData;
+  chain_encrypted?: ChainEncryptedData;
+}
+
+export interface DecryptResponse {
+  plaintext: string;
+  verified: boolean;
+}
+
+export interface EncryptedData {
+  ciphertext: string;
+  iv: string;
+  salt: string;
+  algorithm: 'aes-256-gcm' | 'aes-256-cbc' | 'aes-128-cbc';
+  tag?: string;
+}
+
+export interface ChainEncryptedData {
+  node_id: string;
+  ciphertext: string;
+  iv: string;
+  integrity_hash: string;
+  algorithm: 'aes-256-gcm-chain' | 'aes-256-cbc-chain';
+}
+
+export interface PrivacyPolicy {
+  level?: 'public' | 'internal' | 'confidential' | 'secret';
+  encrypt_at_rest?: boolean;
+  encrypt_in_transit?: boolean;
+  allowed_roles?: string[];
+  retention_days?: number;
+  auto_redact?: boolean;
+}
+
+export interface RedactRequest {
+  text: string;
+  types?: string[];
+}
+
+export interface RedactResponse {
+  redacted?: string;
+  findings?: PIIFinding[];
+}
+
+export interface DetectPIIRequest {
+  text: string;
+}
+
+export interface DetectPIIResponse {
+  findings?: PIIFinding[];
+}
+
+export interface PIIFinding {
+  type?: string;
+  value?: string;
+  start?: number;
+  end?: number;
+}
+
+export interface KeyManageRequest {
+  action: 'create' | 'rotate' | 'revoke';
+  key_id?: string;
+}
+
+export interface VerifyChainRequest {
+  chain_id: string;
+}
+
+export interface Container {
+  id?: string;
+  role?: string;
+  parent_id?: string;
+  created_at?: number;
+  expires_at?: number;
+  metadata?: Record<string, unknown>;
+  isolation_level?: string;
+  resource_quota?: ResourceQuota;
+}
+
+export interface ContainerListResponse {
+  containers?: Container[];
+  count?: number;
+}
+
+export interface ContainerCreateRequest {
+  role: string;
+  parent_id?: string;
+}
+
+export interface ResourceQuota {
+  max_memory_mb?: number;
+  max_file_size_mb?: number;
+  max_file_count?: number;
+  max_network_conns?: number;
+  max_cpu_percent?: number;
+}
+
+export interface QuotaRequest {
+  max_memory_mb?: number;
+  max_file_size_mb?: number;
+  max_file_count?: number;
+  max_network_conns?: number;
+  max_cpu_percent?: number;
+}
+
+export interface QuotaUpdateResponse {
+  message?: string;
+  quota?: ResourceQuota;
+}
+
+export interface AccessCheckRequest {
+  container_id: string;
+  resource: string;
+  resource_path?: string;
+  action: string;
+}
+
+export interface AccessDecision {
+  allowed: boolean;
+  reason: string;
+  constraints?: string[];
+  audit_id?: string;
+  rule_version: string;
+  operation?: string;
+  resource?: string;
+  project_id?: string;
+  agent_id?: string;
+  plugin_id?: string;
+}
+
+export interface AccessCheckResponse {
+  decision?: AccessDecision;
+  latency_ms?: number;
+}
+
+export interface IOValidateRequest {
+  container_id: string;
+  input: string;
+  direction?: 'input' | 'output';
+}
+
+export interface IOValidateResponse {
+  valid?: boolean;
+  sanitized_input?: string;
+  warnings?: string[];
+  blocked_patterns?: string[];
+}
+
+export interface RoleRegisterRequest {
+  name: string;
+  description?: string;
+  permissions: Permission[];
+  inherits?: string[];
+  max_concurrent?: number;
+}
+
+export interface Permission {
+  resource?: string;
+  level?: string;
+  pattern?: string;
+  conditions?: string[];
+}
+
+export interface RoleCheckRequest {
+  resource: string;
+  level: string;
+}
+
+export interface RoleListResponse {
+  roles?: RoleDefinition[];
+  count?: number;
+}
+
+export interface RolePermissionsResponse {
+  role?: string;
+  permissions?: Permission[];
+  count?: number;
+}
+
+export interface RolePermissionCheckResponse {
+  role?: string;
+  resource?: string;
+  level?: string;
+  has_permission?: boolean;
+}
+
+export interface ContainerListEnvelope {
+  success?: boolean;
+  data?: ContainerListResponse;
+  error?: string;
+}
+
+export interface ContainerEnvelope {
+  success?: boolean;
+  data?: Container;
+  error?: string;
+}
+
+export interface QuotaUpdateEnvelope {
+  success?: boolean;
+  data?: QuotaUpdateResponse;
+  error?: string;
+}
+
+export interface AccessCheckEnvelope {
+  success?: boolean;
+  data?: AccessCheckResponse;
+  error?: string;
+}
+
+export interface IOValidateEnvelope {
+  success?: boolean;
+  data?: IOValidateResponse;
+  error?: string;
+}
+
+export interface RoleListEnvelope {
+  success?: boolean;
+  data?: RoleListResponse;
+  error?: string;
+}
+
+export interface RoleEnvelope {
+  success?: boolean;
+  data?: RoleDefinition;
+  error?: string;
+}
+
+export interface RoleRegisterResponse {
+  message?: string;
+  role?: RoleDefinition;
+}
+
+export interface RoleRegisterEnvelope {
+  success?: boolean;
+  data?: RoleRegisterResponse;
+  error?: string;
+}
+
+export interface RolePermissionsEnvelope {
+  success?: boolean;
+  data?: RolePermissionsResponse;
+  error?: string;
+}
+
+export interface RolePermissionCheckEnvelope {
+  success?: boolean;
+  data?: RolePermissionCheckResponse;
+  error?: string;
+}
+
+export interface ErrorEnvelope {
+  success?: boolean;
+  error?: string;
+}
+
+export interface RoleDefinition {
+  name?: string;
+  description?: string;
+  permissions?: Permission[];
+  inherits?: string[];
+  max_concurrent?: number;
+}
+
+export interface TripleNode {
+  '@id'?: string;
+  '@type'?: string[];
+  label?: string;
+}
+
+export interface LiteralValue {
+  '@value'?: unknown;
+  '@type'?: string;
+  '@language'?: string;
+}
+
+export interface TripleObject {
+  node?: TripleNode;
+  literal?: LiteralValue;
+}
+
+export interface TripleSource {
+  session_id?: string;
+  message_index?: number;
+  agent_role?: string;
+  git_commit_hash?: string;
+  extraction_method?: 'llm' | 'rule' | 'user' | 'inferred';
+}
+
+export interface Triple {
+  '@id'?: string;
+  subject?: TripleNode;
+  predicate?: string;
+  object?: TripleObject;
+  confidence?: number;
+  timestamp?: number;
+  source?: TripleSource;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TripleListResponse {
+  triples?: Triple[];
+  count?: number;
+}
+
+export interface AddTriplesRequest {
+  triples: Triple[];
+}
+
+export interface DeleteTriplesRequest {
+  ids: string[];
+}
+
+export interface RelationsResponse {
+  node_id?: string;
+  relations?: Triple[];
+  count?: number;
+}
+
+export interface ExtractRequest {
+  content: string;
+  session_id?: string;
+  message_index?: number;
+  agent_role?: string;
+}
+
+export interface ExtractWithPointersRequest {
+  content: string;
+  session_id?: string;
+  message_index?: number;
+  agent_role?: string;
+  raw_archive_id: string;
+}
+
+export interface ExtractResponse {
+  triples?: Triple[];
+  count?: number;
+}
+
+export interface ActivateRequest {
+  source_ids: string[];
+}
+
+export interface ActivatedNode {
+  id?: string;
+  label?: string;
+  type?: string;
+  activation?: number;
+  hop?: number;
+  path?: string[];
+}
+
+export interface ActivationResult {
+  source_nodes?: string[];
+  activated_nodes?: ActivatedNode[];
+  total_hops?: number;
+  paths_found?: number;
+}
+
+export interface FindPathsRequest {
+  source_id: string;
+  target_id: string;
+  max_hops?: number;
+}
+
+export interface PathsResponse {
+  source_id?: string;
+  target_id?: string;
+  paths?: string[][];
+  count?: number;
+}
+
+export interface ActivationConfig {
+  initial_activation?: number;
+  decay_factor?: number;
+  firing_threshold?: number;
+  max_hops?: number;
+  max_activated_nodes?: number;
+  spreading_factor?: number;
+}
+
+export interface DecayConfig {
+  decay_rate?: number;
+  base_activation?: number;
+  min_activation?: number;
+  hide_threshold?: number;
+  boost_on_access?: number;
+  time_unit?: number;
+  enable_auto_decay?: boolean;
+}
+
+export interface ConfigUpdateMessageResponse {
+  message?: string;
+  config?: ActivationConfig | DecayConfig;
+}
+
+export interface DecayApplyResponse {
+  decayed_nodes?: number;
+  hidden_nodes?: number;
+}
+
+export interface Pointer {
+  source_id?: string;
+  source_type?: string;
+  summary?: string;
+  line_range?: string;
+  file_path?: string;
+  timestamp?: number;
+  relevance?: number;
+}
+
+export type ResolvedPointer = Pointer & { resolved_content?: string; };
+
+export interface QueryMemoryNode {
+  id?: string;
+  label?: string;
+  activation?: number;
+  hop?: number;
+  pointers?: ResolvedPointer[];
+}
+
+export interface QueryMemoryRequest {
+  topic: string;
+  type?: string;
+  max_results?: number;
+  resolve_pointers?: boolean;
+  min_bla?: number;
+}
+
+export interface QueryMemoryResponse {
+  activated_nodes?: QueryMemoryNode[];
+  context_block?: string;
+}
+
+export interface NodePointersResponse {
+  node_id?: string;
+  pointers?: Pointer[];
+  count?: number;
+}
+
+export interface AddNodePointerRequest {
+  source_id: string;
+  source_type: string;
+  summary?: string;
+  line_range?: string;
+  file_path?: string;
+  relevance?: number;
+}
+
+export interface SAMGEntity {
+  '@id'?: string;
+  '@type'?: string[];
+  label?: string;
+  description?: string;
+  properties?: Record<string, unknown>;
+  aliases?: string[];
+  pointers?: Pointer[];
+  activation?: number;
+  access_count?: number;
+  hidden?: boolean;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface NodesResponse {
+  nodes?: SAMGEntity[];
+  count?: number;
+}
+
+export interface GraphMetadata {
+  created_at?: number;
+  updated_at?: number;
+  triple_count?: number;
+  entity_count?: number;
+  predicate_count?: number;
+  version?: string;
+}
+
+export interface JsonLdGraph {
+  '@context'?: Record<string, unknown>;
+  '@id'?: string;
+  '@type'?: string;
+  '@graph'?: Triple[];
+  metadata?: GraphMetadata;
+}
+
+export interface SAMGStats {
+  graph_stats?: GraphMetadata;
+  decay_stats?: Record<string, unknown>;
+  extractor_info?: Record<string, unknown>;
+}
+
+export interface AtomicMemory {
+  id?: string;
+  timestamp?: number;
+  content?: string;
+  tags?: string[];
+  session_id?: string;
+  folder_id?: string;
+  source?: 'user' | 'assistant' | 'system';
+  importance?: number;
+  tier?: 'hot' | 'warm' | 'cold';
+  heat?: number;
+  surprise?: number;
+}
+
+export interface AtomicMemoryCreateRequest {
+  content: string;
+  session_id: string;
+  source: 'user' | 'assistant' | 'system';
+  importance?: number;
+  tags?: string[];
+  timestamp?: number;
+  folder_id?: string;
+  embedding?: number[];
+}
+
+export interface AtomicMemoryUpdateRequest {
+  content?: string;
+  session_id?: string;
+  source?: 'user' | 'assistant' | 'system';
+  importance?: number;
+  tags?: string[];
+  timestamp?: number;
+  folder_id?: string;
+  clear_folder_id?: boolean;
+  embedding?: number[];
+}
+
+export interface AtomicBoostRequest {
+  boost?: number;
+}
+
+export interface AtomicMemoryListResponse {
+  memories?: AtomicMemory[];
+  count?: number;
+  tier?: 'hot' | 'warm' | 'cold';
+  search_report?: AtomicSearchReport;
+  incomplete_reason?: string;
+}
+
+export interface AtomicSearchReport {
+  candidates_scanned?: number;
+  batches?: number;
+  exhausted?: boolean;
+  budget_limited?: boolean;
+  index_pending_jobs?: number;
+  index_failed_jobs?: number;
+}
+
+export interface AtomicMemoryListEnvelope {
+  success?: boolean;
+  data?: AtomicMemoryListResponse;
+  error?: string;
+}
+
+export interface AtomicMemoryEnvelope {
+  success?: boolean;
+  data?: AtomicMemory;
+  error?: string;
+}
+
+export type AtomicMemoryMutationResponse = AtomicMemory & { revision?: number; index_sync?: 'pending' | 'synced' | 'failed'; index_error?: string; };
+
+export interface AtomicMemoryMutationEnvelope {
+  success?: boolean;
+  data?: AtomicMemoryMutationResponse;
+  error?: string;
+}
+
+export interface AtomicMemoryDeleteResponse {
+  deleted?: boolean;
+  id?: string;
+  revision?: number;
+  index_sync?: 'pending' | 'synced' | 'failed';
+  index_error?: string;
+}
+
+export interface AtomicMemoryDeleteEnvelope {
+  success?: boolean;
+  data?: AtomicMemoryDeleteResponse;
+  error?: string;
+}
+
+export interface AtomicMaintenanceEnvelope {
+  success?: boolean;
+  data?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface RawArchiveEntry {
+  id?: string;
+  type?: 'conversation' | 'code_diff' | 'document';
+  content?: string;
+  session_id?: string;
+  timestamp?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RawArchiveStoreRequest {
+  content: string;
+  type: 'conversation' | 'code_diff' | 'document';
+  session_id?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RawArchiveListResponse {
+  entries?: RawArchiveEntry[];
+  count?: number;
+  total?: number;
+}
+
+export interface RawArchiveSearchResponse {
+  entries?: RawArchiveEntry[];
+  count?: number;
+}
+
+export interface RawArchiveCreateResponse {
+  id?: string;
+}
+
+export interface RawArchiveListEnvelope {
+  success?: boolean;
+  data?: RawArchiveListResponse;
+  error?: string;
+}
+
+export interface RawArchiveSearchEnvelope {
+  success?: boolean;
+  data?: RawArchiveSearchResponse;
+  error?: string;
+}
+
+export interface RawArchiveEntryEnvelope {
+  success?: boolean;
+  data?: RawArchiveEntry;
+  error?: string;
+}
+
+export interface RawArchiveCreateEnvelope {
+  success?: boolean;
+  data?: RawArchiveCreateResponse;
+  error?: string;
+}
+
+export interface RawArchiveStatsResponse {
+  total_entries?: number;
+}
+
+export interface RawArchiveStatsEnvelope {
+  success?: boolean;
+  data?: RawArchiveStatsResponse;
+  error?: string;
+}
+
+export interface MemoryAgentIngestRequest {
+  content: string;
+  type: 'conversation' | 'code_diff' | 'document';
+  session_id: string;
+  source: 'user' | 'assistant' | 'system';
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface MemoryAgentRetrieveRequest {
+  query?: string;
+  session_id?: string;
+  max_results?: number;
+  min_heat?: number;
+  tier?: string;
+}
+
+export interface MemoryAgentContextRequest {
+  session_id?: string;
+  query?: string;
+  max_tokens?: number;
+}
+
+export interface MemoryAgentIngestResponse {
+  raw_archive_id?: string;
+  atomic_memory_id?: string;
+  samg_triples_count?: number;
+}
+
+export interface MemoryAgentRetrieveResponse {
+  atomic_memories?: AtomicMemory[];
+  samg_nodes?: Array<Record<string, unknown>>;
+  sources?: Array<Record<string, unknown>>;
+  total_found?: number;
+}
+
+export interface MemoryAgentContextResponse {
+  context_block?: string;
+  source_count?: number;
+  atomic_memories?: AtomicMemory[];
+  samg_nodes?: Array<Record<string, unknown>>;
+  sources?: Array<Record<string, unknown>>;
+}
+
+export interface MemoryAgentIngestEnvelope {
+  success?: boolean;
+  data?: MemoryAgentIngestResponse;
+  error?: string;
+}
+
+export interface MemoryAgentRetrieveEnvelope {
+  success?: boolean;
+  data?: MemoryAgentRetrieveResponse;
+  error?: string;
+}
+
+export interface MemoryAgentContextEnvelope {
+  success?: boolean;
+  data?: MemoryAgentContextResponse;
+  error?: string;
+}
+
+export interface Project {
+  id?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  progress?: number;
+  tags?: string[];
+  git_branch?: string;
+  created_at?: number;
+  updated_at?: number;
+  last_active?: number;
+  plan_ids?: string[];
+  metadata?: Record<string, unknown>;
+  workspace_root?: string;
+  default_flow_id?: string;
+  default_session_id?: string;
+  binding_state?: 'unbound' | 'bound' | 'deleting' | 'archived';
+}
+
+export interface ProjectCreateRequest {
+  title: string;
+  description?: string;
+  status?: string;
+  tags?: string[];
+  git_branch?: string;
+  metadata?: Record<string, unknown>;
+  workspace_root?: string;
+}
+
+export interface ProjectUpdateRequest {
+  title?: string;
+  description?: string;
+  status?: string;
+  tags?: string[];
+  git_branch?: string;
+  progress?: number;
+  metadata?: Record<string, unknown>;
+  workspace_root?: string;
+}
+
+export interface ProjectListEnvelope {
+  success?: boolean;
+  data?: { projects?: Project[]; total?: number; has_more?: boolean; };
+  error?: string;
+}
+
+export interface ProjectEnvelope {
+  success?: boolean;
+  data?: Project;
+  error?: string;
+}
+
+export interface ProjectCreateConflictEnvelope {
+  success?: boolean;
+  data?: { idempotency_key?: string; project_id?: string; differing_fields?: string[]; };
+  error?: string;
+}
+
+export interface ProjectCreationEnvelope {
+  success?: boolean;
+  data?: Project & { flow?: Record<string, unknown>; session?: Record<string, unknown>; };
+  error?: string;
+}
+
+export interface AddPlanRequest {
+  plan_id: string;
+}
+
+export interface PlanGenerateRequest {
+  title?: string;
+  summary?: string;
+  prompt?: string;
+  goal?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PlanReviseRequest {
+  goal?: string;
+  summary?: string;
+  feedback?: string;
+  change_request?: Record<string, unknown>;
+  feedback_resolution?: Array<Record<string, unknown>>;
+}
+
+export interface PlanApproveRequest {
+  approved_by?: string;
+}
+
+export interface PlanDocument {
+  id?: string;
+  project_id?: string;
+  title?: string;
+  summary?: string;
+  goal?: string;
+  status?: string;
+  revision?: number;
+  based_on_revision?: number;
+  approved_by?: string;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export interface PlanDocumentEnvelope {
+  success?: boolean;
+  data?: PlanDocument;
+  error?: string;
+}
+
+export interface ProjectPlansResponse {
+  plans?: Plan[];
+  total?: number;
+}
+
+export interface ProjectPlansEnvelope {
+  success?: boolean;
+  data?: ProjectPlansResponse;
+  error?: string;
+}
+
+export interface ProjectPlanExecuteEnvelope {
+  success?: boolean;
+  data?: { started?: boolean; status?: string; session_id?: string; };
+  error?: string;
+}
+
+export interface PluginManifest {
+  id?: string;
+  name?: string;
+  display_name?: string;
+  summary?: string;
+  description?: string;
+  version?: string;
+  author?: string;
+  vendor?: string;
+  category?: string;
+  tags?: string[];
+  source?: string;
+  scope?: string;
+  enabled?: boolean;
+  installed?: boolean;
+  featured?: boolean;
+  verified?: boolean;
+  health?: string;
+  homepage?: string;
+  repository?: string;
+  icon?: string;
+  updated_at?: number;
+  installed_at?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface PluginToggleRequest {
+  enabled?: boolean;
+}
+
+export interface PluginOverview {
+  total: number;
+  installed: number;
+  enabled: number;
+  marketplace: number;
+  unhealthy: number;
+  categories?: Record<string, unknown>;
+}
+
+export interface PluginListResponse {
+  plugins: PluginManifest[];
+  total: number;
+  has_more?: boolean;
+  summary?: PluginOverview;
+}
+
+export interface PluginCatalogResponse {
+  plugins: PluginManifest[];
+  total: number;
+  featured?: PluginManifest[];
+}
+
+export interface PluginDetailResponse {
+  plugin: PluginManifest;
+}
+
+export interface PluginListEnvelope {
+  success?: boolean;
+  data?: PluginListResponse;
+  error?: string;
+}
+
+export interface PluginCatalogEnvelope {
+  success?: boolean;
+  data?: PluginCatalogResponse;
+  error?: string;
+}
+
+export interface PluginDetailEnvelope {
+  success?: boolean;
+  data?: PluginDetailResponse;
+  error?: string;
+}
+
+export interface WorkflowOverview {
+  project_id?: string;
+  summary?: Record<string, unknown>;
+}
+
+export interface WorkflowTimeline {
+  project_id?: string;
+  session_ids?: string[];
+  events?: Array<Record<string, unknown>>;
+  summary?: Record<string, unknown>;
+}
+
+export interface WorkflowReplay {
+  project_id?: string;
+  session_id?: string;
+  events?: Array<Record<string, unknown>>;
+  summary?: Record<string, unknown>;
+}
+
+export interface WorkflowOverviewEnvelope {
+  success?: boolean;
+  data?: WorkflowOverview;
+  error?: string;
+}
+
+export interface WorkflowTimelineEnvelope {
+  success?: boolean;
+  data?: WorkflowTimeline;
+  error?: string;
+}
+
+export interface WorkflowReplayEnvelope {
+  success?: boolean;
+  data?: WorkflowReplay;
+  error?: string;
+}
+
+export interface GenericMessage {
+  message?: string;
+}
+
+export interface GenericMessageCount {
+  message?: string;
+  count?: number;
+}
+
+export interface GenericMessageEnvelope {
+  success?: boolean;
+  data?: GenericMessage;
+  error?: string;
+}
+
+export interface GenericMessageCountEnvelope {
+  success?: boolean;
+  data?: GenericMessageCount;
+  error?: string;
+}
+
+export interface NodeAccessResponse {
+  message?: string;
+  node_id?: string;
+}
+
+export interface NodeAccessEnvelope {
+  success?: boolean;
+  data?: NodeAccessResponse;
+  error?: string;
+}
+
+export interface GraphImportResponse {
+  message?: string;
+  triple_count?: number;
+}
+
+export interface GraphImportEnvelope {
+  success?: boolean;
+  data?: GraphImportResponse;
+  error?: string;
+}
+
+export interface TripleListEnvelope {
+  success?: boolean;
+  data?: TripleListResponse;
+  error?: string;
+}
+
+export interface TripleEnvelope {
+  success?: boolean;
+  data?: Triple;
+  error?: string;
+}
+
+export interface RelationsEnvelope {
+  success?: boolean;
+  data?: RelationsResponse;
+  error?: string;
+}
+
+export interface ExtractResponseEnvelope {
+  success?: boolean;
+  data?: ExtractResponse;
+  error?: string;
+}
+
+export interface ActivationResultEnvelope {
+  success?: boolean;
+  data?: ActivationResult;
+  error?: string;
+}
+
+export interface PathsEnvelope {
+  success?: boolean;
+  data?: PathsResponse;
+  error?: string;
+}
+
+export interface ActivationConfigEnvelope {
+  success?: boolean;
+  data?: ActivationConfig;
+  error?: string;
+}
+
+export interface DecayConfigEnvelope {
+  success?: boolean;
+  data?: DecayConfig;
+  error?: string;
+}
+
+export interface ConfigUpdateMessageEnvelope {
+  success?: boolean;
+  data?: ConfigUpdateMessageResponse;
+  error?: string;
+}
+
+export interface DecayApplyEnvelope {
+  success?: boolean;
+  data?: DecayApplyResponse;
+  error?: string;
+}
+
+export interface QueryMemoryEnvelope {
+  success?: boolean;
+  data?: QueryMemoryResponse;
+  error?: string;
+}
+
+export interface NodePointersEnvelope {
+  success?: boolean;
+  data?: NodePointersResponse;
+  error?: string;
+}
+
+export interface NodesEnvelope {
+  success?: boolean;
+  data?: NodesResponse;
+  error?: string;
+}
+
+export interface JsonLdGraphEnvelope {
+  success?: boolean;
+  data?: JsonLdGraph;
+  error?: string;
+}
+
+export interface SAMGStatsEnvelope {
+  success?: boolean;
+  data?: SAMGStats;
+  error?: string;
+}
+
+export interface RestoreResult {
+  snapshot_id?: string;
+  git_restored?: boolean;
+  conversation_restored?: boolean;
+  vector_restored?: boolean;
+  memory_graph_restored?: boolean;
+  restored_at?: string;
+  errors?: string[];
+}
+
+export interface SnapshotDeleteResponse {
+  message?: string;
+}
+
+export type SnapshotRestoreResponse = RestoreResult;
+
+export interface CreateFlowRequest {
+  project_id: string;
+  template_id?: string;
+  session_id?: string;
+}
+
+export interface AdvanceFlowRequest {
+  session_id?: string;
+  force?: boolean;
+}
+
+export interface LoopFlowRequest {
+  from_stage_id: string;
+  to_stage_id: string;
+  reason?: string;
+}
+
+export interface GateDecisionRequest {
+  approved: boolean;
+  reason?: string;
+}
+
+export interface FlowEnvelope {
+  success?: boolean;
+  data?: Record<string, unknown>;
+}
+
+export interface WorkspaceWriteRequest {
+  project_id?: string;
+  relative_path?: string;
+  root?: string;
+  path: string;
+  content_text?: string;
+  content_base64?: string;
+  create_parents?: boolean;
+  mode?: 'direct' | 'stage';
+}
+
+export interface AbortFlowRequest {
+  reason?: string;
+}
+
+export interface AttachFlowArtifactRequest {
+  type?: string;
+  content_ref?: string;
+}
+
+export interface UpdateFlowArtifactStatusRequest {
+  status: 'draft' | 'approved' | 'stale';
+}
+
+export interface ImportSkillsRequest {
+  dir: string;
+}
+
+export interface GuardExemptRequest {
+  path: string;
+  rules?: string[];
+  reason?: string;
+  ttl_seconds?: number;
+}
+
+export interface CreateSkillRequest {
+  name: string;
+  description?: string;
+  version?: string;
+  body: string;
+  triggers?: string[];
+  stage_tags?: string[];
+  source?: string;
+}
+
+export interface MatchSkillRequest {
+  text?: string;
+  stage_type?: string;
+  limit?: number;
+}
+
+export interface ApiMeta {
+  request_id: string;
+  command_id?: string;
+  revision?: number;
+}
+
+export interface ErrorBody {
+  code: 'unauthorized' | 'auth_expired' | 'protocol_mismatch' | 'forbidden' | 'invalid_request' | 'conflict' | 'idempotency_key_reused' | 'event_gap' | 'policy_denied' | 'backend_unavailable' | 'base_changed' | 'merge_conflict' | 'budget_exceeded';
+  message: string;
+  retryable: boolean;
+  details?: Record<string, unknown>;
+}
+
+export interface ApiErrorEnvelope {
+  error: ErrorBody;
+  meta: ApiMeta;
+}
+
+export interface CreateRunRequest {
+  task_id: string;
+  agent_revision_id: string;
+  expected_task_revision: number;
+  expected_binding_revision: number;
+  prompt: string;
+  budget: RunBudget;
+}
+
+export interface RunBudget {
+  wall_time_seconds: number;
+  tokens: number;
+}
+
+export interface Run {
+  id: string;
+  status: 'queued' | 'starting' | 'running' | 'waiting_approval' | 'paused' | 'completed' | 'failed' | 'cancelling' | 'cancelled' | 'recovering' | 'expired';
+  project_id: string;
+  task_id: string;
+  binding_revision: number;
+  base_commit: string;
+  agent_revision_id: string;
+  base_manifest_hash: string;
+}
+
+export interface CreateRunEnvelope {
+  data: Run;
+  meta: ApiMeta;
+}
+
+export interface ExecutionIdentity {
+  project_id: string;
+  actor: { type: 'user' | 'agent' | 'system' | 'integration'; id: string; source?: string; };
+  run_id?: string | null;
+  attempt_id?: string | null;
+  agent_revision_id?: string | null;
+}
+
+export interface ExecutionEvent {
+  id: string;
+  scope: string;
+  project_id: string;
+  run_id?: string | null;
+  sequence: number;
+  type: 'approval.approved' | 'approval.decided' | 'approval.required' | 'budget.soft_exceeded' | 'budget.warning' | 'checkpoint.acknowledged' | 'merge.completed' | 'process.exited' | 'process.started' | 'process.terminated' | 'run.completed' | 'run.failed' | 'scheduler.claimed' | 'server.restart' | 'tool.requested';
+  schema_version: 1;
+  occurred_at: string;
+  identity: ExecutionIdentity;
+  payload: Record<string, unknown>;
+}
+
+export interface RunEventsPage {
+  events: ExecutionEvent[];
+  next_after: number;
+  has_more: boolean;
+  retention_floor: number;
+  high_watermark: number;
+}
+
+export interface RunEventsEnvelope {
+  data: RunEventsPage;
+  meta: ApiMeta;
+}
+
+export interface CommandStatus {
+  command_id: string;
+  status: 'accepted' | 'applied' | 'rejected' | 'reconciling';
+}
+
+export interface CommandEnvelope {
+  data: CommandStatus;
+  meta: ApiMeta;
+}
+
+export interface StreamSubscribeFrame {
+  type: 'subscribe';
+  data: { resource_type: 'run' | 'project'; resource_id: string; after: number; client_request_id: string; };
 }
 
 export interface OpenApiSchemas {
-  Response: Record<string, unknown>;
-  HealthResponse: Record<string, unknown>;
-  MemoryItem: Record<string, unknown>;
-  MemoryListResponse: Record<string, unknown>;
-  MemoryCreateRequest: Record<string, unknown>;
-  MemoryUpdateRequest: Record<string, unknown>;
-  MemoryListEnvelope: Record<string, unknown>;
-  MemoryItemEnvelope: Record<string, unknown>;
-  MemoryDeleteResponse: Record<string, unknown>;
-  MemoryDeleteEnvelope: Record<string, unknown>;
-  VectorSearchRequest: Record<string, unknown>;
-  FulltextSearchRequest: Record<string, unknown>;
-  GraphSearchRequest: Record<string, unknown>;
-  HybridSearchRequest: Record<string, unknown>;
-  SearchResponse: Record<string, unknown>;
-  GraphSearchResponse: Record<string, unknown>;
-  FileTreeResponse: Record<string, unknown>;
-  FileNode: Record<string, unknown>;
-  ASTRequest: Record<string, unknown>;
-  ASTResponse: Record<string, unknown>;
-  ASTSymbol: Record<string, unknown>;
-  TokenRequest: Record<string, unknown>;
-  TokenResponse: Record<string, unknown>;
-  PresetCreateRequest: Record<string, unknown>;
-  AgentListResponse: Record<string, unknown>;
-  Agent: Record<string, unknown>;
-  AgentLogsResponse: Record<string, unknown>;
-  LogEntry: Record<string, unknown>;
-  CallTraceResponse: Record<string, unknown>;
-  CallNode: Record<string, unknown>;
-  EntryListResponse: Record<string, unknown>;
-  Entry: Record<string, unknown>;
-  EntryCreateRequest: Record<string, unknown>;
-  EntryUpdateRequest: Record<string, unknown>;
-  VoteCreateRequest: Record<string, unknown>;
-  VoteResponse: Record<string, unknown>;
-  VoteCastRequest: Record<string, unknown>;
-  DebateCreateRequest: Record<string, unknown>;
-  Debate: Record<string, unknown>;
-  Conflict: Record<string, unknown>;
-  Solution: Record<string, unknown>;
-  NextRoundRequest: Record<string, unknown>;
-  ResolveConflictRequest: Record<string, unknown>;
-  SelectSolutionRequest: Record<string, unknown>;
-  PlanListResponse: Record<string, unknown>;
-  Plan: Record<string, unknown>;
-  PlanCreateRequest: Record<string, unknown>;
-  TaskListResponse: Record<string, unknown>;
-  Task: Record<string, unknown>;
-  TaskCreateRequest: Record<string, unknown>;
-  TaskUpdateRequest: Record<string, unknown>;
-  TaskReorderRequest: Record<string, unknown>;
-  BatchModelRequest: Record<string, unknown>;
-  BatchModelResponse: Record<string, unknown>;
-  Snapshot: Record<string, unknown>;
-  SnapshotCreateRequest: Record<string, unknown>;
-  SnapshotListResponse: Record<string, unknown>;
-  PreflightRequest: Record<string, unknown>;
-  PreflightResponse: Record<string, unknown>;
-  MemoryMatch: Record<string, unknown>;
-  SuggestionsResponse: Record<string, unknown>;
-  InjectRequest: Record<string, unknown>;
-  APIChannel: Record<string, unknown>;
-  GlobalConfig: Record<string, unknown>;
-  SessionConfig: Record<string, unknown>;
-  RoleConfig: Record<string, unknown>;
-  ResolvedConfig: Record<string, unknown>;
-  GlobalConfigEnvelope: Record<string, unknown>;
-  SessionConfigEnvelope: Record<string, unknown>;
-  RoleConfigEnvelope: Record<string, unknown>;
-  ResolvedConfigEnvelope: Record<string, unknown>;
-  PAPIVariable: Record<string, unknown>;
-  PAPIVariableListResponse: Record<string, unknown>;
-  PAPIVariableCreateRequest: Record<string, unknown>;
-  PAPIVariableUpdateRequest: Record<string, unknown>;
-  PAPIResolveRequest: Record<string, unknown>;
-  PAPIHotSwapRequest: Record<string, unknown>;
-  Hook: Record<string, unknown>;
-  HookListResponse: Record<string, unknown>;
-  HookConfigRequest: Record<string, unknown>;
-  HookTriggerRequest: Record<string, unknown>;
-  SummarizeConversationRequest: Record<string, unknown>;
-  SummarizeResponse: Record<string, unknown>;
-  CompressContextRequest: Record<string, unknown>;
-  CompressResponse: Record<string, unknown>;
-  SkeletonRequest: Record<string, unknown>;
-  SkeletonResponse: Record<string, unknown>;
-  AuditLog: Record<string, unknown>;
-  AuditLogResponse: Record<string, unknown>;
-  AuditVerifyRequest: Record<string, unknown>;
-  AuditVerifyResponse: Record<string, unknown>;
-  EncryptRequest: Record<string, unknown>;
-  EncryptResponse: Record<string, unknown>;
-  DecryptRequest: Record<string, unknown>;
-  DecryptResponse: Record<string, unknown>;
-  RedactRequest: Record<string, unknown>;
-  RedactResponse: Record<string, unknown>;
-  DetectPIIRequest: Record<string, unknown>;
-  DetectPIIResponse: Record<string, unknown>;
-  PIIFinding: Record<string, unknown>;
-  KeyManageRequest: Record<string, unknown>;
-  VerifyChainRequest: Record<string, unknown>;
-  Container: Record<string, unknown>;
-  ContainerListResponse: Record<string, unknown>;
-  ContainerCreateRequest: Record<string, unknown>;
-  ResourceQuota: Record<string, unknown>;
-  QuotaRequest: Record<string, unknown>;
-  QuotaUpdateResponse: Record<string, unknown>;
-  AccessCheckRequest: Record<string, unknown>;
-  AccessDecision: Record<string, unknown>;
-  AccessCheckResponse: Record<string, unknown>;
-  IOValidateRequest: Record<string, unknown>;
-  IOValidateResponse: Record<string, unknown>;
-  RoleRegisterRequest: Record<string, unknown>;
-  Permission: Record<string, unknown>;
-  RoleCheckRequest: Record<string, unknown>;
-  RoleListResponse: Record<string, unknown>;
-  RolePermissionsResponse: Record<string, unknown>;
-  RolePermissionCheckResponse: Record<string, unknown>;
-  ContainerListEnvelope: Record<string, unknown>;
-  ContainerEnvelope: Record<string, unknown>;
-  QuotaUpdateEnvelope: Record<string, unknown>;
-  AccessCheckEnvelope: Record<string, unknown>;
-  IOValidateEnvelope: Record<string, unknown>;
-  RoleListEnvelope: Record<string, unknown>;
-  RoleEnvelope: Record<string, unknown>;
-  RoleRegisterResponse: Record<string, unknown>;
-  RoleRegisterEnvelope: Record<string, unknown>;
-  RolePermissionsEnvelope: Record<string, unknown>;
-  RolePermissionCheckEnvelope: Record<string, unknown>;
-  ErrorEnvelope: Record<string, unknown>;
-  RoleDefinition: Record<string, unknown>;
-  TripleNode: Record<string, unknown>;
-  LiteralValue: Record<string, unknown>;
-  TripleObject: Record<string, unknown>;
-  TripleSource: Record<string, unknown>;
-  Triple: Record<string, unknown>;
-  TripleListResponse: Record<string, unknown>;
-  AddTriplesRequest: Record<string, unknown>;
-  DeleteTriplesRequest: Record<string, unknown>;
-  RelationsResponse: Record<string, unknown>;
-  ExtractRequest: Record<string, unknown>;
-  ExtractWithPointersRequest: Record<string, unknown>;
-  ExtractResponse: Record<string, unknown>;
-  ActivateRequest: Record<string, unknown>;
-  ActivatedNode: Record<string, unknown>;
-  ActivationResult: Record<string, unknown>;
-  FindPathsRequest: Record<string, unknown>;
-  PathsResponse: Record<string, unknown>;
-  ActivationConfig: Record<string, unknown>;
-  DecayConfig: Record<string, unknown>;
-  ConfigUpdateMessageResponse: Record<string, unknown>;
-  DecayApplyResponse: Record<string, unknown>;
-  Pointer: Record<string, unknown>;
-  ResolvedPointer: Record<string, unknown>;
-  QueryMemoryNode: Record<string, unknown>;
-  QueryMemoryRequest: Record<string, unknown>;
-  QueryMemoryResponse: Record<string, unknown>;
-  NodePointersResponse: Record<string, unknown>;
-  AddNodePointerRequest: Record<string, unknown>;
-  SAMGEntity: Record<string, unknown>;
-  NodesResponse: Record<string, unknown>;
-  GraphMetadata: Record<string, unknown>;
-  JsonLdGraph: Record<string, unknown>;
-  SAMGStats: Record<string, unknown>;
-  AtomicMemory: Record<string, unknown>;
-  AtomicMemoryCreateRequest: Record<string, unknown>;
-  AtomicMemoryUpdateRequest: Record<string, unknown>;
-  AtomicBoostRequest: Record<string, unknown>;
-  AtomicMemoryListResponse: Record<string, unknown>;
-  AtomicMemoryListEnvelope: Record<string, unknown>;
-  AtomicMemoryEnvelope: Record<string, unknown>;
-  AtomicMaintenanceEnvelope: Record<string, unknown>;
-  RawArchiveEntry: Record<string, unknown>;
-  RawArchiveStoreRequest: Record<string, unknown>;
-  RawArchiveListResponse: Record<string, unknown>;
-  RawArchiveSearchResponse: Record<string, unknown>;
-  RawArchiveCreateResponse: Record<string, unknown>;
-  RawArchiveListEnvelope: Record<string, unknown>;
-  RawArchiveSearchEnvelope: Record<string, unknown>;
-  RawArchiveEntryEnvelope: Record<string, unknown>;
-  RawArchiveCreateEnvelope: Record<string, unknown>;
-  RawArchiveStatsResponse: Record<string, unknown>;
-  RawArchiveStatsEnvelope: Record<string, unknown>;
-  MemoryAgentIngestRequest: Record<string, unknown>;
-  MemoryAgentRetrieveRequest: Record<string, unknown>;
-  MemoryAgentContextRequest: Record<string, unknown>;
-  MemoryAgentIngestResponse: Record<string, unknown>;
-  MemoryAgentRetrieveResponse: Record<string, unknown>;
-  MemoryAgentContextResponse: Record<string, unknown>;
-  MemoryAgentIngestEnvelope: Record<string, unknown>;
-  MemoryAgentRetrieveEnvelope: Record<string, unknown>;
-  MemoryAgentContextEnvelope: Record<string, unknown>;
-  Project: Record<string, unknown>;
-  ProjectCreateRequest: Record<string, unknown>;
-  ProjectUpdateRequest: Record<string, unknown>;
-  ProjectListEnvelope: Record<string, unknown>;
-  ProjectEnvelope: Record<string, unknown>;
-  AddPlanRequest: Record<string, unknown>;
-  PlanGenerateRequest: Record<string, unknown>;
-  PlanReviseRequest: Record<string, unknown>;
-  PlanApproveRequest: Record<string, unknown>;
-  PlanDocument: Record<string, unknown>;
-  PlanDocumentEnvelope: Record<string, unknown>;
-  ProjectPlansResponse: Record<string, unknown>;
-  ProjectPlansEnvelope: Record<string, unknown>;
-  ProjectPlanExecuteEnvelope: Record<string, unknown>;
-  PluginManifest: Record<string, unknown>;
-  PluginToggleRequest: Record<string, unknown>;
-  PluginListEnvelope: Record<string, unknown>;
-  PluginCatalogEnvelope: Record<string, unknown>;
-  PluginDetailEnvelope: Record<string, unknown>;
-  WorkflowOverview: Record<string, unknown>;
-  WorkflowTimeline: Record<string, unknown>;
-  WorkflowReplay: Record<string, unknown>;
-  WorkflowOverviewEnvelope: Record<string, unknown>;
-  WorkflowTimelineEnvelope: Record<string, unknown>;
-  WorkflowReplayEnvelope: Record<string, unknown>;
-  GenericMessage: Record<string, unknown>;
-  GenericMessageCount: Record<string, unknown>;
-  GenericMessageEnvelope: Record<string, unknown>;
-  GenericMessageCountEnvelope: Record<string, unknown>;
-  NodeAccessResponse: Record<string, unknown>;
-  NodeAccessEnvelope: Record<string, unknown>;
-  GraphImportResponse: Record<string, unknown>;
-  GraphImportEnvelope: Record<string, unknown>;
-  TripleListEnvelope: Record<string, unknown>;
-  TripleEnvelope: Record<string, unknown>;
-  RelationsEnvelope: Record<string, unknown>;
-  ExtractResponseEnvelope: Record<string, unknown>;
-  ActivationResultEnvelope: Record<string, unknown>;
-  PathsEnvelope: Record<string, unknown>;
-  ActivationConfigEnvelope: Record<string, unknown>;
-  DecayConfigEnvelope: Record<string, unknown>;
-  ConfigUpdateMessageEnvelope: Record<string, unknown>;
-  DecayApplyEnvelope: Record<string, unknown>;
-  QueryMemoryEnvelope: Record<string, unknown>;
-  NodePointersEnvelope: Record<string, unknown>;
-  NodesEnvelope: Record<string, unknown>;
-  JsonLdGraphEnvelope: Record<string, unknown>;
-  SAMGStatsEnvelope: Record<string, unknown>;
-  RestoreResult: Record<string, unknown>;
-  SnapshotDeleteResponse: Record<string, unknown>;
-  SnapshotRestoreResponse: Record<string, unknown>;
+  Response: Response;
+  HealthResponse: HealthResponse;
+  MemoryItem: MemoryItem;
+  MemoryListResponse: MemoryListResponse;
+  MemoryCreateRequest: MemoryCreateRequest;
+  MemoryUpdateRequest: MemoryUpdateRequest;
+  MemoryListEnvelope: MemoryListEnvelope;
+  MemoryItemEnvelope: MemoryItemEnvelope;
+  MemoryDeleteResponse: MemoryDeleteResponse;
+  MemoryDeleteEnvelope: MemoryDeleteEnvelope;
+  VectorSearchRequest: VectorSearchRequest;
+  FulltextSearchRequest: FulltextSearchRequest;
+  GraphSearchRequest: GraphSearchRequest;
+  HybridSearchRequest: HybridSearchRequest;
+  SearchResponse: SearchResponse;
+  GraphSearchResponse: GraphSearchResponse;
+  FileTreeResponse: FileTreeResponse;
+  FileNode: FileNode;
+  ASTRequest: ASTRequest;
+  ASTResponse: ASTResponse;
+  ASTSymbol: ASTSymbol;
+  TokenRequest: TokenRequest;
+  TokenResponse: TokenResponse;
+  PresetCreateRequest: PresetCreateRequest;
+  AgentListResponse: AgentListResponse;
+  Agent: Agent;
+  AgentLogsResponse: AgentLogsResponse;
+  LogEntry: LogEntry;
+  CallTraceResponse: CallTraceResponse;
+  CallNode: CallNode;
+  EntryListResponse: EntryListResponse;
+  Entry: Entry;
+  EntryCreateRequest: EntryCreateRequest;
+  EntryUpdateRequest: EntryUpdateRequest;
+  VoteCreateRequest: VoteCreateRequest;
+  VoteResponse: VoteResponse;
+  VoteCastRequest: VoteCastRequest;
+  DebateCreateRequest: DebateCreateRequest;
+  Debate: Debate;
+  Conflict: Conflict;
+  Solution: Solution;
+  PartyConfig: PartyConfig;
+  PartyContribution: PartyContribution;
+  DebateRound: DebateRound;
+  NextRoundRequest: NextRoundRequest;
+  ResolveConflictRequest: ResolveConflictRequest;
+  SelectSolutionRequest: SelectSolutionRequest;
+  ProposeSolutionRequest: ProposeSolutionRequest;
+  PlanListResponse: PlanListResponse;
+  Plan: Plan;
+  PlanCreateRequest: PlanCreateRequest;
+  TaskListResponse: TaskListResponse;
+  Task: Task;
+  TaskCreateRequest: TaskCreateRequest;
+  TaskUpdateRequest: TaskUpdateRequest;
+  TaskReorderRequest: TaskReorderRequest;
+  BatchModelRequest: BatchModelRequest;
+  BatchModelResponse: BatchModelResponse;
+  Snapshot: Snapshot;
+  SnapshotCreateRequest: SnapshotCreateRequest;
+  SnapshotListResponse: SnapshotListResponse;
+  PreflightRequest: PreflightRequest;
+  PreflightResponse: PreflightResponse;
+  MemoryMatch: MemoryMatch;
+  SuggestionsResponse: SuggestionsResponse;
+  InjectRequest: InjectRequest;
+  APIChannelPublic: APIChannelPublic;
+  APIChannelWrite: APIChannelWrite;
+  GlobalConfig: GlobalConfig;
+  GlobalConfigWrite: GlobalConfigWrite;
+  SessionConfig: SessionConfig;
+  RoleConfig: RoleConfig;
+  ResolvedConfig: ResolvedConfig;
+  GlobalConfigEnvelope: GlobalConfigEnvelope;
+  SessionConfigEnvelope: SessionConfigEnvelope;
+  RoleConfigEnvelope: RoleConfigEnvelope;
+  ResolvedConfigEnvelope: ResolvedConfigEnvelope;
+  PAPIVariable: PAPIVariable;
+  PAPIVariableListResponse: PAPIVariableListResponse;
+  PAPIVariableCreateRequest: PAPIVariableCreateRequest;
+  PAPIVariableUpdateRequest: PAPIVariableUpdateRequest;
+  PAPIResolveRequest: PAPIResolveRequest;
+  PAPIHotSwapRequest: PAPIHotSwapRequest;
+  Hook: Hook;
+  HookListResponse: HookListResponse;
+  HookConfigRequest: HookConfigRequest;
+  HookTriggerRequest: HookTriggerRequest;
+  SummarizeConversationRequest: SummarizeConversationRequest;
+  SummarizeResponse: SummarizeResponse;
+  CompressContextRequest: CompressContextRequest;
+  CompressResponse: CompressResponse;
+  SkeletonRequest: SkeletonRequest;
+  SkeletonResponse: SkeletonResponse;
+  AuditLog: AuditLog;
+  AuditLogResponse: AuditLogResponse;
+  AuditVerifyRequest: AuditVerifyRequest;
+  AuditVerifyResponse: AuditVerifyResponse;
+  EncryptRequest: EncryptRequest;
+  EncryptResponse: EncryptResponse;
+  DecryptRequest: DecryptRequest;
+  DecryptResponse: DecryptResponse;
+  EncryptedData: EncryptedData;
+  ChainEncryptedData: ChainEncryptedData;
+  PrivacyPolicy: PrivacyPolicy;
+  RedactRequest: RedactRequest;
+  RedactResponse: RedactResponse;
+  DetectPIIRequest: DetectPIIRequest;
+  DetectPIIResponse: DetectPIIResponse;
+  PIIFinding: PIIFinding;
+  KeyManageRequest: KeyManageRequest;
+  VerifyChainRequest: VerifyChainRequest;
+  Container: Container;
+  ContainerListResponse: ContainerListResponse;
+  ContainerCreateRequest: ContainerCreateRequest;
+  ResourceQuota: ResourceQuota;
+  QuotaRequest: QuotaRequest;
+  QuotaUpdateResponse: QuotaUpdateResponse;
+  AccessCheckRequest: AccessCheckRequest;
+  AccessDecision: AccessDecision;
+  AccessCheckResponse: AccessCheckResponse;
+  IOValidateRequest: IOValidateRequest;
+  IOValidateResponse: IOValidateResponse;
+  RoleRegisterRequest: RoleRegisterRequest;
+  Permission: Permission;
+  RoleCheckRequest: RoleCheckRequest;
+  RoleListResponse: RoleListResponse;
+  RolePermissionsResponse: RolePermissionsResponse;
+  RolePermissionCheckResponse: RolePermissionCheckResponse;
+  ContainerListEnvelope: ContainerListEnvelope;
+  ContainerEnvelope: ContainerEnvelope;
+  QuotaUpdateEnvelope: QuotaUpdateEnvelope;
+  AccessCheckEnvelope: AccessCheckEnvelope;
+  IOValidateEnvelope: IOValidateEnvelope;
+  RoleListEnvelope: RoleListEnvelope;
+  RoleEnvelope: RoleEnvelope;
+  RoleRegisterResponse: RoleRegisterResponse;
+  RoleRegisterEnvelope: RoleRegisterEnvelope;
+  RolePermissionsEnvelope: RolePermissionsEnvelope;
+  RolePermissionCheckEnvelope: RolePermissionCheckEnvelope;
+  ErrorEnvelope: ErrorEnvelope;
+  RoleDefinition: RoleDefinition;
+  TripleNode: TripleNode;
+  LiteralValue: LiteralValue;
+  TripleObject: TripleObject;
+  TripleSource: TripleSource;
+  Triple: Triple;
+  TripleListResponse: TripleListResponse;
+  AddTriplesRequest: AddTriplesRequest;
+  DeleteTriplesRequest: DeleteTriplesRequest;
+  RelationsResponse: RelationsResponse;
+  ExtractRequest: ExtractRequest;
+  ExtractWithPointersRequest: ExtractWithPointersRequest;
+  ExtractResponse: ExtractResponse;
+  ActivateRequest: ActivateRequest;
+  ActivatedNode: ActivatedNode;
+  ActivationResult: ActivationResult;
+  FindPathsRequest: FindPathsRequest;
+  PathsResponse: PathsResponse;
+  ActivationConfig: ActivationConfig;
+  DecayConfig: DecayConfig;
+  ConfigUpdateMessageResponse: ConfigUpdateMessageResponse;
+  DecayApplyResponse: DecayApplyResponse;
+  Pointer: Pointer;
+  ResolvedPointer: ResolvedPointer;
+  QueryMemoryNode: QueryMemoryNode;
+  QueryMemoryRequest: QueryMemoryRequest;
+  QueryMemoryResponse: QueryMemoryResponse;
+  NodePointersResponse: NodePointersResponse;
+  AddNodePointerRequest: AddNodePointerRequest;
+  SAMGEntity: SAMGEntity;
+  NodesResponse: NodesResponse;
+  GraphMetadata: GraphMetadata;
+  JsonLdGraph: JsonLdGraph;
+  SAMGStats: SAMGStats;
+  AtomicMemory: AtomicMemory;
+  AtomicMemoryCreateRequest: AtomicMemoryCreateRequest;
+  AtomicMemoryUpdateRequest: AtomicMemoryUpdateRequest;
+  AtomicBoostRequest: AtomicBoostRequest;
+  AtomicMemoryListResponse: AtomicMemoryListResponse;
+  AtomicSearchReport: AtomicSearchReport;
+  AtomicMemoryListEnvelope: AtomicMemoryListEnvelope;
+  AtomicMemoryEnvelope: AtomicMemoryEnvelope;
+  AtomicMemoryMutationResponse: AtomicMemoryMutationResponse;
+  AtomicMemoryMutationEnvelope: AtomicMemoryMutationEnvelope;
+  AtomicMemoryDeleteResponse: AtomicMemoryDeleteResponse;
+  AtomicMemoryDeleteEnvelope: AtomicMemoryDeleteEnvelope;
+  AtomicMaintenanceEnvelope: AtomicMaintenanceEnvelope;
+  RawArchiveEntry: RawArchiveEntry;
+  RawArchiveStoreRequest: RawArchiveStoreRequest;
+  RawArchiveListResponse: RawArchiveListResponse;
+  RawArchiveSearchResponse: RawArchiveSearchResponse;
+  RawArchiveCreateResponse: RawArchiveCreateResponse;
+  RawArchiveListEnvelope: RawArchiveListEnvelope;
+  RawArchiveSearchEnvelope: RawArchiveSearchEnvelope;
+  RawArchiveEntryEnvelope: RawArchiveEntryEnvelope;
+  RawArchiveCreateEnvelope: RawArchiveCreateEnvelope;
+  RawArchiveStatsResponse: RawArchiveStatsResponse;
+  RawArchiveStatsEnvelope: RawArchiveStatsEnvelope;
+  MemoryAgentIngestRequest: MemoryAgentIngestRequest;
+  MemoryAgentRetrieveRequest: MemoryAgentRetrieveRequest;
+  MemoryAgentContextRequest: MemoryAgentContextRequest;
+  MemoryAgentIngestResponse: MemoryAgentIngestResponse;
+  MemoryAgentRetrieveResponse: MemoryAgentRetrieveResponse;
+  MemoryAgentContextResponse: MemoryAgentContextResponse;
+  MemoryAgentIngestEnvelope: MemoryAgentIngestEnvelope;
+  MemoryAgentRetrieveEnvelope: MemoryAgentRetrieveEnvelope;
+  MemoryAgentContextEnvelope: MemoryAgentContextEnvelope;
+  Project: Project;
+  ProjectCreateRequest: ProjectCreateRequest;
+  ProjectUpdateRequest: ProjectUpdateRequest;
+  ProjectListEnvelope: ProjectListEnvelope;
+  ProjectEnvelope: ProjectEnvelope;
+  ProjectCreateConflictEnvelope: ProjectCreateConflictEnvelope;
+  ProjectCreationEnvelope: ProjectCreationEnvelope;
+  AddPlanRequest: AddPlanRequest;
+  PlanGenerateRequest: PlanGenerateRequest;
+  PlanReviseRequest: PlanReviseRequest;
+  PlanApproveRequest: PlanApproveRequest;
+  PlanDocument: PlanDocument;
+  PlanDocumentEnvelope: PlanDocumentEnvelope;
+  ProjectPlansResponse: ProjectPlansResponse;
+  ProjectPlansEnvelope: ProjectPlansEnvelope;
+  ProjectPlanExecuteEnvelope: ProjectPlanExecuteEnvelope;
+  PluginManifest: PluginManifest;
+  PluginToggleRequest: PluginToggleRequest;
+  PluginOverview: PluginOverview;
+  PluginListResponse: PluginListResponse;
+  PluginCatalogResponse: PluginCatalogResponse;
+  PluginDetailResponse: PluginDetailResponse;
+  PluginListEnvelope: PluginListEnvelope;
+  PluginCatalogEnvelope: PluginCatalogEnvelope;
+  PluginDetailEnvelope: PluginDetailEnvelope;
+  WorkflowOverview: WorkflowOverview;
+  WorkflowTimeline: WorkflowTimeline;
+  WorkflowReplay: WorkflowReplay;
+  WorkflowOverviewEnvelope: WorkflowOverviewEnvelope;
+  WorkflowTimelineEnvelope: WorkflowTimelineEnvelope;
+  WorkflowReplayEnvelope: WorkflowReplayEnvelope;
+  GenericMessage: GenericMessage;
+  GenericMessageCount: GenericMessageCount;
+  GenericMessageEnvelope: GenericMessageEnvelope;
+  GenericMessageCountEnvelope: GenericMessageCountEnvelope;
+  NodeAccessResponse: NodeAccessResponse;
+  NodeAccessEnvelope: NodeAccessEnvelope;
+  GraphImportResponse: GraphImportResponse;
+  GraphImportEnvelope: GraphImportEnvelope;
+  TripleListEnvelope: TripleListEnvelope;
+  TripleEnvelope: TripleEnvelope;
+  RelationsEnvelope: RelationsEnvelope;
+  ExtractResponseEnvelope: ExtractResponseEnvelope;
+  ActivationResultEnvelope: ActivationResultEnvelope;
+  PathsEnvelope: PathsEnvelope;
+  ActivationConfigEnvelope: ActivationConfigEnvelope;
+  DecayConfigEnvelope: DecayConfigEnvelope;
+  ConfigUpdateMessageEnvelope: ConfigUpdateMessageEnvelope;
+  DecayApplyEnvelope: DecayApplyEnvelope;
+  QueryMemoryEnvelope: QueryMemoryEnvelope;
+  NodePointersEnvelope: NodePointersEnvelope;
+  NodesEnvelope: NodesEnvelope;
+  JsonLdGraphEnvelope: JsonLdGraphEnvelope;
+  SAMGStatsEnvelope: SAMGStatsEnvelope;
+  RestoreResult: RestoreResult;
+  SnapshotDeleteResponse: SnapshotDeleteResponse;
+  SnapshotRestoreResponse: SnapshotRestoreResponse;
+  CreateFlowRequest: CreateFlowRequest;
+  AdvanceFlowRequest: AdvanceFlowRequest;
+  LoopFlowRequest: LoopFlowRequest;
+  GateDecisionRequest: GateDecisionRequest;
+  FlowEnvelope: FlowEnvelope;
+  WorkspaceWriteRequest: WorkspaceWriteRequest;
+  AbortFlowRequest: AbortFlowRequest;
+  AttachFlowArtifactRequest: AttachFlowArtifactRequest;
+  UpdateFlowArtifactStatusRequest: UpdateFlowArtifactStatusRequest;
+  ImportSkillsRequest: ImportSkillsRequest;
+  GuardExemptRequest: GuardExemptRequest;
+  CreateSkillRequest: CreateSkillRequest;
+  MatchSkillRequest: MatchSkillRequest;
+  ApiMeta: ApiMeta;
+  ErrorBody: ErrorBody;
+  ApiErrorEnvelope: ApiErrorEnvelope;
+  CreateRunRequest: CreateRunRequest;
+  RunBudget: RunBudget;
+  Run: Run;
+  CreateRunEnvelope: CreateRunEnvelope;
+  ExecutionIdentity: ExecutionIdentity;
+  ExecutionEvent: ExecutionEvent;
+  RunEventsPage: RunEventsPage;
+  RunEventsEnvelope: RunEventsEnvelope;
+  CommandStatus: CommandStatus;
+  CommandEnvelope: CommandEnvelope;
+  StreamSubscribeFrame: StreamSubscribeFrame;
 }
 
 export type OpenApiPath = OpenApiOperationMap[keyof OpenApiOperationMap]['path'];

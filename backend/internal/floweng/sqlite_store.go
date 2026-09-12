@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // SQLiteFlowStore stores each Flow as a JSON document keyed by id.
@@ -16,17 +17,15 @@ type SQLiteFlowStore struct {
 }
 
 // NewSQLiteFlowStore opens (or creates) a SQLite database at dbPath.
-// Pass ":memory:" for ephemeral tests (shared cache).
+// Pass ":memory:" for an ephemeral private in-memory database.
 func NewSQLiteFlowStore(dbPath string) (*SQLiteFlowStore, error) {
-	conn, err := buildFlowSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareFlowDBDir(dbPath); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", conn)
+	db, err := dbx.Open(dbPath, dbx.WithMaxOpenConns(1)) // SQLite write serialization
 	if err != nil {
 		return nil, fmt.Errorf("open floweng db: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite write serialization
 	store := &SQLiteFlowStore{db: db}
 	if err := store.initSchema(); err != nil {
 		_ = db.Close()
@@ -35,17 +34,17 @@ func NewSQLiteFlowStore(dbPath string) (*SQLiteFlowStore, error) {
 	return store, nil
 }
 
-func buildFlowSQLiteConnString(dbPath string) (string, error) {
+func prepareFlowDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file:floweng_mem?mode=memory&cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create floweng db dir: %w", err)
+			return fmt.Errorf("create floweng db dir: %w", err)
 		}
 	}
-	return fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", filepath.ToSlash(dbPath)), nil
+	return nil
 }
 
 func (s *SQLiteFlowStore) initSchema() error {
@@ -61,9 +60,62 @@ CREATE TABLE IF NOT EXISTS flows (
 );
 CREATE INDEX IF NOT EXISTS idx_flows_project ON flows(project_id);
 CREATE INDEX IF NOT EXISTS idx_flows_status ON flows(status);
+CREATE TABLE IF NOT EXISTS flow_templates (
+  id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 `)
 	if err != nil {
 		return fmt.Errorf("init floweng schema: %w", err)
+	}
+	return nil
+}
+
+// PutTemplate persists a reusable custom template definition.
+func (s *SQLiteFlowStore) PutTemplate(def CustomTemplate) error {
+	payload, err := json.Marshal(def)
+	if err != nil {
+		return fmt.Errorf("marshal flow template: %w", err)
+	}
+	_, err = s.db.Exec(`
+INSERT INTO flow_templates (id, payload, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at
+`, string(def.ID), string(payload), time.Now().UTC().UnixMilli())
+	if err != nil {
+		return fmt.Errorf("put flow template: %w", err)
+	}
+	return nil
+}
+
+// ListTemplateDefinitions loads all reusable custom template definitions.
+func (s *SQLiteFlowStore) ListTemplateDefinitions() ([]CustomTemplate, error) {
+	rows, err := s.db.Query(`SELECT payload FROM flow_templates ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list flow templates: %w", err)
+	}
+	defer rows.Close()
+	out := make([]CustomTemplate, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var def CustomTemplate
+		if err := json.Unmarshal([]byte(payload), &def); err != nil {
+			return nil, fmt.Errorf("unmarshal flow template: %w", err)
+		}
+		out = append(out, def)
+	}
+	return out, rows.Err()
+}
+
+// DeleteTemplate removes a persisted custom template definition.
+func (s *SQLiteFlowStore) DeleteTemplate(id TemplateID) error {
+	_, err := s.db.Exec(`DELETE FROM flow_templates WHERE id = ?`, string(id))
+	if err != nil {
+		return fmt.Errorf("delete flow template: %w", err)
 	}
 	return nil
 }

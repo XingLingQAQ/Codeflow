@@ -1,5 +1,7 @@
 import { ReactNode } from 'react';
 
+import type { Flow } from './src/services-bridge/flows';
+
 // --- UI Types (existing) ---
 
 export enum ViewMode {
@@ -57,6 +59,11 @@ export interface ProjectListResponse {
   projects: Project[];
   total: number;
   has_more: boolean;
+}
+
+/** Returned only after the project's default seven-stage Flow is ready. */
+export interface ProjectCreationResult extends Project {
+  flow: Flow;
 }
 
 export type WorkflowLane = 'project' | 'plan' | 'task' | 'trace' | 'archive' | 'audit';

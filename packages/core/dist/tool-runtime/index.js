@@ -4,5 +4,7 @@ export * from './ToolExecutor.js';
 export * from './FileOperationService.js';
 export * from './SearchProvider.js';
 export * from './MCPGateway.js';
+export * from './SkillRegistry.js';
+export * from './SkillDispatcher.js';
 export * from './HeadlessToolRuntime.js';
 //# sourceMappingURL=index.js.map

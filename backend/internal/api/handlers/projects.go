@@ -2,13 +2,19 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/websocket"
 )
 
 // GetProjects handles GET /api/v1/projects
@@ -37,14 +43,61 @@ func CreateProject(c *gin.Context) {
 		return
 	}
 
-	svc := project.GetProjectService()
-	result, err := svc.CreateProject(c.Request.Context(), &req)
+	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if key == "" {
+		key = uuid.NewString()
+		c.Header("Idempotency-Key", key)
+	}
+	result, err := project.CreateProjectWithDefaultFlowIdempotent(
+		c.Request.Context(),
+		project.GetProjectService(),
+		floweng.GetEngine(),
+		&req,
+		key,
+	)
 	if err != nil {
-		respondInternalError(c, "create project", err)
+		if errors.Is(err, project.ErrInvalidProjectCreate) {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		var conflictErr *project.ProjectCreateConflictError
+		if errors.As(err, &conflictErr) {
+			respondProjectCreateConflict(c, conflictErr)
+			return
+		}
+
+		log.Printf("[ERROR] create project with default flow: %v", err)
+		var creationErr *project.ProjectCreationError
+		if errors.As(err, &creationErr) && creationErr.CleanupErr != nil {
+			respondError(c, http.StatusInternalServerError, "工作流初始化失败，且未能自动清理临时数据；请刷新项目列表确认后再重试")
+			return
+		}
+		respondError(c, http.StatusInternalServerError, "工作流初始化失败，项目未创建；请重试")
 		return
 	}
 
 	respondCreated(c, result)
+}
+
+// respondProjectCreateConflict answers an idempotency-key replay that carried
+// a different payload with 409: the envelope names the conflicting operation
+// (idempotency key and reserved project id) plus the journaled intent fields
+// known to differ, so the client can decide whether to reuse the original
+// operation or choose a new key.
+func respondProjectCreateConflict(c *gin.Context, conflict *project.ProjectCreateConflictError) {
+	fields := conflict.DifferingFields
+	if fields == nil {
+		fields = []string{}
+	}
+	c.JSON(http.StatusConflict, Response{
+		Success: false,
+		Error:   conflict.Error(),
+		Data: gin.H{
+			"idempotency_key":  conflict.IdempotencyKey,
+			"project_id":       conflict.ProjectID,
+			"differing_fields": fields,
+		},
+	})
 }
 
 // GetProject handles GET /api/v1/projects/:id
@@ -66,6 +119,25 @@ func GetProject(c *gin.Context) {
 	}
 
 	respondOK(c, result)
+}
+
+// StreamProjectEvents handles WebSocket /api/v1/projects/:id/stream.
+func StreamProjectEvents(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
+		return
+	}
+	result, err := project.GetProjectService().GetProject(c.Request.Context(), id)
+	if err != nil {
+		respondInternalError(c, "authorize project stream", err)
+		return
+	}
+	if result == nil {
+		respondError(c, http.StatusNotFound, "Project not found")
+		return
+	}
+	topic := "flow:project:" + id
+	websocket.HandleScopedWebSocket(websocket.GetHub(), c, "project:"+id, topic)
 }
 
 // UpdateProject handles PUT /api/v1/projects/:id
@@ -99,12 +171,60 @@ func DeleteProject(c *gin.Context) {
 	}
 
 	svc := project.GetProjectService()
-	if err := svc.DeleteProject(c.Request.Context(), id); err != nil {
+	cleanup := func(_ context.Context, p *project.Project) error {
+		StopWorkspaceWatchesForRoot(p.WorkspaceRoot)
+		StopWorkspaceDevServersForRoot(p.WorkspaceRoot)
+		return nil
+	}
+	if err := project.ArchiveProjectAndAbortFlowsWithCleanup(c.Request.Context(), svc, floweng.GetEngine(), id, cleanup); err != nil {
 		respondInternalError(c, "delete project", err)
 		return
 	}
 
-	respondOK(c, gin.H{"deleted": true, "id": id})
+	respondOK(c, gin.H{"deleted": true, "id": id, "status": string(project.StatusArchived)})
+}
+
+// RestoreProject handles POST /api/v1/projects/:id/restore.
+func RestoreProject(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
+		return
+	}
+	result, err := project.RestoreProjectWithDefaultFlow(c.Request.Context(), project.GetProjectService(), floweng.GetEngine(), id)
+	if err != nil {
+		if err.Error() == "project not found" {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondInternalError(c, "restore project", err)
+		return
+	}
+	respondOK(c, result)
+}
+
+// BindProjectWorkspace handles POST /api/v1/projects/:id/bind-workspace.
+func BindProjectWorkspace(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "project ID")
+	if !ok {
+		return
+	}
+	var body struct {
+		WorkspaceRoot string `json:"workspace_root" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	result, err := project.GetProjectService().BindWorkspaceRoot(c.Request.Context(), id, body.WorkspaceRoot)
+	if err != nil {
+		if err.Error() == "project not found" {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		respondError(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondOK(c, result)
 }
 
 // GetProjectPlans handles GET /api/v1/projects/:id/plans

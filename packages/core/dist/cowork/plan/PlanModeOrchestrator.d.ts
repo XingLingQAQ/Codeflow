@@ -7,6 +7,7 @@ import { PlanSession, PlanConfig, PlanEventListener, VisionDocument, ConstraintS
 import { VisionBuilder } from './VisionBuilder.js';
 import { ConstraintExtractor } from './ConstraintExtractor.js';
 import { PlanArtifactManager } from './PlanArtifactManager.js';
+type EventEmitterListener = (...args: unknown[]) => void;
 /**
  * PlanModeOrchestrator - Plan 模式编排器
  */
@@ -152,11 +153,13 @@ export declare class PlanModeOrchestrator extends EventEmitter {
     /**
      * 添加事件监听器
      */
-    addListener(listener: PlanEventListener): void;
+    addListener<E extends string | symbol>(eventName: E, listener: EventEmitterListener): this;
+    addListener(listener: PlanEventListener): this;
     /**
      * 移除事件监听器
      */
-    removeListener(listener: PlanEventListener): void;
+    removeListener<E extends string | symbol>(eventName: E, listener: EventEmitterListener): this;
+    removeListener(listener: PlanEventListener): this;
     /**
      * 清理资源
      */
@@ -166,4 +169,5 @@ export declare class PlanModeOrchestrator extends EventEmitter {
      */
     private emitEvent;
 }
+export {};
 //# sourceMappingURL=PlanModeOrchestrator.d.ts.map

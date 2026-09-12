@@ -2,13 +2,11 @@ package memory
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
-
+	"github.com/codeflow/backend/internal/dbx"
 	"github.com/codeflow/backend/internal/samg"
 )
 
@@ -26,7 +24,7 @@ func setupMemoryAgentTestDeps(t *testing.T) memoryAgentTestDeps {
 	tmpDir := t.TempDir()
 	archive := NewSQLiteRawArchive(filepath.Join(tmpDir, "raw_archive.db"))
 
-	db, err := sql.Open("sqlite3", filepath.Join(tmpDir, "atomic_memory.db"))
+	db, err := dbx.Open(filepath.Join(tmpDir, "atomic_memory.db"), dbx.WithWAL(false), dbx.WithForeignKeys(false), dbx.WithBusyTimeout(0))
 	if err != nil {
 		t.Fatalf("open atomic memory db failed: %v", err)
 	}

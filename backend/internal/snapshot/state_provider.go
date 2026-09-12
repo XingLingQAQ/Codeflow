@@ -61,7 +61,9 @@ func (p *defaultStateProvider) CaptureGitState(ctx context.Context) (string, err
 func (p *defaultStateProvider) CaptureConversationState(ctx context.Context, sessionID string) (string, error) {
 	payload := conversationStatePayload{SessionID: strings.TrimSpace(sessionID)}
 	if payload.SessionID != "" {
-		trace, err := agent.GetAgentService().GetConversationTrace(ctx, payload.SessionID)
+		svc := agent.GetAgentService()
+		if svc == nil { return "", fmt.Errorf("agent service is not initialized") }
+		trace, err := svc.GetConversationTrace(ctx, payload.SessionID)
 		if err != nil {
 			return "", fmt.Errorf("capture conversation trace: %w", err)
 		}
@@ -71,7 +73,8 @@ func (p *defaultStateProvider) CaptureConversationState(ctx context.Context, ses
 }
 
 func (p *defaultStateProvider) CaptureVectorState(ctx context.Context, sessionID string) (string, error) {
-	resp, err := memory.GetMemoryService().List(ctx, &memory.MemoryListOptions{SessionID: sessionID, Limit: 10000})
+	svc := memory.GetMemoryService(); if svc == nil { return "", fmt.Errorf("memory service is not initialized") }
+	resp, err := svc.List(ctx, &memory.MemoryListOptions{SessionID: sessionID, Limit: 10000})
 	if err != nil {
 		return "", fmt.Errorf("capture memory vector pointer: %w", err)
 	}
@@ -88,6 +91,7 @@ func (p *defaultStateProvider) CaptureVectorState(ctx context.Context, sessionID
 
 func (p *defaultStateProvider) CaptureMemoryGraphState(ctx context.Context) (string, error) {
 	svc := samg.GetSAMGService()
+	if svc == nil { return "", fmt.Errorf("samg service is not initialized") }
 	graph, err := svc.ExportGraph(ctx)
 	if err != nil {
 		return "", fmt.Errorf("capture samg graph: %w", err)
@@ -125,7 +129,8 @@ func (p *defaultStateProvider) RestoreConversationState(ctx context.Context, sta
 	if strings.TrimSpace(trace.SessionID) == "" {
 		trace.SessionID = payload.SessionID
 	}
-	return agent.GetAgentService().RestoreConversationTrace(ctx, trace.SessionID, trace)
+	svc := agent.GetAgentService(); if svc == nil { return fmt.Errorf("agent service is not initialized") }
+	return svc.RestoreConversationTrace(ctx, trace.SessionID, trace)
 }
 
 func (p *defaultStateProvider) RestoreVectorState(ctx context.Context, pointer string) error {
@@ -137,7 +142,8 @@ func (p *defaultStateProvider) RestoreVectorState(ctx context.Context, pointer s
 	if err != nil {
 		return err
 	}
-	return memory.GetMemoryService().ReplaceItems(ctx, payload.SessionID, payload.Items)
+	svc := memory.GetMemoryService(); if svc == nil { return fmt.Errorf("memory service is not initialized") }
+	return svc.ReplaceItems(ctx, payload.SessionID, payload.Items)
 }
 
 func (p *defaultStateProvider) RestoreMemoryGraphState(ctx context.Context, version string) error {
@@ -149,6 +155,7 @@ func (p *defaultStateProvider) RestoreMemoryGraphState(ctx context.Context, vers
 	if err != nil {
 		return err
 	}
-	_, err = samg.GetSAMGService().ReplaceGraph(ctx, payload.Graph)
+	svc := samg.GetSAMGService(); if svc == nil { return fmt.Errorf("samg service is not initialized") }
+	_, err = svc.ReplaceGraph(ctx, payload.Graph)
 	return err
 }

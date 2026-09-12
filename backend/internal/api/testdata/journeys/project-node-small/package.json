@@ -1,0 +1,12 @@
+{
+  "name": "codeflow-fixture-project-node-small",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Credential-free, zero-dependency Node fixture for Codeflow journey E2E tests.",
+  "scripts": {
+    "lint": "node scripts/lint.js",
+    "typecheck": "node --experimental-strip-types --check src/greet.ts && node --experimental-strip-types --check test/greet.test.ts",
+    "test": "node --test"
+  }
+}

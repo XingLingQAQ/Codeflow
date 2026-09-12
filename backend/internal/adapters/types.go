@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -59,11 +60,142 @@ type AIResponse struct {
 	FinishReason string         `json:"finish_reason,omitempty"`
 }
 
+// TerminalStatus 流终结状态（T13.04 冻结契约，§31.3）。
+// 枚举值固定为 completed/error/cancelled，不得扩展其它取值。
+type TerminalStatus string
+
+const (
+	// TerminalCompleted 协议级正常完成，只有它代表执行成功。
+	TerminalCompleted TerminalStatus = "completed"
+	// TerminalError 异常终结：provider 流内错误、扫描失败、非正常 EOF 或关键帧损坏。
+	TerminalError TerminalStatus = "error"
+	// TerminalCancelled 调用方取消导致的终结（由发送侧依据 ctx 判定，parser 不产生）。
+	TerminalCancelled TerminalStatus = "cancelled"
+)
+
+// StreamError 终结帧上的结构化错误（§31.3：error{code,message,retryable}）。
+type StreamError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
+}
+
 // StreamChunk 流式响应块
+//
+// T13.04 冻结的终结契约（§31.3）：
+//   - Done=false 表示内容帧，只携带 Delta/Index，绝不携带 TerminalStatus/Error/Usage。
+//   - Done=true 仅表示"流已终结"，不代表成功；终结帧只发送一次，
+//     且必须携带 TerminalStatus，只有 TerminalCompleted 才是执行成功。
+//   - 消费者必须同时检查 Done 与 TerminalStatus，不得凭 Done=true 判定成功。
+//   - 新增字段全部可空/缺省：旧消费者只认 Delta/Index/Done 不受影响。
 type StreamChunk struct {
 	Delta string `json:"delta"`
 	Index int    `json:"index"`
 	Done  bool   `json:"done"`
+	// TerminalStatus 终结状态，仅 Done=true 时出现。
+	TerminalStatus TerminalStatus `json:"terminal_status,omitempty"`
+	// Error 结构化终结错误，仅 TerminalStatus=TerminalError 时出现。
+	Error *StreamError `json:"error,omitempty"`
+	// FinishReason provider 上报的真实结束原因，按各 provider 原值映射，不统一写 "stop"。
+	FinishReason string `json:"finish_reason,omitempty"`
+	// Usage provider 上报的流式用量，可空（provider 未上报时为 nil）。
+	Usage *Usage `json:"usage,omitempty"`
+}
+
+// streamProviderBody 驱动一条 provider 流：把响应体交给 parser，内容帧一解析
+// 出来就投递，解析结束后按 §31.3 终结契约投递终结帧（T13.04.b 接线）。
+//
+// 必须逐帧投递，不能"先整体解析再投递"：那样消费者要等 provider 把整条回答
+// 生成完才收到第一帧，Stream 就退化成了一次性返回，实时输出无从谈起。parse
+// 的 sink 回调因此同时承担投递与取消检测：sink 返回 false（消费者已取消）时
+// parser 立即停止扫描，也不再继续读响应体。
+//
+// 语义：
+//   - 内容帧按 parser 顺序实时投递；每个 send 都 select ctx.Done，取消即停止。
+//   - 只有 TerminalCompleted 才把 assistant 内容追加为成功历史，并触发 PostResponse
+//     （FinishReason 为 provider 原值，不再伪报 "stop"）。
+//   - error 终结（EOF/provider error/扫描失败/帧损坏）只发终结帧，不追加成功历史、
+//     不触发 PostResponse；已投递的部分 delta 仅供错误展示，不冒充完整回答。
+//   - 取消路径：终结帧只尽力投递一次（channel 有缓冲空位才投），绝不阻塞等待
+//     不存在的消费者；响应体与 channel 的关闭由调用方 goroutine 的 defer 完成。
+func streamProviderBody(
+	ctx context.Context,
+	base *BaseAdapter,
+	controls *RequestControls,
+	model string,
+	body io.Reader,
+	parse func(io.Reader, streamFrameSink) *StreamParseResult,
+	ch chan StreamChunk,
+) {
+	sent := 0
+	cancelled := ctx.Err() != nil
+
+	var result *StreamParseResult
+	if cancelled {
+		// 进入时已取消：不读响应体，直接走取消终结。
+		result = &StreamParseResult{}
+	} else {
+		result = parse(body, func(chunk StreamChunk) bool {
+			if !sendStreamChunk(ctx, controls, ch, chunk) {
+				return false
+			}
+			sent++
+			return true
+		})
+		cancelled = result.sinkCancelled
+	}
+
+	if cancelled || ctx.Err() != nil {
+		terminal := StreamChunk{Done: true, Index: sent, TerminalStatus: TerminalCancelled}
+		select {
+		case ch <- terminal:
+		default:
+		}
+		return
+	}
+
+	status := result.TerminalStatus()
+	terminal := StreamChunk{Done: true, Index: sent, TerminalStatus: status, FinishReason: result.FinishReason, Usage: result.Usage}
+	if status != TerminalCompleted {
+		terminal.Error = result.TerminalError()
+		sendStreamChunk(ctx, controls, ch, terminal)
+		return
+	}
+
+	content := streamResultContent(result.Chunks)
+	assistantMsg := Message{Role: RoleAssistant, Content: content, Blocks: []ContentBlock{{Type: "text", Text: content}}, Timestamp: time.Now()}
+	base.AddMessage(assistantMsg)
+	if sendStreamChunk(ctx, controls, ch, terminal) {
+		_ = notifyAdapterPostResponse(ctx, controls, &AIResponse{Content: content, Blocks: cloneBlocks(assistantMsg.Blocks), Model: model, Usage: derefUsage(result.Usage), FinishReason: result.FinishReason})
+	}
+}
+
+// sendStreamChunk 透传 hook 后发送一帧；ctx 取消时返回 false，由调用方走关闭路径。
+func sendStreamChunk(ctx context.Context, controls *RequestControls, ch chan<- StreamChunk, chunk StreamChunk) bool {
+	notifyAdapterStreamChunk(ctx, controls, chunk)
+	select {
+	case ch <- chunk:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// streamResultContent 拼接 parser 产出的全部内容帧。
+func streamResultContent(chunks []StreamChunk) string {
+	var b strings.Builder
+	for _, chunk := range chunks {
+		b.WriteString(chunk.Delta)
+	}
+	return b.String()
+}
+
+// derefUsage 把可空的流式 usage 投影为 AIResponse 的值字段。
+func derefUsage(usage *Usage) Usage {
+	if usage == nil {
+		return Usage{}
+	}
+	return *usage
 }
 
 // RequestControls 统一请求控制面。
@@ -180,7 +312,7 @@ type ToolTurnResponse struct {
 }
 
 type AdapterConfig struct {
-	APIKey      string        `json:"api_key,omitempty"`
+	APIKey      string        `json:"-"`
 	BaseURL     string        `json:"base_url,omitempty"`
 	Model       string        `json:"model"`
 	Temperature float64       `json:"temperature,omitempty"`

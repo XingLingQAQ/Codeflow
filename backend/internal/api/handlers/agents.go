@@ -11,9 +11,19 @@ import (
 	"github.com/codeflow/backend/internal/websocket"
 )
 
+func requireAgentService(c *gin.Context) (agent.IAgentService, bool) {
+	svc := agent.GetAgentService()
+	if svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "Agent service is not initialized")
+		return nil, false
+	}
+	return svc, true
+}
+
 // GetAgents handles GET /api/v1/agents
 func GetAgents(c *gin.Context) {
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	result, err := svc.ListAgents(c.Request.Context())
 	if err != nil {
 		respondInternalError(c, "list agents", err)
@@ -30,7 +40,8 @@ func GetAgent(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	result, err := svc.GetAgent(c.Request.Context(), id)
 	if err != nil {
 		respondInternalError(c, "get agent", err)
@@ -52,7 +63,8 @@ func CreateAgent(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	result, err := svc.CreateAgent(c.Request.Context(), &req)
 	if err != nil {
 		respondError(c, http.StatusBadRequest, err.Error())
@@ -75,7 +87,8 @@ func UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	result, err := svc.UpdateAgent(c.Request.Context(), id, &req)
 	if err != nil {
 		if errors.Is(err, agent.ErrAgentNotFound) {
@@ -96,7 +109,8 @@ func DeleteAgent(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	if err := svc.DeleteAgent(c.Request.Context(), id); err != nil {
 		if errors.Is(err, agent.ErrAgentNotFound) {
 			respondError(c, http.StatusNotFound, "Agent not found")
@@ -121,7 +135,8 @@ func GetAgentLogs(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	result, err := svc.GetAgentLogs(c.Request.Context(), id, limit)
 	if err != nil {
 		respondInternalError(c, "get agent logs", err)
@@ -139,7 +154,8 @@ func GetConversationTrace(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	result, err := svc.GetConversationTrace(c.Request.Context(), sessionID)
 	if err != nil {
 		respondInternalError(c, "get conversation trace", err)
@@ -161,7 +177,8 @@ func StopConversation(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	if err := svc.StopConversation(c.Request.Context(), sessionID); err != nil {
 		respondInternalError(c, "stop conversation", err)
 		return
@@ -186,7 +203,8 @@ func RetryConversation(c *gin.Context) {
 		return
 	}
 
-	svc := agent.GetAgentService()
+	svc, ok := requireAgentService(c)
+	if !ok { return }
 	if err := svc.RetryConversation(c.Request.Context(), sessionID); err != nil {
 		respondInternalError(c, "retry conversation", err)
 		return
@@ -205,6 +223,18 @@ func RetryConversation(c *gin.Context) {
 
 // StreamConversation handles WebSocket /api/v1/conversations/:sessionId/stream
 func StreamConversation(c *gin.Context) {
+	sessionID := c.Param("sessionId")
+	svc, ok := requireAgentService(c)
+	if !ok { return }
+	trace, err := svc.GetConversationTrace(c.Request.Context(), sessionID)
+	if err != nil {
+		respondInternalError(c, "authorize conversation stream", err)
+		return
+	}
+	if trace == nil {
+		respondError(c, http.StatusNotFound, "Conversation not found")
+		return
+	}
 	hub := websocket.GetHub()
-	websocket.HandleWebSocket(hub, c)
+	websocket.HandleScopedWebSocket(hub, c, sessionID)
 }

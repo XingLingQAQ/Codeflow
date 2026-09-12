@@ -1,6 +1,11 @@
 package audit
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // AuditEventType 审计事件类型
 type AuditEventType string
@@ -43,6 +48,73 @@ const (
 // GenesisHash 创世块哈希（链的起点）
 const GenesisHash = "0000000000000000000000000000000000000000000000000000000000000000"
 
+// ActorType 审计操作者类型，固定四枚举（I-50）。
+// user=终端用户（如审批人）；agent=AI Agent 执行体；system=服务端自身
+// （恢复器、后台任务、迁移）；integration=外部集成（如已验签的 GitHub webhook）。
+type ActorType string
+
+const (
+	ActorTypeUser        ActorType = "user"
+	ActorTypeAgent       ActorType = "agent"
+	ActorTypeSystem      ActorType = "system"
+	ActorTypeIntegration ActorType = "integration"
+)
+
+const (
+	// MaxActorIDLength 操作者 ID 最大字节长度
+	MaxActorIDLength = 128
+	// MaxActorSourceLength 操作者来源标识最大字节长度
+	MaxActorSourceLength = 64
+)
+
+// Actor 校验错误哨兵，调用方可 errors.Is 判定。
+var (
+	ErrInvalidActorType   = errors.New("audit: invalid actor type")
+	ErrEmptyActorID       = errors.New("audit: actor id is empty")
+	ErrActorIDTooLong     = errors.New("audit: actor id too long")
+	ErrActorSourceTooLong = errors.New("audit: actor source too long")
+)
+
+// Actor 带校验的审计操作者身份（I-50 / T0.10）。
+//
+// Source 记录身份在何处确立，用于区分可信等级，约定值：
+//   - 服务端可信来源：如 "http-session"（服务端会话认证）、"approval"（审批流）、
+//     "recovery"（系统恢复）、"webhook:github"（已验签的集成回调）；
+//   - 客户端声明：如 "client-header"（请求头自报），仅作如实记录，不可作为授权依据。
+//
+// Validate 只做形状校验（type 枚举、id 非空且不超长、source 不超长）；
+// 它无法也无意证明身份可信——可信性由入口（认证中间件、恢复器、webhook 验签）
+// 在注入上下文时保证。校验拒绝冒充形状（如空 id 声称 agent），但不判断来源真假。
+type Actor struct {
+	Type   ActorType `json:"type"`
+	ID     string    `json:"id"`
+	Source string    `json:"source,omitempty"`
+}
+
+// Validate 校验操作者身份形状；非法 type、空 id、id/source 超长均拒绝。
+func (a Actor) Validate() error {
+	switch a.Type {
+	case ActorTypeUser, ActorTypeAgent, ActorTypeSystem, ActorTypeIntegration:
+	default:
+		return fmt.Errorf("%w: %q", ErrInvalidActorType, string(a.Type))
+	}
+	if strings.TrimSpace(a.ID) == "" {
+		return ErrEmptyActorID
+	}
+	if len(a.ID) > MaxActorIDLength {
+		return fmt.Errorf("%w: %d > %d", ErrActorIDTooLong, len(a.ID), MaxActorIDLength)
+	}
+	if len(a.Source) > MaxActorSourceLength {
+		return fmt.Errorf("%w: %d > %d", ErrActorSourceTooLong, len(a.Source), MaxActorSourceLength)
+	}
+	return nil
+}
+
+// AuditActor 转换为存量审计条目的参与者形状（兼容挂载，Source 为 omitempty 新增）。
+func (a Actor) AuditActor() AuditActor {
+	return AuditActor{ID: a.ID, Type: string(a.Type), Source: a.Source}
+}
+
 // AuditActor 审计参与者
 type AuditActor struct {
 	ID        string `json:"id"`
@@ -50,6 +122,9 @@ type AuditActor struct {
 	Name      string `json:"name,omitempty"`
 	IP        string `json:"ip,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// Source 身份来源（见 Actor.Source 约定）；omitempty 兼容新增，
+	// 空值时序列化与哈希与旧条目完全一致。
+	Source string `json:"source,omitempty"`
 }
 
 // AuditResource 审计资源

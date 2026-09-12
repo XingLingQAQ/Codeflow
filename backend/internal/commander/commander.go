@@ -360,7 +360,7 @@ func BuildAgentConfigFromResolved(role AgentRole, resolved *config.ResolvedConfi
 	return agent, nil
 }
 
-func BuildAgentFromResolved(role AgentRole, resolved *config.ResolvedConfig) (*AgentConfig, error) {
+func BuildAgentFromResolved(ctx context.Context, role AgentRole, resolved *config.ResolvedConfig) (*AgentConfig, error) {
 	if resolved == nil {
 		return nil, fmt.Errorf("resolved config is nil")
 	}
@@ -372,9 +372,16 @@ func BuildAgentFromResolved(role AgentRole, resolved *config.ResolvedConfig) (*A
 	if err != nil {
 		return nil, err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	apiKey, err := resolved.ResolveAPIKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("resolve API channel credential: %w", err)
+	}
 
 	adapterConfig := &adapters.AdapterConfig{
-		APIKey:           resolved.APIChannel.APIKey,
+		APIKey:           apiKey,
 		BaseURL:          resolved.APIChannel.BaseURL,
 		Model:            strings.TrimSpace(resolved.Model),
 		Temperature:      resolved.Temperature,

@@ -17,6 +17,8 @@
 | G02 | 文档 SSOT（design/plans/adr） | ✅ | **M0.6**：`docs/README.md` IA；design/plans/adr/requirements；5 份 2.0 设计纳入跟踪；early/historical 迁入；ADR 0001/0002 | 持续按 IA 写入；禁止再散落 plan/archive | M0 | **2026-07-13**：见 `docs/adr/0001-docs-information-architecture.md`；openapi 仍 `backend/docs/openapi.yaml` |
 | G03 | 本矩阵持续跟踪 | ✅ | 本文档 | 每里程碑更新 | M0 | |
 | G30 | CGO / SQLite 基线决策 | ✅ | **M0.9**：维持 `mattn/go-sqlite3` + `CGO_ENABLED=1`；Makefile `build-all` 对齐为 1；modernc 后置 | 迁移须独立 ADR/PR | M0 | `docs/adr/0003-sqlite-cgo.md` |
+| G32 | Sidecar 信任边界 | ✅ | 默认 loopback；每次启动随机 token；HTTP Bearer；精确 CORS/WS Origin；会话/辩论/项目 WS scope | 启动器消费握手，前端仅内存持有 token；远程配对后置 | Hardening B1 | `docs/adr/0004-sidecar-trust-boundary.md`；认证、轮换、监听、Origin、WS 测试 |
+| G33 | API credential secret boundary | ✅ | `SecretStore` 独立加密文件（Windows DPAPI；非 Windows AES-256-GCM + 外部 master key）；配置读取只返回 `secret_ref`、状态、掩码和版本；旧 `config_json.api_key` 启动迁移 fail-closed；adapter 运行时按引用解析 | 系统钥匙串适配器、健康检查和前端配置 UI | Hardening B2 | `docs/adr/0005-api-credential-secret-store.md`；配置/迁移/轮换/删除/运行时解析测试；CGO/SQLite 全量测试待编译器环境 |
 
 ---
 
@@ -84,7 +86,7 @@
 | G26 | DI 去除全局 Get/Set | ⚠️ | bootstrap B0+B1 八服务 Apply；handlers 仍走 Get* | 按域继续 B2+ 删除全局 | 贯穿 | **2026-07-15 PR-6**：Snapshot/Debate/Summarize 已入 bootstrap |
 | G27 | summarize 合并 | ✅ | **M0.8**：仅 `internal/summarize`；engine（Compressor/TokenCounter）迁入；删除 `internal/summarizer` | 保持单包；API 面不变 | M0 | **2026-07-15**：handlers/OpenAPI 仍 `/api/v1/summarize`；EntitySkeleton 与 API DecisionSkeleton 分型 |
 | G28 | Schema-first OpenAPI | ⚠️ | 有 TS 生成脚本 | YAML SSOT + CI | 贯穿 | 输出 `apps/workbench/generated/`；契约 `backend/docs/openapi.yaml` |
-| G29 | WS 统一事件总线 | ⚠️ | hub 存在；**flow_event 广播**；debate stream 仍独立；**workspace_event** topic（`workspace:root:{hash8}`） | 单连接多路 topics | M2–M3 | 2026-07-26 workspace_event |
+| G29 | WS 统一事件总线 | ⚠️ | hub 存在；后端仍可广播全局 topic；客户端升级已按会话/辩论/项目固定 scope，不能跨资源订阅；workspace 尚未绑定 Project root | 单连接多路受权 topics | M2–M3 | 2026-08-18 B1 完成身份/Origin/scope，项目根绑定待 B3 |
 | G31 | 仓库生成物 hygiene | ✅ | untrack node_modules；gitignore 强化；CI Repo Hygiene Guard | 持续禁止 tracked 生成物/依赖 | M0 | M0.5：`scripts/check-repo-hygiene.mjs` + `pnpm check:repo-hygiene` |
 
 ---
@@ -100,11 +102,32 @@
 | `/api/v1/workspace` | ⚠️ Experimental | list/read/stat/write/promote/promote-all/staged/discard/discard-all；**watch/watches/delete** |
 | `/api/v1/skills` | ⚠️ Experimental | CRUD/match/inject/import/export |
 | `/api/v1/guard` | ⚠️ Experimental | config/rules/check/index/exempt/exemptions |
+| `/api/v1/projects/:id/stream` | ✅ 受权 WS | Bearer 或浏览器子协议认证；仅 `flow:project:{id}` |
 | 静态 embed `/` | ✅ | `static.go` + dist（需构建同步） |
 
 ---
 
 ## 8. 更新日志
+
+### 2026-08-19 B3 Project binding
+
+Project rows now own canonical workspace roots plus default Flow/Session IDs
+and binding state. Workspace APIs resolve `project_id + relative_path`; new
+roots fail closed without `CODEFLOW_WORKSPACE_ROOTS` unless the explicit desktop
+migration switch is enabled. Create uses a forward-only recovery journal;
+archive/restore uses a lifecycle journal, aborts active Flows, stops local
+watchers/dev-servers, and restores a runnable Flow without deleting retained
+Session/Flow history.
+
+### 2026-08-19 B5 durable runtime state
+
+Production now owns durable SQLite stores for Session/message,
+conversation/trace, Memory/Atomic/vector/Raw Archive, and SAMG graph/access
+metadata. Legacy getters no longer manufacture empty in-memory data. Audit
+startup rejects corruption, retained files verify from a persisted rotation
+anchor, shutdown syncs buffered writes, and authenticated mutation successes
+and failures receive baseline records. See ADR 0008; SQLite runtime execution
+remains gated by the CGO-capable B11 environment.
 
 | 日期 | 变更 |
 |---|---|
@@ -156,3 +179,5 @@
 | 2026-07-26 | **OpenAPI 230/230 对齐**：debate solutions、workspace watch、agent routes 全量覆盖；契约检查通过 |
 | 2026-07-26 | **WS topics**：新增 `workspace_event` topic（`workspace:root:{hash8}`）|
 | 2026-07-27 | **G17 豁免审批流**：ExemptionRequest pending/approved/rejected + HTTP；**G16 dev-server** 进程管理 + HTTP；**G20** SelectForStage + skill mounts + registry API；**G12** template JSON import/export/delete HTTP；**插件贡献点注册表** M6.1 切片；**前端 M1** 新壳（浅色默认+深色切换、mock 层、调色板对齐、侧栏展开、黑白简约 chrome） |
+| 2026-08-18 | **后端 Hardening B1**：sidecar 默认 loopback；进程令牌握手；API Bearer；精确 CORS/WS Origin；浏览器 WS 子协议；会话/辩论/项目 topic scope；ADR 0004 |
+| 2026-08-19 | **后端 Hardening B2**：API credential SecretStore 独立加密存储；公开/写入配置模型分离；旧 `config_json.api_key` 迁移 fail-closed；OpenAPI `api_key` writeOnly；ADR 0005；SQLite 依赖验收因当前 Windows 无 `gcc` 留待 B11 |

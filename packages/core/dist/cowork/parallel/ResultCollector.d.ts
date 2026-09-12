@@ -43,12 +43,15 @@ export interface ResultCollectorEvents {
     'result:updated': (workerId: string, result: ExecutionResult) => void;
     'summary:updated': (summary: ResultSummary) => void;
 }
+export type WorkerResult = ExecutionResult;
 /**
  * ResultCollector - 结果收集器
  */
 export declare class ResultCollector extends EventEmitter {
     private results;
     private workers;
+    private isSuccessful;
+    private getDiffs;
     /**
      * 添加结果
      */

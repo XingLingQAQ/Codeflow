@@ -1,5 +1,13 @@
 import { EventEmitter } from 'events';
 import { IConfigManager, GlobalConfig, SessionConfig, RoleConfig, ConfigHierarchy, ResolvedConfig, APIChannel } from './types.js';
+type RuntimeMetadata = {
+    answerStyle?: string;
+    capabilities?: string[];
+    allowedSkills?: string[];
+    allowedHooks?: string[];
+};
+type ResolvedRoleConfig = RoleConfig & RuntimeMetadata;
+type ResolvedRuntimeConfig = ResolvedConfig & RuntimeMetadata;
 /**
  * 配置管理器实现
  * 支持三级配置继承：Global → Session → Role
@@ -12,14 +20,14 @@ export declare class ConfigManager extends EventEmitter implements IConfigManage
     constructor(initialConfig?: Partial<GlobalConfig>);
     loadGlobalConfig(): GlobalConfig;
     loadSessionConfig(sessionId: string): SessionConfig | null;
-    loadRoleConfig(role: 'main' | 'coder' | 'sub'): RoleConfig | null;
+    loadRoleConfig(role: 'main' | 'coder' | 'sub'): ResolvedRoleConfig | null;
     saveGlobalConfig(config: GlobalConfig): void;
     saveSessionConfig(config: SessionConfig): void;
     saveRoleConfig(role: 'main' | 'coder' | 'sub', config: RoleConfig): void;
     /**
      * 解析配置，按优先级合并：Role > Session > Global
      */
-    resolveConfig(sessionId?: string, role?: 'main' | 'coder' | 'sub'): ResolvedConfig;
+    resolveConfig(sessionId?: string, role?: 'main' | 'coder' | 'sub'): ResolvedRuntimeConfig;
     onConfigChange(callback: (config: ConfigHierarchy) => void): () => void;
     private resolveApiChannel;
     private notifyChange;
@@ -37,4 +45,5 @@ export declare class ConfigManager extends EventEmitter implements IConfigManage
      */
     detectConflicts(): string[];
 }
+export {};
 //# sourceMappingURL=ConfigManager.d.ts.map

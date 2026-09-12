@@ -1,0 +1,428 @@
+<title>CodeFlow 风格选型</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ============ 选型页自身（中性，不参与评选） ============ */
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: #fafafa; color: #18181b;
+    font-family: "Public Sans", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 52px 28px 100px; }
+  .eyebrow {
+    font-size: 12px; letter-spacing: .18em; color: #a1a1aa; font-weight: 600;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  h1 { font-size: 34px; letter-spacing: -.02em; font-weight: 750; margin-bottom: 10px; }
+  .lede { color: #52525b; max-width: 46em; font-size: 15px; }
+  .hint {
+    margin-top: 18px; display: inline-block; font-size: 13px; color: #3f3f46;
+    background: #f0f0f2; border: 1px solid #e4e4e7; border-radius: 8px; padding: 8px 14px;
+  }
+  .hint b { font-weight: 700; }
+
+  .option { margin-top: 56px; }
+  .opt-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .opt-tag {
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 13px; font-weight: 700;
+    background: #18181b; color: #fff; border-radius: 6px; padding: 2px 10px;
+  }
+  .opt-head h2 { font-size: 21px; font-weight: 700; letter-spacing: -.01em; }
+  .opt-head .ref { font-size: 12.5px; color: #a1a1aa; }
+  .opt-desc { color: #52525b; font-size: 14px; max-width: 60em; margin-bottom: 16px; }
+  .opt-desc strong { color: #18181b; }
+  .tokens { display: flex; gap: 6px; margin: 0 0 14px; flex-wrap: wrap; }
+  .tk {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11px;
+    font-family: "JetBrains Mono", monospace; color: #52525b;
+    border: 1px solid #e4e4e7; border-radius: 999px; padding: 3px 10px 3px 4px; background: #fff;
+  }
+  .tk i { width: 16px; height: 16px; border-radius: 999px; display: inline-block; border: 1px solid rgba(0,0,0,.08); }
+
+  /* ============ mockup 通用骨架（布局同构，皮肤各异） ============ */
+  .shot {
+    height: 400px; border-radius: 12px; overflow: hidden;
+    display: grid; grid-template-rows: 40px 1fr 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.07), 0 12px 40px rgba(0,0,0,.06);
+    font-size: 11px; user-select: none;
+  }
+  .tb { display: flex; align-items: center; gap: 10px; padding: 0 12px; }
+  .logo { width: 18px; height: 18px; border-radius: 6px; flex: none; }
+  .tb .proj { font-weight: 600; font-size: 11.5px; }
+  .flowp { display: flex; align-items: center; gap: 0; margin: 0 auto; }
+  .fnode { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+  .fseg { width: 26px; height: 2px; flex: none; }
+  .tb .acts { display: flex; gap: 6px; }
+  .body { display: grid; grid-template-columns: 148px 1fr 218px; min-height: 0; }
+  .rail { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px; }
+  .rit { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 11px; }
+  .rit .dot { width: 6px; height: 6px; border-radius: 999px; flex: none; }
+  .canvas { padding: 14px 16px; min-width: 0; overflow: hidden; }
+  .cv-title { font-size: 15px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 2px; }
+  .cv-sub { font-size: 10.5px; margin-bottom: 12px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card { border-radius: 8px; padding: 10px 12px; }
+  .card h4 { font-size: 11px; font-weight: 650; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; }
+  .badge { font-size: 9px; padding: 1px 7px; border-radius: 999px; font-weight: 600; }
+  .ln { height: 6px; border-radius: 3px; margin-top: 6px; }
+  .btnrow { display: flex; gap: 8px; margin-top: 14px; }
+  .btn { font-size: 10.5px; font-weight: 600; padding: 6px 14px; border-radius: 6px; }
+  .agent { display: flex; flex-direction: column; padding: 10px; gap: 8px; }
+.ag-h { font-size: 10.5px; font-weight: 650; display: flex; align-items: center; gap: 6px; }
+  .ag-h .live { width: 6px; height: 6px; border-radius: 999px; }
+  .bubble { border-radius: 10px; padding: 7px 9px; font-size: 10px; line-height: 1.5; max-width: 92%; }
+  .bubble.me { align-self: flex-end; }
+  .composer { margin-top: auto; border-radius: 8px; padding: 7px 10px; font-size: 10px; }
+  .sb { display: flex; align-items: center; gap: 14px; padding: 0 12px; font-size: 9.5px; font-family: "JetBrains Mono", monospace; }
+  .sb .grow { flex: 1; }
+
+  /* ================= A · GEIST 纯黑白 ================= */
+  .m-a.shot { background: #ffffff; color: #171717; border: 1px solid #eaeaea; }
+  .m-a .tb { border-bottom: 1px solid #eaeaea; background: #fff; }
+  .m-a .logo { background: #000; }
+  .m-a .fnode { background: #fff; border: 1.5px solid #d4d4d4; }
+  .m-a .fnode.done { background: #000; border-color: #000; }
+  .m-a .fnode.act { background: #000; border-color: #000; box-shadow: 0 0 0 3px #e5e5e5; }
+  .m-a .fseg { background: #eaeaea; } .m-a .fseg.done { background: #000; }
+  .m-a .acts .btn { border: 1px solid #eaeaea; color: #171717; background: #fff; padding: 4px 10px; }
+  .m-a .rail { border-right: 1px solid #eaeaea; }
+  .m-a .rit { color: #737373; }
+  .m-a .rit .dot { border: 1.2px solid #d4d4d4; }
+  .m-a .rit.done { color: #171717; } .m-a .rit.done .dot { background: #171717; border-color: #171717; }
+  .m-a .rit.act { color: #000; font-weight: 650; background: #f5f5f5; }
+  .m-a .rit.act .dot { background: #000; border-color: #000; }
+  .m-a .cv-sub { color: #737373; }
+  .m-a .card { border: 1px solid #eaeaea; background: #fff; }
+  .m-a .badge.ok { background: #f5f5f5; color: #171717; border: 1px solid #eaeaea; }
+  .m-a .badge.wait { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+  .m-a .ln { background: #f2f2f2; }
+  .m-a .btn.pri { background: #000; color: #fff; }
+  .m-a .btn.sec { border: 1px solid #eaeaea; color: #171717; background: #fff; }
+  .m-a .agent { border-left: 1px solid #eaeaea; background: #fafafa; }
+  .m-a .ag-h .live { background: #16a34a; }
+  .m-a .bubble { background: #fff; border: 1px solid #eaeaea; color: #404040; }
+.m-a .bubble.me { background: #000; color: #fff; border-color: #000; }
+  .m-a .composer { border: 1px solid #eaeaea; background: #fff; color: #a3a3a3; }
+.m-a .sb { border-top: 1px solid #eaeaea; color: #737373; background: #fff; }
+
+  /* ================= B · 钴蓝精密 ================= */
+  .m-b.shot { background: #fbfbfd; color: #1c2030; border: 1px solid #e6e8ef; }
+  .m-b .tb { background: rgba(255,255,255,.85); border-bottom: 1px solid #e6e8ef; backdrop-filter: blur(8px); }
+  .m-b .logo { background: linear-gradient(135deg, #2456e6, #10b3d6); }
+  .m-b .fnode { background: #fff; border: 1.5px solid #d6dae6; }
+  .m-b .fnode.done { background: #2456e6; border-color: #2456e6; }
+  .m-b .fnode.act { background: #2456e6; border-color: #2456e6; box-shadow: 0 0 0 3px rgba(36,86,230,.18), 0 0 10px rgba(36,86,230,.35); }
+  .m-b .fseg { background: #e6e8ef; } .m-b .fseg.done { background: linear-gradient(90deg, #2456e6, #10b3d6); }
+  .m-b .acts .btn { border: 1px solid #e6e8ef; background: #fff; color: #3d4459; padding: 4px 10px; }
+  .m-b .rail { border-right: 1px solid #e6e8ef; background: #fff; }
+  .m-b .rit { color: #6b7288; }
+  .m-b .rit .dot { border: 1.2px solid #c9cede; }
+  .m-b .rit.done { color: #1c2030; } .m-b .rit.done .dot { background: #2456e6; border-color: #2456e6; }
+  .m-b .rit.act { color: #2456e6; font-weight: 650; background: rgba(36,86,230,.07); }
+  .m-b .rit.act .dot { background: #2456e6; border-color: #2456e6; box-shadow: 0 0 6px rgba(36,86,230,.5); }
+  .m-b .cv-sub { color: #6b7288; }
+  .m-b .card { border: 1px solid #e6e8ef; background: #fff; box-shadow: 0 1px 2px rgba(28,32,48,.04); }
+  .m-b .badge.ok { background: rgba(22,163,74,.1); color: #15803d; }
+  .m-b .badge.wait { background: rgba(180,83,9,.1); color: #b45309; }
+  .m-b .ln { background: #eef0f5; }
+  .m-b .btn.pri { background: #2456e6; color: #fff; box-shadow: 0 1px 3px rgba(36,86,230,.35); }
+  .m-b .btn.sec { border: 1px solid #e6e8ef; background: #fff; color: #3d4459; }
+  .m-b .agent { border-left: 1px solid #e6e8ef; background: #f7f8fb; }
+  .m-b .ag-h .live { background: #10b3d6; box-shadow: 0 0 6px rgba(16,179,214,.6); }
+  .m-b .bubble { background: #fff; border: 1px solid #e6e8ef; color: #3d4459; }
+  .m-b .bubble.me { background: #2456e6; color: #fff; border: none; }
+  .m-b .composer { border: 1px solid #e6e8ef; background: #fff; color: #9aa1b5; box-shadow: inset 0 1px 2px rgba(28,32,48,.03); }
+  .m-b .sb { border-top: 1px solid #e6e8ef; color: #6b7288; background: #fff; }
+
+  /* ================= C · 无边框填充 ================= */
+  .m-c.shot { background: #ffffff; color: #33322e; }
+  .m-c .tb { background: #fff; }
+  .m-c .logo { background: #33322e; border-radius: 7px; }
+  .m-c .fnode { background: #e8e7e3; }
+  .m-c .fnode.done { background: #33322e; }
+  .m-c .fnode.act { background: #33322e; box-shadow: 0 0 0 3px #e8e7e3; }
+  .m-c .fseg { background: #efeeeb; } .m-c .fseg.done { background: #b6b4ad; }
+  .m-c .acts .btn { background: #f4f3f0; color: #55534d; padding: 4px 10px; }
+  .m-c .rail { background: #f9f8f6; margin: 0 0 0 8px; border-radius: 10px; height: calc(100% - 16px); align-self: center; }
+  .m-c .rit { color: #83817a; border-radius: 7px; }
+  .m-c .rit .dot { background: #d5d3cd; }
+  .m-c .rit.done { color: #33322e; } .m-c .rit.done .dot { background: #33322e; }
+  .m-c .rit.act { color: #33322e; font-weight: 650; background: #ebe9e5; }
+  .m-c .rit.act .dot { background: #33322e; }
+  .m-c .cv-sub { color: #83817a; }
+  .m-c .card { background: #f7f6f4; border-radius: 10px; }
+  .m-c .badge.ok { background: #dcf0e2; color: #1e6b3c; }
+  .m-c .badge.wait { background: #fbeeda; color: #8a5a13; }
+  .m-c .ln { background: #eae9e5; }
+.m-c .btn.pri { background: #33322e; color: #fff; border-radius: 8px; }
+  .m-c .btn.sec { background: #f4f3f0; color: #55534d; border-radius: 8px; }
+  .m-c .agent { background: #f9f8f6; margin: 0 8px 0 0; border-radius: 10px; height: calc(100% - 16px); align-self: center; }
+  .m-c .ag-h .live { background: #4ba36a; }
+  .m-c .bubble { background: #fff; color: #55534d; box-shadow: 0 1px 2px rgba(51,50,46,.06); }
+  .m-c .bubble.me { background: #33322e; color: #fff; }
+  .m-c .composer { background: #fff; color: #a5a39b; box-shadow: 0 1px 2px rgba(51,50,46,.06); }
+  .m-c .sb { color: #83817a; background: #fff; }
+  .m-c .body { gap: 0; align-items: stretch; }
+
+  /* ================= D · 石墨机房（深色） ================= */
+  .m-d.shot { background: #131417; color: #e6e8ee; border: 1px solid #26282e; }
+  .m-d .tb { background: rgba(22,23,27,.9); border-bottom: 1px solid #26282e; }
+  .m-d .logo { background: linear-gradient(135deg, #2dd4e8, #1a6fd4); }
+  .m-d .fnode { background: #1d1f24; border: 1.5px solid #34373f; }
+  .m-d .fnode.done { background: #e6e8ee; border-color: #e6e8ee; }
+  .m-d .fnode.act { background: #2dd4e8; border-color: #2dd4e8; box-shadow: 0 0 0 3px rgba(45,212,232,.15), 0 0 12px rgba(45,212,232,.5); }
+  .m-d .fseg { background: #26282e; } .m-d .fseg.done { background: #565b66; }
+  .m-d .acts .btn { border: 1px solid #2c2f36; background: #1a1c20; color: #b9bdc9; padding: 4px 10px; }
+  .m-d .rail { border-right: 1px solid #26282e; background: #16171b; }
+  .m-d .rit { color: #7d8290; }
+  .m-d .rit .dot { border: 1.2px solid #3d414b; }
+  .m-d .rit.done { color: #cfd3dc; } .m-d .rit.done .dot { background: #cfd3dc; border-color: #cfd3dc; }
+  .m-d .rit.act { color: #2dd4e8; font-weight: 650; background: rgba(45,212,232,.08); }
+  .m-d .rit.act .dot { background: #2dd4e8; border-color: #2dd4e8; box-shadow: 0 0 8px rgba(45,212,232,.7); }
+  .m-d .cv-sub { color: #7d8290; }
+.m-d .card { border: 1px solid #26282e; background: #1a1c20; }
+  .m-d .badge.ok { background: rgba(74,222,128,.12); color: #4ade80; }
+  .m-d .badge.wait { background: rgba(224,163,74,.12); color: #e0a34a; }
+  .m-d .ln { background: #24262c; }
+  .m-d .btn.pri { background: #e6e8ee; color: #131417; }
+  .m-d .btn.sec { border: 1px solid #2c2f36; background: #1a1c20; color: #b9bdc9; }
+  .m-d .agent { border-left: 1px solid #26282e; background: #16171b; }
+  .m-d .ag-h .live { background: #2dd4e8; box-shadow: 0 0 8px rgba(45,212,232,.8); }
+  .m-d .bubble { background: #1d1f24; border: 1px solid #26282e; color: #b9bdc9; }
+  .m-d .bubble.me { background: #e6e8ee; color: #131417; border: none; }
+  .m-d .composer { border: 1px solid #2c2f36; background: #1a1c20; color: #6b7080; }
+  .m-d .sb { border-top: 1px solid #26282e; color: #7d8290; background: #131417; }
+
+  .foot {
+    margin-top: 64px; padding: 22px 26px; background: #fff; border: 1px solid #e4e4e7;
+    border-radius: 12px; font-size: 14px; color: #3f3f46;
+  }
+  .foot b { color: #18181b; }
+  @media (max-width: 860px) {
+    .shot { font-size: 10px; }
+    .body { grid-template-columns: 120px 1fr 170px; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">CodeFlow Workbench · 设计选型</div>
+  <h1>四种大厂极简方向，选一个</h1>
+  <p class="lede">同一张工作台（顶栏 FlowProgress + 七阶段 Rail + 阶段画布 + Agent 伴侣 + 状态栏），四种皮肤。布局完全相同，差异只在设计语言——重点看边线、颜色用量、圆角和层次的处理方式。</p>
+  <span class="hint">看完回复 <b>A / B / C / D</b>（可以加备注，比如「B 但蓝色收一点」）</span>
+
+  <!-- ============ A ============ -->
+  <div class="option">
+    <div class="opt-head">
+      <span class="opt-tag">A</span>
+      <h2>纯黑白 · 高对比锐利</h2>
+      <span class="ref">参照 Vercel / Geist</span>
+    </div>
+    <p class="opt-desc"><strong>零颜色，黑就是主色。</strong>纯白底 + 一套灰阶 + 纯黑按钮和活动态；1px 发丝边框划分一切，圆角小（6px），阴影几乎不用。语义色只留审批琥珀和成功绿的极小用量。最接近当前代码库的 true-white 方向，改动最小。</p>
+    <div class="tokens">
+      <span class="tk"><i style="background:#ffffff"></i>#FFFFFF</span>
+      <span class="tk"><i style="background:#000000"></i>#000000</span>
+      <span class="tk"><i style="background:#eaeaea"></i>#EAEAEA</span>
+      <span class="tk"><i style="background:#9a3412"></i>#9A3412</span>
+    </div>
+    <div class="shot m-a">
+      <div class="tb">
+        <div class="logo"></div><span class="proj">codeflow-demo</span>
+   <div class="flowp">
+ <span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode act"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span>
+    </div>
+        <div class="acts"><span class="btn">⌘K</span><span class="btn">面板</span></div>
+      </div>
+      <div class="body">
+        <div class="rail">
+     <div class="rit done"><span class="dot"></span>意图</div>
+          <div class="rit done"><span class="dot"></span>设计</div>
+          <div class="rit done"><span class="dot"></span>规划</div>
+          <div class="rit act"><span class="dot"></span>编码</div>
+     <div class="rit"><span class="dot"></span>审查</div>
+<div class="rit"><span class="dot"></span>提交</div>
+        </div>
+     <div class="canvas">
+          <div class="cv-title">编码</div>
+      <div class="cv-sub">3 个文件已暂存 · 守卫检查通过</div>
+          <div class="cards">
+            <div class="card"><h4>暂存区 <span class="badge ok">通过</span></h4><div class="ln" style="width:90%"></div><div class="ln" style="width:72%"></div><div class="ln" style="width:81%"></div></div>
+            <div class="card"><h4>Gate 审批 <span class="badge wait">待审</span></h4><div class="ln" style="width:84%"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:76%"></div></div>
+          </div>
+          <div class="btnrow"><span class="btn pri">推进到审查</span><span class="btn sec">循环本阶段</span></div>
+        </div>
+        <div class="agent">
+        <div class="ag-h"><span class="live"></span>Agent · 编码伴侣</div>
+          <div class="bubble">已按规划实现 flow.ts 的重试逻辑，暂存了 3 个文件。</div>
+          <div class="bubble me">补上超时的单测</div>
+          <div class="bubble">好的，正在生成 flow.test.ts…</div>
+          <div class="composer">输入消息，⏎ 发送</div>
+</div>
+      </div>
+   <div class="sb"><span>阶段 编码</span><span>claude-sonnet-5</span><span>tokens 12.4k</span><span class="grow"></span><span>快照 SNAP-0047</span><span>守卫 ●</span><span>已连接</span></div>
+    </div>
+  </div>
+
+  <!-- ============ B ============ -->
+  <div class="option">
+    <div class="opt-head">
+      <span class="opt-tag">B</span>
+      <h2>钴蓝精密 · 单强调色</h2>
+      <span class="ref">参照 Linear / Stripe</span>
+    </div>
+    <p class="opt-desc"><strong>白底不变，给系统一枚精确的钴蓝。</strong>活动阶段、主按钮、焦点、选中态共用一个蓝，FlowProgress 活动段带一丝辉光，签名渐变顺势改为钴蓝→青（清掉紫色残留）。冷灰中性色 + 轻阴影，观感是精密仪表。这条与你们「渐变紫→cobalt 纠偏」的待决项直接对齐。</p>
+    <div class="tokens">
+      <span class="tk"><i style="background:#fbfbfd"></i>#FBFBFD</span>
+      <span class="tk"><i style="background:#1c2030"></i>#1C2030</span>
+      <span class="tk"><i style="background:#2456e6"></i>#2456E6</span>
+      <span class="tk"><i style="background:#10b3d6"></i>#10B3D6</span>
+    <span class="tk"><i style="background:#b45309"></i>#B45309</span>
+    </div>
+    <div class="shot m-b">
+      <div class="tb">
+        <div class="logo"></div><span class="proj">codeflow-demo</span>
+        <div class="flowp">
+          <span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode act"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span>
+      </div>
+    <div class="acts"><span class="btn">⌘K</span><span class="btn">面板</span></div>
+      </div>
+      <div class="body">
+      <div class="rail">
+          <div class="rit done"><span class="dot"></span>意图</div>
+          <div class="rit done"><span class="dot"></span>设计</div>
+          <div class="rit done"><span class="dot"></span>规划</div>
+ <div class="rit act"><span class="dot"></span>编码</div>
+      <div class="rit"><span class="dot"></span>审查</div>
+       <div class="rit"><span class="dot"></span>提交</div>
+        </div>
+        <div class="canvas">
+          <div class="cv-title">编码</div>
+          <div class="cv-sub">3 个文件已暂存 · 守卫检查通过</div>
+          <div class="cards">
+        <div class="card"><h4>暂存区 <span class="badge ok">通过</span></h4><div class="ln" style="width:90%"></div><div class="ln" style="width:72%"></div><div class="ln" style="width:81%"></div></div>
+   <div class="card"><h4>Gate 审批 <span class="badge wait">待审</span></h4><div class="ln" style="width:84%"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:76%"></div></div>
+          </div>
+          <div class="btnrow"><span class="btn pri">推进到审查</span><span class="btn sec">循环本阶段</span></div>
+     </div>
+        <div class="agent">
+          <div class="ag-h"><span class="live"></span>Agent · 编码伴侣</div>
+          <div class="bubble">已按规划实现 flow.ts 的重试逻辑，暂存了 3 个文件。</div>
+     <div class="bubble me">补上超时的单测</div>
+          <div class="bubble">好的，正在生成 flow.test.ts…</div>
+     <div class="composer">输入消息，⏎ 发送</div>
+        </div>
+      </div>
+      <div class="sb"><span>阶段 编码</span><span>claude-sonnet-5</span><span>tokens 12.4k</span><span class="grow"></span><span>快照 SNAP-0047</span><span>守卫 ●</span><span>已连接</span></div>
+    </div>
+  </div>
+
+  <!-- ============ C ============ -->
+  <div class="option">
+ <div class="opt-head">
+      <span class="opt-tag">C</span>
+<h2>无边框填充 · 柔和暖白</h2>
+      <span class="ref">参照 Notion / Slack 新版</span>
+    </div>
+    <p class="opt-desc"><strong>把边框全部扔掉，用「面」分层。</strong>暖白纸面上，侧栏和 Agent 面板是圆角浅灰色块（悬浮岛），卡片是填充而非描边，圆角放大到 10px，阴影极浅。整体安静、亲和、文档感强——适合把 CodeFlow 表达成「和 AI 一起写作工程」而非「操作机器」。</p>
+    <div class="tokens">
+      <span class="tk"><i style="background:#ffffff"></i>#FFFFFF</span>
+      <span class="tk"><i style="background:#f7f6f4"></i>#F7F6F4</span>
+      <span class="tk"><i style="background:#33322e"></i>#33322E</span>
+    <span class="tk"><i style="background:#1e6b3c"></i>#1E6B3C</span>
+      <span class="tk"><i style="background:#8a5a13"></i>#8A5A13</span>
+    </div>
+    <div class="shot m-c">
+      <div class="tb">
+    <div class="logo"></div><span class="proj">codeflow-demo</span>
+        <div class="flowp">
+       <span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode act"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span>
+  </div>
+        <div class="acts"><span class="btn">⌘K</span><span class="btn">面板</span></div>
+    </div>
+      <div class="body">
+        <div class="rail">
+     <div class="rit done"><span class="dot"></span>意图</div>
+  <div class="rit done"><span class="dot"></span>设计</div>
+        <div class="rit done"><span class="dot"></span>规划</div>
+<div class="rit act"><span class="dot"></span>编码</div>
+          <div class="rit"><span class="dot"></span>审查</div>
+       <div class="rit"><span class="dot"></span>提交</div>
+        </div>
+        <div class="canvas">
+          <div class="cv-title">编码</div>
+          <div class="cv-sub">3 个文件已暂存 · 守卫检查通过</div>
+ <div class="cards">
+            <div class="card"><h4>暂存区 <span class="badge ok">通过</span></h4><div class="ln" style="width:90%"></div><div class="ln" style="width:72%"></div><div class="ln" style="width:81%"></div></div>
+  <div class="card"><h4>Gate 审批 <span class="badge wait">待审</span></h4><div class="ln" style="width:84%"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:76%"></div></div>
+        </div>
+      <div class="btnrow"><span class="btn pri">推进到审查</span><span class="btn sec">循环本阶段</span></div>
+   </div>
+        <div class="agent">
+          <div class="ag-h"><span class="live"></span>Agent · 编码伴侣</div>
+ <div class="bubble">已按规划实现 flow.ts 的重试逻辑，暂存了 3 个文件。</div>
+<div class="bubble me">补上超时的单测</div>
+        <div class="bubble">好的，正在生成 flow.test.ts…</div>
+   <div class="composer">输入消息，⏎ 发送</div>
+        </div>
+   </div>
+      <div class="sb"><span>阶段 编码</span><span>claude-sonnet-5</span><span>tokens 12.4k</span><span class="grow"></span><span>快照 SNAP-0047</span><span>守卫 ●</span><span>已连接</span></div>
+    </div>
+  </div>
+
+  <!-- ============ D ============ -->
+  <div class="option">
+    <div class="opt-head">
+      <span class="opt-tag">D</span>
+      <h2>石墨机房 · 深色指示灯</h2>
+      <span class="ref">参照 Linear 深色 / Raycast</span>
+    </div>
+    <p class="opt-desc"><strong>深色为主视觉，青色只做「灯」。</strong>石墨底上层次靠白透明描边和面板亮度差；唯一的颜色是电光青，只出现在活动阶段、流式光标、连接指示灯——像一间只有指示灯亮着的机房。注意：你们产品承诺是浅色默认，选这条意味着重开该决策（或只用作深色主题精修）。</p>
+    <div class="tokens">
+      <span class="tk"><i style="background:#131417"></i>#131417</span>
+      <span class="tk"><i style="background:#1a1c20"></i>#1A1C20</span>
+      <span class="tk"><i style="background:#e6e8ee;border-color:#ccc"></i>#E6E8EE</span>
+      <span class="tk"><i style="background:#2dd4e8"></i>#2DD4E8</span>
+  <span class="tk"><i style="background:#e0a34a"></i>#E0A34A</span>
+    </div>
+    <div class="shot m-d">
+      <div class="tb">
+      <div class="logo"></div><span class="proj">codeflow-demo</span>
+        <div class="flowp">
+  <span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode done"></span><span class="fseg done"></span><span class="fnode act"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span><span class="fseg"></span><span class="fnode"></span>
+        </div>
+        <div class="acts"><span class="btn">⌘K</span><span class="btn">面板</span></div>
+ </div>
+      <div class="body">
+     <div class="rail">
+          <div class="rit done"><span class="dot"></span>意图</div>
+   <div class="rit done"><span class="dot"></span>设计</div>
+          <div class="rit done"><span class="dot"></span>规划</div>
+          <div class="rit act"><span class="dot"></span>编码</div>
+     <div class="rit"><span class="dot"></span>审查</div>
+          <div class="rit"><span class="dot"></span>提交</div>
+        </div>
+        <div class="canvas">
+   <div class="cv-title">编码</div>
+       <div class="cv-sub">3 个文件已暂存 · 守卫检查通过</div>
+<div class="cards">
+  <div class="card"><h4>暂存区 <span class="badge ok">通过</span></h4><div class="ln" style="width:90%"></div><div class="ln" style="width:72%"></div><div class="ln" style="width:81%"></div></div>
+            <div class="card"><h4>Gate 审批 <span class="badge wait">待审</span></h4><div class="ln" style="width:84%"></div><div class="ln" style="width:60%"></div><div class="ln" style="width:76%"></div></div>
+</div>
+       <div class="btnrow"><span class="btn pri">推进到审查</span><span class="btn sec">循环本阶段</span></div>
+        </div>
+   <div class="agent">
+     <div class="ag-h"><span class="live"></span>Agent · 编码伴侣</div>
+      <div class="bubble">已按规划实现 flow.ts 的重试逻辑，暂存了 3 个文件。</div>
+          <div class="bubble me">补上超时的单测</div>
+          <div class="bubble">好的，正在生成 flow.test.ts…</div>
+     <div class="composer">输入消息，⏎ 发送</div>
+        </div>
+      </div>
+      <div class="sb"><span>阶段 编码</span><span>claude-sonnet-5</span><span>tokens 12.4k</span><span class="grow"></span><span>快照 SNAP-0047</span><span>守卫 ●</span><span>已连接</span></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <b>怎么选：</b>回复字母即可。A 最克制、离现状最近；B 是「有一枚主色」的大厂标准答案，且顺手解决紫→钴蓝纠偏；C 最柔和、最不像 IDE；D 最沉浸但与「浅色默认」承诺冲突。也可以组合，例如「B 的浅色 + D 做深色主题」。
+  </div>
+</div>

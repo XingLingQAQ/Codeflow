@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // SQLiteVectorStore SQLite 向量存储实现
@@ -68,7 +68,10 @@ func (s *SQLiteVectorStore) Initialize() error {
 	}
 
 	// 打开数据库
-	db, err := sql.Open("sqlite3", s.config.DBPath)
+	db, err := dbx.Open(s.config.DBPath,
+		dbx.WithWAL(s.config.WALMode),
+		dbx.WithForeignKeys(false),
+	)
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}

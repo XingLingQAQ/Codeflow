@@ -3,6 +3,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -40,7 +41,9 @@ func (s *AuditService) Log(ctx context.Context, entry *AuditLogEntry) error {
 	// Get previous entry to build hash chain
 	lastEntry, err := s.storage.GetLastEntry(ctx)
 	if err != nil {
-		// If no previous entry, this is the first entry
+		return fmt.Errorf("read audit chain head: %w", err)
+	}
+	if lastEntry == nil {
 		entry.PreviousHash = GenesisHash
 	} else {
 		entry.PreviousHash = lastEntry.Hash
@@ -62,6 +65,9 @@ func (s *AuditService) Query(ctx context.Context, query *AuditQuery) (*AuditQuer
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if query == nil {
+		query = &AuditQuery{}
+	}
 	// Set defaults
 	if query.Limit == 0 {
 		query.Limit = 100

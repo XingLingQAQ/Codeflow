@@ -20,23 +20,23 @@ const (
 type PermissionLevel string
 
 const (
-	PermissionNone      PermissionLevel = "none"
-	PermissionRead      PermissionLevel = "read"
-	PermissionWrite     PermissionLevel = "write"
-	PermissionExecute   PermissionLevel = "execute"
-	PermissionAdmin     PermissionLevel = "admin"
+	PermissionNone    PermissionLevel = "none"
+	PermissionRead    PermissionLevel = "read"
+	PermissionWrite   PermissionLevel = "write"
+	PermissionExecute PermissionLevel = "execute"
+	PermissionAdmin   PermissionLevel = "admin"
 )
 
 // ResourceType 资源类型
 type ResourceType string
 
 const (
-	ResourceFile       ResourceType = "file"
-	ResourceMemory     ResourceType = "memory"
-	ResourceNetwork    ResourceType = "network"
-	ResourceProcess    ResourceType = "process"
-	ResourceConfig     ResourceType = "config"
-	ResourceAudit      ResourceType = "audit"
+	ResourceFile    ResourceType = "file"
+	ResourceMemory  ResourceType = "memory"
+	ResourceNetwork ResourceType = "network"
+	ResourceProcess ResourceType = "process"
+	ResourceConfig  ResourceType = "config"
+	ResourceAudit   ResourceType = "audit"
 )
 
 // Permission 权限定义
@@ -49,41 +49,41 @@ type Permission struct {
 
 // RoleDefinition 角色定义
 type RoleDefinition struct {
-	Name          IsolationAgentRole `json:"name"`
-	Description   string             `json:"description"`
-	Permissions   []Permission       `json:"permissions"`
+	Name          IsolationAgentRole   `json:"name"`
+	Description   string               `json:"description"`
+	Permissions   []Permission         `json:"permissions"`
 	Inherits      []IsolationAgentRole `json:"inherits,omitempty"`
-	MaxConcurrent int                `json:"max_concurrent"`
+	MaxConcurrent int                  `json:"max_concurrent"`
 }
 
 // ContextContainer 上下文容器
 type ContextContainer struct {
-	ID              string             `json:"id"`
-	Role            IsolationAgentRole `json:"role"`
-	ParentID        string             `json:"parent_id,omitempty"`
-	CreatedAt       int64              `json:"created_at"`
-	ExpiresAt       int64              `json:"expires_at,omitempty"`
-	Metadata        map[string]interface{} `json:"metadata,omitempty"`
-	IsolationLevel  string             `json:"isolation_level"`
-	ResourceQuota   *ResourceQuota     `json:"resource_quota,omitempty"`
+	ID             string                 `json:"id"`
+	Role           IsolationAgentRole     `json:"role"`
+	ParentID       string                 `json:"parent_id,omitempty"`
+	CreatedAt      int64                  `json:"created_at"`
+	ExpiresAt      int64                  `json:"expires_at,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	IsolationLevel string                 `json:"isolation_level"`
+	ResourceQuota  *ResourceQuota         `json:"resource_quota,omitempty"`
 }
 
 // ResourceQuota 资源配额
 type ResourceQuota struct {
-	MaxMemoryMB     int   `json:"max_memory_mb"`
-	MaxFileSizeMB   int   `json:"max_file_size_mb"`
-	MaxFileCount    int   `json:"max_file_count"`
-	MaxNetworkConns int   `json:"max_network_conns"`
-	MaxCPUPercent   int   `json:"max_cpu_percent"`
+	MaxMemoryMB     int `json:"max_memory_mb"`
+	MaxFileSizeMB   int `json:"max_file_size_mb"`
+	MaxFileCount    int `json:"max_file_count"`
+	MaxNetworkConns int `json:"max_network_conns"`
+	MaxCPUPercent   int `json:"max_cpu_percent"`
 }
 
 // AccessRequest 访问请求
 type AccessRequest struct {
-	ContainerID  string       `json:"container_id"`
-	Resource     ResourceType `json:"resource"`
-	ResourcePath string       `json:"resource_path,omitempty"`
-	Action       string       `json:"action"`
-	Timestamp    int64        `json:"timestamp"`
+	ContainerID  string                 `json:"container_id"`
+	Resource     ResourceType           `json:"resource"`
+	ResourcePath string                 `json:"resource_path,omitempty"`
+	Action       string                 `json:"action"`
+	Timestamp    int64                  `json:"timestamp"`
 	Context      map[string]interface{} `json:"context,omitempty"`
 }
 
@@ -93,6 +93,12 @@ type AccessDecision struct {
 	Reason      string   `json:"reason"`
 	Constraints []string `json:"constraints,omitempty"`
 	AuditID     string   `json:"audit_id,omitempty"`
+	RuleVersion string   `json:"rule_version"`
+	Operation   string   `json:"operation,omitempty"`
+	Resource    string   `json:"resource,omitempty"`
+	ProjectID   string   `json:"project_id,omitempty"`
+	AgentID     string   `json:"agent_id,omitempty"`
+	PluginID    string   `json:"plugin_id,omitempty"`
 }
 
 // IOValidationResult I/O验证结果
@@ -107,10 +113,10 @@ type IOValidationResult struct {
 type IsolationLevel string
 
 const (
-	IsolationNone     IsolationLevel = "none"
-	IsolationProcess  IsolationLevel = "process"
-	IsolationSandbox  IsolationLevel = "sandbox"
-	IsolationStrict   IsolationLevel = "strict"
+	IsolationNone    IsolationLevel = "none"
+	IsolationProcess IsolationLevel = "process"
+	IsolationSandbox IsolationLevel = "sandbox"
+	IsolationStrict  IsolationLevel = "strict"
 )
 
 // PermissionPriority 权限优先级

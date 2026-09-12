@@ -1,7 +1,19 @@
+import type { AdapterConfig } from '../adapters/types.js';
 /**
  * 配置系统类型定义
  * 支持三级配置继承：Global → Session → Role
  */
+export type CanonicalProvider = 'anthropic' | 'openai' | 'google' | 'local' | 'custom';
+export type APIChannelProvider = Exclude<CanonicalProvider, 'local'>;
+export type RuntimeProviderFamily = 'claude' | 'gemini' | 'codex' | 'openai' | 'custom';
+/**
+ * 将运行时 provider family 归一到声明侧 canonical provider。
+ */
+export declare function toCanonicalProvider(provider: CanonicalProvider | RuntimeProviderFamily): CanonicalProvider;
+/**
+ * 将声明侧 canonical provider 映射到运行时 provider family。
+ */
+export declare function toRuntimeProviderFamily(provider: APIChannelProvider | RuntimeProviderFamily): RuntimeProviderFamily;
 export interface GlobalConfig {
     defaultModel: string;
     apiPool: APIChannel[];
@@ -13,7 +25,7 @@ export interface GlobalConfig {
 export interface APIChannel {
     id: string;
     name: string;
-    provider: 'anthropic' | 'openai' | 'google' | 'custom';
+    provider: APIChannelProvider;
     apiKey?: string;
     baseURL?: string;
     enabled: boolean;
@@ -53,6 +65,7 @@ export interface ResolvedConfig {
     timeout?: number;
     maxRetries?: number;
 }
+export declare function toAdapterConfigPatch(config: ResolvedConfig): Partial<AdapterConfig>;
 export interface IConfigManager {
     loadGlobalConfig(): GlobalConfig;
     loadSessionConfig(sessionId: string): SessionConfig | null;

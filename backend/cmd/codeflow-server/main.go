@@ -22,10 +22,16 @@ import (
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/guard"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/isolation"
+	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/privacy"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
+	"github.com/codeflow/backend/internal/samg"
+	"github.com/codeflow/backend/internal/storage"
 	"github.com/codeflow/backend/internal/summarize"
 	"github.com/codeflow/backend/internal/workspace"
 )
@@ -42,6 +48,11 @@ func main() {
 }
 
 func run() error {
+	trust, err := loadTrustConfig()
+	if err != nil {
+		return err
+	}
+
 	// Get port from environment or use dynamic port (0 = OS assigns)
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -52,10 +63,11 @@ func run() error {
 	allowedOrigins := []string{
 		"http://localhost:3000",
 		"http://localhost:5173",
+		"tauri://localhost",
+		"https://tauri.localhost",
 	}
 	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {
-		// Could parse comma-separated origins here
-		allowedOrigins = append(allowedOrigins, origins)
+		allowedOrigins = splitCommaSeparated(origins)
 	}
 
 	// Check if debug mode is enabled
@@ -63,17 +75,45 @@ func run() error {
 
 	configureHookRuntimeControls()
 
+	// Audit must be ready before config opens so legacy credential migrations
+	// and reconciliation are recorded during startup.
+	auditStore := audit.NewFileAuditStorage(&audit.FileStorageConfig{
+		LogDir:          durableDBPath("audit"),
+		VerifyOnStartup: true,
+	})
+	if err := auditStore.Initialize(); err != nil {
+		return fmt.Errorf("init audit storage: %w", err)
+	}
+	auditSvc := audit.NewAuditService(auditStore)
+	audit.SetAuditService(auditSvc)
+	defer func() {
+		_ = auditSvc.Close()
+		audit.SetAuditService(nil)
+	}()
+
+	policy.RequireEnforcement(true)
+	defer policy.RequireEnforcement(false)
+	policy.SetEvaluator(policy.BootstrapEvaluator())
+	defer policy.SetEvaluator(nil)
+
+	privacyMaster := strings.TrimSpace(os.Getenv("CODEFLOW_PRIVACY_MASTER_KEY"))
+	if privacyMaster == "" {
+		return fmt.Errorf("CODEFLOW_PRIVACY_MASTER_KEY is required")
+	}
+	privacySvc, err := privacy.NewPrivacyService(privacyMaster, nil)
+	if err != nil {
+		return fmt.Errorf("init privacy service: %w", err)
+	}
+	privacy.SetPrivacyService(privacySvc)
+	defer privacy.SetPrivacyService(nil)
+	isolation.SetIsolationService(isolation.NewIsolationService(nil))
+	defer isolation.SetIsolationService(nil)
+
 	configSvc, configClose, err := initConfigService()
 	if err != nil {
 		return err
 	}
 	defer configClose()
-
-	agentSvc := agent.NewInMemoryAgentService()
-
-	if err := registerConfiguredAgents(configSvc, agentSvc); err != nil {
-		return err
-	}
 
 	plannerSvc, plannerClose, err := initPlannerService()
 	if err != nil {
@@ -86,6 +126,38 @@ func run() error {
 		return err
 	}
 	defer projectClose()
+	allowedWorkspaceRoots := parseAllowedWorkspaceRoots()
+	if svc, ok := projectSvc.(*project.SQLiteProjectService); ok {
+		svc.SetAllowedWorkspaceRoots(allowedWorkspaceRoots)
+		svc.SetAllowUnrestrictedWorkspaceRoots(os.Getenv("CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING") == "1")
+	}
+	sessionStore, err := storage.NewSessionStorage(durableDBPath("sessions.db"))
+	if err != nil {
+		return fmt.Errorf("init project session storage: %w", err)
+	}
+	project.SetSessionStorage(sessionStore)
+	defer func() {
+		project.SetSessionStorage(nil)
+		_ = sessionStore.Close()
+	}()
+	agentSvc, err := agent.NewSQLiteAgentService(durableDBPath("sessions.db"))
+	if err != nil { return fmt.Errorf("init agent runtime storage: %w", err) }
+	defer closeFunc(agentSvc)()
+	if err := registerConfiguredAgents(context.Background(), configSvc, agentSvc); err != nil { return err }
+
+	rawArchive := memory.NewSQLiteRawArchive(durableDBPath("raw_archive.db"))
+	if err := rawArchive.Initialize(); err != nil { return fmt.Errorf("init raw archive: %w", err) }
+	defer rawArchive.Close()
+	memorySvc, err := memory.NewSQLiteService(durableDBPath("memory.db"))
+	if err != nil { return fmt.Errorf("init memory service: %w", err) }
+	defer memorySvc.Close()
+	atomicSvc, err := memory.NewSQLiteAtomicMemoryService(context.Background(), durableDBPath("atomic_memory.db"), durableDBPath("atomic_vectors.db"))
+	if err != nil { return fmt.Errorf("init atomic memory service: %w", err) }
+	defer atomicSvc.Close()
+	samgSvc, err := samg.NewSQLiteSAMGService(durableDBPath("samg.db"), nil)
+	if err != nil { return fmt.Errorf("init samg service: %w", err) }
+	defer samgSvc.Close()
+	memoryAgent := memory.NewMemoryAgent(rawArchive, atomicSvc, samgSvc)
 
 	contextSvc, contextClose, err := initContextService()
 	if err != nil {
@@ -102,6 +174,19 @@ func run() error {
 	defer func() { _ = flowEngine.Close() }()
 	flowEngine.SetEventNotifier(floweng.NewWSNotifier(nil))
 	flowEngine.SetSnapshotRestorer(floweng.NewDefaultSnapshotRestorer(snapshotSvc))
+	// Startup recovery is per-record: unrecoverable operations are reported as
+	// diagnostics (also queryable via project.CreateOperationRecoveryDiagnostics)
+	// and logged here without blocking startup; only an unreadable journal is fatal.
+	recoveryDiagnostics, err := project.RecoverIncompleteProjectCreations(context.Background(), projectSvc, flowEngine)
+	if err != nil {
+		return fmt.Errorf("recover incomplete project creation: %w", err)
+	}
+	for _, diagnostic := range recoveryDiagnostics {
+		log.Printf("[WARN] project create operation %q (project %s, state %s) was not recovered: %s", diagnostic.IdempotencyKey, diagnostic.ProjectID, diagnostic.State, diagnostic.Error)
+	}
+	if err := project.RecoverIncompleteProjectLifecycles(context.Background(), projectSvc, flowEngine); err != nil {
+		return fmt.Errorf("recover incomplete project lifecycle: %w", err)
+	}
 	skillReg, err := skill.NewSQLiteRegistry(durableDBPath("skills.db"))
 	if err != nil {
 		return fmt.Errorf("init skill sqlite: %w", err)
@@ -111,18 +196,6 @@ func run() error {
 	if n, err := skillReg.ImportMarkdownDir(context.Background(), filepath.Join(".", ".codeflow", "skills")); err == nil && n > 0 {
 		fmt.Printf("✓ Imported %d skill(s) from .codeflow/skills\n", n)
 	}
-	auditStore := audit.NewFileAuditStorage(&audit.FileStorageConfig{
-		LogDir: durableDBPath("audit"),
-	})
-	if err := auditStore.Initialize(); err != nil {
-		return fmt.Errorf("init audit storage: %w", err)
-	}
-	auditSvc := audit.NewAuditService(auditStore)
-	audit.SetAuditService(auditSvc)
-	defer func() {
-		_ = auditSvc.Close()
-		audit.SetAuditService(nil)
-	}()
 	guardEng := guard.NewEngine(nil, guard.NewAuditBridge(auditSvc))
 	if err := guardEng.OpenExemptionStore(durableDBPath("guard_exemptions.db")); err != nil {
 		return fmt.Errorf("init guard exemption store: %w", err)
@@ -140,6 +213,9 @@ func run() error {
 	defer handlers.ShutdownWorkspaceDevServers()
 	if roots := parseAllowedWorkspaceRoots(); len(roots) > 0 {
 		wsSvc.SetAllowedRoots(roots)
+		if svc, ok := projectSvc.(*project.SQLiteProjectService); ok {
+			svc.SetAllowedWorkspaceRoots(roots)
+		}
 		fmt.Printf("✓ Workspace roots restricted to %d path(s)\n", len(roots))
 	}
 	debateMgr, debateClose := initDebateManager()
@@ -166,19 +242,27 @@ func run() error {
 		},
 	))
 	services := bootstrap.Services{
-		Config:    configSvc,
-		Agent:     agentSvc,
-		Planner:   plannerSvc,
-		Project:   projectSvc,
-		Context:   contextSvc,
-		Snapshot:  snapshotSvc,
-		Debate:    debateMgr,
-		Summarize: summarize.NewSummarizerService(),
-		Floweng:   flowEngine,
-		Guard:     guardEng,
-		Workspace: wsSvc,
-		Skill:     skillReg,
+		Config:        configSvc,
+		Agent:         agentSvc,
+		Planner:       plannerSvc,
+		Project:       projectSvc,
+		Context:       contextSvc,
+		Snapshot:      snapshotSvc,
+		Debate:        debateMgr,
+		Summarize:     summarize.NewSummarizerService(),
+		Floweng:       flowEngine,
+		Guard:         guardEng,
+		Workspace:     wsSvc,
+		Skill:         skillReg,
 		AgentRegistry: agentReg,
+		Session:       sessionStore,
+		Memory:        memorySvc,
+		RawArchive:    rawArchive,
+		AtomicMemory:  atomicSvc,
+		MemoryAgent:   memoryAgent,
+		SAMG:          samgSvc,
+		Preflight:     memory.NewMemoryPreflightService(),
+		RequireDurable: true,
 	}
 	if err := services.Apply(); err != nil {
 		return err
@@ -187,14 +271,20 @@ func run() error {
 
 	// Create API server
 	config := &api.Config{
+		Host:            trust.host,
 		Port:            port,
+		AuthToken:       trust.authToken,
 		AllowedOrigins:  allowedOrigins,
 		EnableDebugMode: debugMode,
+		AllowRemote:     trust.remoteMode,
 	}
 
 	server := api.NewServer(config)
+	if err := server.Validate(); err != nil {
+		return fmt.Errorf("invalid API trust configuration: %w", err)
+	}
 
-	fmt.Printf("\n✓ API server starting on port %s\n", port)
+	fmt.Printf("\n✓ API server starting on %s:%s\n", trust.host, port)
 	fmt.Println("✓ CORS enabled for frontend origins")
 	fmt.Println("✓ Request logging enabled")
 	fmt.Printf("\nEndpoints:\n")
@@ -206,7 +296,7 @@ func run() error {
 	fmt.Println("  GET  /api/v1/blackboard/* - Blackboard collaboration")
 	fmt.Println("  POST /api/v1/debates/*    - Debate validation")
 	fmt.Println("  GET  /api/v1/plans/*      - Plan management")
-	fmt.Printf("\nListening on http://localhost:%s\n", port)
+	fmt.Printf("\nListening on http://%s:%s\n", trust.host, port)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -257,7 +347,7 @@ func initConfigService() (cfgsvc.IConfigService, func(), error) {
 	return svc, closeFunc(svc), nil
 }
 
-func registerConfiguredAgents(configSvc cfgsvc.IConfigService, agentSvc agent.IAgentService) error {
+func registerConfiguredAgents(ctx context.Context, configSvc cfgsvc.IConfigService, agentSvc agent.IAgentService) error {
 	if configSvc == nil {
 		return fmt.Errorf("config service is nil")
 	}
@@ -277,7 +367,7 @@ func registerConfiguredAgents(configSvc cfgsvc.IConfigService, agentSvc agent.IA
 		if err != nil {
 			return err
 		}
-		built, err := commander.BuildAgentFromResolved(agentRole, resolved)
+		built, err := commander.BuildAgentFromResolved(ctx, agentRole, resolved)
 		if err != nil {
 			return fmt.Errorf("build configured agent for role %q: %w", role, err)
 		}
@@ -352,8 +442,9 @@ func durableDBPath(filename string) string {
 }
 
 // parseAllowedWorkspaceRoots reads CODEFLOW_WORKSPACE_ROOTS (comma-separated).
-// Empty means unrestricted (desktop default). When set, all workspace API roots
-// must resolve under one of the listed paths.
+// Empty rejects new Project bindings by default. Desktop migration can opt in
+// to unrestricted canonical bindings with
+// CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1.
 func parseAllowedWorkspaceRoots() []string {
 	raw := strings.TrimSpace(os.Getenv("CODEFLOW_WORKSPACE_ROOTS"))
 	if raw == "" {
@@ -369,4 +460,39 @@ func parseAllowedWorkspaceRoots() []string {
 		out = append(out, p)
 	}
 	return out
+}
+
+func splitCommaSeparated(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+type trustConfig struct {
+	host       string
+	authToken  string
+	remoteMode bool
+}
+
+func loadTrustConfig() (trustConfig, error) {
+	config := trustConfig{
+		host:       strings.TrimSpace(os.Getenv("CODEFLOW_HOST")),
+		authToken:  os.Getenv("CODEFLOW_SIDECAR_TOKEN"),
+		remoteMode: strings.EqualFold(strings.TrimSpace(os.Getenv("CODEFLOW_REMOTE_MODE")), "true"),
+	}
+	if config.host == "" {
+		config.host = "127.0.0.1"
+	}
+	if config.remoteMode {
+		config.authToken = os.Getenv("CODEFLOW_REMOTE_TOKEN")
+		if config.authToken == "" {
+			return trustConfig{}, fmt.Errorf("CODEFLOW_REMOTE_MODE requires CODEFLOW_REMOTE_TOKEN")
+		}
+	}
+	return config, nil
 }

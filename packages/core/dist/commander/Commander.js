@@ -3,6 +3,10 @@
  * 指挥官模式编排 - Main AI 调用 Coder/Sub Agent
  */
 import { CommanderEvent, } from './types.js';
+import { getMessageText } from '../hooks/types.js';
+function isHookAwareAdapter(adapter) {
+    return typeof adapter.setHookManager === 'function';
+}
 export class Commander {
     constructor(hookManager, maxNestingDepth = 5) {
         this.agents = new Map();
@@ -13,6 +17,9 @@ export class Commander {
         this.maxNestingDepth = maxNestingDepth;
     }
     registerAgent(config) {
+        if (this.hookManager && isHookAwareAdapter(config.adapter)) {
+            config.adapter.setHookManager(this.hookManager);
+        }
         this.agents.set(config.role, config);
         this.emit(CommanderEvent.AGENT_REGISTERED, { role: config.role });
     }
@@ -194,7 +201,7 @@ export class Commander {
             metadata: {
                 sourceAgent: sourceRole,
                 graftedAt: Date.now(),
-                tokenCount: Math.ceil(messages.reduce((acc, m) => acc + m.content.length, 0) / 4),
+                tokenCount: Math.ceil(messages.reduce((acc, m) => acc + getMessageText(m.content).length, 0) / 4),
             },
         };
         this.emit(CommanderEvent.CONTEXT_GRAFTED, {
@@ -348,7 +355,7 @@ export class Commander {
      * 使用改进的启发式算法
      */
     estimateMessageTokens(message) {
-        const content = message.content;
+        const content = getMessageText(message.content);
         if (!content)
             return 0;
         let tokens = 0;

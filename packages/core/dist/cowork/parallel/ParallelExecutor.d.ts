@@ -4,11 +4,11 @@
  */
 import { EventEmitter } from 'events';
 import { WorktreeManager, WorktreeInfo } from '../../git/WorktreeManager.js';
-import { CoworkTask, ExecutionResult, ICodeEditor, ExecutorCapabilities } from '../types.js';
+import { AgentRuntimeLike, CoworkTask, ExecutionResult, ExecutorCapabilities, ExecutorRegistration, ICodeEditor } from '../types.js';
 /**
  * Agent Worker 状态
  */
-export type WorkerStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentWorkerStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
 /**
  * Agent Worker 信息
  */
@@ -17,7 +17,7 @@ export interface AgentWorker {
     name: string;
     modelId: string;
     worktree?: WorktreeInfo;
-    status: WorkerStatus;
+    status: AgentWorkerStatus;
     task?: CoworkTask;
     result?: ExecutionResult;
     startedAt?: number;
@@ -61,12 +61,6 @@ export interface ParallelExecutorEvents {
 /**
  * 执行器注册信息
  */
-interface ExecutorRegistration {
-    name: string;
-    editor: ICodeEditor;
-    capabilities: ExecutorCapabilities;
-    modelId: string;
-}
 /**
  * ParallelExecutor - 多 Agent 并行执行器
  */
@@ -74,10 +68,12 @@ export declare class ParallelExecutor extends EventEmitter {
     private config;
     private worktreeManager;
     private workers;
-    private executors;
+    private runtime;
     private isRunning;
     private abortController?;
-    constructor(worktreeManager: WorktreeManager, config?: Partial<ParallelExecutorConfig>);
+    constructor(worktreeManager: WorktreeManager, config?: Partial<ParallelExecutorConfig>, runtime?: AgentRuntimeLike);
+    private cloneEditorForCwd;
+    private createSandboxedExecutor;
     /**
      * 注册执行器
      */
@@ -154,5 +150,4 @@ export declare class ParallelExecutor extends EventEmitter {
      */
     updateConfig(config: Partial<ParallelExecutorConfig>): void;
 }
-export {};
 //# sourceMappingURL=ParallelExecutor.d.ts.map

@@ -1,0 +1,4 @@
+{
+  "code": "forbidden",
+  "message": "actor has no grant for this resource"
+}

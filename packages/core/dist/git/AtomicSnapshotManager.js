@@ -23,7 +23,7 @@ export class AtomicSnapshotManager {
     setConversationProvider(provider) {
         this.conversationProvider = provider;
     }
-    async createSnapshot(description, trigger = 'manual') {
+    async createSnapshot(description, trigger = 'manual', options = {}) {
         const gitSnapshot = await this.gitManager.createSnapshot(description);
         const conversationSnapshot = await this.captureConversation();
         const vectorSnapshot = await this.captureVector();
@@ -48,6 +48,10 @@ export class AtomicSnapshotManager {
                 createdBy: 'system',
                 trigger,
                 tags: [],
+                sessionId: options.sessionId,
+                taskId: options.taskId,
+                agentId: options.agentId,
+                codeChangeEventIds: options.codeChangeEventIds,
             },
         };
         await this.storage.save(snapshot);
@@ -382,7 +386,7 @@ export class AtomicSnapshotManager {
             // 过滤出需要删除的 chunks（时间戳晚于目标状态）
             const toDelete = [];
             for (const chunk of allChunks) {
-                const chunkTimestamp = chunk.metadata?.timestamp || chunk.metadata?.createdAt || 0;
+                const chunkTimestamp = chunk.metadata?.timestamp || 0;
                 if (chunkTimestamp > targetState.timestamp) {
                     toDelete.push(chunk.id);
                 }

@@ -8,7 +8,7 @@ import {
   decideExemptionRequest,
   type ExemptionRequestStatus,
 } from '../services-bridge/guard';
-import { listStageAgents } from '../services-bridge/agents';
+import { listAgents, listStageAgents } from '../services-bridge/agents';
 import { getGlobalConfig } from '../services-bridge/config';
 import { probeChatEndpoint } from '../services-bridge/chat';
 import {
@@ -33,6 +33,7 @@ export const qk = {
   guardRules: ['guard-rules'] as const,
   exemptionRequests: (status?: string) => ['guard-exemption-requests', status ?? 'all'] as const,
   agents: ['agents-registry'] as const,
+  agentRegistry: ['agents-registry-management'] as const,
   chatAvailability: ['chat-availability'] as const,
   globalConfig: ['global-config'] as const,
   workspace: (root: string, path: string) => ['workspace', root, path] as const,
@@ -123,6 +124,16 @@ export function useAgents() {
   return useQuery({
     queryKey: qk.agents,
     queryFn: ({ signal }) => listStageAgents(undefined, signal),
+    retry: 0,
+    staleTime: 60_000,
+  });
+}
+
+/** Strict registry query for management/editor surfaces; never masks backend errors. */
+export function useAgentRegistry() {
+  return useQuery({
+    queryKey: qk.agentRegistry,
+    queryFn: ({ signal }) => listAgents(signal),
     retry: 0,
     staleTime: 60_000,
   });

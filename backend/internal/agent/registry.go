@@ -250,7 +250,7 @@ func (r *InMemoryAgentRegistry) IncrementUsage(ctx context.Context, id string) e
 	a.Stats.UsageCount++
 	a.UpdatedAt = time.Now().UTC()
 	if r.store != nil {
-		if err := r.store.put(a); err != nil {
+		if err := r.store.putStats(a); err != nil {
 			return err
 		}
 	}
@@ -268,7 +268,7 @@ func (r *InMemoryAgentRegistry) SetScore(ctx context.Context, id string, score f
 	a.Stats.Score = score
 	a.UpdatedAt = time.Now().UTC()
 	if r.store != nil {
-		if err := r.store.put(a); err != nil {
+		if err := r.store.putStats(a); err != nil {
 			return err
 		}
 	}

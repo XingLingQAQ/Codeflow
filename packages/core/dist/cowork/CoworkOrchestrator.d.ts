@@ -3,17 +3,12 @@
  * 多 CLI 协作编排器 - 支持并行、顺序、辩论三种协作模式
  */
 import { EventEmitter } from 'events';
-import { CoworkTask, ICodeEditor, ExecutorCapabilities, ParallelOptions, SequentialOptions, DebateOptions, ExecutionResult, BatchExecutionResult, DebateResult } from './types.js';
+import { AgentRuntimeLike, CoworkTask, ICodeEditor, ExecutorCapabilities, ParallelOptions, SequentialOptions, DebateOptions, ExecutionResult, BatchExecutionResult, DebateResult, ExecutorRegistration } from './types.js';
 import { CLIProcessManager } from './process/CLIProcessManager.js';
 import { GitConflictDetector } from './GitConflictDetector.js';
 /**
  * 执行器注册信息
  */
-interface ExecutorRegistration {
-    name: string;
-    editor: ICodeEditor;
-    capabilities: ExecutorCapabilities;
-}
 /**
  * Blackboard 条目
  */
@@ -27,16 +22,16 @@ interface BlackboardEntry {
  * Cowork Orchestrator
  */
 export declare class CoworkOrchestrator extends EventEmitter {
-    private executors;
+    private runtime;
     private processManager;
     private blackboard;
     private runningTasks;
     private gitConflictDetector;
-    constructor(processManager?: CLIProcessManager, cwd?: string);
+    constructor(processManager?: CLIProcessManager, cwd?: string, runtime?: AgentRuntimeLike);
     /**
      * 注册执行器
      */
-    registerExecutor(name: string, editor: ICodeEditor, capabilities: ExecutorCapabilities): void;
+    registerExecutor(name: string, editor: ICodeEditor, capabilities: ExecutorCapabilities, modelId?: string): void;
     /**
      * 获取执行器
      */
@@ -45,6 +40,7 @@ export declare class CoworkOrchestrator extends EventEmitter {
      * 获取所有执行器
      */
     getAllExecutors(): ExecutorRegistration[];
+    getHookManager(): unknown;
     /**
      * 执行单个任务
      */
@@ -89,7 +85,6 @@ export declare class CoworkOrchestrator extends EventEmitter {
      */
     cleanup(): Promise<void>;
     private emitEvent;
-    private buildContextFromResult;
     private parseIssues;
     /**
      * 根据描述推断问题类型

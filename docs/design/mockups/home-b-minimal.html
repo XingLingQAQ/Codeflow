@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeFlow · 首页（B · 台账式极简）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ---------- tokens ---------- */
+  :root{
+    --white:#FFFFFF;
+    --ink:#111111;
+    --ink-2:#5F5F5F;
+    --ink-3:#9A9A9A;
+    --ink-4:#C9C9C9;
+    --line:#ECECEC;
+    --line-2:#F3F3F3;
+    --wash:#FAFAFA;
+    --amber:#D97706;
+    --green:#15803D;
+    --red:#C2410C;
+    --sans:"Geist","Noto Sans SC",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --max:1320px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--white);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+  :focus-visible{outline:1.5px solid var(--ink);outline-offset:3px}
+  code{font-family:var(--mono);font-size:.93em}
+
+  /* ---------- top nav ---------- */
+  .top{position:sticky;top:0;z-index:5;background:rgba(255,255,255,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+  .top .in{max-width:var(--max);margin:0 auto;height:60px;display:flex;align-items:center;gap:28px;padding:0 32px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.01em;font-size:15px}
+  .logo svg{width:22px;height:22px;display:block}
+  .tabs{display:flex;gap:4px}
+  .tabs a{padding:6px 10px;border-radius:6px;color:var(--ink-2);font-size:13.5px}
+  .tabs a:hover{color:var(--ink);background:var(--wash)}
+  .tabs a.on{color:var(--ink);font-weight:500;position:relative}
+  .tabs a.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-16px;height:1.5px;background:var(--ink)}
+  .top .sp{flex:1}
+  .find{display:flex;align-items:center;gap:8px;color:var(--ink-3);font-size:13px;height:34px;padding:0 4px;border-bottom:1px solid transparent}
+  .find:hover{color:var(--ink)}
+  .find svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8}
+  .find kbd{font-family:var(--mono);font-size:11px;color:var(--ink-4);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .bk{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2)}
+  .bk .stack{display:inline-flex}
+  .bk .stack i{width:20px;height:20px;border-radius:50%;border:1.5px solid var(--white);margin-left:-6px;display:grid;place-items:center;font-size:10px;font-weight:600;font-style:normal;background:var(--ink);color:#fff}
+  .bk .stack i:first-child{margin-left:0}
+  .bk .stack i.off{background:var(--line);color:var(--ink-3)}
+  .bell{position:relative;width:34px;height:34px;display:grid;place-items:center;color:var(--ink-2)}
+  .bell svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .bell .n{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--amber);border:1.5px solid var(--white)}
+  .me{width:30px;height:30px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:600}
+
+  /* ---------- page grid ---------- */
+  .page{max-width:var(--max);margin:0 auto;padding:44px 32px 96px;display:grid;grid-template-columns:repeat(12,1fr);column-gap:32px}
+  .lede{grid-column:1/span 3;position:sticky;top:96px;align-self:start}
+  .body{grid-column:4/span 9;min-width:0}
+
+  /* ---------- lede (signature numerals) ---------- */
+  .lede .date{font-size:12.5px;color:var(--ink-3);letter-spacing:.02em}
+  .lede h1{margin:6px 0 30px;font-weight:500;font-size:22px;letter-spacing:-.02em;line-height:1.3}
+  .stat{padding:18px 0;border-top:1px solid var(--line)}
+  .stat:last-of-type{border-bottom:1px solid var(--line)}
+  .stat .n{font-weight:300;font-size:56px;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums}
+  .stat .n small{font-size:20px;font-weight:300;letter-spacing:-.02em;color:var(--ink-3);margin-left:4px}
+  .stat .l{margin-top:8px;font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:8px}
+  .stat .l i{width:6px;height:6px;border-radius:50%;background:var(--ink-4)}
+  .stat.attn .l i{background:var(--amber)}
+  .stat.live .l i{background:var(--ink);animation:blink 1.8s ease-in-out infinite}
+  .stat.done .l i{background:var(--green)}
+  .lede .note{margin-top:22px;font-size:13px;color:var(--ink-3);line-height:1.6}
+  .lede .note a{color:var(--ink-2);border-bottom:1px solid var(--line)}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+  /* ---------- composer ---------- */
+  .ask{padding-bottom:18px;border-bottom:1px solid var(--ink)}
+  .ask textarea{width:100%;border:0;outline:none;resize:none;padding:0;font:inherit;font-size:24px;font-weight:300;letter-spacing:-.015em;line-height:1.4;color:var(--ink);background:transparent;min-height:68px}
+  .ask textarea::placeholder{color:var(--ink-4)}
+  .ask .opts{display:flex;align-items:center;gap:22px;margin-top:8px}
+  .pick{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)}
+  .pick:hover{color:var(--ink)}
+  .pick .k{color:var(--ink-3)}
+  .pick svg{width:11px;height:11px;stroke:var(--ink-4);fill:none;stroke-width:2}
+  .ask .go{margin-left:auto;display:inline-flex;align-items:center;gap:10px;font-weight:500;font-size:14px}
+  .ask .go kbd{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-weight:400}
+  .ask .go svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .ask .go:hover svg{transform:translateX(2px)}
+  .ask .go svg{transition:transform .15s ease}
+
+  /* ---------- sections ---------- */
+  .sec{margin-top:44px}
+  .sec .h{display:flex;align-items:baseline;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  .sec .h h2{margin:0;font-size:11.5px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+  .sec .h .c{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+  .sec .h .more{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+  .sec .h .more:hover{color:var(--ink)}
+
+  /* inbox rows */
+  .row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:24px;align-items:center;padding:16px 0 16px 18px;border-bottom:1px solid var(--line-2);position:relative}
+  .row::before{content:"";position:absolute;left:0;top:18px;bottom:18px;width:2px;background:var(--ink-4)}
+  .row.attn::before{background:var(--amber)}
+  .row.block::before{background:var(--red)}
+  .row .t{font-size:14.5px;font-weight:500;letter-spacing:-.005em;line-height:1.35}
+  .row .t code{background:var(--wash);padding:1px 6px;border-radius:4px;color:var(--ink-2);font-weight:400}
+  .row .m{margin-top:4px;font-size:12.5px;color:var(--ink-3);display:flex;gap:8px;flex-wrap:wrap}
+  .row .m b{font-weight:500;color:var(--ink-2)}
+  .acts{display:flex;gap:18px;font-size:13px;white-space:nowrap}
+  .acts a{color:var(--ink-3)}
+  .acts a:hover{color:var(--ink)}
+  .acts a.y{color:var(--ink);font-weight:500;border-bottom:1px solid var(--ink)}
+  .tail{padding:12px 0 0 18px;font-size:12.5px;color:var(--ink-3);display:flex;gap:16px;align-items:center}
+  .tail a{margin-left:auto;color:var(--ink-2);border-bottom:1px solid var(--line)}
+  .tail a:hover{color:var(--ink);border-color:var(--ink)}
+
+  /* run rows with 1px progress line (signature) */
+  .run{padding:18px 0 16px;border-bottom:1px solid var(--line-2)}
+  .run .hd{display:flex;align-items:baseline;gap:14px}
+  .run .hd .t{font-size:15px;font-weight:500;letter-spacing:-.005em}
+  .run .hd .who{font-size:12.5px;color:var(--ink-3)}
+  .run .hd .who b{font-weight:500;color:var(--ink-2)}
+  .run .hd .el{margin-left:auto;font-family:var(--mono);font-size:12.5px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+  .prog{position:relative;height:28px;margin-top:14px}
+  .prog .base{position:absolute;left:0;right:0;top:21px;height:1px;background:var(--line)}
+  .prog .fill{position:absolute;left:0;top:21px;height:1px;background:var(--ink)}
+  .prog .fill::after{content:"";position:absolute;right:-2px;top:-2px;width:5px;height:5px;background:var(--ink);border-radius:50%;animation:blink 1.4s ease-in-out infinite}
+  .prog .s{position:absolute;top:0;font-size:11px;line-height:1;color:var(--ink-4);transform:translateX(-50%);white-space:nowrap}
+  .prog .s:first-of-type{transform:none}
+  .prog .s:last-of-type{transform:translateX(-100%)}
+  .prog .s.d{color:var(--ink-3)}
+  .prog .s.now{color:var(--ink);font-weight:500}
+  .run.attn .prog .fill{background:var(--amber)}
+  .run.attn .prog .fill::after{background:var(--amber);animation:none}
+  .run.attn .prog .s.now{color:var(--amber)}
+  .run .ft{display:flex;align-items:center;gap:18px;margin-top:8px;font-size:12.5px;color:var(--ink-3)}
+  .run .ft code{color:var(--ink-2)}
+  .run .ft .r{margin-left:auto;display:flex;gap:16px}
+  .run .ft .r a{color:var(--ink-3)}
+  .run .ft .r a.y{color:var(--ink);font-weight:500;border-bottom:1px solid var(--ink)}
+  .pill{display:inline-flex;align-items:center;gap:6px;color:var(--amber);font-weight:500}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--amber)}
+
+  /* projects table */
+  table{width:100%;border-collapse:collapse}
+  th{font-size:11.5px;font-weight:500;color:var(--ink-3);text-align:left;padding:10px 0;border-bottom:1px solid var(--line);letter-spacing:.02em}
+  td{padding:14px 0;border-bottom:1px solid var(--line-2);vertical-align:top;font-size:13.5px}
+  td.nm{font-weight:500;letter-spacing:-.005em}
+  td.nm .p{display:block;font-family:var(--mono);font-size:11.5px;color:var(--ink-3);font-weight:400;margin-top:2px}
+  td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink-2)}
+  td.fl{color:var(--ink-2)}
+  td.fl span{display:block}
+  td.fl span i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ink-4);margin-right:8px;vertical-align:2px}
+  td.fl span i.live{background:var(--ink)}
+  td.fl .st{color:var(--ink-3);font-size:12px;margin-left:8px}
+  td.g{text-align:right}
+  td.g i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green)}
+  td.g i.w{background:var(--amber)}
+  th.g{text-align:right}
+  .empty{color:var(--ink-4)}
+
+  /* ---------- motion ---------- */
+  .fade{opacity:0;transform:translateY(4px);animation:fade .55s cubic-bezier(.2,.7,.2,1) forwards}
+  .fade:nth-child(2){animation-delay:.06s}.fade:nth-child(3){animation-delay:.12s}.fade:nth-child(4){animation-delay:.18s}.fade:nth-child(5){animation-delay:.24s}
+  @keyframes fade{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){
+    .fade{animation:none;opacity:1;transform:none}
+    .prog .fill::after,.stat.live .l i{animation:none}
+    .ask .go svg{transition:none}
+  }
+
+  /* ---------- responsive ---------- */
+  @media (max-width:1100px){
+    .page{grid-template-columns:1fr;row-gap:32px}
+    .lede{grid-column:1;position:static;display:grid;grid-template-columns:repeat(4,1fr);column-gap:24px}
+    .lede .date,.lede h1,.lede .note{grid-column:1/-1}
+    .stat{border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+    .body{grid-column:1}
+  }
+  @media (max-width:720px){
+    .top .in{padding:0 18px;gap:14px}
+    .tabs{display:none}
+    .page{padding:28px 18px 64px}
+    .lede{grid-template-columns:repeat(2,1fr)}
+    .row{grid-template-columns:1fr}
+    .acts{gap:14px}
+    th:nth-child(2),td:nth-child(2){display:none}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="in">
+    <a class="logo" href="#" aria-label="CodeFlow">
+      <svg viewBox="0 0 22 22" aria-hidden="true"><path d="M3 16 C8 16 8 6 13 6 S17 10 19 6" fill="none" stroke="#111" stroke-width="2.2" stroke-linecap="round"/><circle cx="3" cy="16" r="2" fill="#111"/><circle cx="19" cy="6" r="2" fill="#111"/></svg>
+      CodeFlow
+    </a>
+    <nav class="tabs" aria-label="主导航">
+      <a class="on" href="#">首页</a><a href="#">项目</a><a href="#">运行</a><a href="#">Agent</a><a href="#">守卫</a><a href="#">记忆</a><a href="#">密钥库</a>
+    </nav>
+    <span class="sp"></span>
+    <button class="find"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>搜索<kbd>⌘K</kbd></button>
+    <button class="bk" aria-label="执行后端：2 个就绪，共 3 个"><span class="stack"><i>C</i><i>X</i><i class="off">G</i></span><span>2 就绪</span></button>
+    <button class="bell" aria-label="通知，有未读"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="n"></span></button>
+    <div class="me" aria-label="当前用户">X</div>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- ---------- lede ---------- -->
+  <aside class="lede">
+    <div class="date">9 月 3 日 · 星期四</div>
+    <h1>下午好。今天进展顺利。</h1>
+
+    <div class="stat attn fade"><div class="n">3</div><div class="l"><i></i>等你处理</div></div>
+    <div class="stat live fade"><div class="n">2</div><div class="l"><i></i>正在运行</div></div>
+    <div class="stat done fade"><div class="n">5</div><div class="l"><i></i>今天已合入</div></div>
+    <div class="stat fade"><div class="n">12<small>.40</small></div><div class="l"><i></i>今天花费 ¥ · 预算已用 41%</div></div>
+
+    <p class="note">守卫今天拦下 4 次重复代码，都已由 Agent 自行改正。<a href="#">查看守卫记录</a></p>
+  </aside>
+
+  <!-- ---------- body ---------- -->
+  <div class="body">
+
+    <section class="ask fade" aria-label="交给 AI 做一件事">
+      <textarea rows="2" placeholder="把一件事交给 AI。比如：给 PaymentService.Refund 补齐单元测试，覆盖超时和重复退款。"></textarea>
+      <div class="opts">
+        <button class="pick"><span class="k">项目</span>codeflow-backend<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="pick"><span class="k">用</span>Claude Code<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="pick"><span class="k">流程</span>新功能<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="pick"><span class="k">附上文件</span></button>
+        <button class="go">开始运行<kbd>⌘↵</kbd><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+    </section>
+
+    <section class="sec fade">
+      <div class="h"><h2>等你处理</h2><span class="c">3</span><a class="more" href="#">全部</a></div>
+
+      <div class="row attn">
+        <div>
+          <div class="t">要执行 <code>rm -rf node_modules && pnpm install</code></div>
+          <div class="m"><b>Code Artisan</b><span>Claude Code</span><span>·</span><span>billing-service / 修复 #412 退款重复扣款</span><span>·</span><span>2 分钟前</span></div>
+        </div>
+        <div class="acts"><a href="#">查看</a><a href="#">拒绝</a><a class="y" href="#">允许一次</a></div>
+      </div>
+
+      <div class="row block">
+        <div>
+          <div class="t">合入被守卫阻止：<code>handlers/refund_v2.go</code> 与 <code>handlers/refund.go</code> 结构相似 91%</div>
+          <div class="m"><b>Code Artisan</b><span>Codex</span><span>·</span><span>codeflow-backend / 重构退款处理器</span><span>·</span><span>14 分钟前</span></div>
+        </div>
+        <div class="acts"><a href="#">看 diff</a><a href="#">申请豁免</a><a class="y" href="#">让它重做</a></div>
+      </div>
+
+      <div class="row">
+        <div>
+          <div class="t">新记忆待确认：「退款接口必须幂等，用 idempotency_key 去重」</div>
+          <div class="m"><span>来源 <code>run_8f3a</code></span><span>·</span><span>置信度 0.82</span><span>·</span><span>1 小时前</span></div>
+        </div>
+        <div class="acts"><a href="#">丢弃</a><a class="y" href="#">记住</a></div>
+      </div>
+
+      <div class="tail"><span>另有 6 个低风险操作已自动放行。</span><a href="#">今天允许所有低风险操作</a></div>
+    </section>
+
+    <section class="sec fade">
+      <div class="h"><h2>正在运行</h2><span class="c">2</span><a class="more" href="#">所有运行</a></div>
+
+      <article class="run">
+        <div class="hd"><span class="t">修复 #412 退款重复扣款</span><span class="who"><b>Code Artisan</b> · Claude Code · billing-service</span><span class="el">06:42</span></div>
+        <div class="prog" aria-label="进度：运行中">
+          <div class="base"></div><div class="fill" style="width:46%"></div>
+          <span class="s d" style="left:0">准备</span><span class="s now" style="left:46%">运行</span><span class="s" style="left:74%">审阅</span><span class="s" style="left:100%">合入</span>
+        </div>
+        <div class="ft"><span>正在改 <code>internal/payment/refund.go</code></span><span>12 次工具调用</span><span>3 文件</span><span>¥1.86</span><span class="r"><a href="#">停止</a><a class="y" href="#">打开</a></span></div>
+      </article>
+
+      <article class="run attn">
+        <div class="hd"><span class="t">为 auth 模块补齐集成测试</span><span class="who"><b>Scout</b> · Codex · codeflow-backend</span><span class="el">11:08</span></div>
+        <div class="prog" aria-label="进度：等待审批">
+          <div class="base"></div><div class="fill" style="width:46%"></div>
+          <span class="s d" style="left:0">准备</span><span class="s now" style="left:46%">等待审批</span><span class="s" style="left:74%">审阅</span><span class="s" style="left:100%">合入</span>
+        </div>
+        <div class="ft"><span class="pill">等你审批</span><span>要执行 <code>rm -rf node_modules …</code></span><span>27 次工具调用</span><span>6 文件</span><span>¥3.12</span><span class="r"><a href="#">停止</a><a class="y" href="#">去处理</a></span></div>
+      </article>
+    </section>
+
+    <section class="sec fade">
+      <div class="h"><h2>项目</h2><span class="c">4</span><a class="more" href="#">新建或导入</a></div>
+      <table>
+        <thead><tr><th>项目</th><th>流程</th><th>运行中</th><th>流程数</th><th>记忆</th><th class="g">守卫</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="nm">codeflow-backend<span class="p">D:\Project\Codeflow\backend</span></td>
+            <td class="fl"><span><i class="live"></i>重构退款处理器<span class="st">审阅</span></span><span><i class="live"></i>auth 集成测试<span class="st">运行</span></span><span><i></i>迁移到单库<span class="st">规划</span></span></td>
+            <td class="num">2</td><td class="num">3</td><td class="num">128</td><td class="g"><i></i></td>
+          </tr>
+          <tr>
+            <td class="nm">billing-service<span class="p">D:\Project\billing</span></td>
+            <td class="fl"><span><i class="live"></i>修复 #412 重复扣款<span class="st">运行</span></span></td>
+            <td class="num">1</td><td class="num">1</td><td class="num">41</td><td class="g"><i></i></td>
+          </tr>
+          <tr>
+            <td class="nm">docs-site<span class="p">D:\Project\docs-site</span></td>
+            <td class="fl"><span><i></i>更新 API 文档<span class="st">待豁免</span></span></td>
+            <td class="num">0</td><td class="num">1</td><td class="num">9</td><td class="g"><i class="w"></i></td>
+          </tr>
+          <tr>
+            <td class="nm">ml-pipeline<span class="p">D:\Project\ml-pipeline</span></td>
+            <td class="fl empty">还没有流程，交给 AI 一件事就会开始</td>
+            <td class="num">0</td><td class="num">0</td><td class="num">2</td><td class="g"><i></i></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="sec fade">
+      <div class="h"><h2>最近合入</h2><a class="more" href="#">全部历史</a></div>
+      <table>
+        <tbody>
+          <tr><td class="num" style="width:72px">14:20</td><td class="nm">给 Cache 加过期回调</td><td class="fl">codeflow-backend</td><td class="num">3 文件</td><td class="num">run_8f3a</td></tr>
+          <tr><td class="num">11:47</td><td class="nm">修 flaky 测试 TestWatch</td><td class="fl">codeflow-backend</td><td class="num">1 文件</td><td class="num">run_8e90</td></tr>
+          <tr><td class="num">10:05</td><td class="nm">OpenAPI 补 runs 路由</td><td class="fl">codeflow-backend</td><td class="num">2 文件</td><td class="num">run_8d12</td></tr>
+          <tr><td class="num">昨天</td><td class="nm">撤销：错误的迁移脚本</td><td class="fl">billing-service</td><td class="num">—</td><td class="num">run_8b77</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+</main>
+</body>
+</html>

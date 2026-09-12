@@ -1,3 +1,4 @@
+import type { SkillRegistration, ToolRuntimeDecision, ToolRuntimeRiskLevel } from '../tool-runtime/types.js';
 /**
  * Cowork Mode - 多 CLI 协作类型定义
  */
@@ -69,6 +70,61 @@ export interface EditResult {
     diff: Diff;
     message?: string;
 }
+export interface ToolRuntimeExecutionOutcome {
+    decision: ToolRuntimeDecision;
+    risk: ToolRuntimeRiskLevel;
+    isolated: boolean;
+    processId?: string;
+    notes: string[];
+    snapshot?: {
+        command: string;
+        args: string[];
+        cwd?: string;
+        envKeys: string[];
+        boundarySummary: {
+            matched: number;
+            missing: number;
+            required: number;
+        };
+        metadataPreview?: Record<string, unknown>;
+    };
+    fallback?: {
+        attempted: boolean;
+        fromExecutor?: string;
+        toExecutor?: string;
+        reason?: string;
+        recovered: boolean;
+    };
+}
+export interface ExecutorRuntimePolicy {
+    profileId?: string;
+    command?: string;
+    env?: Record<string, string>;
+    metadata?: Record<string, unknown>;
+    boundaries?: Array<{
+        type: 'command' | 'path' | 'network' | 'resource';
+        value: string;
+        risk: ToolRuntimeRiskLevel;
+        required?: boolean;
+        metadata?: Record<string, unknown>;
+    }>;
+    requestedBoundaries?: Array<{
+        type: 'command' | 'path' | 'network' | 'resource';
+        value: string;
+        risk: ToolRuntimeRiskLevel;
+        required?: boolean;
+        metadata?: Record<string, unknown>;
+    }>;
+}
+export interface ExecutorRuntimeContext {
+    actor?: {
+        id: string;
+        type: 'user' | 'system' | 'agent' | 'service';
+        name?: string;
+        sessionId?: string;
+    };
+    policy?: ExecutorRuntimePolicy;
+}
 /**
  * 代码编辑器接口
  */
@@ -113,6 +169,7 @@ export interface CoworkTaskOutput {
     result?: string;
     diffs?: Diff[];
     error?: string;
+    runtime?: ToolRuntimeExecutionOutcome;
     metrics?: {
         duration: number;
         tokensUsed?: number;
@@ -127,6 +184,7 @@ export interface CoworkTask {
     executor: string;
     input: CoworkTaskInput;
     config?: CoworkTaskConfig;
+    runtime?: ExecutorRuntimeContext;
     status: CoworkTaskStatus;
     output?: CoworkTaskOutput;
     createdAt: number;
@@ -148,6 +206,60 @@ export interface ExecutorCapabilities {
         contextAware: boolean;
         codeReview: boolean;
     };
+}
+export interface ExecutorRegistration {
+    name: string;
+    editor: ICodeEditor;
+    capabilities: ExecutorCapabilities;
+    modelId?: string;
+}
+export interface RuntimeExecutionOptions {
+    cwd?: string;
+    worktreePath?: string;
+    executorOverride?: ExecutorRegistration;
+}
+export interface ModelPool {
+    registerExecutor(executor: ExecutorRegistration): void;
+    getModelId(executorName: string): string | undefined;
+    markExecutorHealthy(executorName: string): void;
+    markExecutorUnhealthy(executorName: string, reason?: string): void;
+    getFallbackExecutor(task: CoworkTask, currentExecutor: string): ExecutorRegistration | undefined;
+}
+export interface ContextAssembler {
+    buildContextFromResult(result: ExecutionResult): string;
+    attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask;
+}
+export interface PolicyDecision {
+    allowed: boolean;
+    reason?: string;
+}
+export interface PolicyGuard {
+    canExecute(task: CoworkTask, executor: ExecutorRegistration): Promise<PolicyDecision> | PolicyDecision;
+}
+export interface SandboxedTask {
+    task: CoworkTask;
+    executor?: ExecutorRegistration;
+    release?: () => Promise<void>;
+}
+export interface ExecutionSandbox {
+    prepare(task: CoworkTask, executor: ExecutorRegistration, options?: RuntimeExecutionOptions): Promise<SandboxedTask> | SandboxedTask;
+}
+export interface AgentRuntimeLike {
+    registerExecutor(name: string, editor: ICodeEditor, capabilities: ExecutorCapabilities, modelId?: string): void;
+    registerSkill(skill: SkillRegistration, replace?: boolean): void;
+    getExecutor(name: string): ExecutorRegistration | undefined;
+    getAllExecutors(): ExecutorRegistration[];
+    executeTask(task: CoworkTask, options?: RuntimeExecutionOptions): Promise<ExecutionResult>;
+    buildContextFromResult(result: ExecutionResult): string;
+    attachPreviousResult(task: CoworkTask, result: ExecutionResult): CoworkTask;
+    executeSkill<TOutput = unknown>(skillId: string, input: unknown, context: {
+        taskId?: string;
+        sessionId?: string;
+        agentId?: string;
+        triggerReason?: string;
+        metadata?: Record<string, unknown>;
+    }): Promise<TOutput>;
+    getHookManager?(): unknown;
 }
 /**
  * 协作模式
@@ -202,6 +314,9 @@ export interface ExecutionResult {
     output?: CoworkTaskOutput;
     executor: string;
     duration: number;
+    success?: boolean;
+    diffs?: Diff[];
+    error?: string;
 }
 /**
  * 批量执行结果

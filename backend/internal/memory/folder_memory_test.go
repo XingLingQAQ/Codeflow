@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	_ "github.com/mattn/go-sqlite3"
 )
 
 func setupFolderMemoryService(t *testing.T) (*FolderMemoryService, func()) {

@@ -18,6 +18,10 @@ type GitDiff struct {
 	Status    GitDiffStatus `json:"status"`
 	Additions int           `json:"additions"`
 	Deletions int           `json:"deletions"`
+	// OldPath rename/copy 的源路径；非 rename/copy 为空（E-13：File 始终指向目标路径）
+	OldPath string `json:"old_path,omitempty"`
+	// Score rename/copy 的相似度分数（0-100）；非 rename/copy 为 nil
+	Score *int `json:"score,omitempty"`
 }
 
 // GitCommitInfo 提交信息

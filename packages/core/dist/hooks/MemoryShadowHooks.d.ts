@@ -10,6 +10,7 @@ import { HookManager } from './HookManager.js';
 import { MemoryExtractor } from '../memory/MemoryExtractor.js';
 import { UserProfileService } from '../memory/UserProfileService.js';
 import { ShadowScaffold } from '../shadow/ShadowScaffold.js';
+import { MemoryAgentClient } from '../memory/MemoryAgentClient.js';
 export interface MemoryShadowHooksConfig {
     /** 用户 ID */
     userId: string;
@@ -23,16 +24,19 @@ export interface MemoryShadowHooksConfig {
     enableProfileUpdate: boolean;
     /** 画像更新的最小消息间隔（条数） */
     profileUpdateInterval: number;
+    /** 是否启用 MemoryAgent 双写 */
+    enableAgentIngest: boolean;
 }
 export declare class MemoryShadowHooks {
     private readonly hookManager;
     private readonly memoryExtractor?;
     private readonly profileService?;
     private readonly shadowScaffold;
+    private readonly agentClient?;
     private readonly config;
     private messageCount;
     private lastUserMessage;
-    constructor(hookManager: HookManager, config?: Partial<MemoryShadowHooksConfig>, memoryExtractor?: MemoryExtractor, profileService?: UserProfileService, shadowScaffold?: ShadowScaffold);
+    constructor(hookManager: HookManager, config?: Partial<MemoryShadowHooksConfig>, memoryExtractor?: MemoryExtractor, profileService?: UserProfileService, shadowScaffold?: ShadowScaffold, agentClient?: MemoryAgentClient);
     /**
      * 注册所有 hooks
      */
@@ -46,9 +50,10 @@ export declare class MemoryShadowHooks {
      */
     initializeShadowDirectory(): Promise<void>;
     /**
-     * hook_post_response: 提取记忆
+     * hook_post_response: 提取记忆 + MemoryAgent 双写
      *
-     * 在 AI 响应后，异步提取对话中的记忆
+     * 在 AI 响应后，异步提取对话中的记忆，
+     * 同时通过 MemoryAgent 归档完整对话。
      */
     private onPostResponse;
     /**

@@ -5,10 +5,19 @@ import { HookEvent, } from './types.js';
  * 基于 EventEmitter 的事件订阅/发布机制
  */
 export class HookManager extends EventEmitter {
-    constructor() {
+    constructor(codeChangeEventRecorder, controls) {
         super();
         this.handlers = new Map();
+        this.controls = {
+            enabled: true,
+            allowedHooks: [],
+            hasExplicitAllowlist: false,
+        };
+        this.codeChangeEventRecorder = codeChangeEventRecorder;
         this.initializeHandlers();
+        if (controls) {
+            this.setControls(controls);
+        }
     }
     initializeHandlers() {
         // 初始化所有 Hook 事件的处理器集合
@@ -34,34 +43,65 @@ export class HookManager extends EventEmitter {
             handlers.delete(handler);
         }
     }
+    setControls(controls) {
+        this.controls = {
+            enabled: controls.enabled ?? true,
+            allowedHooks: Array.isArray(controls.allowedHooks)
+                ? controls.allowedHooks.filter((hook) => Object.values(HookEvent).includes(hook))
+                : [],
+            hasExplicitAllowlist: Object.prototype.hasOwnProperty.call(controls, 'allowedHooks'),
+        };
+    }
+    getControls() {
+        return {
+            enabled: this.controls.enabled,
+            allowedHooks: [...this.controls.allowedHooks],
+        };
+    }
+    isEventAllowed(event) {
+        if (!this.controls.enabled) {
+            return false;
+        }
+        if (!this.controls.hasExplicitAllowlist) {
+            return true;
+        }
+        return this.controls.allowedHooks.includes(event);
+    }
     /**
      * 执行 Hook 处理器链
      */
-    async executeHandlers(event, data, reducer) {
+    async executeHandlers(event, data, reducer, options = {}) {
+        if (!this.isEventAllowed(event)) {
+            return undefined;
+        }
         const handlers = this.handlers.get(event);
         if (!handlers || handlers.size === 0) {
             return undefined;
         }
         let result;
+        let currentData = data;
         for (const handler of handlers) {
-            const handlerResult = await handler(data);
+            const handlerInput = options.chainPayload ? currentData : data;
+            const handlerResult = await handler(handlerInput);
             if (reducer && handlerResult !== undefined) {
                 result = reducer(result, handlerResult);
             }
             else if (handlerResult !== undefined) {
                 result = handlerResult;
             }
+            if (options.chainPayload && handlerResult !== undefined) {
+                currentData = handlerResult;
+            }
         }
         // 触发 EventEmitter 事件
-        this.emit(event, data, result);
+        this.emit(event, options.chainPayload ? currentData : data, result);
         return result;
     }
     /**
      * 生命周期 Hook: 发送前拦截
      */
     async hook_before_send(payload) {
-        const result = await this.executeHandlers(HookEvent.BEFORE_SEND, payload, (_, current) => current // 使用最后一个处理器的结果
-        );
+        const result = await this.executeHandlers(HookEvent.BEFORE_SEND, payload, undefined, { chainPayload: true });
         return result || payload;
     }
     /**
@@ -74,6 +114,9 @@ export class HookManager extends EventEmitter {
      * 生命周期 Hook: 流式输出处理
      */
     hook_on_stream(chunk) {
+        if (!this.isEventAllowed(HookEvent.ON_STREAM)) {
+            return;
+        }
         const handlers = this.handlers.get(HookEvent.ON_STREAM);
         if (handlers) {
             handlers.forEach((handler) => handler(chunk));
@@ -102,13 +145,45 @@ export class HookManager extends EventEmitter {
      */
     async hook_after_exec(result) {
         const snapshotId = await this.executeHandlers(HookEvent.AFTER_EXEC, result);
-        return snapshotId || `snapshot_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        const resolvedSnapshotId = snapshotId || `snapshot_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        this.appendCodeChangeEvent(this.determineExecEventType(result), `Command executed: ${result.command}`, {
+            sessionId: result.sessionId,
+            taskId: result.taskId,
+            agentId: result.agentId,
+            snapshotId: resolvedSnapshotId,
+            files: result.filesModified,
+            metadata: {
+                command: result.command,
+                exitCode: result.exitCode,
+                stderr: result.stderr ? result.stderr.slice(0, 200) : undefined,
+                ...result.metadata,
+            },
+        });
+        this.appendCodeChangeEvent('checkpoint_create', `Checkpoint created after command: ${result.command}`, {
+            sessionId: result.sessionId,
+            taskId: result.taskId,
+            agentId: result.agentId,
+            snapshotId: resolvedSnapshotId,
+            files: result.filesModified,
+            metadata: {
+                trigger: 'hook_after_exec',
+                command: result.command,
+                ...result.metadata,
+            },
+        });
+        return resolvedSnapshotId;
     }
     /**
      * 状态管理 Hook: 状态恢复
      */
     async hook_restore_state(snapshotId) {
         await this.executeHandlers(HookEvent.RESTORE_STATE, snapshotId);
+        this.appendCodeChangeEvent('restore', `State restored from snapshot: ${snapshotId}`, {
+            snapshotId,
+            metadata: {
+                trigger: 'restore_state',
+            },
+        });
     }
     /**
      * 记忆检索 Hook: 用户输入提交时触发
@@ -141,6 +216,38 @@ export class HookManager extends EventEmitter {
      */
     async hook_on_task_complete(result) {
         await this.executeHandlers(HookEvent.ON_TASK_COMPLETE, result);
+    }
+    determineExecEventType(result) {
+        const metadataType = result.metadata?.['codeChangeEventType'];
+        if (metadataType === 'file_edit' ||
+            metadataType === 'batch_edit' ||
+            metadataType === 'formatting' ||
+            metadataType === 'command_mutation') {
+            return metadataType;
+        }
+        if ((result.filesModified?.length ?? 0) > 1) {
+            return 'batch_edit';
+        }
+        const command = result.command.toLowerCase();
+        if (command.includes('prettier') || command.includes('eslint') || command.includes('format')) {
+            return 'formatting';
+        }
+        if ((result.filesModified?.length ?? 0) === 1) {
+            return 'file_edit';
+        }
+        return 'command_mutation';
+    }
+    appendCodeChangeEvent(type, summary, options = {}) {
+        this.codeChangeEventRecorder?.appendCodeChangeEvent({
+            type,
+            summary,
+            sessionId: options.sessionId,
+            taskId: options.taskId,
+            agentId: options.agentId,
+            snapshotId: options.snapshotId,
+            files: options.files,
+            metadata: options.metadata,
+        });
     }
     /**
      * 清理所有处理器

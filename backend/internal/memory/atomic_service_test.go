@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 func setupAtomicServiceTestDB(t *testing.T) (*sql.DB, func()) {
@@ -20,7 +20,7 @@ func setupAtomicServiceTestDB(t *testing.T) (*sql.DB, func()) {
 	}
 
 	dbPath := filepath.Join(tmpDir, "atomic_service.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := dbx.Open(dbPath, dbx.WithWAL(false), dbx.WithForeignKeys(false), dbx.WithBusyTimeout(0))
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("open sqlite failed: %v", err)

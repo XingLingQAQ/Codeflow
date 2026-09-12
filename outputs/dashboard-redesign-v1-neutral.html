@@ -1,0 +1,344 @@
+<title>首页重设计 · A 语言</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #ececea; color: #1c1c1a;
+    font-family: "Public Sans", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased; line-height: 1.6;
+  }
+  .page { max-width: 1240px; margin: 0 auto; padding: 52px 24px 120px; }
+  .page > header h1 { font-size: 28px; font-weight: 750; letter-spacing: -.02em; }
+  .page > header p { color: #6f6f6a; margin-top: 6px; font-size: 14px; max-width: 56em; }
+  .pick {
+    display: inline-block; margin-top: 14px; font-size: 13px; background: #fff;
+  border-radius: 12px; padding: 8px 16px; color: #44443f; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .pick b { font-weight: 700; }
+
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ================= 应用框架（与已通过的项目页同一套） ================= */
+  .frame {
+    height: 880px; margin-top: 32px; border-radius: 24px; overflow: hidden;
+    display: grid; grid-template-columns: 212px 1fr;
+ background: #f1f0ec; color: #26251f;
+    box-shadow: 0 2px 6px rgba(20,20,15,.06), 0 24px 64px rgba(20,20,15,.10);
+font-size: 13px; user-select: none;
+  }
+  .side {
+    display: flex; flex-direction: column; padding: 18px 12px;
+    border-right: 1px solid #e2e1db; background: #f1f0ec;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 4px 10px 16px; }
+  .brand .mk { width: 24px; height: 24px; border-radius: 8px; flex: none; background: #26251f; position: relative; color: #f1f0ec; }
+  .brand .mk::after {
+    content: ""; position: absolute; inset: 0; border-radius: 8px;
+  background:
+ radial-gradient(circle at 30% 68%, currentColor 2.2px, transparent 2.6px),
+      radial-gradient(circle at 70% 32%, currentColor 2.2px, transparent 2.6px);
+  }
+  .brand .nm { font-weight: 700; font-size: 14px; letter-spacing: -.01em; }
+  .sep { height: 1px; background: #e2e1db; margin: 6px 10px 12px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nv { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; color: #75746c; }
+  .nv svg { flex: none; opacity: .75; }
+  .nv:hover { background: rgba(38,37,31,.05); }
+  .nv.on { background: #fff; color: #26251f; font-weight: 600; box-shadow: 0 1px 3px rgba(38,37,31,.08); }
+  .side .foot {
+    margin-top: auto; padding: 12px 12px 2px; font-size: 11.5px; color: #92918a;
+    display: flex; align-items: center; gap: 7px; border-top: 1px solid #e2e1db;
+  }
+  .side .foot .cd { width: 7px; height: 7px; border-radius: 999px; background: #3fa060; flex: none; }
+
+  .main { min-width: 0; overflow-y: auto; padding: 28px 30px 30px 26px; }
+
+  /* ---------- 顶部：问候 + 事实行 + 主按钮 ---------- */
+  .m-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .m-head h1 { font-size: 26px; font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
+  .m-head .sub { font-size: 13px; margin-top: 6px; color: #92918a; }
+  .facts-inline { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 13px; font-size: 12.5px; color: #75746c; }
+  .facts-inline b { color: #26251f; font-weight: 650; }
+  .newbtn {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600;
+    padding: 9px 18px; border-radius: 14px; white-space: nowrap; background: #26251f; color: #f6f5f1;
+  }
+  .newbtn::before { content: "+"; font-weight: 500; font-size: 15px; line-height: 1; }
+
+  /* ---------- Gate 收件箱：首屏第一优先级 ---------- */
+  .inbox {
+    margin-top: 22px; background: #fff; border-radius: 20px; padding: 17px 20px 10px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); border-left: 3px solid #c9a13d;
+  }
+  .inbox .hd { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 4px; }
+  .inbox .hd .t { font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .inbox .hd .t svg { color: #8a5a13; }
+  .inbox .hd span { font-size: 11.5px; color: #a5a49c; }
+  .inbox .it {
+ display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 10px; border-radius: 12px;
+  }
+  .inbox .it:hover { background: #f7f6f2; }
+  .inbox .it + .it { border-top: 1px solid #f0efe9; }
+  .inbox .it .l b { font-size: 13px; font-weight: 650; display: block; }
+  .inbox .it .l span { font-size: 11.5px; color: #92918a; }
+  .inbox .it .go {
+    font-size: 11.5px; font-weight: 650; color: #8a5a13; background: #f8f1e0;
+    border-radius: 999px; padding: 4px 13px; white-space: nowrap;
+  }
+
+  /* ---------- 命令行四块 ---------- */
+.cmds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
+  .cmd {
+    background: #fff; border-radius: 18px; padding: 15px 17px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); display: flex; flex-direction: column; gap: 12px;
+  }
+  .cmd:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+  .cmd .ic { width: 30px; height: 30px; border-radius: 10px; background: #f4f3ef; display: grid; place-items: center; color: #55544c; }
+  .cmd .tt { font-size: 13px; font-weight: 650; }
+  .cmd .dd { font-size: 11.5px; color: #92918a; margin-top: 2px; line-height: 1.5; }
+  .cmd .kbd { margin-left: auto; font-size: 10px; color: #92918a; border: 1px solid #e6e5df; border-radius: 6px; padding: 1px 6px; }
+  .cmd .row { display: flex; align-items: flex-start; }
+
+  /* ---------- 分区标题 ---------- */
+  .sec { display: flex; align-items: baseline; justify-content: space-between; margin: 26px 4px 12px; }
+  .sec h2 { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
+  .sec a { font-size: 12px; color: #92918a; text-decoration: none; }
+  .sec a:hover { color: #26251f; }
+
+  /* ---------- 最近项目：通过版卡片的紧凑变体 ---------- */
+  .pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .pc {
+    background: #fff; border-radius: 18px; padding: 16px 18px 13px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); display: flex; flex-direction: column;
+  }
+  .pc:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+  .pc .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .pc h3 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+  .pc h3 i { width: 6px; height: 6px; border-radius: 999px; flex: none; }
+  .stage {
+  font-size: 10.5px; color: #75746c; background: #f4f3ef; border-radius: 999px;
+  padding: 3px 10px; white-space: nowrap; flex: none;
+  }
+  .stage b { color: #26251f; font-weight: 650; }
+  .pc .ds { color: #75746c; font-size: 12px; margin-top: 6px; line-height: 1.6; flex: 1; }
+  .pc .meta {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 11px; padding-top: 10px; border-top: 1px solid #f0efe9;
+    font-size: 11px; color: #92918a;
+  }
+
+  /* ---------- 进行中的工作流：行式，阶段用文字胶囊 ---------- */
+  .flows { background: #fff; border-radius: 18px; box-shadow: 0 1px 2px rgba(38,37,31,.04); overflow: hidden; }
+  .fr { display: flex; align-items: center; gap: 14px; padding: 14px 20px; }
+.fr:hover { background: #fafaf7; }
+  .fr + .fr { border-top: 1px solid #f0efe9; }
+  .fr .nm { font-size: 13.5px; font-weight: 650; min-width: 0; }
+  .fr .tpl { font-size: 11px; color: #a5a49c; }
+  .fr .sp { flex: 1; }
+  .fr .warnpill {
+    font-size: 11px; font-weight: 650; color: #8a5a13; background: #f8f1e0;
+    border-radius: 999px; padding: 4px 12px;
+  }
+  .fr .arrow { color: #b4b3ab; font-size: 14px; }
+
+  /* ---------- Agent：一行五个胶囊卡 ---------- */
+  .agents { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .ag {
+    background: #fff; border-radius: 16px; padding: 13px 14px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); display: flex; flex-direction: column; gap: 7px;
+  }
+  .ag:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+  .ag .top { display: flex; align-items: center; gap: 8px; }
+  .ag .av { width: 26px; height: 26px; border-radius: 9px; background: #f4f3ef; display: grid; place-items: center; color: #55544c; flex: none; }
+  .ag b { font-size: 12.5px; font-weight: 650; }
+  .ag p { font-size: 11px; color: #92918a; line-height: 1.55; flex: 1; }
+  .ag .go { font-size: 11px; font-weight: 600; color: #75746c; }
+  .ag:hover .go { color: #26251f; }
+
+  @media (max-width: 980px) {
+    .frame { grid-template-columns: 176px 1fr; height: auto; }
+    .cmds { grid-template-columns: 1fr 1fr; }
+    .pgrid { grid-template-columns: 1fr; }
+    .agents { grid-template-columns: 1fr 1fr; }
+  }
+
+  .closing {
+    margin-top: 40px; background: #fff; border-radius: 20px; padding: 22px 26px;
+    font-size: 14px; color: #44443f; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .closing b { color: #1c1c1a; }
+  .closing ul { margin: 8px 0 0 18px; }
+  .closing li { margin-top: 4px; font-size: 13.5px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>首页（总览）· A 语言</h1>
+    <p>沿用已通过的项目页设计语言：暖纸底 + 白色悬浮岛 + 侧栏分割线 + 大圆角 + 零进度条。信息序重排为：问候与全局事实 → Gate 收件箱（有待审时置顶）→ 四个命令入口 → 最近项目 → 进行中的工作流 → Agent 快速对话。原首页的大品牌卡（Logo + 口号 + 渐变横线）取消，首屏让给待办。</p>
+    <span class="pick">审核方式：回复「通过」或提意见</span>
+  </header>
+
+  <div class="frame">
+    <aside class="side">
+      <div class="brand"><span class="mk"></span><span class="nm">CodeFlow</span></div>
+      <div class="sep"></div>
+      <nav class="nav">
+        <span class="nv on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>总览</span>
+      <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>项目</span>
+   <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h6m2-5l-4 4m4 6l-4-4"/></svg>工作流</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 7V3M8 13h.01M16 13h.01"/></svg>Agent</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6m0 0a3 3 0 103 3h6M12 9a3 3 0 013 3"/></svg>插件</span>
+    <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h10M18 8h2M4 16h2M10 16h10M14 5v6M8 13v6"/></svg>配置</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10l2 2M19 5l-2 2M7 17l-2 2"/></svg>设置</span>
+    </nav>
+   <div class="foot"><span class="cd"></span>已连接 · 本地后端</div>
+    </aside>
+
+    <main class="main">
+  <!-- 问候 + 全局事实 -->
+      <div class="m-head">
+     <div>
+  <h1>下午好</h1>
+   <p class="sub">8 月 17 日 星期一 · 欢迎回到 CodeFlow</p>
+          <div class="facts-inline">
+ <span>项目 <b class="num">4</b></span>
+    <span>进行中工作流 <b class="num">2</b></span>
+            <span>快照 <b class="num">17</b></span>
+         <span>今日事件 <b class="num">23</b></span>
+        </div>
+        </div>
+        <span class="newbtn">新建项目</span>
+      </div>
+
+      <!-- Gate 收件箱：有待审时是首屏第一块 -->
+    <div class="inbox">
+      <div class="hd">
+          <span class="t">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M12 8v4m0 4h.01"/></svg>
+        1 个 Gate 等待你的决定
+       </span>
+          <span>审批后流程才会继续</span>
+        </div>
+        <div class="it">
+        <div class="l">
+            <b>Nebula Console</b>
+      <span>阶段「编码」请求推进 · 守卫 3 项通过 · 快照 <span class="mono">SNAP-0047</span> 已就绪</span>
+          </div>
+   <span class="go">去审批 →</span>
+        </div>
+      </div>
+
+      <!-- 四命令 -->
+      <div class="cmds">
+        <div class="cmd">
+          <div class="row"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span></div>
+    <div><div class="tt">新建项目</div><div class="dd">从想法开始一条完整流程</div></div>
+        </div>
+    <div class="cmd">
+          <div class="row"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h6m2-5l-4 4m4 6l-4-4"/></svg></span></div>
+  <div><div class="tt">新建工作流</div><div class="dd">在项目中发起七阶段流程</div></div>
+  </div>
+        <div class="cmd">
+          <div class="row"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg></span></div>
+   <div><div class="tt">回到工作台</div><div class="dd">Nebula Console · 编码</div></div>
+   </div>
+        <div class="cmd">
+          <div class="row">
+  <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span>
+     <span class="kbd">⌘ K</span>
+          </div>
+          <div><div class="tt">命令面板</div><div class="dd">全部入口与跳转，一搜即达</div></div>
+        </div>
+      </div>
+
+      <!-- 最近项目 -->
+      <div class="sec"><h2>最近项目</h2><a href="#">查看全部 →</a></div>
+      <div class="pgrid">
+        <div class="pc">
+          <div class="head"><h3><i style="background:#3fa060"></i>Nebula Console</h3><span class="stage">驻留 <b>编码</b></span></div>
+     <p class="ds">下一代星云管理控制台，支持实时监控与自动扩缩容。</p>
+  <div class="meta"><span class="mono">feat/nebula-ui</span><span class="num">1 小时前</span></div>
+        </div>
+        <div class="pc">
+          <div class="head"><h3><i style="background:#3fa060"></i>数据管线重构</h3><span class="stage">驻留 <b>规划</b></span></div>
+      <p class="ds">将批量 ETL 管线迁移至流式处理架构，提升实时性与容错能力。</p>
+          <div class="meta"><span class="mono">refactor/pipeline</span><span class="num">2 小时前</span></div>
+        </div>
+        <div class="pc">
+ <div class="head"><h3><i style="background:#c9a13d"></i>移动端伴侣</h3><span class="stage">待启程 · <b>意图</b></span></div>
+          <p class="ds">远程审批与 Agent 对话的手机伴侣端，支持配对与推送通知。</p>
+          <div class="meta"><span>尚未建立分支</span><span class="num">2 天前</span></div>
+        </div>
+      </div>
+
+    <!-- 进行中的工作流 -->
+      <div class="sec"><h2>进行中的工作流</h2><a href="#">查看全部 →</a></div>
+      <div class="flows">
+     <div class="fr">
+      <div>
+  <div class="nm">Nebula Console</div>
+            <div class="tpl mono">seven-stage-default</div>
+      </div>
+     <span class="sp"></span>
+          <span class="warnpill">编码 · Gate 待审</span>
+        <span class="arrow">→</span>
+        </div>
+    <div class="fr">
+          <div>
+       <div class="nm">数据管线重构</div>
+            <div class="tpl mono">seven-stage-default</div>
+      </div>
+     <span class="sp"></span>
+   <span class="stage">驻留 <b>规划</b></span>
+    <span class="arrow">→</span>
+     </div>
+ </div>
+
+<!-- Agent 快速对话 -->
+      <div class="sec"><h2>开始一次对话</h2><a href="#">Agent 广场 →</a></div>
+      <div class="agents">
+        <div class="ag">
+          <div class="top"><span class="av"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 5-4 1 2-5z"/></svg></span><b>流程指挥官</b></div>
+          <p>规划阶段的编排者，拆解任务、排定优先级。</p>
+   <span class="go">开始对话 →</span>
+        </div>
+        <div class="ag">
+       <div class="top"><span class="av"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 7V3M8 13h.01M16 13h.01"/></svg></span><b>代码工匠</b></div>
+    <p>编码阶段主力，实现、重构与守卫修复。</p>
+          <span class="go">开始对话 →</span>
+        </div>
+     <div class="ag">
+          <div class="top"><span class="av"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></span><b>侦察兵</b></div>
+          <p>研究阶段快速扫描代码库与外部资料。</p>
+          <span class="go">开始对话 →</span>
+        </div>
+  <div class="ag">
+      <div class="top"><span class="av"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></span><b>红队评审</b></div>
+          <p>审查阶段的对抗者，专挑设计与实现的毛病。</p>
+          <span class="go">开始对话 →</span>
+</div>
+    <div class="ag">
+      <div class="top"><span class="av"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 012-2h13v14H6a2 2 0 00-2 2zm0 0a2 2 0 002 2h13"/></svg></span><b>深度研究员</b></div>
+          <p>长程调研与文献沉淀，产出结构化报告。</p>
+          <span class="go">开始对话 →</span>
+    </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="closing">
+    <b>与现有首页（Dashboard.tsx）的差异说明：</b>
+    <ul>
+      <li>取消大品牌卡（Logo + 「从想法到提交」口号 + 渐变横线）：首屏空间让给 Gate 收件箱与命令入口；品牌回归侧栏 Logo 一处。</li>
+      <li>四个统计（项目/进行中/快照/今日事件）从品牌卡里的图标链降为问候语下的一行文字事实，不做统计卡片墙。</li>
+      <li>Gate 收件箱升为首屏第一块（有待审时），琥珀左缘 + 「去审批」胶囊，与项目页的 Gate 语言一致；无待审时该块整体消失，命令行上移。</li>
+      <li>命令四块保留但压扁：图标 + 标题 + 一行描述，去掉品牌色小圆点装饰；「回到工作台」直接显示目的地（项目 · 阶段）。</li>
+      <li>「进行中的工作流」去掉 MiniFlow 七点时间轴（也属于进度条类），改用与项目卡一致的阶段文字胶囊；待审的行用琥珀胶囊直接写「编码 · Gate 待审」。</li>
+      <li>Agent 五卡压缩为一行五个小卡：图标 + 名字 + 一句职责 + 开始对话，去掉角色 Badge 与分隔线堆叠。</li>
+    <li>状态语言与项目页统一：状态 = 小圆点，阶段 = 文字胶囊，警示 = 琥珀，全部真实数据、取不到即隐藏。</li>
+    </ul>
+  </div>
+</div>

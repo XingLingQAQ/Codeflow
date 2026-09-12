@@ -100,6 +100,7 @@ func NextDebateRound(c *gin.Context) {
 		},
 	}
 	hub.BroadcastToTopic(websocket.TopicDebateEvent, msg)
+	hub.BroadcastToTopic("debate:"+id, msg)
 	if result.FlowID != "" {
 		hub.BroadcastToTopic("debate:flow:"+result.FlowID, msg)
 	}
@@ -133,7 +134,7 @@ func ResolveConflict(c *gin.Context) {
 
 	// 通知WebSocket客户端
 	hub := websocket.GetHub()
-	hub.BroadcastToTopic(websocket.TopicDebateEvent, &websocket.Message{
+	msg := &websocket.Message{
 		Type:    websocket.MessageType("debate_event"),
 		Content: "conflict_resolved",
 		Data: map[string]interface{}{
@@ -141,7 +142,9 @@ func ResolveConflict(c *gin.Context) {
 			"conflict_id": conflictID,
 			"resolution":  result.Resolution,
 		},
-	})
+	}
+	hub.BroadcastToTopic(websocket.TopicDebateEvent, msg)
+	hub.BroadcastToTopic("debate:"+debateID, msg)
 
 	respondOK(c, result)
 }
@@ -179,6 +182,7 @@ func SelectSolution(c *gin.Context) {
 		},
 	}
 	hub.BroadcastToTopic(websocket.TopicDebateEvent, msg)
+	hub.BroadcastToTopic("debate:"+id, msg)
 	if result.FlowID != "" {
 		hub.BroadcastToTopic("debate:flow:"+result.FlowID, msg)
 	}
@@ -210,8 +214,21 @@ func ExportDebateReport(c *gin.Context) {
 
 // StreamDebate handles WebSocket /api/v1/debates/:id/stream
 func StreamDebate(c *gin.Context) {
+	id, ok := requireUUIDParam(c, "id", "debate ID")
+	if !ok {
+		return
+	}
+	result, err := debate.GetDebateManager().GetDebate(c.Request.Context(), id)
+	if err != nil {
+		respondInternalError(c, "authorize debate stream", err)
+		return
+	}
+	if result == nil {
+		respondError(c, http.StatusNotFound, "Debate not found")
+		return
+	}
 	hub := websocket.GetHub()
-	websocket.HandleWebSocket(hub, c)
+	websocket.HandleScopedWebSocket(hub, c, "debate:"+id, "debate:"+id)
 }
 
 // ProposeSolution handles POST /api/v1/debates/:id/solutions (additional endpoint)
@@ -236,7 +253,7 @@ func ProposeSolution(c *gin.Context) {
 
 	// 通知WebSocket客户端
 	hub := websocket.GetHub()
-	hub.BroadcastToTopic(websocket.TopicDebateEvent, &websocket.Message{
+	msg := &websocket.Message{
 		Type:    websocket.MessageType("debate_event"),
 		Content: "solution_proposed",
 		Data: map[string]interface{}{
@@ -244,7 +261,9 @@ func ProposeSolution(c *gin.Context) {
 			"solution_id": result.ID,
 			"title":       result.Title,
 		},
-	})
+	}
+	hub.BroadcastToTopic(websocket.TopicDebateEvent, msg)
+	hub.BroadcastToTopic("debate:"+id, msg)
 
 	respondCreated(c, result)
 }

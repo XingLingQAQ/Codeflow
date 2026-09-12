@@ -3,6 +3,7 @@
  * 管理 Agent Worker 的生命周期和资源分配
  */
 import { EventEmitter } from 'events';
+import { AgentRuntime } from '../runtime.js';
 /**
  * 默认配置
  */
@@ -16,32 +17,32 @@ const DEFAULT_CONFIG = {
  * WorkerPool - Worker 池
  */
 export class WorkerPool extends EventEmitter {
-    constructor(worktreeManager, config = {}) {
+    constructor(worktreeManager, config = {}, runtime) {
         super();
         this.workers = new Map();
-        this.executors = new Map();
         this.idleTimers = new Map();
         this.workerCounter = 0;
         this.worktreeManager = worktreeManager;
         this.config = { ...DEFAULT_CONFIG, ...config };
+        this.runtime = runtime || new AgentRuntime();
     }
     /**
      * 注册执行器
      */
     registerExecutor(name, editor, capabilities, modelId) {
-        this.executors.set(name, { name, editor, capabilities, modelId });
+        this.runtime.registerExecutor(name, editor, capabilities, modelId);
     }
     /**
      * 获取执行器
      */
     getExecutor(name) {
-        return this.executors.get(name);
+        return this.runtime.getExecutor(name);
     }
     /**
      * 创建新 Worker
      */
     async createWorker(executorName, task) {
-        const executor = this.executors.get(executorName);
+        const executor = this.runtime.getExecutor(executorName);
         if (!executor) {
             throw new Error(`Executor not found: ${executorName}`);
         }
@@ -53,7 +54,7 @@ export class WorkerPool extends EventEmitter {
         const worker = {
             id: workerId,
             name: executorName,
-            modelId: executor.modelId,
+            modelId: executor.modelId || executorName,
             worktree,
             status: 'idle',
             task,

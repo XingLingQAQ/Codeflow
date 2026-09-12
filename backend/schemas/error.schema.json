@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "error.schema.json",
+  "title": "ErrorBody",
+  "description": "统一错误体 error{code,message,retryable,details}，固定自 §27.3 与 §20.1 失败实例。code 为封闭枚举，13 个错误码逐字固定自 §15 T0.03 卡；前端必须按 code 判断，错误文本不是 UI 判断依据（§15 T0.03 验收断言）。retryable 必填布尔；details 为可选结构化上下文（如 base_changed 的 expected_commit/current_commit），无上下文时缺省。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "message", "retryable"],
+  "properties": {
+    "code": {
+      "enum": [
+        "unauthorized",
+        "auth_expired",
+        "protocol_mismatch",
+        "forbidden",
+        "invalid_request",
+        "conflict",
+        "idempotency_key_reused",
+        "event_gap",
+        "policy_denied",
+        "backend_unavailable",
+        "base_changed",
+        "merge_conflict",
+        "budget_exceeded"
+      ],
+      "description": "封闭枚举，13 个码与 §15 T0.03 卡逐字一致。新增错误码必须在同一变更内扩展此枚举与 fixtures。"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "面向日志/展示的去敏文本；不作为程序判断依据。"
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "客户端是否可以安全重试同一语义操作（通常仍需新的 Idempotency-Key 或沿用 key 对账，按 §27.3）。"
+    },
+    "details": {
+      "type": "object",
+      "description": "可选结构化上下文，如 §20.1 的 {\"expected_commit\": ..., \"current_commit\": ...}；键集合按错误码在各域契约固定，此处不限制。"
+    }
+  }
+}

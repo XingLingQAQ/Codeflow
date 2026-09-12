@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "command_not_found",
+    "message": "this code is mentioned in plan prose but is not in the pinned 13-code enum",
+    "retryable": false
+  },
+  "meta": {"request_id": "rq_1"}
+}

@@ -39,15 +39,7 @@ func RollbackSkillVersion(c *gin.Context) {
 	}
 	s, err := skill.GetRegistry().RollbackVersion(c.Request.Context(), id, body.VersionRowID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		if strings.Contains(err.Error(), "builtin") {
-			respondError(c, http.StatusConflict, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondSkillWriteError(c, "rollback skill version", err)
 		return
 	}
 	respondOK(c, s)

@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 const createTablesSQL = `
@@ -67,12 +68,11 @@ type SessionStorage struct {
 
 // NewSessionStorage 创建会话存储
 func NewSessionStorage(dbPath string) (*SessionStorage, error) {
-	connStr, err := buildSessionSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareSessionDBDir(dbPath); err != nil {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", connStr)
+	db, err := dbx.Open(dbPath, dbx.WithMaxOpenConns(8))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -86,19 +86,17 @@ func NewSessionStorage(dbPath string) (*SessionStorage, error) {
 	return storage, nil
 }
 
-func buildSessionSQLiteConnString(dbPath string) (string, error) {
+func prepareSessionDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
-
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create session db dir: %w", err)
+			return fmt.Errorf("create session db dir: %w", err)
 		}
 	}
-
-	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	return nil
 }
 
 func (s *SessionStorage) initialize() error {
@@ -116,6 +114,15 @@ func (s *SessionStorage) initialize() error {
 		}
 	} else if err != nil {
 		return fmt.Errorf("failed to check schema version: %w", err)
+	} else if version != SchemaVersion {
+		return fmt.Errorf("unsupported session schema version %d (expected %d)", version, SchemaVersion)
+	}
+	var quickCheck string
+	if err := s.db.QueryRow("PRAGMA quick_check").Scan(&quickCheck); err != nil || quickCheck != "ok" {
+		if err == nil {
+			err = fmt.Errorf("quick_check returned %q", quickCheck)
+		}
+		return fmt.Errorf("session database integrity check failed: %w", err)
 	}
 
 	return nil
@@ -125,11 +132,14 @@ func (s *SessionStorage) initialize() error {
 func (s *SessionStorage) CreateSession(input CreateSessionInput) (*Session, error) {
 	now := time.Now().UnixMilli()
 	session := &Session{
-		ID:        uuid.New().String(),
+		ID:        input.ID,
 		Title:     input.Title,
 		CreatedAt: now,
 		UpdatedAt: now,
 		Model:     input.Model,
+	}
+	if session.ID == "" {
+		session.ID = uuid.New().String()
 	}
 
 	if session.Title == "" {
@@ -144,12 +154,20 @@ func (s *SessionStorage) CreateSession(input CreateSessionInput) (*Session, erro
 		session.Config = string(configBytes)
 	}
 
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin session transaction: %w", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(
 		"INSERT INTO sessions (id, title, created_at, updated_at, model, config) VALUES (?, ?, ?, ?, ?, ?)",
 		session.ID, session.Title, session.CreatedAt, session.UpdatedAt, nullString(session.Model), nullString(session.Config),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert session: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit session transaction: %w", err)
 	}
 
 	return session, nil
@@ -180,7 +198,7 @@ func (s *SessionStorage) GetSession(id string) (*Session, error) {
 
 // GetAllSessions 获取所有会话
 func (s *SessionStorage) GetAllSessions(options *QueryOptions) ([]Session, error) {
-	opts := normalizeQueryOptions(options, "updated_at", "DESC", 100)
+	opts := normalizeQueryOptions(options, "updated_at", "DESC", 100, "id", "title", "created_at", "updated_at")
 
 	query := fmt.Sprintf(
 		"SELECT id, title, created_at, updated_at, model, config FROM sessions ORDER BY %s %s LIMIT ? OFFSET ?",
@@ -272,7 +290,12 @@ func (s *SessionStorage) CreateMessage(input CreateMessageInput) (*SessionMessag
 		ParentID:   input.ParentID,
 	}
 
-	_, err := s.db.Exec(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin message transaction: %w", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(
 		"INSERT INTO messages (id, session_id, role, content, timestamp, model, token_count, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		message.ID, message.SessionID, string(message.Role), message.Content, message.Timestamp,
 		nullString(message.Model), nullInt(message.TokenCount), nullString(message.ParentID),
@@ -282,8 +305,11 @@ func (s *SessionStorage) CreateMessage(input CreateMessageInput) (*SessionMessag
 	}
 
 	// Update session's updated_at
-	if _, err := s.db.Exec("UPDATE sessions SET updated_at = ? WHERE id = ?", time.Now().UnixMilli(), input.SessionID); err != nil {
+	if _, err := tx.Exec("UPDATE sessions SET updated_at = ? WHERE id = ?", time.Now().UnixMilli(), input.SessionID); err != nil {
 		return nil, fmt.Errorf("failed to update session timestamp: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit message transaction: %w", err)
 	}
 
 	return message, nil
@@ -322,11 +348,11 @@ func (s *SessionStorage) getMessageUnlocked(id string) (*SessionMessage, error) 
 
 // GetSessionMessages 获取会话消息
 func (s *SessionStorage) GetSessionMessages(sessionID string, options *QueryOptions) ([]SessionMessage, error) {
-	opts := normalizeQueryOptions(options, "timestamp", "ASC", 1000)
+	opts := normalizeQueryOptions(options, "timestamp", "ASC", 1000, "id", "session_id", "role", "content", "timestamp")
 
 	query := fmt.Sprintf(
-		"SELECT id, session_id, role, content, timestamp, model, token_count, parent_id FROM messages WHERE session_id = ? ORDER BY %s %s LIMIT ? OFFSET ?",
-		opts.OrderBy, opts.Order,
+		"SELECT id, session_id, role, content, timestamp, model, token_count, parent_id FROM messages WHERE session_id = ? ORDER BY %s %s, id %s LIMIT ? OFFSET ?",
+		opts.OrderBy, opts.Order, opts.Order,
 	)
 
 	rows, err := s.db.Query(query, sessionID, opts.Limit, opts.Offset)
@@ -427,7 +453,7 @@ func (s *SessionStorage) GetCheckpoint(id string) (*Checkpoint, error) {
 
 // GetSessionCheckpoints 获取会话检查点
 func (s *SessionStorage) GetSessionCheckpoints(sessionID string, options *QueryOptions) ([]Checkpoint, error) {
-	opts := normalizeQueryOptions(options, "created_at", "DESC", 100)
+	opts := normalizeQueryOptions(options, "created_at", "DESC", 100, "id", "session_id", "created_at", "dialog_state_hash")
 
 	query := fmt.Sprintf(
 		"SELECT id, session_id, git_hash, dialog_state_hash, vector_state_hash, created_at, description FROM checkpoints WHERE session_id = ? ORDER BY %s %s LIMIT ? OFFSET ?",
@@ -516,7 +542,7 @@ func (s *SessionStorage) getSessionUnlocked(id string) (*Session, error) {
 	return &session, nil
 }
 
-func normalizeQueryOptions(options *QueryOptions, defaultOrderBy, defaultOrder string, defaultLimit int) QueryOptions {
+func normalizeQueryOptions(options *QueryOptions, defaultOrderBy, defaultOrder string, defaultLimit int, allowedOrderBy ...string) QueryOptions {
 	opts := QueryOptions{
 		Limit:   defaultLimit,
 		Offset:  0,
@@ -531,7 +557,7 @@ func normalizeQueryOptions(options *QueryOptions, defaultOrderBy, defaultOrder s
 		if options.Offset > 0 {
 			opts.Offset = options.Offset
 		}
-		if options.OrderBy != "" {
+		if containsOrderBy(allowedOrderBy, options.OrderBy) {
 			opts.OrderBy = options.OrderBy
 		}
 		if options.Order == "ASC" || options.Order == "DESC" {
@@ -540,6 +566,15 @@ func normalizeQueryOptions(options *QueryOptions, defaultOrderBy, defaultOrder s
 	}
 
 	return opts
+}
+
+func containsOrderBy(allowed []string, value string) bool {
+	for _, candidate := range allowed {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func nullString(s string) sql.NullString {

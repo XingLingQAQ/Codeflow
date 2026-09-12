@@ -20,6 +20,7 @@ const DEFAULT_ROLE_CONFIGS = {
         apiChannel: 'default',
         mcpTools: ['orchestrator'],
         systemPrompt: 'You are the main AI commander.',
+        answerStyle: 'balanced',
     },
     coder: {
         model: 'claude-3-5-sonnet-20241022',
@@ -27,6 +28,8 @@ const DEFAULT_ROLE_CONFIGS = {
         apiChannel: 'default',
         mcpTools: ['filesystem', 'linter'],
         systemPrompt: 'You are a code implementation expert.',
+        answerStyle: 'concise',
+        capabilities: ['code'],
     },
     sub: {
         model: 'claude-3-5-haiku-20241022',
@@ -34,6 +37,7 @@ const DEFAULT_ROLE_CONFIGS = {
         apiChannel: 'default',
         mcpTools: ['websearch'],
         systemPrompt: 'You are a research assistant.',
+        answerStyle: 'concise',
     },
 };
 /**
@@ -85,6 +89,10 @@ export class ConfigManager extends EventEmitter {
         let maxTokens;
         let mcpTools = [...this.globalConfig.publicMcp];
         let systemPrompt;
+        let answerStyle;
+        let capabilities;
+        let allowedSkills;
+        let allowedHooks;
         let apiChannelId = 'default';
         // 2. 应用 Session 配置
         if (sessionId) {
@@ -110,6 +118,10 @@ export class ConfigManager extends EventEmitter {
             apiChannelId = roleConfig.apiChannel;
             mcpTools = [...mcpTools, ...roleConfig.mcpTools];
             systemPrompt = roleConfig.systemPrompt;
+            answerStyle = roleConfig.answerStyle;
+            capabilities = roleConfig.capabilities ? [...roleConfig.capabilities] : undefined;
+            allowedSkills = roleConfig.allowedSkills ? [...roleConfig.allowedSkills] : undefined;
+            allowedHooks = roleConfig.allowedHooks ? [...roleConfig.allowedHooks] : undefined;
         }
         // 4. 解析 API Channel
         const apiChannel = this.resolveApiChannel(apiChannelId);
@@ -121,6 +133,10 @@ export class ConfigManager extends EventEmitter {
             apiChannel,
             mcpTools: [...new Set(mcpTools)], // 去重
             systemPrompt,
+            answerStyle,
+            capabilities,
+            allowedSkills,
+            allowedHooks,
             timeout: this.globalConfig.timeout,
             maxRetries: this.globalConfig.maxRetries,
         };

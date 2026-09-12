@@ -2,6 +2,7 @@
  * 压缩器实现
  * 80/20 压缩策略 + 决策骨架提取
  */
+import { getMessageText } from '../hooks/types.js';
 import { DEFAULT_COMPRESSION_CONFIG, } from './types.js';
 import { TokenCounter } from './TokenCounter.js';
 export class Compressor {
@@ -97,7 +98,7 @@ export class Compressor {
             'But', 'For', 'With', 'From', 'Into', 'About', 'After', 'Before', 'Between',
         ]);
         for (const msg of messages) {
-            const content = msg.content;
+            const content = getMessageText(msg.content);
             // 提取实体
             for (const pattern of entityPatterns) {
                 const matches = content.match(pattern);
@@ -142,7 +143,8 @@ export class Compressor {
         // 基于实体共现补充关系
         const entitySet = new Set(entities.slice(0, 30));
         for (const msg of messages) {
-            const foundEntities = entities.filter((e) => msg.content.includes(e));
+            const content = getMessageText(msg.content);
+            const foundEntities = entities.filter((e) => content.includes(e));
             if (foundEntities.length >= 2) {
                 for (let i = 0; i < foundEntities.length - 1; i++) {
                     for (let j = i + 1; j < foundEntities.length; j++) {
@@ -208,7 +210,7 @@ export class Compressor {
                 let currentTokens = 0;
                 const selectedHistorical = [];
                 for (const { msg } of scored) {
-                    const msgTokens = this.tokenCounter.count(msg.content);
+                    const msgTokens = this.tokenCounter.count(getMessageText(msg.content));
                     if (currentTokens + msgTokens <= targetHistoricalTokens) {
                         selectedHistorical.push(msg);
                         currentTokens += msgTokens;
@@ -225,7 +227,7 @@ export class Compressor {
     }
     calculateImportance(msg, index, totalMessages) {
         let score = 0;
-        const content = msg.content;
+        const content = getMessageText(msg.content);
         const lowerContent = content.toLowerCase();
         // 1. 长度因素（较长的消息可能更重要，但有上限）
         const lengthScore = Math.min(content.length / 100, 10);
@@ -284,16 +286,15 @@ export class Compressor {
         const topics = [];
         const keyPhrases = [];
         for (const msg of userMessages.slice(-5)) {
-            // 提取第一句话作为主题
-            const firstSentence = msg.content.split(/[.。!！?？\n]/)[0]?.trim();
+            const content = getMessageText(msg.content);
+            const firstSentence = content.split(/[.。!！?？\n]/)[0]?.trim();
             if (firstSentence && firstSentence.length >= 5 && firstSentence.length <= 100) {
                 topics.push(firstSentence);
             }
-            else if (msg.content.length > 0) {
-                // 如果第一句太长或太短，取前 80 个字符
-                const topic = msg.content.slice(0, 80).replace(/\n/g, ' ').trim();
+            else if (content.length > 0) {
+                const topic = content.slice(0, 80).replace(/\n/g, ' ').trim();
                 if (topic)
-                    topics.push(topic + (msg.content.length > 80 ? '...' : ''));
+                    topics.push(topic + (content.length > 80 ? '...' : ''));
             }
         }
         // 从 assistant 消息中提取关键短语
@@ -304,7 +305,7 @@ export class Compressor {
                 /(?:created|implemented|fixed|added|updated|modified|removed)\s+([^.。!！?？]{5,50})/gi,
             ];
             for (const pattern of actionPatterns) {
-                const matches = msg.content.match(pattern);
+                const matches = getMessageText(msg.content).match(pattern);
                 if (matches) {
                     for (const match of matches.slice(0, 2)) {
                         const phrase = match.trim();
@@ -328,7 +329,7 @@ export class Compressor {
         return parts.join(' ');
     }
     buildSummaryPrompt(messages, config) {
-        const content = messages.map((m) => `[${m.role}]: ${m.content.slice(0, 500)}`).join('\n\n');
+        const content = messages.map((m) => `[${m.role}]: ${getMessageText(m.content).slice(0, 500)}`).join('\n\n');
         let prompt = `Summarize the following conversation concisely:\n\n${content}\n\n`;
         if (config?.includeEntities) {
             prompt += 'Include key entities mentioned.\n';

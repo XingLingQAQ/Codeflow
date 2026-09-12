@@ -192,7 +192,7 @@ func (c *ChainKeyDerivation) Encrypt(_ context.Context, plaintext string) (*Chai
 	}
 
 	// Generate IV
-	iv := make([]byte, aes.BlockSize)
+	iv := make([]byte, 12)
 	if _, err := rand.Read(iv); err != nil {
 		return nil, fmt.Errorf("generate iv: %w", err)
 	}
@@ -203,14 +203,11 @@ func (c *ChainKeyDerivation) Encrypt(_ context.Context, plaintext string) (*Chai
 		return nil, fmt.Errorf("create cipher: %w", err)
 	}
 
-	// PKCS7 padding
-	plainBytes := []byte(plaintext)
-	paddedPlain := pkcs7Pad(plainBytes, aes.BlockSize)
-
-	// Encrypt
-	ciphertext := make([]byte, len(paddedPlain))
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext, paddedPlain)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("create gcm: %w", err)
+	}
+	ciphertext := gcm.Seal(nil, iv, []byte(plaintext), []byte(currentNode.ID))
 
 	// Calculate integrity hash
 	integrityHash := c.calculateDataIntegrityHash(ciphertext, iv, currentNode.ID)
@@ -220,7 +217,7 @@ func (c *ChainKeyDerivation) Encrypt(_ context.Context, plaintext string) (*Chai
 		Ciphertext:    base64.StdEncoding.EncodeToString(ciphertext),
 		IV:            base64.StdEncoding.EncodeToString(iv),
 		IntegrityHash: integrityHash,
-		Algorithm:     "aes-256-cbc-chain",
+		Algorithm:     "aes-256-gcm-chain",
 	}, nil
 }
 
@@ -254,18 +251,34 @@ func (c *ChainKeyDerivation) Decrypt(_ context.Context, encrypted *ChainEncrypte
 		return "", fmt.Errorf("create cipher: %w", err)
 	}
 
-	// Decrypt
-	plaintext := make([]byte, len(ciphertext))
-	mode := cipher.NewCBCDecrypter(block, iv)
-	mode.CryptBlocks(plaintext, ciphertext)
-
-	// Remove padding
-	unpaddedPlain, err := pkcs7Unpad(plaintext)
-	if err != nil {
-		return "", fmt.Errorf("unpad: %w", err)
+	switch encrypted.Algorithm {
+	case "aes-256-gcm-chain":
+		if len(iv) != 12 {
+			return "", errors.New("invalid gcm nonce")
+		}
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return "", fmt.Errorf("create gcm: %w", err)
+		}
+		plaintext, err := gcm.Open(nil, iv, ciphertext, []byte(encrypted.NodeID))
+		if err != nil {
+			return "", errors.New("authentication failed")
+		}
+		return string(plaintext), nil
+	case "", "aes-256-cbc-chain":
+		if len(iv) != aes.BlockSize || len(ciphertext) == 0 || len(ciphertext)%aes.BlockSize != 0 {
+			return "", errors.New("invalid legacy ciphertext")
+		}
+		plaintext := make([]byte, len(ciphertext))
+		cipher.NewCBCDecrypter(block, iv).CryptBlocks(plaintext, ciphertext)
+		unpaddedPlain, err := pkcs7Unpad(plaintext)
+		if err != nil {
+			return "", fmt.Errorf("unpad: %w", err)
+		}
+		return string(unpaddedPlain), nil
+	default:
+		return "", fmt.Errorf("unsupported chain algorithm: %s", encrypted.Algorithm)
 	}
-
-	return string(unpaddedPlain), nil
 }
 
 // calculateDataIntegrityHash calculates integrity hash for encrypted data
@@ -283,10 +296,10 @@ func (c *ChainKeyDerivation) VerifyChain() (*ChainVerificationResult, error) {
 	defer c.mu.RUnlock()
 
 	result := &ChainVerificationResult{
-		Valid:          true,
-		CheckedNodes:   len(c.chainNodes),
-		InvalidNodes:   make([]string, 0),
-		VerifiedAt:     time.Now().UnixNano(),
+		Valid:        true,
+		CheckedNodes: len(c.chainNodes),
+		InvalidNodes: make([]string, 0),
+		VerifiedAt:   time.Now().UnixNano(),
 	}
 
 	// Verify each node

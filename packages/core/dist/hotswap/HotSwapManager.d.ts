@@ -20,10 +20,13 @@ export declare class HotSwapManager implements IHotSwapManager {
     canSwitch(modelId: string): boolean;
     switchModel(modelId: string, options?: Partial<SwitchOptions>): Promise<SwitchResult>;
     retry(options?: Partial<RetryStrategy>): Promise<SwitchResult>;
-    relay(fallbackChain?: string[]): Promise<SwitchResult>;
+    relay(fallbackChain?: string[], options?: Partial<SwitchOptions>): Promise<SwitchResult>;
     migrateContext(targetModel: string): Promise<ContextMigrationResult>;
     configure(config: Partial<HotSwapConfig>): void;
     setRelayConfig(config: Partial<RelayConfig>): void;
+    private buildAdapterConfigPatch;
+    private resolveProviderRequestFamily;
+    private resolveProviderRequestFamilyFromConfig;
     private estimateTokens;
     private truncateMessages;
     private sleep;

@@ -1,6 +1,9 @@
+import { HookManager } from '../hooks/HookManager.js';
 import { FileOperationService } from './FileOperationService.js';
 import { MCPGateway } from './MCPGateway.js';
 import { SearchGateway, SearchProviderRegistry, } from './SearchProvider.js';
+import { SkillDispatcher } from './SkillDispatcher.js';
+import { SkillRegistry } from './SkillRegistry.js';
 import { ToolExecutor } from './ToolExecutor.js';
 import { ToolRegistry } from './ToolRegistry.js';
 /**
@@ -21,6 +24,16 @@ export class HeadlessToolRuntime {
             deps.searchGateway ??
                 new SearchGateway(this.searchProviderRegistry, this.toolRegistry, this.toolExecutor);
         this.mcpGateway = deps.mcpGateway ?? new MCPGateway(this.toolRegistry, this.toolExecutor);
+        this.skillRegistry = deps.skillRegistry ?? new SkillRegistry();
+        this.skillDispatcher =
+            deps.skillDispatcher ??
+                new SkillDispatcher(this.skillRegistry, this, {
+                    auditManager: deps.auditManager,
+                });
+        this.hookManager = deps.hookManager ?? new HookManager(undefined, deps.hookControls);
+        if (deps.hookControls) {
+            this.hookManager.setControls(deps.hookControls);
+        }
         this.registerBuiltinFileTools();
     }
     getToolRegistry() {
@@ -41,17 +54,69 @@ export class HeadlessToolRuntime {
     getMCPGateway() {
         return this.mcpGateway;
     }
+    getSkillRegistry() {
+        return this.skillRegistry;
+    }
+    getSkillDispatcher() {
+        return this.skillDispatcher;
+    }
+    getHookManager() {
+        return this.hookManager;
+    }
+    getToolTraceCount() {
+        return this.toolExecutor.getTraces().length;
+    }
     getToolTraces() {
         return this.toolExecutor.getTraces();
+    }
+    getSkillExecutionRecords() {
+        return this.skillDispatcher.getRecords();
     }
     registerTool(tool, replace = false) {
         this.toolRegistry.register(tool, { replace });
     }
+    registerSkill(skill, replace = false) {
+        this.skillRegistry.register(skill, { replace });
+    }
     registerSkillTool(tool, replace = false) {
-        this.toolRegistry.register({
+        this.registerTool({
             ...tool,
             source: 'skill',
-        }, { replace });
+        }, replace);
+        this.registerSkill({
+            manifest: {
+                skillId: tool.id,
+                version: tool.version,
+                description: tool.description,
+                tags: tool.tags,
+                riskLevel: tool.riskLevel,
+                source: 'internal',
+                entryPoints: tool.entryPoints,
+                inputSchema: tool.inputSchema,
+                outputSchema: tool.outputSchema,
+                toolIds: [tool.id],
+            },
+            handler: {
+                execute: async (input, context) => {
+                    const traceCountBefore = context.runtime.getToolTraceCount();
+                    const result = await context.runtime.execute(tool.id, input, context);
+                    if (!result.ok) {
+                        throw new Error(result.error?.message ?? `Skill tool failed: ${tool.id}`);
+                    }
+                    const traces = context.runtime.getToolTraces();
+                    const latestTrace = traces.length > traceCountBefore ? traces[traces.length - 1] : undefined;
+                    return {
+                        ...(typeof result.output === 'object' && result.output !== null
+                            ? result.output
+                            : { value: result.output ?? null }),
+                        __skillToolCallId: latestTrace?.toolCallId,
+                    };
+                },
+            },
+        }, replace);
+    }
+    listSkills(filter = {}) {
+        return this.skillRegistry.list(filter);
     }
     execute(toolId, input, context) {
         return this.toolExecutor.execute({
@@ -59,6 +124,9 @@ export class HeadlessToolRuntime {
             input,
             context,
         });
+    }
+    executeSkill(request) {
+        return this.skillDispatcher.execute(request);
     }
     registerSearchProvider(provider, options = {}) {
         this.searchGateway.register(provider, options);

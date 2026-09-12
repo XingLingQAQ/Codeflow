@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "execution-identity.schema.json",
+  "title": "ExecutionIdentity",
+  "description": "执行身份，固定自计划 §27.1 与 §20.2 实例。必填 project_id + actor；Run 事件增加 run_id；仅执行中（attempt 存活期间）才有 attempt_id/agent_revision_id；Gate/人工文档/系统恢复允许没有 Run，此时 run_id/attempt_id/agent_revision_id 为 null 或缺省。actor.type 枚举固定自 §15 T0.10 卡（user/agent/system/integration），actor.source 为可选来源说明（同卡 Actor{type,id,source}）；服务端必须从权威资源验证父子关系，不信任 HTTP body 自报的 actor。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_id", "actor"],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "项目 ID。§20.4：示例别名（如 p_123）仅用于阅读，真实路由/fixture 使用 UUID；本 schema 对两者均按不透明字符串校验。"
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "enum": ["user", "agent", "system", "integration"],
+          "description": "固定自 §15 T0.10 卡：user/agent/system/integration。"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "可选。Actor{type,id,source} 的 source（§15 T0.10 卡），如 desktop/cli/system 组件名。"
+        }
+      }
+    },
+    "run_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Run 事件必填；非 Run 事件（Gate/人工文档/系统恢复）为 null 或缺省（§19.1 events 表 run_id 可空）。"
+    },
+    "attempt_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "仅执行中才有（§27.1）；§19.1 events 表可空。"
+    },
+    "agent_revision_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "仅执行中才有（§27.1）。agent_revision_id 是不可变主键，旧 AgentAsset.Version 仅是用户标签（§27.1）。"
+    }
+  }
+}

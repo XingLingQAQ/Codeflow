@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeFlow · 工作台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="shared.css" />
+<style>
+  /* 工作台：整屏应用，不滚动页面 */
+  body{overflow:hidden}
+
+  /* ---------- 状态门控：idle → typed → prompt → flow → agents ---------- */
+  body[data-state="idle"] .not-idle{display:none!important}
+  body:not([data-state="idle"]) .idle-only{display:none!important}
+  body[data-state="flow"] .normal-only,body[data-state="agents"] .normal-only{display:none!important}
+  body:not([data-state="flow"]):not([data-state="agents"]) .flow-only{display:none!important}
+  body[data-state="agents"] .stage-only{display:none!important}
+  body:not([data-state="agents"]) .agents-only{display:none!important}
+  body:not([data-state="prompt"]) .modal{display:none}
+
+  /* ---------- 应用框架 ---------- */
+  .app{display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr);grid-template-rows:var(--topbar-h) minmax(0,1fr) 28px;height:100vh}
+  .rail{grid-row:1/4}
+
+  /* 顶栏（页面附加） */
+  .topbar{grid-column:2;padding-left:10px}
+  .topbar .back{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--ink-3)}
+  .topbar .back:hover{background:var(--canvas);color:var(--ink)}
+  .crumb .br{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11.5px;color:var(--ink-2);background:var(--inset);border-radius:6px;padding:1px 7px;letter-spacing:0}
+  .crumb .br .i{width:12px;height:12px}
+  .crumb code{font-size:12px;color:var(--ink-2)}
+  .topbar .mid{flex:1;display:flex;justify-content:center;min-width:0;padding:0 24px}
+  .topbar .mid .fp{max-width:520px}
+  .topbar .right{display:flex;align-items:center;gap:8px}
+  @media (max-width:1400px){.topbar .right .lbl{display:none}.topbar .mid{padding:0 16px}}
+
+  /* 工作区三栏 */
+  .work{grid-column:2;display:grid;grid-template-columns:248px minmax(0,1fr) 340px;min-height:0}
+  .left{background:var(--paper);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .left>div{flex:1;display:flex;flex-direction:column;min-height:0}
+  .center{display:grid;grid-template-rows:minmax(0,1fr) 176px;min-height:0;min-width:0;container-type:inline-size;container-name:center}
+  /* 中栏变窄（导轨展开 / 小窗口）时的降级 */
+  @container center (max-width:880px){
+    .board .bgrid{grid-template-columns:1fr}
+    .board .acard.wide .raw{height:230px}
+    .board .top .btn.quiet,.board .top .seg{display:none}
+    .board .counts span span{display:none}
+    .canvas .top .contract .lbl{display:none}
+    .canvas .cbody{padding:16px 18px 24px}
+  }
+  .companion{background:var(--paper);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+
+  .ph{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px 0 14px;border-bottom:1px solid var(--line-2);flex:none}
+  .ph .r{margin-left:auto;display:flex;gap:2px}
+  .ph .r button{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--ink-3)}
+  .ph .r button:hover{background:var(--canvas);color:var(--ink)}
+  .ph .r .i{width:14px;height:14px}
+
+  /* 文件树 */
+  .tree{padding:8px 6px;font-size:13px;overflow:auto}
+  .tree .n{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:7px;color:var(--ink-2);white-space:nowrap}
+  .tree .n:hover{background:var(--hover)}
+  .tree .n.on{background:var(--hover-2);color:var(--ink);font-weight:500}
+  .tree .n .i{width:14px;height:14px;color:var(--ink-4)}
+  .tree .n .i.chev{width:12px;height:12px}
+  .tree .d1{padding-left:24px}.tree .d2{padding-left:42px}.tree .d3{padding-left:60px}
+  .tree .n .m{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--amber-ink)}
+  .tree .n .w{margin-left:auto;width:14px;height:14px;border-radius:4px;background:var(--amber-bg);color:var(--amber-ink);font-size:10px;font-weight:700;display:grid;place-items:center;font-family:var(--display)}
+
+  /* 编辑器 */
+  .editor{background:var(--paper);display:flex;flex-direction:column;min-height:0;border-bottom:1px solid var(--line)}
+  .tabs{display:flex;align-items:stretch;height:40px;border-bottom:1px solid var(--line-2);padding:0 6px;flex:none}
+  .tab{display:flex;align-items:center;gap:7px;padding:0 12px;font-size:12.5px;color:var(--ink-3);font-family:var(--mono);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+  .tab .i{width:13px;height:13px}
+  .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--amber)}
+  .tabs .r{margin-left:auto;display:flex;align-items:center;gap:2px;padding-right:4px}
+  .tabs .r button{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--ink-3)}
+  .tabs .r .i{width:14px;height:14px}
+  .code{flex:1;overflow:auto;padding:12px 0;font-family:var(--mono);font-size:12.5px;line-height:1.75;counter-reset:ln}
+  .code .ln{display:block;padding-right:16px;white-space:pre}
+  .code .ln::before{counter-increment:ln;content:counter(ln);display:inline-block;width:52px;text-align:right;padding-right:18px;color:var(--ink-4);user-select:none}
+  .code .ln.hl{background:var(--amber-bg)}
+  .code .k{color:var(--accent-ink);font-weight:500}
+  .code .s{color:var(--amber-ink)}
+  .code .c{color:var(--ink-3);font-style:italic}
+  .code .t{color:var(--amber-ink);font-weight:600;font-style:normal}
+
+  /* 底部面板 */
+  .panel{background:var(--paper);display:flex;flex-direction:column;min-height:0}
+  .ptabs{display:flex;align-items:center;height:36px;padding:0 8px;border-bottom:1px solid var(--line-2);gap:2px;flex:none}
+  .ptab{height:28px;padding:0 10px;border-radius:7px;font-size:12.5px;color:var(--ink-3);display:inline-flex;align-items:center;gap:6px}
+  .ptab.on{color:var(--ink);background:var(--hover-2);font-weight:500}
+  .ptab .c{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);background:var(--inset);border-radius:999px;padding:0 6px;line-height:16px;letter-spacing:0}
+  .ptab .c.warn{color:var(--amber-ink);background:var(--amber-bg)}
+  .ptabs .r{margin-left:auto;display:flex;gap:2px}
+  .ptabs .r button{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--ink-3)}
+  .ptabs .r .i{width:14px;height:14px}
+  .term{flex:1;overflow:auto;padding:10px 16px;font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--ink-2);white-space:pre}
+  .term .p{color:var(--ink)}
+  .term .fail{color:var(--red-ink)}
+  .term .dim{color:var(--ink-4)}
+
+  /* Agent 伴侣 */
+  .ch{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px 0 14px;border-bottom:1px solid var(--line-2);flex:none}
+  .ch .agchip{margin-left:auto;height:26px}
+  .ch .agchip i{width:18px;height:18px}
+  .stage-banner{margin:10px 12px 0;padding:7px 10px;border-radius:10px;background:var(--inset);font-size:12px;display:flex;align-items:center;gap:8px;color:var(--ink-2);flex:none;font-weight:500}
+  .stage-banner b{color:var(--ink);font-weight:600}
+  .stage-banner .i{width:13px;height:13px;color:var(--accent)}
+  .stage-banner .r{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+  .msgs{flex:1;overflow:auto;padding:14px 12px;display:flex;flex-direction:column;gap:16px}
+  .empty{margin:auto 0;text-align:center;padding:10px 8px;color:var(--ink-3)}
+  .empty .logo{width:36px;height:36px;margin:0 auto}
+  .empty h4{font-weight:600;color:var(--ink);font-size:14px;margin:10px 0 4px}
+  .empty p{margin:0;font-size:12.5px}
+  .sugg{display:flex;flex-direction:column;gap:6px;margin-top:16px;text-align:left}
+  .sugg button{height:34px;border-radius:10px;box-shadow:var(--ring);font-size:12.5px;font-weight:500;color:var(--ink-2);text-align:left;padding:0 10px;background:var(--paper);display:flex;align-items:center;gap:8px}
+  .sugg button:hover{background:var(--hover);color:var(--ink)}
+  .sugg .i{width:14px;height:14px;color:var(--ink-4)}
+  .msg{display:flex;gap:10px}
+  .msg.user{justify-content:flex-end}
+  .msg.user .bubble{background:var(--inset);color:var(--ink);border-radius:12px;padding:8px 12px;max-width:90%;font-size:13px;line-height:1.55}
+  .msg .av{width:22px;height:22px;border-radius:7px;background:var(--ink);color:#fff;font-weight:600;font-size:10px;display:grid;place-items:center;flex:none;margin-top:2px}
+  .msg .av.b{background:#fff;color:var(--ink);box-shadow:var(--ring)}
+  .msg .body{font-size:13px;line-height:1.6;color:var(--ink);min-width:0;flex:1}
+  .msg .body .who{font-size:11.5px;color:var(--ink-3);margin-bottom:3px;display:flex;gap:6px}
+  .msg .body p{margin:0 0 8px}
+  .msg .body p:last-child{margin-bottom:0}
+  .msg .body ol{margin:0 0 8px;padding-left:18px}
+  .msg .body li{margin-bottom:2px}
+  .msg .body code{background:var(--inset);padding:2px 5px;border-radius:5px;font-size:12px;color:var(--ink-2)}
+  .act{margin-top:8px;box-shadow:var(--shadow-card);border-radius:12px;padding:10px 12px 10px 14px;display:flex;align-items:center;gap:10px;position:relative;overflow:hidden;background:var(--paper)}
+  .act::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--flow)}
+  .act .tt{font-weight:600;font-size:12.5px}
+  .act .ss{font-size:12px;color:var(--ink-3);margin-top:1px}
+  .act .btn{margin-left:auto;height:28px}
+  .qr{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .qr button{height:26px;padding:0 10px;box-shadow:var(--ring);border-radius:999px;font-size:12px;font-weight:500;color:var(--ink-2);background:var(--paper)}
+  .qr button:hover{background:var(--hover);color:var(--ink)}
+  .composer{margin:0 12px 12px;border-radius:14px;background:var(--paper);box-shadow:var(--shadow-raised);position:relative;overflow:hidden;flex:none}
+  .composer::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--flow);opacity:.9}
+  .composer textarea{width:100%;border:0;outline:0;resize:none;padding:13px 14px 6px;font:inherit;font-size:13.5px;line-height:1.5;min-height:62px;background:transparent;color:var(--ink);display:block}
+  .composer textarea::placeholder{color:var(--ink-4)}
+  .composer .bar{display:flex;align-items:center;gap:6px;padding:6px 8px 8px 10px;border-top:1px solid var(--line-2)}
+  .composer .send{margin-left:auto;width:28px;height:28px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center}
+  .composer .send:hover{background:#333844}
+  .composer .send .i{width:14px;height:14px;stroke-width:2.2}
+
+  /* ---------- 工作流模式：Flow Rail ---------- */
+  .frail .fh{padding:14px 14px 12px;border-bottom:1px solid var(--line-2);flex:none}
+  .frail .fh h3{margin:4px 0 8px;font-weight:600;font-size:14px;letter-spacing:-.01em;line-height:1.3}
+  .frail .fh .meta{display:flex;flex-wrap:wrap;gap:5px;font-size:11px;color:var(--ink-2)}
+  .frail .fh .meta span{background:var(--inset);border-radius:5px;padding:1px 6px;font-family:var(--mono);letter-spacing:0}
+  .stages{position:relative;padding:12px 10px 8px 14px;flex:none}
+  .stages::before{content:"";position:absolute;left:23px;top:30px;bottom:30px;width:2px;background:var(--line)}
+  .stg{display:flex;align-items:center;gap:12px;height:40px;position:relative;padding:0 6px 0 4px;border-radius:9px}
+  .stg i{width:12px;height:12px;border-radius:50%;background:var(--paper);border:2px solid var(--line-strong);flex:none;display:block;position:relative;z-index:1}
+  .stg.done i{background:var(--cobalt);border-color:var(--cobalt)}
+  .stg.now i{border-color:var(--teal);animation:pulse 1.6s ease-in-out infinite}
+  .stg .n{font-size:13px;color:var(--ink-3)}
+  .stg.now .n{color:var(--ink);font-weight:600}
+  .stg .s{margin-left:auto;font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+  .frail .sec{padding:10px 14px 12px;border-top:1px solid var(--line-2);flex:none}
+  .frail .sec .eyebrow{margin-bottom:6px}
+  .bm{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2);height:26px}
+  .bm code{font-size:11px;color:var(--ink-3)}
+  .bm .t{margin-left:auto;font-size:11px;color:var(--ink-4)}
+  .budget .row{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-2)}
+  .budget .row b{font-weight:600;color:var(--ink)}
+  .budget .bar{height:4px;background:var(--hover-2);border-radius:2px;overflow:hidden;margin:7px 0 4px}
+  .budget .bar i{display:block;height:100%;width:2%;background:var(--accent)}
+  .budget .sub{font-size:11px;color:var(--ink-3)}
+  .frail .exit{margin-top:auto;padding:12px 14px;border-top:1px solid var(--line-2);font-size:12px;color:var(--ink-3);display:flex;align-items:center;gap:6px;flex:none}
+  .frail .exit:hover{color:var(--ink)}
+  .frail .exit .i{width:13px;height:13px}
+
+  /* ---------- 工作流模式：阶段画布 ---------- */
+  .canvas{background:var(--canvas);display:flex;flex-direction:column;min-height:0;overflow:auto;border-bottom:1px solid var(--line)}
+  .canvas .top{display:flex;align-items:center;gap:12px;padding:8px 18px;background:var(--paper);border-bottom:1px solid var(--line-2);position:sticky;top:0;z-index:2;flex:none}
+  .contract{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .contract .lbl{font-size:11.5px;color:var(--ink-4);margin-right:2px}
+  .cchip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:500;color:var(--green-ink);background:var(--green-bg);white-space:nowrap}
+  .cchip::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green)}
+  .cchip.todo{background:var(--amber-bg);color:var(--amber-ink)}
+  .cchip.todo::before{background:var(--amber)}
+  .cbody{padding:20px 24px 28px;display:flex;flex-direction:column;gap:16px;max-width:1000px}
+  .cbody h2{margin:0;font-weight:600;font-size:18px;letter-spacing:-.02em;display:flex;align-items:baseline;gap:10px}
+  .cbody h2 small{font-weight:500;font-size:13px;color:var(--ink-3);letter-spacing:0}
+  .cbody .lead{margin:-8px 0 0;color:var(--ink-2);font-size:13.5px}
+  .art{padding:12px 16px;display:flex;flex-direction:column;gap:6px}
+  .art .ah{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+  .art .ah b{font-weight:600;color:var(--ink);font-size:13px}
+  .art .ah .v{font-family:var(--mono);background:var(--inset);border-radius:5px;padding:0 5px;font-size:11px;letter-spacing:0}
+  .art .ah .ok{margin-left:auto;color:var(--green);display:inline-flex;align-items:center;gap:4px;font-weight:500}
+  .art .ah .ok .i{width:13px;height:13px;stroke-width:2.2}
+  .art .ab{font-size:13px;color:var(--ink-2);line-height:1.65}
+  .art .ab b{color:var(--ink);font-weight:600}
+  .art .ab code{background:var(--canvas);padding:0 5px;border-radius:4px;font-size:12px}
+  .tasks-h{display:flex;align-items:baseline;gap:8px;margin-top:2px}
+  .tasks-h h3{margin:0;font-weight:600;font-size:13.5px}
+  .tasklist{display:flex;flex-direction:column;gap:8px}
+  .tasks-h .cnt{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+  .tasks-h .r{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+  .task{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:12px;align-items:center;padding:10px 12px 10px 12px;cursor:pointer;background:var(--paper);border-radius:12px;box-shadow:var(--shadow-card);transition:box-shadow .15s ease}
+  .task:hover{box-shadow:var(--shadow-raised)}
+  .task .no{width:24px;height:24px;border-radius:50%;background:var(--paper);box-shadow:var(--ring-strong);display:grid;place-items:center;font-weight:600;font-size:11.5px;color:var(--ink-2)}
+  .task .tt{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .task .dep{display:inline-block;font-size:11px;font-weight:500;color:var(--ink-3);border:1px dashed var(--line);border-radius:5px;padding:0 6px;line-height:17px;margin-right:8px;vertical-align:1px}
+  .task .td{font-size:12.5px;color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .task .td code{background:var(--canvas);padding:0 5px;border-radius:4px;font-size:11.5px}
+  .task .rt{display:flex;align-items:center;gap:12px}
+  .task .cost{font-family:var(--mono);font-size:12px;color:var(--ink-3);min-width:38px;text-align:right}
+  .task .go{width:22px;height:22px;display:grid;place-items:center;color:var(--ink-4)}
+  .task .go .i{width:14px;height:14px}
+  .addt{height:40px;border:1px dashed var(--line-strong);border-radius:12px;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--ink-3);font-size:12.5px;font-weight:500;background:transparent}
+  .addt:hover{border-color:var(--ink-4);color:var(--ink)}
+  .addt .i{width:14px;height:14px}
+  .advance{display:flex;align-items:center;gap:14px;padding-top:4px}
+  .advance .note{font-size:12.5px;color:var(--amber-ink);display:inline-flex;align-items:center;gap:6px}
+  .advance .note::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--amber)}
+  .advance .hint{font-size:12.5px;color:var(--ink-3)}
+  .advance .btn.primary{margin-left:auto;height:32px;padding:0 16px;font-size:13px}
+
+  /* ---------- Agent 看板 ---------- */
+  .board{background:var(--canvas);display:flex;flex-direction:column;min-height:0;overflow:auto;border-bottom:1px solid var(--line)}
+  .board .top{display:flex;align-items:center;gap:14px;padding:8px 18px;background:var(--paper);border-bottom:1px solid var(--line-2);position:sticky;top:0;z-index:2;flex:none}
+  .board .top h2{margin:0;font-weight:600;font-size:14px;letter-spacing:-.01em;white-space:nowrap}
+  .counts{display:flex;gap:14px;font-size:12.5px;color:var(--ink-3)}
+  .counts span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+  .counts span::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ink-4)}
+  .counts .w::before{background:var(--accent);animation:blink 1.4s ease-in-out infinite}
+  .counts .a::before{background:var(--amber)}
+  .counts b{font-weight:600;color:var(--ink)}
+  .board .top .seg{margin-left:auto}
+  .bbody{padding:16px 20px 24px;display:flex;flex-direction:column;gap:14px}
+  .bgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .acard{background:var(--paper);border-radius:14px;box-shadow:var(--shadow-card);display:flex;flex-direction:column;min-width:0}
+  .acard.wide{grid-column:1/-1}
+  .acard.wait{box-shadow:0 0 0 1px var(--amber-line),var(--shadow-sm);background:#FFFBF8}
+  .acard .hd{display:flex;align-items:center;gap:10px;padding:12px 14px 8px;min-width:0}
+  .acard .av{width:28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;font-weight:600;font-size:12px;display:grid;place-items:center;flex:none}
+  .acard .av.b{background:#fff;color:var(--ink);box-shadow:var(--ring)}
+  .acard .who{min-width:0;flex:1}
+  .acard .nm{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden;min-width:0}
+  .acard .nm .bkc{flex:none}
+  .acard .stt span{white-space:nowrap}
+  .acard .nm .bkc{font-size:11px;font-weight:500;background:var(--inset);border-radius:5px;padding:0 6px;color:var(--ink-2);line-height:18px}
+  .acard .tk{font-size:12px;color:var(--ink-3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .acard .tk b{font-weight:500;color:var(--ink-2)}
+  .acard .stt{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11.5px;color:var(--ink-3);flex:none}
+  .acard .now{display:flex;align-items:center;gap:8px;padding:0 14px 10px;font-size:12px;color:var(--ink-2);min-width:0}
+  .acard .now code{background:var(--inset);padding:2px 6px;border-radius:5px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .acard.wait .now code{background:#FFF3DC}
+  .acard .now .spin{width:12px;height:12px;border:2px solid var(--line-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .9s linear infinite;flex:none}
+  .acard .now .dim{color:var(--ink-3);white-space:nowrap}
+  .raw{margin:0 14px;border-radius:10px;background:var(--inset);box-shadow:0 0 0 1px var(--line-soft);font-family:var(--mono);font-size:11.5px;line-height:1.65;color:var(--ink-2);height:250px;overflow:auto;padding:10px 12px;white-space:pre-wrap;word-break:break-all;tab-size:4;letter-spacing:0}
+  .acard.wide .raw{height:190px}
+  .acard.wait .raw{background:#FFF7F0;box-shadow:0 0 0 1px var(--amber-line)}
+  .raw .t{color:var(--ink);font-weight:500}
+  .raw .a{color:var(--ink)}
+  .raw .r{color:var(--ink-3)}
+  .raw .add{color:var(--green)}
+  .raw .del{color:var(--red-ink)}
+  .raw .g{color:var(--cobalt)}
+  .raw .w{color:var(--amber-ink);font-weight:600}
+  .raw .cur{display:inline-block;width:7px;height:12px;background:var(--ink);vertical-align:-2px;animation:blink 1s steps(1) infinite}
+  .acard .ft{display:flex;align-items:center;gap:12px;padding:10px 14px 12px;font-size:12px;color:var(--ink-3)}
+  .follow{display:inline-flex;align-items:center;gap:6px;color:var(--ink-2)}
+  .follow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--teal)}
+  .acard .ft .r{margin-left:auto;display:flex;gap:6px}
+  .acard .ft .btn{height:28px}
+  .idlecard{background:var(--paper);border-radius:14px;box-shadow:var(--shadow-card)}
+  .idlecard .row{display:flex;align-items:center;gap:12px;padding:10px 14px}
+  .idlecard .row+.row{border-top:1px solid var(--line-2)}
+  .idlecard .av{width:26px;height:26px;border-radius:8px;background:var(--ink);color:#fff;font-weight:600;font-size:11px;display:grid;place-items:center;flex:none}
+  .idlecard .av.b{background:#fff;color:var(--ink);box-shadow:var(--ring)}
+  .idlecard .av.dim{background:var(--line);color:var(--ink-3)}
+  .idlecard .nm{font-weight:600;font-size:13px;display:flex;align-items:center;gap:7px}
+  .idlecard .nm .bkc{font-size:11px;font-weight:500;background:var(--inset);border-radius:5px;padding:0 6px;color:var(--ink-2);line-height:18px}
+  .idlecard .sub{font-size:12px;color:var(--ink-3)}
+  .idlecard .r{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+  .idlecard .r .btn{height:28px}
+  .topbar .agents-btn .cnt{font-family:var(--mono);font-size:10.5px;color:var(--accent-ink);background:var(--accent-tint);border-radius:999px;padding:0 6px;line-height:16px;letter-spacing:0}
+  body[data-state="agents"] .topbar .agents-btn{background:var(--canvas);color:var(--ink)}
+  body[data-state="agents"] .budget .bar i{width:24%}
+
+  /* ---------- 弹窗：AI 建议进入工作流 ---------- */
+  .modal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(14,17,22,.34);backdrop-filter:blur(3px)}
+  .dlg{width:600px;max-width:calc(100% - 32px);background:var(--paper);border-radius:14px;box-shadow:var(--shadow-overlay);position:relative;overflow:hidden;animation:pop .28s cubic-bezier(.2,.7,.2,1)}
+  .dlg::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--flow)}
+  .dlg .in{padding:24px 26px 0}
+  .dlg .eyebrow{display:flex;align-items:center;gap:7px}
+  .dlg .eyebrow .i{width:13px;height:13px;color:var(--accent)}
+  .dlg h2{margin:8px 0 6px;font-weight:600;font-size:17px;letter-spacing:-.02em}
+  .dlg .l{margin:0;color:var(--ink-2);font-size:13.5px;line-height:1.6}
+  .dlg .plan{margin:18px 0 0;box-shadow:var(--ring);border-radius:12px;overflow:hidden}
+  .dlg .plan .pf{padding:14px 18px 6px;background:var(--inset);border-bottom:1px solid var(--line-soft);display:flex;align-items:center;gap:16px}
+  .dlg .plan .pf .nm{font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+  .dlg .plan .pf .nm b{color:var(--ink);font-weight:600}
+  .dlg .plan .pf .fp{flex:1;height:32px}
+  .dlg .plan .pt{padding:4px 18px 6px}
+  .tm{display:flex;align-items:center;gap:10px;padding:10px 0;font-size:13px}
+  .tm+.tm{border-top:1px solid var(--line-2)}
+  .tm .no{width:22px;height:22px;border-radius:50%;background:var(--paper);box-shadow:var(--ring-strong);font-weight:600;font-size:11px;display:grid;place-items:center;color:var(--ink-2);flex:none}
+  .tm .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tm .ag{font-size:12px;color:var(--ink-3);white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+  .tm .ag i{width:16px;height:16px;border-radius:5px;background:var(--ink);color:#fff;font-style:normal;font-weight:600;font-size:9px;display:grid;place-items:center}
+  .tm .ag i.b{background:#fff;color:var(--ink);box-shadow:var(--ring)}
+  .dlg .sum{display:flex;gap:18px;padding:11px 18px;background:var(--inset);font-size:12.5px;color:var(--ink-2);border-top:1px solid var(--line-soft)}
+  .dlg .sum b{color:var(--ink);font-weight:600}
+  .dlg .foot{display:flex;align-items:center;gap:8px;padding:18px 26px 22px}
+  .dlg .foot .btn{height:34px;padding:0 14px}
+  .dlg .foot .btn.primary{margin-left:auto}
+  .dlg .foot .why{font-size:12px;color:var(--ink-4);margin-right:auto}
+  @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+
+  /* ---------- 状态栏 ---------- */
+  .status{grid-column:2;display:flex;align-items:center;gap:16px;padding:0 14px;background:var(--paper);border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-3);font-family:var(--mono);white-space:nowrap;overflow:hidden}
+  .status .it{display:inline-flex;align-items:center;gap:6px}
+  .status .it i{width:6px;height:6px;border-radius:50%;background:var(--green)}
+  .status .it i.b{background:var(--teal)}
+  .status .r{margin-left:auto;display:flex;gap:16px}
+
+  /* ---------- 演示步进器（非产品 UI） ---------- */
+  .demo{position:fixed;left:50%;bottom:3px;transform:translateX(-50%);z-index:60;display:flex;align-items:center;gap:2px;padding:2px 3px 2px 10px;background:var(--ink);color:#fff;border-radius:999px;box-shadow:var(--shadow-2);font-size:11.5px}
+  .demo .l{opacity:.5;margin-right:6px;font-family:var(--display);font-weight:700;letter-spacing:.08em;font-size:10px;text-transform:uppercase}
+  .demo button{height:20px;padding:0 9px;border-radius:999px;color:rgba(255,255,255,.66);font-size:11.5px}
+  .demo button:hover{color:#fff}
+  .demo button.on{background:#fff;color:var(--ink);font-weight:600}
+
+  @media (prefers-reduced-motion:reduce){
+    .dlg{animation:none}
+    .stg.now i,.spill.run::before,.counts .w::before,.raw .cur,.acard .now .spin{animation:none}
+  }
+</style>
+</head>
+<body data-state="idle" class="rail-collapsed">
+<div class="app">
+
+  <!-- ================= 导轨（共享组件，工作台默认收起） ================= -->
+  <aside class="rail" aria-label="全局导航">
+    <a class="brand" href="home.html" aria-label="CodeFlow 首页">
+      <span class="mark"><svg viewBox="0 0 26 26" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1F5EFF"/><stop offset="1" stop-color="#06B6D4"/></linearGradient></defs><path d="M4 19 C10 19 9 7 15 7 S20 12 22 7" fill="none" stroke="url(#g)" stroke-width="2.6" stroke-linecap="round"/><circle cx="4" cy="19" r="2.4" fill="#0E1116"/><circle cx="22" cy="7" r="2.4" fill="url(#g)"/></svg></span>
+      <span class="name">CodeFlow</span><span class="ver">3.0</span>
+    </a>
+    <nav class="nav">
+      <a href="home.html" title="首页"><svg class="i" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>首页</span><kbd>G H</kbd></a>
+      <a class="active" href="#" title="项目"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>项目</span><kbd>G P</kbd></a>
+      <a href="#" title="运行"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg><span>运行</span><kbd>G R</kbd></a>
+      <a href="#" title="Agent"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 11h.01M15 11h.01M9 15h6"/></svg><span>Agent</span></a>
+      <a href="#" title="守卫"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg><span>守卫</span></a>
+      <a href="#" title="记忆"><svg class="i" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>记忆</span></a>
+      <a href="#" title="密钥库"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>密钥库</span></a>
+    </nav>
+    <div class="rail-foot">
+      <a href="#" title="帮助与快捷键"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5M12 17h.01"/></svg><span>帮助与快捷键</span></a>
+      <a href="#" title="设置"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>设置</span></a>
+      <button class="collapse" title="展开导航" data-toggle-rail><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg><span>收起</span></button>
+      <a class="me" href="#" title="XingLing"><i>X</i><span>XingLing</span></a>
+    </div>
+  </aside>
+
+  <!-- ================= 顶栏 ================= -->
+  <header class="topbar">
+    <button class="back" aria-label="返回项目"><svg class="i" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></button>
+    <div class="crumb">
+      <b>billing-service</b>
+      <span class="br"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 3-3 4-6 4H9"/></svg>main</span>
+      <span class="normal-only">·</span><code class="normal-only">internal/payment/refund.go</code>
+      <span class="flow-only">·</span><span class="flow-only" style="color:var(--ink)">修复 #412 退款重复扣款</span>
+    </div>
+    <div class="mid">
+      <div class="fp main flow-only anim" aria-label="流程进度">
+        <div class="track"></div><div class="fill" style="width:0"></div>
+        <div class="st now" style="left:0"><i></i><span>拆解</span></div>
+        <div class="st" style="left:25%"><i></i><span>执行</span></div>
+        <div class="st" style="left:50%"><i></i><span>测试</span></div>
+        <div class="st" style="left:75%"><i></i><span>审阅</span></div>
+        <div class="st" style="left:100%"><i></i><span>合入</span></div>
+      </div>
+    </div>
+    <div class="right">
+      <button class="btn quiet agents-btn" data-go="agents"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 11h.01M15 11h.01M9 15h6"/></svg><span class="lbl">Agent 看板</span><span class="cnt">2</span></button>
+      <button class="btn quiet normal-only"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg><span class="lbl">新建流程</span></button>
+      <button class="backends" aria-label="执行后端：2 / 3 就绪"><span class="stack"><i>C</i><i>X</i><i class="off">G</i></span><span><b>2</b> / 3</span></button>
+      <button class="iconbtn" aria-label="通知，3 条未读"><svg class="i" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge">3</span></button>
+    </div>
+  </header>
+
+  <!-- ================= 工作区 ================= -->
+  <div class="work">
+
+    <!-- ---------- 左栏：文件树 / Flow Rail ---------- -->
+    <aside class="left">
+
+      <div class="normal-only">
+        <div class="ph"><span class="eyebrow">文件</span>
+          <div class="r"><button aria-label="搜索文件"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button><button aria-label="新建文件"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+        </div>
+        <div class="tree">
+          <div class="n"><svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>billing-service</div>
+          <div class="n d1"><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>cmd</div>
+          <div class="n d1"><svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>handlers</div>
+          <div class="n d2"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund.go</div>
+          <div class="n d2"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund_v2.go<span class="w" title="守卫：与 refund.go 结构相似 91%">!</span></div>
+          <div class="n d1"><svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>internal</div>
+          <div class="n d2"><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>gateway</div>
+          <div class="n d2"><svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>payment</div>
+          <div class="n d3 on"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund.go<span class="m">M</span></div>
+          <div class="n d3"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund_test.go</div>
+          <div class="n d3"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>service.go</div>
+          <div class="n d3"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>store.go</div>
+          <div class="n d1"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>go.mod</div>
+          <div class="n d1"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>go.sum</div>
+        </div>
+      </div>
+
+      <div class="frail flow-only anim">
+        <div class="fh">
+          <span class="eyebrow">流程</span>
+          <h3>修复 #412 退款重复扣款</h3>
+          <div class="meta"><span>新功能</span><span>wt/fix-412</span><span>预算 ¥20</span></div>
+        </div>
+        <div class="stages" aria-label="阶段">
+          <div class="stg now"><i></i><span class="n">拆解</span><span class="s stage-only">当前</span><span class="s agents-only">已完成</span></div>
+          <div class="stg"><i></i><span class="n">执行</span><span class="s stage-only">3 任务</span><span class="s agents-only">2 运行 · 1 等待</span></div>
+          <div class="stg"><i></i><span class="n">测试</span></div>
+          <div class="stg"><i></i><span class="n">审阅</span><span class="s">Red Critic</span></div>
+          <div class="stg"><i></i><span class="n">合入</span></div>
+        </div>
+        <div class="sec">
+          <div class="eyebrow">书签</div>
+          <div class="bm agents-only"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px;color:var(--ink-4)"><path d="M6 3h12v18l-6-4-6 4z"/></svg>拆解完成<code>b_02</code><span class="t">4 分钟前</span></div>
+          <div class="bm"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px;color:var(--ink-4)"><path d="M6 3h12v18l-6-4-6 4z"/></svg>创建流程<code>b_01</code><span class="t stage-only">刚刚</span><span class="t agents-only">11 分钟前</span></div>
+        </div>
+        <div class="sec budget">
+          <div class="eyebrow">预算</div>
+          <div class="row"><span>已用</span><b class="stage-only">¥0.12 / ¥20</b><b class="agents-only">¥4.86 / ¥20</b></div>
+          <div class="bar"><i></i></div>
+          <div class="sub stage-only">拆解阶段 · Flow Conductor（直连模型）</div>
+          <div class="sub agents-only">执行阶段 · 3 个 Agent 并行</div>
+        </div>
+        <a class="exit" href="#" data-go="typed"><svg class="i" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>退出工作流，流程保留</a>
+      </div>
+
+    </aside>
+
+    <!-- ---------- 中栏：编辑器 / 阶段画布 + 底部面板 ---------- -->
+    <div class="center">
+
+      <section class="editor normal-only" aria-label="编辑器">
+        <div class="tabs">
+          <div class="tab on"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund.go<span class="dot" title="已修改"></span></div>
+          <div class="tab"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund_test.go</div>
+          <div class="tab"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>handlers/refund_v2.go</div>
+          <div class="r"><button aria-label="对比"><svg class="i" viewBox="0 0 24 24"><path d="M9 4v16M15 4v16M4 9h5M15 9h5M4 15h5M15 15h5"/></svg></button><button aria-label="分屏"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button></div>
+        </div>
+        <div class="code" role="region" aria-label="internal/payment/refund.go">
+<div class="ln"><span class="k">package</span> payment</div>
+<div class="ln"></div>
+<div class="ln"><span class="k">import</span> (</div>
+<div class="ln">	<span class="s">"context"</span></div>
+<div class="ln">	<span class="s">"errors"</span></div>
+<div class="ln">	<span class="s">"time"</span></div>
+<div class="ln">)</div>
+<div class="ln"></div>
+<div class="ln"><span class="k">var</span> ErrRefundExceeds = errors.New(<span class="s">"refund exceeds captured amount"</span>)</div>
+<div class="ln"></div>
+<div class="ln"><span class="c">// Refund issues a refund against a captured payment.</span></div>
+<div class="ln hl"><span class="c">// <span class="t">TODO(#412)</span>: not idempotent — a retried request charges twice.</span></div>
+<div class="ln"><span class="k">func</span> (s *Service) Refund(ctx context.Context, req RefundRequest) (*Refund, <span class="k">error</span>) {</div>
+<div class="ln">	p, err := s.store.GetPayment(ctx, req.PaymentID)</div>
+<div class="ln">	<span class="k">if</span> err != <span class="k">nil</span> {</div>
+<div class="ln">		<span class="k">return</span> <span class="k">nil</span>, err</div>
+<div class="ln">	}</div>
+<div class="ln">	<span class="k">if</span> req.Amount &gt; p.Captured-p.Refunded {</div>
+<div class="ln">		<span class="k">return</span> <span class="k">nil</span>, ErrRefundExceeds</div>
+<div class="ln">	}</div>
+<div class="ln">	r := &amp;Refund{ID: newID(), PaymentID: p.ID, Amount: req.Amount, CreatedAt: time.Now()}</div>
+<div class="ln">	<span class="k">if</span> err := s.gateway.Refund(ctx, r); err != <span class="k">nil</span> {</div>
+<div class="ln">		<span class="k">return</span> <span class="k">nil</span>, err</div>
+<div class="ln">	}</div>
+<div class="ln">	<span class="k">return</span> r, s.store.SaveRefund(ctx, r)</div>
+<div class="ln">}</div>
+        </div>
+      </section>
+
+      <section class="canvas flow-only stage-only anim" aria-label="阶段画布：拆解">
+        <div class="top">
+          <div class="seg" role="tablist"><button class="on" role="tab" aria-selected="true">阶段画布</button><button role="tab">文件</button></div>
+          <div class="contract" aria-label="完成契约">
+            <span class="lbl">推进条件</span>
+            <span class="cchip">至少 1 个任务</span>
+            <span class="cchip todo">全部指派 Agent · 2 / 3</span>
+            <span class="cchip">预算已设</span>
+          </div>
+        </div>
+        <div class="cbody">
+          <h2>拆解<small>1 / 5 · 把需求拆成可派发的任务</small></h2>
+          <p class="lead">每个任务会在自己的影子副本里运行，合入前经守卫检查。你可以改任务、换 Agent、调预算，确认后推进到执行。</p>
+
+          <div class="card art">
+            <div class="ah"><b>需求摘要</b><span class="v">v1</span><span>Flow Conductor 生成</span><span class="ok"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg>已采纳</span></div>
+            <div class="ab"><b>目标</b>：退款接口幂等，重试不再二次扣款。<b>约束</b>：不改 gateway 契约；不新增处理器文件。<b>成功标准</b>：<code>TestRefund_Retry</code> 通过，<code>handlers/refund_v2.go</code> 被合并删除，守卫无阻止。</div>
+          </div>
+
+          <div class="tasks-h"><h3>任务</h3><span class="cnt">3</span><span class="r">拖动可调顺序</span></div>
+          <div class="tasklist">
+            <div class="task">
+              <div class="no">1</div>
+              <div><div class="tt">在 Refund 入口加 idempotency_key 校验与存储</div><div class="td">读取 <code>req.IdempotencyKey</code>，命中已存在退款则直接返回原记录；store 层新增唯一索引。</div></div>
+              <div class="rt"><span class="agchip"><i>C</i>Code Artisan</span><span class="cost">¥3.0</span><span class="pill ok">已指派</span><span class="go"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></div>
+            </div>
+            <div class="task">
+              <div class="no">2</div>
+              <div><div class="tt">把 handlers/refund_v2.go 合并回 refund.go</div><div class="td"><span class="dep">依赖 1</span>守卫已多次拦下这对重复；合并后删除 v2 文件，路由指向统一处理器。</div></div>
+              <div class="rt"><span class="agchip"><i>C</i>Code Artisan</span><span class="cost">¥2.0</span><span class="pill ok">已指派</span><span class="go"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></div>
+            </div>
+            <div class="task">
+              <div class="no">3</div>
+              <div><div class="tt">补齐重复退款与超时的测试</div><div class="td"><span class="dep">依赖 1</span>单测覆盖同 key 重试、并发重试、gateway 超时；集成测试走真实 store。</div></div>
+              <div class="rt"><button class="agchip pick"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>选择 Agent</button><span class="cost">¥1.5</span><span class="pill warn">未指派</span><span class="go"><svg class="i" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></div>
+            </div>
+          </div>
+          <button class="addt"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加任务</button>
+
+          <div class="advance">
+            <span class="note">还差：任务 3 未指派 Agent</span>
+            <span class="hint">推进后 3 个任务在各自影子副本并行运行</span>
+            <button class="btn primary pill">推进到「执行」<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="board agents-only anim" aria-label="Agent 看板">
+        <div class="top">
+          <h2>Agent 看板</h2>
+          <div class="counts"><span class="w"><b>2</b><span>工作中</span></span><span class="a"><b>1</b><span>等待审批</span></span><span><b>3</b><span>空闲</span></span></div>
+          <div class="seg" role="tablist" aria-label="输出形式"><button class="on" role="tab" aria-selected="true">终端输出</button><button role="tab">JSON 事件流</button></div>
+          <button class="btn quiet"><svg class="i" viewBox="0 0 24 24"><path d="M4 14v6h6M20 10V4h-6M20 4l-7 7M4 20l7-7"/></svg>全部展开</button>
+        </div>
+
+        <div class="bbody">
+          <div class="bgrid">
+
+            <!-- 任务 1 · Code Artisan · Claude Code · 工作中 -->
+            <article class="acard">
+              <div class="hd">
+                <div class="av">C</div>
+                <div class="who">
+                  <div class="nm">Code Artisan<span class="bkc">Claude Code</span></div>
+                  <div class="tk"><b>任务 1</b> · 在 Refund 入口加 idempotency_key 校验与存储 · <code>wt/fix-412-t1</code></div>
+                </div>
+                <div class="stt"><span class="pill info live">工作中</span><span>04:12</span><span>¥1.86</span></div>
+              </div>
+              <div class="now"><span class="spin" aria-hidden="true"></span><span class="dim">正在</span><code>Bash(go vet ./...)</code><span class="dim">· 14 次工具调用 · 3 文件</span></div>
+              <div class="raw" aria-label="Code Artisan 原始输出"><span class="t">● Read(internal/payment/refund.go)</span>
+  <span class="r">⎿  Read 26 lines</span>
+
+<span class="t">● Grep(pattern: "IdempotencyKey", path: "internal")</span>
+  <span class="r">⎿  Found 0 files</span>
+
+<span class="a">● I'll add an idempotency lookup before the gateway call and persist the key with the refund row, so a retried request returns the original refund instead of charging again.</span>
+
+<span class="t">● Edit(internal/payment/refund.go)</span>
+  <span class="r">⎿  Added 18 lines, removed 2 lines</span>
+<span class="add">     +	if req.IdempotencyKey != "" {
+     +		if existing, err := s.store.FindRefundByKey(ctx, req.IdempotencyKey); err == nil {
+     +			return existing, nil
+     +		}
+     +	}</span>
+<span class="del">     -	r := &amp;Refund{ID: newID(), PaymentID: p.ID, Amount: req.Amount, CreatedAt: time.Now()}</span>
+<span class="add">     +	r := &amp;Refund{ID: newID(), PaymentID: p.ID, Amount: req.Amount, IdempotencyKey: req.IdempotencyKey, CreatedAt: time.Now()}</span>
+  <span class="g">⎿  [CodeFlow 守卫] 通过 · 无重复符号 · 无堆叠命名</span>
+
+<span class="t">● Edit(internal/payment/store.go)</span>
+  <span class="r">⎿  Added 11 lines</span>
+  <span class="g">⎿  [CodeFlow 守卫] 通过</span>
+
+<span class="t">● Bash(go test ./internal/payment/...)</span>
+  <span class="r">⎿  ok  	billing/internal/payment	0.412s</span>
+
+<span class="t">● Bash(go vet ./...)</span>
+  <span class="r">⎿  running…</span><span class="cur"></span></div>
+              <div class="ft"><span class="follow">跟随输出</span><span>214 行</span><div class="r"><button class="btn">发消息</button><button class="btn">暂停</button><button class="btn">打开运行</button></div></div>
+            </article>
+
+            <!-- 任务 3 · Scout · Codex · 工作中 -->
+            <article class="acard">
+              <div class="hd">
+                <div class="av b">S</div>
+                <div class="who">
+                  <div class="nm">Scout<span class="bkc">Codex</span></div>
+                  <div class="tk"><b>任务 3</b> · 补齐重复退款与超时的测试 · <code>wt/fix-412-t3</code></div>
+                </div>
+                <div class="stt"><span class="pill info live">工作中</span><span>02:47</span><span>¥0.92</span></div>
+              </div>
+              <div class="now"><span class="spin" aria-hidden="true"></span><span class="dim">正在</span><code>exec go test -run 'TestRefund_(IdempotentRetry|ConcurrentRetry)'</code><span class="dim">· 9 次</span></div>
+              <div class="raw" aria-label="Scout 原始输出"><span class="t">codex</span>
+<span class="a">I'll read the existing test file first to match its conventions and fakes.</span>
+
+<span class="t">exec</span>
+<span class="r">$ sed -n '1,80p' internal/payment/refund_test.go
+  succeeded in 12ms</span>
+
+<span class="t">codex</span>
+<span class="a">Adding TestRefund_IdempotentRetry and TestRefund_ConcurrentRetry, plus a gateway-timeout case using the existing fakeGateway with a configurable delay.</span>
+
+<span class="t">apply_patch</span>
+<span class="r">*** Update File: internal/payment/refund_test.go</span>
+<span class="add">+func TestRefund_IdempotentRetry(t *testing.T) {
++	svc, store := newTestService(t)
++	req := RefundRequest{PaymentID: "p_1", Amount: 500, IdempotencyKey: "k_1"}
++	first, err := svc.Refund(ctx, req)
++	require.NoError(t, err)
++	second, err := svc.Refund(ctx, req)
++	require.NoError(t, err)
++	require.Equal(t, first.ID, second.ID)
++	require.Len(t, store.Refunds(), 1)
++}
++
++func TestRefund_ConcurrentRetry(t *testing.T) {
++	svc, store := newTestService(t)
++	var wg sync.WaitGroup
++	for i := 0; i &lt; 8; i++ {</span>
+<span class="r">  succeeded</span>
+  <span class="g">⎿  [CodeFlow 守卫] 通过</span>
+
+<span class="t">exec</span>
+<span class="r">$ go test -run 'TestRefund_(IdempotentRetry|ConcurrentRetry)' ./internal/payment/
+  running…</span><span class="cur"></span></div>
+              <div class="ft"><span class="follow">跟随输出</span><span>131 行</span><div class="r"><button class="btn">发消息</button><button class="btn">暂停</button><button class="btn">打开运行</button></div></div>
+            </article>
+
+            <!-- 任务 2 · Code Artisan · Claude Code · 等待审批 -->
+            <article class="acard wide wait">
+              <div class="hd">
+                <div class="av">C</div>
+                <div class="who">
+                  <div class="nm">Code Artisan<span class="bkc">Claude Code</span></div>
+                  <div class="tk"><b>任务 2</b> · 把 handlers/refund_v2.go 合并回 refund.go · <code>wt/fix-412-t2</code></div>
+                </div>
+                <div class="stt"><span class="pill warn">等待审批 1:42</span><span>05:03</span><span>¥2.08</span></div>
+              </div>
+              <div class="now"><span class="dim">想要</span><code>Bash(git rm handlers/refund_v2.go)</code><span class="dim">· 删除文件属于高风险操作，已暂停等你决定</span></div>
+              <div class="raw" aria-label="Code Artisan（任务 2）原始输出"><span class="t">● Read(handlers/refund_v2.go)</span>
+  <span class="r">⎿  Read 84 lines</span>
+
+<span class="t">● Read(handlers/refund.go)</span>
+  <span class="r">⎿  Read 71 lines</span>
+
+<span class="a">● The two handlers differ only in the retry branch (v2 re-reads the payment before retrying). I'll fold that branch into refund.go, point the route at the single handler, and remove refund_v2.go.</span>
+
+<span class="t">● Edit(handlers/refund.go)</span>
+  <span class="r">⎿  Added 9 lines, removed 1 line</span>
+  <span class="g">⎿  [CodeFlow 守卫] 通过 · 结构相似度告警已清除</span>
+
+<span class="t">● Edit(cmd/server/routes.go)</span>
+  <span class="r">⎿  Added 1 line, removed 1 line</span>
+
+<span class="t">● Bash(git rm handlers/refund_v2.go)</span>
+  <span class="w">⎿  ⏸ [CodeFlow 策略] 等待审批 · 删除文件（高风险） · 审批 ID ap_3f9c</span></div>
+              <div class="ft"><span>暂停中 · 已等待 1:42</span><span>96 行</span><div class="r"><button class="btn quiet pill">发消息</button><button class="btn soft pill">拒绝</button><button class="btn primary pill">允许一次</button></div></div>
+            </article>
+
+          </div>
+
+          <div class="idlecard" aria-label="空闲 Agent">
+            <div class="row">
+              <div class="av">F</div>
+              <div><div class="nm">Flow Conductor<span class="bkc">直连模型</span></div><div class="sub">空闲 · 上次：拆解阶段，4 分钟前 · 本流程 ¥0.12</div></div>
+              <div class="r"><span>阶段推进时自动唤起</span><button class="btn">发消息</button></div>
+            </div>
+            <div class="row">
+              <div class="av b">R</div>
+              <div><div class="nm">Red Critic<span class="bkc">直连模型</span></div><div class="sub">待命 · 审阅阶段自动启用 · 与生成者不同模型</div></div>
+              <div class="r"><span>等待任务合入</span><button class="btn">发消息</button></div>
+            </div>
+            <div class="row">
+              <div class="av dim">D</div>
+              <div><div class="nm">Deep Researcher<span class="bkc">直连模型</span></div><div class="sub">空闲 · 未参与本流程</div></div>
+              <div class="r"><button class="btn">唤起</button></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="底部面板">
+        <div class="ptabs" role="tablist">
+          <button class="ptab on" role="tab" aria-selected="true"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M4 17l6-5-6-5M12 19h8"/></svg>终端</button>
+          <button class="ptab" role="tab">运行<span class="c stage-only flow-only">0</span><span class="c agents-only">3</span></button>
+          <button class="ptab" role="tab">守卫<span class="c warn">1</span></button>
+          <button class="ptab flow-only" role="tab">审批<span class="c stage-only">0</span><span class="c warn agents-only">1</span></button>
+          <button class="ptab" role="tab">问题<span class="c">1</span></button>
+          <div class="r"><button aria-label="新终端"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button><button aria-label="最大化"><svg class="i" viewBox="0 0 24 24"><path d="M4 14v6h6M20 10V4h-6M20 4l-7 7M4 20l7-7"/></svg></button></div>
+        </div>
+        <div class="term"><span class="p">$ go test ./internal/payment/...</span>
+<span class="fail">--- FAIL: TestRefund_Retry (0.02s)</span>
+    refund_test.go:41: expected 1 refund, got 2
+<span class="fail">FAIL</span>
+<span class="fail">FAIL</span>	billing/internal/payment	0.318s
+<span class="p">$ </span><span class="dim">▍</span></div>
+      </section>
+
+    </div>
+
+    <!-- ---------- 右栏：Agent 伴侣 ---------- -->
+    <aside class="companion" aria-label="Agent 伴侣">
+      <div class="ch">
+        <span class="eyebrow">Agent 伴侣</span>
+        <button class="agchip normal-only"><i>C</i>Code Artisan<svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="agchip flow-only"><i>F</i>Flow Conductor<svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      </div>
+
+      <div class="stage-banner flow-only anim"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg><span class="stage-only">阶段 <b>拆解</b> · 负责拆任务与指派</span><span class="agents-only">阶段 <b>执行</b> · 3 个任务并行运行中</span><span class="r stage-only">1 / 5</span><span class="r agents-only">2 / 5</span></div>
+
+      <div class="msgs">
+
+        <div class="empty idle-only">
+          <svg class="logo" viewBox="0 0 26 26" aria-hidden="true"><path d="M4 19 C10 19 9 7 15 7 S20 12 22 7" fill="none" stroke="url(#g)" stroke-width="2.6" stroke-linecap="round"/><circle cx="4" cy="19" r="2.4" fill="#0E1116"/><circle cx="22" cy="7" r="2.4" fill="url(#g)"/></svg>
+          <h4>把一件事交给 AI</h4>
+          <p>小事直接做；多步骤的事，我会建议用工作流。</p>
+          <div class="sugg">
+            <button><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>解释 <code>Refund</code> 为什么会重复扣款</button>
+            <button><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>找出 <code>Refund</code> 的所有调用方</button>
+            <button><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg>给这个文件写一个失败用例</button>
+          </div>
+        </div>
+
+        <div class="msg user not-idle">
+          <div class="bubble">退款接口现在会重复扣款（#412）。需要加幂等：用 idempotency_key 去重，补测试，顺便把旧的 refund_v2 处理器合并掉。</div>
+        </div>
+
+        <div class="msg not-idle">
+          <div class="av">C</div>
+          <div class="body">
+            <div class="who">Code Artisan · Claude Code</div>
+            <p>看了 <code>internal/payment/refund.go</code> 和 <code>handlers/refund_v2.go</code>，问题确认：<code>Refund</code> 没有幂等键，重试会二次扣款，<code>TestRefund_Retry</code> 现在就是这么挂的。</p>
+            <p>这件事有三部分，彼此有依赖：</p>
+            <ol>
+              <li>在 Refund 入口加 idempotency_key 校验与存储</li>
+              <li>把 refund_v2.go 合并回 refund.go（守卫一直在拦这对重复）</li>
+              <li>补齐重复退款和超时的测试</li>
+            </ol>
+            <p>一次运行全做完风险偏高，建议分阶段做，每步有检查和审批。</p>
+            <div class="act normal-only">
+              <div><div class="tt">建议：用「新功能」工作流</div><div class="ss">拆解 → 执行 → 测试 → 审阅 → 合入 · 约 3 次运行</div></div>
+              <button class="btn primary" data-go="prompt">看看方案</button>
+            </div>
+            <div class="act flow-only">
+              <div><div class="tt">已创建流程「修复 #412 退款重复扣款」</div><div class="ss">现在在拆解阶段，任务在左侧画布</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg flow-only anim">
+          <div class="av">F</div>
+          <div class="body">
+            <div class="who">Flow Conductor · 直连模型</div>
+            <p>我把需求拆成 3 个任务，前两个指派给 Code Artisan（Claude Code）；第 3 个是测试，建议用 Scout（Codex），你来定。确认后点「推进到执行」，三个任务会并行跑，合入前你逐个审阅。</p>
+            <div class="qr"><button>把任务 3 给 Scout</button><button>调整预算</button><button>先看影响范围</button></div>
+          </div>
+        </div>
+
+        <div class="msg user agents-only">
+          <div class="bubble">任务 3 给 Scout。推进到执行。</div>
+        </div>
+
+        <div class="msg agents-only anim">
+          <div class="av">F</div>
+          <div class="body">
+            <div class="who">Flow Conductor · 直连模型</div>
+            <p>已推进到执行，3 个任务各在自己的影子副本里跑。任务 1 的测试已经变绿；任务 2 想删除 <code>handlers/refund_v2.go</code>，属于高风险操作，等你审批；任务 3 正在写测试。Agent 看板里能看到每个 Agent 的原始输出。</p>
+            <div class="qr"><button>允许任务 2 删除文件</button><button>看任务 1 的 diff</button><button>暂停全部</button></div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="composer" role="group" aria-label="发送给 Agent">
+        <textarea rows="2" placeholder="继续追问，或再交一件事…"></textarea>
+        <div class="bar">
+          <span class="chip sm normal-only"><svg class="i" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>refund.go</span>
+          <span class="chip sm flow-only"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg><span class="stage-only">拆解阶段</span><span class="agents-only">执行阶段</span></span>
+          <span class="chip sm"><span class="sw"></span>Claude Code</span>
+          <button class="chip sm ghost"><svg class="i" viewBox="0 0 24 24"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/></svg>附上</button>
+          <button class="send" aria-label="发送" data-go="typed"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ================= 状态栏 ================= -->
+  <footer class="status">
+    <span class="it"><i></i>已连接 127.0.0.1:52341</span>
+    <span class="it"><i></i>守卫 正常</span>
+    <span class="it"><i></i>Claude Code 就绪</span>
+    <span class="it flow-only"><i class="b"></i>流程 修复 #412 · <span class="stage-only">拆解 1/5</span><span class="agents-only">执行 2/5</span></span>
+    <span class="it flow-only">书签 b_01</span>
+    <div class="r">
+      <span class="normal-only">main · 1 个未提交改动</span>
+      <span class="flow-only">wt/fix-412 · 影子副本已就绪</span>
+      <span>今日 ¥12.40</span>
+    </div>
+  </footer>
+</div>
+
+<!-- ================= 弹窗：AI 建议进入工作流 ================= -->
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+  <div class="dlg">
+    <div class="in">
+      <div class="eyebrow"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg>Code Artisan 的建议</div>
+      <h2 id="dlg-title">这件事适合用工作流来做</h2>
+      <p class="l">从你的需求里识别出 3 个相互依赖的部分。用工作流分阶段推进，每一步都有检查点和审批，出问题能只撤销那一步。</p>
+
+      <div class="plan">
+        <div class="pf">
+          <span class="nm">模板 <b>新功能</b></span>
+          <div class="fp" aria-label="阶段：拆解、执行、测试、审阅、合入">
+            <div class="track"></div>
+            <div class="st now" style="left:0"><i></i><span>拆解</span></div>
+            <div class="st" style="left:25%"><i></i><span>执行</span></div>
+            <div class="st" style="left:50%"><i></i><span>测试</span></div>
+            <div class="st" style="left:75%"><i></i><span>审阅</span></div>
+            <div class="st" style="left:100%"><i></i><span>合入</span></div>
+          </div>
+        </div>
+        <div class="pt">
+          <div class="tm"><span class="no">1</span><span class="t">在 Refund 入口加 idempotency_key 校验与存储</span><span class="ag"><i>C</i>Code Artisan · Claude Code</span></div>
+          <div class="tm"><span class="no">2</span><span class="t">把 handlers/refund_v2.go 合并回 refund.go</span><span class="ag"><i>C</i>Code Artisan · Claude Code</span></div>
+          <div class="tm"><span class="no">3</span><span class="t">补齐重复退款与超时的测试</span><span class="ag"><i class="b">S</i>Scout · Codex（建议）</span></div>
+        </div>
+        <div class="sum"><span>约 <b>3 次运行</b></span><span>预计 <b>¥6</b></span><span>约 <b>25 分钟</b></span><span>合入前经 <b>Red Critic</b> 审阅</span></div>
+      </div>
+    </div>
+    <div class="foot">
+      <button class="btn quiet pill" data-go="typed">先聊聊</button>
+      <button class="btn soft pill" data-go="typed">直接开始一次运行</button>
+      <button class="btn primary pill" data-go="flow">用工作流做<svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 演示步进器（仅为看稿，不是产品 UI） ================= -->
+<div class="demo" aria-label="演示状态切换">
+  <span class="l">演示</span>
+  <button data-go="idle" class="on">1 普通工作台</button>
+  <button data-go="typed">2 输入需求</button>
+  <button data-go="prompt">3 AI 建议</button>
+  <button data-go="flow">4 工作流模式</button>
+  <button data-go="agents">5 Agent 看板</button>
+</div>
+
+<script>
+  const ORDER=['idle','typed','prompt','flow','agents'];
+  // 把顶栏流线与 Flow Rail 切到第 n 个阶段（1 起）
+  function setStage(n){
+    document.querySelectorAll('.fp.main .st').forEach((el,i)=>{el.classList.toggle('done',i<n-1);el.classList.toggle('now',i===n-1)});
+    const fill=document.querySelector('.fp.main .fill');if(fill)fill.style.width=((n-1)*25)+'%';
+    document.querySelectorAll('.stages .stg').forEach((el,i)=>{el.classList.toggle('done',i<n-1);el.classList.toggle('now',i===n-1)});
+  }
+  function go(s){
+    if(!ORDER.includes(s))return;
+    document.body.dataset.state=s;
+    setStage(s==='agents'?2:1);
+    document.querySelectorAll('.demo button').forEach(b=>b.classList.toggle('on',b.dataset.go===s));
+    const m=document.querySelector('.msgs');if(m)requestAnimationFrame(()=>{m.scrollTop=m.scrollHeight});
+    document.querySelectorAll('.raw').forEach(r=>{r.scrollTop=r.scrollHeight});
+  }
+  document.querySelectorAll('[data-go]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();go(el.dataset.go)}));
+  document.querySelectorAll('[data-toggle-rail]').forEach(b=>b.addEventListener('click',()=>document.body.classList.toggle('rail-collapsed')));
+  document.addEventListener('keydown',e=>{
+    if(e.target.tagName==='TEXTAREA')return;
+    const i=ORDER.indexOf(document.body.dataset.state);
+    if(e.key==='ArrowRight')go(ORDER[Math.min(ORDER.length-1,i+1)]);
+    if(e.key==='ArrowLeft')go(ORDER[Math.max(0,i-1)]);
+    if(e.key==='Escape'&&document.body.dataset.state==='prompt')go('typed');
+  });
+  const q=new URLSearchParams(location.search).get('state');
+  if(q)go(q);
+</script>
+</body>
+</html>

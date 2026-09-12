@@ -1,0 +1,217 @@
+/* =====================================================================
+   CodeFlow 3.0 · 控制台共享样式（A 版 · Beautiful UI 调性）
+   令牌 · 基础 · 通用控件 · 导轨 · 顶栏件 · 流线（签名元素）
+   参考：beautifului.dev 浅色令牌（Inter / 13px / 500 / 发丝环 / 8·14px 圆角 / 单蓝色强调）
+   ===================================================================== */
+
+/* ---------- 令牌 ---------- */
+:root{
+  /* 表面 */
+  --page:#FAFAFB;        /* 页面底 */
+  --canvas:#F3F4F6;      /* 画布 / 演示区 */
+  --paper:#FFFFFF;       /* 卡片 / 面板 */
+  --inset:#F5F6F8;       /* 内嵌区（输入、代码框、工具值） */
+  --hover:#F4F5F7;
+  --hover-2:#EAEBEE;
+  /* 线 */
+  --line:#EBECEF;
+  --line-strong:#E1E3E8;
+  --line-soft:#F3F4F6;
+  --line-2:var(--line-soft);
+  /* 墨 */
+  --ink:#262A33;
+  --ink-2:#6B7280;
+  --ink-3:#9CA3AF;
+  --ink-4:#C4C8CF;
+  /* 强调与状态 */
+  --accent:#3B82F6; --accent-ink:#2563EB; --accent-tint:#EFF6FF;
+  --cobalt:var(--accent); --teal:#06B6D4;
+  --green:#1FA35A; --green-bg:#ECFDF3; --green-ink:#15803D;
+  --amber:#F97316; --amber-bg:#FFF4EC; --amber-ink:#C2410C; --amber-line:#FDDCC4;
+  --red:#EF4444; --red-bg:#FEF2F2; --red-ink:#B91C1C;
+  --flow:linear-gradient(90deg,var(--accent) 0%,var(--teal) 100%);
+  /* 形 */
+  --r-card:14px; --r-md:10px; --r-sm:8px; --r-xs:6px;
+  --ring:0 0 0 1px var(--line);
+  --ring-strong:0 0 0 1px var(--line-strong);
+  --shadow-xs:0 1px 2px rgba(20,24,33,.05);
+  --shadow-sm:0 1px 2px rgba(20,24,33,.04),0 2px 6px rgba(20,24,33,.04);
+  --shadow-md:0 2px 10px rgba(20,24,33,.08);
+  --shadow-lg:0 8px 28px rgba(20,24,33,.14);
+  --shadow-card:var(--ring),var(--shadow-sm);
+  --shadow-raised:var(--ring),var(--shadow-md);
+  --shadow-overlay:var(--ring),var(--shadow-lg);
+  --shadow-btn:var(--ring-strong),var(--shadow-xs);
+  --shadow-1:var(--shadow-card); --shadow-2:var(--shadow-raised); --shadow-3:var(--shadow-overlay);
+  /* 字 */
+  --display:"Inter","Noto Sans SC",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --body:"Inter","Noto Sans SC",system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  /* 布局 */
+  --rail-w:232px; --topbar-h:52px;
+}
+body.rail-collapsed{--rail-w:56px}
+
+/* ---------- 基础 ---------- */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--body);font-size:13px;line-height:1.5;letter-spacing:-.01em;-webkit-font-smoothing:antialiased;font-feature-settings:"tnum" 1,"cv11" 1}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;letter-spacing:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+code{font-family:var(--mono);letter-spacing:0}
+.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* ---------- 通用控件 ---------- */
+.btn{height:28px;padding:0 11px;border-radius:var(--r-sm);border:0;background:var(--paper);box-shadow:var(--shadow-btn);font-weight:500;font-size:12.5px;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .12s ease,box-shadow .12s ease}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);color:#fff;box-shadow:none}
+.btn.primary:hover{background:var(--accent-ink)}
+.btn.dark{background:var(--ink);color:#fff;box-shadow:none}
+.btn.dark:hover{background:#333844}
+.btn.quiet{background:transparent;box-shadow:none;color:var(--ink-2)}
+.btn.quiet:hover{color:var(--ink);background:var(--hover)}
+.btn.soft{background:var(--hover-2);box-shadow:none;color:var(--ink)}
+.btn.soft:hover{background:#E2E4E8}
+.btn.pill{border-radius:999px;padding:0 12px}
+.btn .i{width:14px;height:14px;stroke-width:2}
+.kbd{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:0}
+.eyebrow{font-weight:500;font-size:12px;color:var(--ink-3)}
+.card{background:var(--paper);border-radius:var(--r-card);box-shadow:var(--shadow-card)}
+
+/* 状态药丸（参考 Task Rows 的 Completed） */
+.pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:11.5px;font-weight:500;white-space:nowrap}
+.pill.ok{background:var(--green-bg);color:var(--green-ink)}
+.pill.warn{background:var(--amber-bg);color:var(--amber-ink)}
+.pill.bad{background:var(--red-bg);color:var(--red-ink)}
+.pill.info{background:var(--accent-tint);color:var(--accent-ink)}
+.pill.mute{background:var(--hover-2);color:var(--ink-2)}
+.pill.live::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.4s ease-in-out infinite}
+
+/* 芯片（选择器 / 上下文） */
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 9px 0 8px;border-radius:var(--r-sm);font-size:12.5px;font-weight:500;color:var(--ink-2);background:transparent;white-space:nowrap}
+.chip:hover{background:var(--hover);color:var(--ink)}
+.chip .i{width:13px;height:13px;stroke-width:2;color:var(--ink-3)}
+.chip .sw{width:8px;height:8px;border-radius:50%;background:var(--ink)}
+.chip .caret{width:12px;height:12px;color:var(--ink-3)}
+.chip.ghost{color:var(--ink-3)}
+.chip.sm{height:24px;padding:0 7px;font-size:11.5px}
+.chip.sm .i{width:12px;height:12px}
+.chip.box{background:var(--paper);box-shadow:var(--ring)}
+.chip.box:hover{background:var(--hover)}
+
+/* Agent 芯片 */
+.agchip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px 0 4px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink-2);background:var(--paper);box-shadow:var(--ring);white-space:nowrap}
+.agchip i{width:18px;height:18px;border-radius:6px;background:var(--ink);color:#fff;font-style:normal;font-weight:600;font-size:10px;display:grid;place-items:center}
+.agchip i.b{background:#fff;color:var(--ink);box-shadow:var(--ring)}
+.agchip .bk{color:var(--ink-3)}
+.agchip.pick{background:var(--amber-bg);color:var(--amber-ink);box-shadow:0 0 0 1px var(--amber-line)}
+.agchip .i{width:12px;height:12px;color:var(--ink-3)}
+
+/* 工具值框（参考 Tool Chips 的 inset mono） */
+.tv{display:inline-flex;align-items:center;height:22px;padding:0 7px;border-radius:6px;background:var(--inset);font-family:var(--mono);font-size:11.5px;color:var(--ink-2);letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+/* 变更文件芯片 file +13 −2 */
+.diffchip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;background:var(--paper);box-shadow:var(--ring);font-family:var(--mono);font-size:11.5px;color:var(--ink);letter-spacing:0}
+.diffchip .add{color:var(--green-ink)} .diffchip .del{color:var(--red-ink)}
+
+/* 分段控件（参考 Capsules | List） */
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:999px;background:var(--hover-2)}
+.seg button{height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink-2)}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:var(--paper);color:var(--ink);box-shadow:var(--ring),var(--shadow-xs)}
+
+/* 区块标题（参考：编号 · 标题 · 灰色说明） */
+.sec-h{display:flex;align-items:baseline;gap:10px;margin:0 0 10px}
+.sec-h h2{font-weight:600;font-size:14px;letter-spacing:-.01em;margin:0;color:var(--ink)}
+.sec-h .cnt{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);letter-spacing:0}
+.sec-h .desc{font-size:13px;color:var(--ink-3)}
+.sec-h .more{margin-left:auto;font-size:12.5px;color:var(--ink-3);font-weight:500}
+.sec-h .more:hover{color:var(--ink)}
+.sec-h .btn{margin-left:auto}
+
+/* ---------- 流线（签名元素） ---------- */
+.fp{position:relative;height:34px;width:100%}
+.fp .track{position:absolute;left:0;right:0;top:11px;height:2px;background:var(--line-strong)}
+.fp .fill{position:absolute;left:0;top:11px;height:2px;background:var(--flow);border-radius:2px}
+.fp .st{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+.fp .st:first-of-type{transform:none;align-items:flex-start}
+.fp .st:last-of-type{transform:translateX(-100%);align-items:flex-end}
+.fp .st i{width:10px;height:10px;border-radius:50%;background:var(--paper);border:2px solid var(--line-strong);display:block;margin-top:6px}
+.fp .st.done i{background:var(--accent);border-color:var(--accent)}
+.fp .st.now i{border-color:var(--teal);animation:pulse 1.6s ease-in-out infinite}
+.fp .st span{font-size:11px;font-weight:500;color:var(--ink-3);margin-top:5px;white-space:nowrap}
+.fp .st.now span{color:var(--ink)}
+.fp.wait .fill{background:var(--amber)}
+.fp.wait .st.now i{border-color:var(--amber);animation:none}
+.fp.wait .st.now span{color:var(--amber-ink)}
+
+/* ---------- 导轨（可收起；参考 Sidebar Nav 的克制） ---------- */
+.rail{background:var(--page);border-right:1px solid var(--line);display:flex;flex-direction:column;gap:18px;padding:14px 12px 12px;position:sticky;top:0;height:100vh;overflow:hidden}
+.rail .brand{display:flex;align-items:center;gap:10px;height:30px;padding:0 6px}
+.rail .brand .mark{width:26px;height:26px;flex:none}
+.rail .brand .mark svg{width:26px;height:26px;display:block}
+.rail .brand .name{font-weight:600;font-size:15px;letter-spacing:-.01em;white-space:nowrap}
+.rail .brand .ver{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);box-shadow:var(--ring);padding:1px 6px;border-radius:999px;letter-spacing:0}
+.rail .nav{display:flex;flex-direction:column;gap:1px}
+.rail .nav a,.rail-foot a,.rail-foot button{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:var(--r-sm);color:var(--ink-2);font-weight:500;white-space:nowrap;width:100%;text-align:left;font-size:13px;transition:background .12s ease}
+.rail .nav a:hover,.rail-foot a:hover,.rail-foot button:hover{background:var(--hover);color:var(--ink)}
+.rail .nav a.active{background:var(--hover-2);color:var(--ink)}
+.rail .nav .i,.rail-foot .i{width:16px;height:16px;color:var(--ink-3)}
+.rail .nav a.active .i,.rail .nav a:hover .i{color:var(--ink)}
+.rail .nav kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink-4);letter-spacing:0}
+.rail-sec{font-size:12px;color:var(--ink-3);font-weight:500;padding:0 10px;margin-bottom:4px}
+.plist{display:flex;flex-direction:column;gap:1px}
+.plist a{display:flex;align-items:center;gap:9px;height:30px;padding:0 10px;border-radius:var(--r-sm);color:var(--ink-2);font-weight:500;white-space:nowrap}
+.plist a:hover{background:var(--hover);color:var(--ink)}
+.plist .dot{width:6px;height:6px;border-radius:50%;background:var(--ink-4);flex:none}
+.plist .dot.live{background:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}
+.plist .dot.warn{background:var(--amber)}
+.plist .n{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3);letter-spacing:0}
+.rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:1px}
+.rail-foot a,.rail-foot button{color:var(--ink-3);font-size:12.5px}
+.rail-foot .me i{width:24px;height:24px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;font-weight:600;font-size:11px;font-style:normal;flex:none;margin-left:-4px}
+.rail-foot .me{color:var(--ink-2)}
+/* 收起态 */
+body.rail-collapsed .rail{padding:12px 9px 10px;gap:14px;align-items:center}
+body.rail-collapsed .rail .brand{padding:0;justify-content:center;width:38px}
+body.rail-collapsed .rail .brand .name,body.rail-collapsed .rail .brand .ver,
+body.rail-collapsed .rail .nav a span,body.rail-collapsed .rail .nav kbd,
+body.rail-collapsed .rail-sec,body.rail-collapsed .plist,
+body.rail-collapsed .rail-foot span{display:none}
+body.rail-collapsed .rail .nav,body.rail-collapsed .rail-foot{width:38px}
+body.rail-collapsed .rail .nav a,body.rail-collapsed .rail-foot a,body.rail-collapsed .rail-foot button{width:38px;padding:0;justify-content:center}
+body.rail-collapsed .rail-foot .me i{margin-left:0}
+body.rail-collapsed .rail-foot .collapse .i{transform:rotate(180deg)}
+
+/* ---------- 顶栏件 ---------- */
+.topbar{height:var(--topbar-h);display:flex;align-items:center;gap:12px;padding:0 16px;background:var(--page);border-bottom:1px solid var(--line);min-width:0}
+.crumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-3);white-space:nowrap;font-weight:500}
+.crumb b{color:var(--ink);font-weight:600}
+.search{display:flex;align-items:center;gap:8px;width:300px;height:32px;background:var(--paper);box-shadow:var(--ring);border-radius:var(--r-sm);padding:0 8px 0 10px;color:var(--ink-3);font-size:13px}
+.search:hover{box-shadow:var(--ring-strong)}
+.search .i{width:14px;height:14px;stroke-width:2}
+.search .kbd{margin-left:auto;box-shadow:var(--ring);border-radius:5px;padding:1px 5px;color:var(--ink-3);font-size:10.5px;background:var(--inset)}
+.iconbtn{width:32px;height:32px;border-radius:var(--r-sm);background:transparent;display:grid;place-items:center;position:relative;color:var(--ink-2)}
+.iconbtn:hover{background:var(--hover);color:var(--ink)}
+.iconbtn .badge{position:absolute;top:2px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--amber);color:#fff;font-weight:600;font-size:10px;display:grid;place-items:center;border:2px solid var(--page)}
+.backends{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 8px;border-radius:var(--r-sm);background:var(--paper);box-shadow:var(--ring);font-size:12.5px;font-weight:500;color:var(--ink-2)}
+.backends:hover{background:var(--hover)}
+.backends .stack{display:inline-flex}
+.backends .stack i{width:18px;height:18px;border-radius:6px;border:2px solid var(--paper);margin-left:-6px;display:grid;place-items:center;font-weight:600;font-size:9.5px;font-style:normal;background:var(--ink);color:#fff}
+.backends .stack i:first-child{margin-left:0}
+.backends .stack i.off{background:var(--hover-2);color:var(--ink-3)}
+.backends b{font-weight:600;color:var(--ink)}
+.backends .caret{width:12px;height:12px;stroke:var(--ink-3);fill:none;stroke-width:2}
+
+/* ---------- 动效 ---------- */
+@keyframes pulse{0%,100%{box-shadow:0 0 0 3px rgba(6,182,212,.22)}50%{box-shadow:0 0 0 7px rgba(6,182,212,.06)}}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes blink{50%{opacity:.25}}
+.anim{animation:in .45s cubic-bezier(.2,.7,.2,1)}
+.reveal{opacity:0;transform:translateY(6px);animation:in .5s cubic-bezier(.2,.7,.2,1) forwards}
+.reveal:nth-child(1){animation-delay:.02s}.reveal:nth-child(2){animation-delay:.08s}.reveal:nth-child(3){animation-delay:.14s}.reveal:nth-child(4){animation-delay:.2s}
+@media (prefers-reduced-motion:reduce){
+  .anim,.reveal{animation:none;opacity:1;transform:none}
+  .fp .st.now i,.pill.live::before{animation:none}
+}

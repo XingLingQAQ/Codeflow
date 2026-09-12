@@ -76,7 +76,6 @@ type SAMGService struct {
 var (
 	globalSAMGService *SAMGService
 	globalSAMGMu      sync.RWMutex
-	samgOnce          sync.Once
 )
 
 // SAMGServiceConfig 服务配置
@@ -90,6 +89,24 @@ type SAMGServiceConfig struct {
 // NewSAMGService 创建SAMG服务
 func NewSAMGService(config *SAMGServiceConfig) *SAMGService {
 	var storeConfig *TripleStoreConfig
+	if config != nil {
+		storeConfig = config.StoreConfig
+	}
+	svc, _ := newSAMGService(NewInMemoryTripleStore(storeConfig), config)
+	return svc
+}
+
+// NewSAMGServiceWithStore wires an explicit graph store. Tests may pass the
+// in-memory store; production passes SQLiteTripleStore.
+func NewSAMGServiceWithStore(store ITripleStore, config *SAMGServiceConfig) (*SAMGService, error) {
+	if store == nil {
+		return nil, fmt.Errorf("samg store is nil")
+	}
+	return newSAMGService(store, config)
+}
+
+func newSAMGService(store ITripleStore, config *SAMGServiceConfig) (*SAMGService, error) {
+	var storeConfig *TripleStoreConfig
 	var extractorConfig *TripleExtractorConfig
 	var activationConfig *ActivationConfig
 	var decayConfig *DecayConfig
@@ -101,17 +118,25 @@ func NewSAMGService(config *SAMGServiceConfig) *SAMGService {
 		decayConfig = config.DecayConfig
 	}
 
-	store := NewInMemoryTripleStore(storeConfig)
+	if store == nil {
+		store = NewInMemoryTripleStore(storeConfig)
+	}
 	extractor := NewTripleExtractor(extractorConfig)
 	activation := NewSpreadingActivation(store, activationConfig)
 	decay := NewDecayManager(store, decayConfig)
+	if persistence, ok := store.(activationPersistence); ok {
+		decay.SetPersistence(persistence)
+		if err := decay.LoadPersisted(context.Background()); err != nil {
+			return nil, fmt.Errorf("load samg access metadata: %w", err)
+		}
+	}
 
 	return &SAMGService{
 		store:      store,
 		extractor:  extractor,
 		activation: activation,
 		decay:      decay,
-	}
+	}, nil
 }
 
 // SetSAMGService 设置全局SAMG服务
@@ -123,16 +148,23 @@ func SetSAMGService(svc *SAMGService) {
 
 // GetSAMGService 获取全局SAMG服务
 func GetSAMGService() *SAMGService {
-	samgOnce.Do(func() {
-		globalSAMGMu.Lock()
-		defer globalSAMGMu.Unlock()
-		if globalSAMGService == nil {
-			globalSAMGService = NewSAMGService(nil)
-		}
-	})
 	globalSAMGMu.RLock()
 	defer globalSAMGMu.RUnlock()
 	return globalSAMGService
+}
+
+func HasSAMGService() bool {
+	globalSAMGMu.RLock()
+	defer globalSAMGMu.RUnlock()
+	return globalSAMGService != nil
+}
+
+// Close releases a durable graph store when one was injected.
+func (s *SAMGService) Close() error {
+	if closer, ok := s.store.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
 }
 
 // SetOnExtractComplete 设置提取完成回调

@@ -1,0 +1,3 @@
+hello from project-no-git
+this file stands in for project source code in a workspace without git
+line three keeps the file multi-line so diffs have context

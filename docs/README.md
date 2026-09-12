@@ -44,6 +44,7 @@
 | 文档 | 角色 |
 |---|---|
 | [2.0 实施与硬化计划](plans/2026-07-11-codeflow-2.0-implementation-and-hardening-plan.md) | 主实施计划 / 进度看板 / M0 门禁 |
+| [后端用户功能闭环计划](plans/2026-08-18-backend-product-hardening-plan.md) | 后端问题清单、串行实施顺序、验收与前端契约 |
 | [前端主线裁决](frontend-mainline-decision.md) | 唯一主前端 = `apps/workbench` |
 | [功能对等矩阵](design/feature-parity-matrix.md) | 能力差距 Living 跟踪 |
 | [2.0 总体路线图](design/2026-06-12-overall-roadmap.md) | 产品重定位与里程碑总表 |
@@ -51,6 +52,18 @@
 | [Workbench / Shell 设计](design/workbench-and-shell.md) | App Shell + 阶段画布 |
 | [Agent 质量体系](design/agent-quality-system.md) | 广场 / 辩论 / 守卫 / 配置 |
 | [前端体验设计](design/frontend-experience.md) | 设计系统 / 启动 / 多端 |
+
+### 3.0 文档目录（docs/design/codeflow-3.0/）
+
+| 文档 | 用途 |
+|---|---|
+| [3.0 问题深挖](design/codeflow-3.0/2026-09-03-project-issues-deep-dive.md) | 存量问题清单与根因分析（3.0 立项依据） |
+| [3.0 重设计](design/codeflow-3.0/codeflow-3.0-redesign.md) | 3.0 目标态架构与模块设计正文 |
+| [3.0 实施计划](design/codeflow-3.0/2026-09-03-codeflow-3.0-implementation-plan.md) | 派发式实施计划、任务卡与进度回执 |
+
+### 单机单用户边界
+
+CodeFlow 当前为**单机单用户个人工具**，团队协作仅通过导出审计包/项目包进行。RBAC、votes、integrations、blackboard、手机端、插件市场为冻结或后置能力，不得写成已交付。
 
 ---
 
@@ -78,6 +91,7 @@ docs/
 │   ├── frontend-experience.md
 │   ├── guard-policy.example.yaml
 │   ├── plugin-system.md
+│   ├── codeflow-3.0/                  # 3.0 问题深挖 / 设计 / 实施计划
 │   └── early/                         # 早期设计归档（Historical）
 ├── plans/                             # 实施计划
 └── requirements/                      # 需求文档

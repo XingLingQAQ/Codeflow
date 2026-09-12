@@ -50,6 +50,7 @@ type SessionWithMessages struct {
 
 // CreateSessionInput 创建会话输入
 type CreateSessionInput struct {
+	ID     string                 `json:"-"`
 	Title  string                 `json:"title,omitempty"`
 	Model  string                 `json:"model,omitempty"`
 	Config map[string]interface{} `json:"config,omitempty"`

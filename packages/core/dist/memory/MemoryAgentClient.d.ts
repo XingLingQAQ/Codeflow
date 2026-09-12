@@ -47,7 +47,11 @@ export interface MemoryAgentResolvedPointer {
 }
 export interface MemoryAgentNode {
     id: string;
+    '@type'?: string[];
     label: string;
+    description?: string;
+    properties?: Record<string, unknown>;
+    aliases?: string[];
     activation: number;
     hop: number;
     pointers?: MemoryAgentResolvedPointer[];

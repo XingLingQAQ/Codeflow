@@ -38,7 +38,12 @@ func TestClientHandleMessageTriggersMessageCompleteHook(t *testing.T) {
 
 func TestTopicSubscribeAndBroadcast(t *testing.T) {
 	hub := NewHub()
-	client := &Client{ID: "c-topic", Hub: hub, Send: make(chan []byte, 4)}
+	client := &Client{
+		ID:            "c-topic",
+		Hub:           hub,
+		Send:          make(chan []byte, 4),
+		allowedTopics: topicSet([]string{TopicFlowEvent}),
+	}
 	hub.clients[client.ID] = client
 
 	client.handleMessage(&Message{

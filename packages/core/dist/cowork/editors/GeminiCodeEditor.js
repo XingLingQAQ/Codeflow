@@ -1,11 +1,11 @@
 /**
  * Gemini Code Editor
- * 基于 GeminiAdapter 实现 ICodeEditor 接口
- * 复用 Claude Editor 的 Prompt 模板
+ * 同时支持 Gemini API adapter 与 cowork Gemini CLI adapter
  */
 import { readFile, writeFile, copyFile, unlink, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, dirname } from 'path';
+import { GeminiCLIAdapter } from '../adapters/GeminiCLIAdapter.js';
 /**
  * Prompt 模板（与 Claude Editor 一致）
  */
@@ -47,6 +47,44 @@ const PREVIEW_PROMPT_TEMPLATE = `You are a code editing assistant. Preview the c
 {instruction}
 
 ## Output (unified diff only):`;
+class GeminiApiPromptExecutor {
+    constructor(adapter) {
+        this.adapter = adapter;
+    }
+    async executePrompt(prompt, options) {
+        const response = await this.adapter.send(prompt, {
+            model: options.model,
+            maxTokens: options.maxTokens,
+            temperature: options.temperature,
+        });
+        return response.content;
+    }
+}
+class GeminiCliPromptExecutor {
+    constructor(adapter) {
+        this.adapter = adapter;
+    }
+    async executePrompt(prompt, options) {
+        const originalConfig = this.adapter.getConfig();
+        this.adapter.configure({
+            model: options.model || originalConfig.model,
+        });
+        try {
+            const result = await this.adapter.execute(prompt, {
+                cwd: originalConfig.cwd,
+            });
+            if (result.exitCode !== 0) {
+                throw new Error(result.stderr || `Gemini CLI exited with code ${result.exitCode}`);
+            }
+            return result.stdout;
+        }
+        finally {
+            this.adapter.configure({
+                model: originalConfig.model,
+            });
+        }
+    }
+}
 /**
  * Gemini Code Editor
  */
@@ -55,6 +93,7 @@ export class GeminiCodeEditor {
         this.name = 'gemini-editor';
         this.backupStack = [];
         this.adapter = adapter;
+        this.executor = this.createPromptExecutor(adapter);
         this.config = {
             autoBackup: true,
             backupDir: '.gemini-backups',
@@ -83,13 +122,9 @@ export class GeminiCodeEditor {
             .replace('{content}', content)
             .replace('{instruction}', instruction);
         try {
-            const response = await this.adapter.send(prompt, {
-                model: this.config.model,
-                maxTokens: this.config.maxTokens,
-                temperature: this.config.temperature,
-            });
+            const output = await this.executePrompt(prompt);
             // 解析 diff
-            const diff = this.parseDiff(response.content, file);
+            const diff = this.parseDiff(output, file);
             if (diff.hunks.length === 0) {
                 return {
                     success: true,
@@ -141,12 +176,8 @@ export class GeminiCodeEditor {
             .replace('{content}', content)
             .replace('{instruction}', instruction);
         try {
-            const response = await this.adapter.send(prompt, {
-                model: this.config.model,
-                maxTokens: this.config.maxTokens,
-                temperature: this.config.temperature,
-            });
-            return this.parseDiff(response.content, file);
+            const output = await this.executePrompt(prompt);
+            return this.parseDiff(output, file);
         }
         catch {
             return this.emptyDiff(file);
@@ -224,7 +255,26 @@ export class GeminiCodeEditor {
         }
         this.backupStack = [];
     }
+    getAdapter() {
+        return this.adapter;
+    }
+    getConfig() {
+        return { ...this.config };
+    }
     // ==================== 私有方法 ====================
+    createPromptExecutor(adapter) {
+        if (adapter instanceof GeminiCLIAdapter) {
+            return new GeminiCliPromptExecutor(adapter);
+        }
+        return new GeminiApiPromptExecutor(adapter);
+    }
+    async executePrompt(prompt) {
+        return this.executor.executePrompt(prompt, {
+            model: this.config.model,
+            maxTokens: this.config.maxTokens,
+            temperature: this.config.temperature,
+        });
+    }
     resolvePath(file) {
         if (this.config.cwd) {
             return join(this.config.cwd, file);

@@ -2,12 +2,8 @@ package handlers
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,18 +11,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
-
 	"github.com/codeflow/backend/internal/memory"
 )
 
 type atomicMemoryService interface {
-	Add(ctx context.Context, mem *memory.AtomicMemory) error
-	Search(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
+	AddWithReceipt(ctx context.Context, mem *memory.AtomicMemory) (memory.AtomicMutationReceipt, error)
+	SearchWithReport(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, memory.AtomicSearchReport, error)
 	GetBySession(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
 	GetByID(ctx context.Context, id string) (*memory.AtomicMemory, error)
-	Update(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
-	Delete(ctx context.Context, id string) error
+	UpdateWithReceipt(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) (memory.AtomicMutationReceipt, error)
+	DeleteWithReceipt(ctx context.Context, id string) (memory.AtomicMutationReceipt, error)
 	ApplyHeatDecay(ctx context.Context) (int, error)
 	RecomputeTiers(ctx context.Context) (int, error)
 	BoostHeat(ctx context.Context, id string, boost float64) error
@@ -45,42 +39,10 @@ func getAtomicMemoryService() (atomicMemoryService, error) {
 	if defaultAtomicMemoryService != nil {
 		return defaultAtomicMemoryService, nil
 	}
-
-	svc, err := initAtomicMemoryService()
-	if err != nil {
-		return nil, err
+	if svc := memory.GetAtomicMemoryService(); svc != nil {
+		return svc, nil
 	}
-	defaultAtomicMemoryService = svc
-	return defaultAtomicMemoryService, nil
-}
-
-func initAtomicMemoryService() (atomicMemoryService, error) {
-	dataDir := filepath.Join(".", "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create data dir: %w", err)
-	}
-
-	dbPath := filepath.Join(dataDir, "atomic_memory.db")
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open atomic memory db: %w", err)
-	}
-
-	vectorDBPath := filepath.Join(dataDir, "atomic_vectors.db")
-	vectorStore, err := memory.CreateSQLiteVectorStore(&memory.VectorStoreConfig{
-		CollectionName: "atomic_memory",
-		DBPath:         vectorDBPath,
-		WALMode:        true,
-	}, memory.NewSimpleEmbeddingProvider(384))
-	if err != nil {
-		return nil, fmt.Errorf("create atomic vector store: %w", err)
-	}
-
-	svc, err := memory.NewAtomicMemoryService(context.Background(), db, vectorStore, memory.NewSimpleEmbeddingProvider(384))
-	if err != nil {
-		return nil, fmt.Errorf("create atomic memory service: %w", err)
-	}
-	return svc, nil
+	return nil, errors.New("atomic memory service is not initialized")
 }
 
 func setAtomicMemoryServiceForTest(svc atomicMemoryService) {
@@ -110,6 +72,86 @@ type updateAtomicMemoryRequest struct {
 	Source        *string    `json:"source,omitempty"`
 	Importance    *float64   `json:"importance,omitempty"`
 	Embedding     *[]float64 `json:"embedding,omitempty"`
+}
+
+// atomicMemoryMutationData 是 mutation（创建/更新）响应的 data 形状
+// （T13.02.c）：保留 AtomicMemory 的全部既有字段（向后兼容），新增
+// revision 与 index_sync，分开表达"正文已接受"与"向量索引同步状态"
+// （pending/failed/synced）；index_error 只在 pending/failed 时出现。
+// 只查正文的读路径不使用本形状，不向调用方报告索引状态。
+type atomicMemoryMutationData struct {
+	memory.AtomicMemory
+	Revision   int64  `json:"revision"`
+	IndexSync  string `json:"index_sync"`
+	IndexError string `json:"index_error,omitempty"`
+}
+
+func atomicMemoryMutationDataFrom(mem *memory.AtomicMemory, receipt memory.AtomicMutationReceipt) atomicMemoryMutationData {
+	return atomicMemoryMutationData{
+		AtomicMemory: *mem,
+		Revision:     receipt.Revision,
+		IndexSync:    string(receipt.IndexSync),
+		IndexError:   receipt.IndexError,
+	}
+}
+
+// atomicMemoryDeleteData 是删除响应的 data 形状（T13.02.c）：保留既有
+// deleted/id 字段，新增 revision/index_sync/index_error（语义同上）。
+type atomicMemoryDeleteData struct {
+	Deleted    bool   `json:"deleted"`
+	ID         string `json:"id"`
+	Revision   int64  `json:"revision"`
+	IndexSync  string `json:"index_sync"`
+	IndexError string `json:"index_error,omitempty"`
+}
+
+func atomicMemoryDeleteDataFrom(id string, receipt memory.AtomicMutationReceipt) atomicMemoryDeleteData {
+	return atomicMemoryDeleteData{
+		Deleted:    true,
+		ID:         id,
+		Revision:   receipt.Revision,
+		IndexSync:  string(receipt.IndexSync),
+		IndexError: receipt.IndexError,
+	}
+}
+
+// atomicSearchReportData 是 Search 响应中的候选续取/索引同步报告
+// （T13.02.c）：耗尽与达到工作量上限分开，另报告"当前 revision 未同步"
+// 的索引 job 数。
+type atomicSearchReportData struct {
+	CandidatesScanned int  `json:"candidates_scanned"`
+	Batches           int  `json:"batches"`
+	Exhausted         bool `json:"exhausted"`
+	BudgetLimited     bool `json:"budget_limited"`
+	IndexPendingJobs  int  `json:"index_pending_jobs"`
+	IndexFailedJobs   int  `json:"index_failed_jobs"`
+}
+
+// atomicMemorySearchData 是 Search 响应的 data 形状（T13.02.c）：保留既有
+// memories/count 字段，新增 search_report 与 incomplete_reason。向量未同步
+// （pending/failed job）或达到候选工作量上限时 incomplete_reason 非空，
+// 不再把未同步的检索当成完整空结果。
+type atomicMemorySearchData struct {
+	Memories         []memory.AtomicMemory  `json:"memories"`
+	Count            int                    `json:"count"`
+	Report           atomicSearchReportData `json:"search_report"`
+	IncompleteReason string                 `json:"incomplete_reason,omitempty"`
+}
+
+func atomicMemorySearchDataFrom(items []memory.AtomicMemory, report memory.AtomicSearchReport) atomicMemorySearchData {
+	return atomicMemorySearchData{
+		Memories: items,
+		Count:    len(items),
+		Report: atomicSearchReportData{
+			CandidatesScanned: report.CandidatesScanned,
+			Batches:           report.Batches,
+			Exhausted:         report.Exhausted,
+			BudgetLimited:     report.BudgetLimited,
+			IndexPendingJobs:  report.IndexPendingJobs,
+			IndexFailedJobs:   report.IndexFailedJobs,
+		},
+		IncompleteReason: report.IncompleteReason(),
+	}
 }
 
 // CreateAtomicMemory handles POST /api/v1/memory/atomic.
@@ -174,12 +216,13 @@ func CreateAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	if err := svc.Add(c.Request.Context(), mem); err != nil {
+	receipt, err := svc.AddWithReceipt(c.Request.Context(), mem)
+	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to create atomic memory: "+err.Error())
 		return
 	}
 
-	respondCreated(c, mem)
+	respondCreated(c, atomicMemoryMutationDataFrom(mem, receipt))
 }
 
 // SearchAtomicMemory handles GET /api/v1/memory/atomic/search.
@@ -202,13 +245,13 @@ func SearchAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	items, err := svc.Search(c.Request.Context(), query, opts)
+	items, report, err := svc.SearchWithReport(c.Request.Context(), query, opts)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to search atomic memories: "+err.Error())
 		return
 	}
 
-	respondOK(c, gin.H{"memories": items, "count": len(items)})
+	respondOK(c, atomicMemorySearchDataFrom(items, report))
 }
 
 // GetAtomicMemoriesBySession handles GET /api/v1/memory/atomic/session/:id.
@@ -284,7 +327,8 @@ func UpdateAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	if err := svc.Update(c.Request.Context(), id, updates); err != nil {
+	receipt, err := svc.UpdateWithReceipt(c.Request.Context(), id, updates)
+	if err != nil {
 		if errors.Is(err, memory.ErrAtomicMemoryNotFound) {
 			respondError(c, http.StatusNotFound, "Atomic memory not found")
 			return
@@ -303,7 +347,7 @@ func UpdateAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	respondOK(c, item)
+	respondOK(c, atomicMemoryMutationDataFrom(item, receipt))
 }
 
 // DeleteAtomicMemory handles DELETE /api/v1/memory/atomic/:id.
@@ -320,7 +364,8 @@ func DeleteAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	if err := svc.Delete(c.Request.Context(), id); err != nil {
+	receipt, err := svc.DeleteWithReceipt(c.Request.Context(), id)
+	if err != nil {
 		if errors.Is(err, memory.ErrAtomicMemoryNotFound) {
 			respondError(c, http.StatusNotFound, "Atomic memory not found")
 			return
@@ -329,7 +374,7 @@ func DeleteAtomicMemory(c *gin.Context) {
 		return
 	}
 
-	respondOK(c, gin.H{"deleted": true, "id": id})
+	respondOK(c, atomicMemoryDeleteDataFrom(id, receipt))
 }
 
 func buildAtomicSearchOptions(c *gin.Context) (*memory.AtomicMemorySearchOptions, error) {

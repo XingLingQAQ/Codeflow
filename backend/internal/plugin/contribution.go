@@ -9,6 +9,7 @@ import (
 
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/guard"
+	"github.com/codeflow/backend/internal/policy"
 	"github.com/codeflow/backend/internal/skill"
 )
 
@@ -78,8 +79,17 @@ func NewContributionRegistry() *ContributionRegistry {
 // for the given plugin. Semantics are all-or-nothing: if any contribution
 // fails, earlier ones are rolled back.
 func (r *ContributionRegistry) RegisterContributions(pluginID string, m ContributionManifest) error {
+	return r.RegisterContributionsContext(context.Background(), pluginID, m)
+}
+
+// RegisterContributionsContext enforces the plugin boundary before applying
+// any contribution. The legacy method delegates here for API compatibility.
+func (r *ContributionRegistry) RegisterContributionsContext(ctx context.Context, pluginID string, m ContributionManifest) error {
 	if strings.TrimSpace(pluginID) == "" {
 		return fmt.Errorf("plugin id required")
+	}
+	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID}); !decision.Allowed {
+		return policy.DenialError(decision)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -95,12 +105,12 @@ func (r *ContributionRegistry) RegisterContributions(pluginID string, m Contribu
 	// --- skills (applied first so template failures can roll them back) ---
 	for _, sc := range m.Skills {
 		sk, err := skill.GetRegistry().Create(context.Background(), &skill.CreateRequest{
-			Name:      sc.Name,
-			Body:      sc.Body,
-			Triggers:  sc.Triggers,
-			StageTags: sc.StageTags,
-			Source:    skill.SourcePlugin,
-			Version:   sc.Version,
+			Name:        sc.Name,
+			Body:        sc.Body,
+			Triggers:    sc.Triggers,
+			StageTags:   sc.StageTags,
+			Source:      skill.SourcePlugin,
+			Version:     sc.Version,
 			Description: sc.Description,
 		})
 		if err != nil {
@@ -157,6 +167,13 @@ func (r *ContributionRegistry) RegisterContributions(pluginID string, m Contribu
 
 // UnregisterContributions removes all contributions for a plugin.
 func (r *ContributionRegistry) UnregisterContributions(pluginID string) error {
+	return r.UnregisterContributionsContext(context.Background(), pluginID)
+}
+
+func (r *ContributionRegistry) UnregisterContributionsContext(ctx context.Context, pluginID string) error {
+	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID}); !decision.Allowed {
+		return policy.DenialError(decision)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	records, ok := r.applied[pluginID]

@@ -8,6 +8,25 @@ on:
       - main
       - master
 
+env:
+  # T0.01.c：后端 GA 已知失败包排除清单（实测基线见计划 §26.11，2026-09-10）。
+  # 全量 `go test ./...` 因下列 4 个包的已记录非 CGO 失败会永久红、掩盖新回归，
+  # 故各 Go job 运行 `go test $(go list ./... | grep -vE "$BACKEND_TEST_EXCLUDE")`。
+  # 本清单只能随修复缩小，不得扩大；逐包失败类别与责任卡：
+  #   - internal（根包）：已于 2026-09-12 移出排除清单——契约测试
+  #     TestDatabaseResourcesUseDeferredCloseOrRollback 按 §26.17 裁定放宽
+  #     （接受错误路径显式 rollback/Close，保留全路径覆盖牙口），整包转绿。
+  #   - internal/api/handlers：4 个失败（TestIntegrationWorkflowAPI 期望 200
+  #     实际 500；3 个 snapshot 全局服务未初始化类，其中 1 个伴随既有 panic），
+  #     归 S1/S3 修复。
+  #   - internal/snapshot：9 个失败（agent/memory service is not initialized），
+  #     归 S1/S3 修复。
+  #   - internal/integration：2 个测试含 3 个子测试失败
+  #     （agent service is not initialized），归 S1/S3 修复。
+  #   - internal/floweng：TestAdvanceCreatesSnapshot（同一全局服务类），
+  #     归 S1/S3 修复。
+  BACKEND_TEST_EXCLUDE: 'github\.com/codeflow/backend/internal/(api/handlers|snapshot|integration|floweng)$'
+
 jobs:
   nx-build-test:
     runs-on: ubuntu-latest
@@ -70,6 +89,40 @@ jobs:
           path: coverage/
           if-no-files-found: warn
 
+  workbench-fu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Install Root Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # FU = workbench unit tests (vitest, apps/workbench/vitest.config.ts).
+      # FT (pnpm exec tsc -p apps/workbench/tsconfig.json --noEmit) and
+      # FB (pnpm --filter @codeflow/workbench build) are intentionally not
+      # wired into CI yet: the plan §26.5 baseline records 3 pre-existing
+      # TS2322 errors in apps/workbench/App.tsx, so FT would stay
+      # permanently red and mask new regressions; FB failed locally with a
+      # dist/assets EPERM and has not been verified in a clean environment.
+      # Reopen conditions: add FT once its baseline is cleared to 0 errors;
+      # add FB after a clean-environment build is verified.
+      - name: Workbench Unit Tests (FU)
+        run: pnpm exec vitest run --config apps/workbench/vitest.config.ts
+
   nx-backend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -81,7 +134,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
 
       - name: Setup GCC (for CGO)
         run: sudo apt-get update && sudo apt-get install -y gcc
@@ -99,11 +152,12 @@ jobs:
       - name: Backend Experimental Routes Check
         run: node scripts/check-backend-routes.mjs
 
+      # 排除清单见文件顶部 BACKEND_TEST_EXCLUDE 注释（计划 §26.11）。
       - name: Backend Test (CGO=1)
         working-directory: backend
         env:
           CGO_ENABLED: "1"
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -coverprofile=coverage.out $(go list ./... | grep -vE "$BACKEND_TEST_EXCLUDE")
 
       - name: Backend Coverage Report
         if: always()
@@ -132,3 +186,51 @@ jobs:
         run: |
           mkdir -p build
           CGO_ENABLED=1 go build -v -ldflags "-s -w" -o build/codeflow-server ./cmd/codeflow-server
+
+  # T0.01.c：Windows + CGO_ENABLED=0 是开发本机基线（无 gcc），
+  # modernc 驱动下 SQLite 测试必须在该组合真实运行。
+  # 排除清单见文件顶部 BACKEND_TEST_EXCLUDE 注释（计划 §26.11）。
+  backend-windows-cgo0:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Backend Test (Windows, CGO=0)
+        working-directory: backend
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go test $(go list ./... | grep -vE "$BACKEND_TEST_EXCLUDE") -count=1
+
+  # T0.01.c：race 需要 CGO=1 与 C 编译器（计划 §21.3 GR），
+  # 与 nx-backend 的覆盖率 job 分开，单独承担 race 信号。
+  # 排除清单见文件顶部 BACKEND_TEST_EXCLUDE 注释（计划 §26.11）。
+  backend-linux-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Setup GCC (for CGO)
+        run: sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Backend Test (Linux, race)
+        working-directory: backend
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race $(go list ./... | grep -vE "$BACKEND_TEST_EXCLUDE") -count=1

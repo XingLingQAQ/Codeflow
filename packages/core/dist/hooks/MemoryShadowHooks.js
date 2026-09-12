@@ -6,7 +6,7 @@
  * - hook_on_message_complete: 更新用户画像
  * - project:init (手动触发): 初始化影子目录
  */
-import { HookEvent } from './types.js';
+import { HookEvent, getMessageText } from './types.js';
 import { ShadowScaffold } from '../shadow/ShadowScaffold.js';
 const DEFAULT_CONFIG = {
     userId: 'default',
@@ -15,9 +15,10 @@ const DEFAULT_CONFIG = {
     enableMemoryExtraction: true,
     enableProfileUpdate: true,
     profileUpdateInterval: 10,
+    enableAgentIngest: true,
 };
 export class MemoryShadowHooks {
-    constructor(hookManager, config = {}, memoryExtractor, profileService, shadowScaffold) {
+    constructor(hookManager, config = {}, memoryExtractor, profileService, shadowScaffold, agentClient) {
         this.messageCount = 0;
         this.lastUserMessage = '';
         this.hookManager = hookManager;
@@ -25,6 +26,7 @@ export class MemoryShadowHooks {
         this.memoryExtractor = memoryExtractor;
         this.profileService = profileService;
         this.shadowScaffold = shadowScaffold || new ShadowScaffold();
+        this.agentClient = agentClient;
     }
     /**
      * 注册所有 hooks
@@ -47,11 +49,29 @@ export class MemoryShadowHooks {
         await this.shadowScaffold.initialize(this.config.projectRoot);
     }
     /**
-     * hook_post_response: 提取记忆
+     * hook_post_response: 提取记忆 + MemoryAgent 双写
      *
-     * 在 AI 响应后，异步提取对话中的记忆
+     * 在 AI 响应后，异步提取对话中的记忆，
+     * 同时通过 MemoryAgent 归档完整对话。
      */
     async onPostResponse(response) {
+        // 1. MemoryAgent 双写（归档完整对话）
+        if (this.config.enableAgentIngest && this.agentClient && this.lastUserMessage) {
+            try {
+                const fullContent = `User: ${this.lastUserMessage}\nAssistant: ${response.content || ''}`;
+                this.agentClient.ingest({
+                    content: fullContent,
+                    type: 'conversation',
+                    session_id: this.config.sessionId,
+                    source: 'assistant',
+                    tags: ['auto-ingest'],
+                }).catch(() => { });
+            }
+            catch {
+                // 归档失败不阻塞主流程
+            }
+        }
+        // 2. 原有的记忆提取逻辑
         if (!this.config.enableMemoryExtraction || !this.memoryExtractor) {
             return;
         }
@@ -73,7 +93,7 @@ export class MemoryShadowHooks {
     async onMessageComplete(message) {
         // 记录最后的用户消息（用于记忆提取）
         if (message.role === 'user') {
-            this.lastUserMessage = message.content;
+            this.lastUserMessage = getMessageText(message.content);
         }
         this.messageCount++;
         if (!this.config.enableProfileUpdate || !this.profileService) {

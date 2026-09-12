@@ -1,7 +1,7 @@
 # CodeFlow 目录结构说明
 
-> 最后更新：2026-07-13  
-> 版本：2.1（M0.6 docs IA）
+> 最后更新：2026-09-10（T0.04.b 按实测修正 8 处偏差）  
+> 版本：2.2（M0.6 docs IA）
 
 ## 📁 项目结构概览
 
@@ -33,18 +33,22 @@ CodeFlow/
 │   │   ├── src/
 │   │   └── package.json     # @codeflow/cli
 │   │
+│   ├── gui/                  # GUI 层（与 ui-components 并存；无引用，T0.05 评估中）
+│   │   ├── src/
+│   │   └── package.json     # @codeflow/gui
+│   │
 │   ├── ui-components/        # UI 组件库（历史资产）
 │   │   ├── src/
 │   │   └── package.json     # @codeflow/ui-components
 │   │
-│   └── shared/               # 共享工具库
+│   └── shared/               # 共享工具库（实质空包）
 │       ├── src/
-│       └── package.json     # @codeflow/shared
+│       └── package.json     # shared（包名非 @codeflow/shared）
 │
 ├── backend/                   # Go 后端服务
 │   ├── cmd/
 │   │   └── codeflow-server/ # 主入口
-│   ├── internal/             # 内部模块（35+ 子模块）
+│   ├── internal/             # 内部模块（40 个一级包，分类见「后端服务」节）
 │   │   ├── adapters/        # LLM 适配器
 │   │   ├── api/             # RESTful API
 │   │   ├── hooks/           # Hook 系统
@@ -52,8 +56,8 @@ CodeFlow/
 │   │   ├── commander/       # 指挥官模式
 │   │   ├── blackboard/      # 黑板协作
 │   │   ├── websocket/       # WebSocket 服务
-│   │   └── ...
-│   ├── pkg/                  # 公共库
+│   │   └── ...              # 共 40 个一级包
+│   ├── schemas/              # JSON Schema 契约（在途，T0.03 产物）
 │   ├── go.mod
 │   └── Makefile
 │
@@ -112,7 +116,7 @@ CodeFlow/
 #### packages/core - 核心逻辑层
 - **职责**：CodeFlow 核心业务逻辑，所有应用共享
 - **包名**：`@codeflow/core`
-- **主要模块**：
+- **主要模块**（src 下一级目录实测 22 个 + index.ts）：
   - `adapters/` - LLM 适配器（Claude/Gemini/Codex）
   - `hooks/` - Hook 事件总线
   - `memory/` - 向量化记忆（Episodic Memory）
@@ -120,25 +124,32 @@ CodeFlow/
   - `commander/` - 指挥官模式（多智能体协作）
   - `config/` - 多层级配置管理
   - `storage/` - 存储抽象层
-  - `retriever/` - 混合检索引擎
+  - `retriever/` - 混合检索引擎（Go 侧同名包 backend/internal/retriever 无入口引用，T0.05 评估中）
   - `hotswap/` - 模型热切换
   - `isolation/` - 沙箱隔离
   - `privacy/` - 隐私保护与加密
   - `audit/` - 审计日志
+  - 其余 10 个一级目录：`ast/`、`cache/`、`cowork/`、`disclosure/`、`git/`、`mapagent/`、`shadow/`、`spec/`、`summarizer/`、`tool-runtime/`
 
 #### packages/cli - 命令行工具
 - **职责**：CodeFlow CLI 工具
 - **包名**：`@codeflow/cli`
 - **依赖**：`@codeflow/core`、`commander`
 
+#### packages/gui - GUI 层（历史资产）
+- **职责**：早期 GUI 层；2026-05-27 重构计划更名并入 ui-components，实测未执行，两包并存
+- **包名**：`@codeflow/gui`
+- **现状**：无引用（T0.05 评估中）
+
 #### packages/ui-components - UI 组件库（历史资产）
 - **职责**：历史 GUI 组件库，不再作为默认前端
 - **包名**：`@codeflow/ui-components`
-- **状态**：维护模式，新功能在 `apps/workbench` 开发
+- **状态**：维护模式（实测零消费方，T0.05 评估中），新功能在 `apps/workbench` 开发
 
 #### packages/shared - 共享工具库
 - **职责**：跨包共享的工具函数与类型定义
-- **包名**：`@codeflow/shared`
+- **包名**：`shared`（非 @codeflow/shared）
+- **现状**：实质空包（src/index.ts 仅导出 APP_NAME），无引用（T0.05 评估中）
 
 ---
 
@@ -146,9 +157,17 @@ CodeFlow/
 
 **Go 1.23+ 后端服务**
 - **框架**：Gin Web Framework
-- **数据库**：SQLite（会话存储）
+- **数据库**：SQLite（会话存储；驱动迁移 modernc.org/sqlite 在途，见 ADR 0009 / T0.01）
 - **通信**：RESTful API + WebSocket
 - **端口**：8080（默认）
+- **internal 一级包 40 个，按入口接线分类（2026-09-10 实测）**：
+  - A. main.go 直接装配 23 个：agent、api、audit、bootstrap、commander、config、context、debate、floweng、guard、hooks、isolation、memory、planner、policy、privacy、project、skill、snapshot、samg、storage、summarize、workspace
+  - B. router.go 入口 2 个：web、websocket
+  - C. 仅经 handlers 注册路由 5 个：blackboard、search、workflow、plugin、integration（/votes 路由归 blackboard.go、/conversations 归 agents.go，两路由域均无独立 internal 包）
+  - D. 纯传递生产依赖 3 个：adapters、ast、git
+  - E. 无入口引用 6 个（T0.05 评估中）：cache、disclosure、hotswap、mapagent、retriever、shadow
+  - F. 在途 1 个：dbx（T0.01 SQLite 驱动迁移产物，后续逐域接线）
+  - 另：`backend/schemas/` 为 T0.03 在途产物，非 internal 包
 - **启动命令**：
   ```bash
   cd backend
@@ -174,7 +193,7 @@ CodeFlow/
 **变更内容**：
 1. ✅ 新增 `apps/` 目录，区分"应用"与"包"
 2. ✅ `codeflow_template` → `apps/desktop` → `apps/workbench`（G01；明确工作台身份）
-3. ✅ `packages/gui` → `packages/ui-components`（明确组件库定位）
+3. ⚠️ `packages/gui` → `packages/ui-components`（计划更名未实际执行：两目录并存，gui 仍为独立包 @codeflow/gui，无引用，T0.05 评估中）
 4. ✅ `archive` → `.archive/legacy`（隐藏归档）
 5. ✅ 清理 5 个 `.tmp_codeflow_review*` → `.archive/reviews/`
 6. ✅ 更新 `pnpm-workspace.yaml` 纳入 `apps/*`
@@ -192,21 +211,27 @@ CodeFlow/
 ## 📦 包依赖关系
 
 ```
-apps/workbench
-  └── @codeflow/core
-      ├── @anthropic-ai/sdk
-      ├── @google/generative-ai
-      ├── openai
-      └── better-sqlite3
+apps/workbench（唯一活跃前端入口；零 @codeflow/* 依赖，以 package.json 实测为准）
+  └── 构建产物 dist/ → backend/internal/web/dist（Go embed 进后端二进制）
 
-packages/cli
+packages/cli（无引用，T0.05 评估中）
   └── @codeflow/core
       └── commander
 
-packages/ui-components
+packages/gui（无引用，T0.05 评估中）
   ├── @codeflow/core
   ├── react
   └── react-dom
+
+packages/ui-components（无引用，T0.05 评估中）
+  ├── @codeflow/core
+  ├── react
+  └── react-dom
+
+packages/shared（实质空包，无引用，T0.05 评估中）
+  └── （无依赖）
+
+@codeflow/core 外部依赖：@anthropic-ai/sdk、@google/generative-ai、openai、better-sqlite3
 ```
 
 ---
@@ -311,7 +336,7 @@ make lint
 {
   "dependencies": {
     "@codeflow/core": "workspace:*",
-    "@codeflow/shared": "workspace:*"
+    "shared": "workspace:*"
   }
 }
 ```
@@ -331,12 +356,12 @@ make lint
 
 | 类型 | 数量 | 说明 |
 |------|------|------|
-| 应用（apps） | 1 | desktop |
-| 共享包（packages） | 4 | core, cli, ui-components, shared |
-| Go 后端模块 | 35+ | backend/internal/* |
-| TypeScript 核心模块 | 20+ | packages/core/src/* |
+| 应用（apps） | 1 | workbench |
+| 共享包（packages） | 5 | core, cli, gui, ui-components, shared |
+| Go 后端模块 | 40 | backend/internal/* |
+| TypeScript 核心模块 | 22 | packages/core/src/*（一级目录） |
 
 ---
 
 **维护者**：CodeFlow Team  
-**最后更新**：2026-05-27
+**最后更新**：2026-09-10

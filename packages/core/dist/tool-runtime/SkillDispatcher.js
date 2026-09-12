@@ -1,4 +1,20 @@
 const DEFAULT_TIMEOUT_MS = 30000;
+const SKILL_CONTROLS_METADATA_KEY = 'skillControls';
+function normalizeSkillControls(metadata) {
+    const candidate = metadata?.[SKILL_CONTROLS_METADATA_KEY];
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        return undefined;
+    }
+    const raw = candidate;
+    const controls = {};
+    if (typeof raw.enabled === 'boolean') {
+        controls.enabled = raw.enabled;
+    }
+    if (Array.isArray(raw.allowedSkills)) {
+        controls.allowedSkills = raw.allowedSkills.filter((skillId) => typeof skillId === 'string' && skillId.trim().length > 0);
+    }
+    return controls.enabled === undefined && controls.allowedSkills === undefined ? undefined : controls;
+}
 function summarizeValue(value) {
     if (value === undefined)
         return 'undefined';
@@ -30,13 +46,39 @@ class AllowAllSkillAuthorizer {
         };
     }
 }
+class MetadataSkillAuthorizer {
+    constructor(fallback = new AllowAllSkillAuthorizer()) {
+        this.fallback = fallback;
+    }
+    async authorize(skill, request) {
+        const controls = normalizeSkillControls(request.context.metadata);
+        if (controls?.enabled === false) {
+            return {
+                allowed: false,
+                reason: 'Skill execution disabled by runtime controls',
+                approvalState: 'rejected',
+            };
+        }
+        if (controls?.allowedSkills && controls.allowedSkills.length > 0) {
+            const allowed = new Set(controls.allowedSkills);
+            if (!allowed.has(skill.skillId)) {
+                return {
+                    allowed: false,
+                    reason: `Skill execution denied by runtime controls: ${skill.skillId}`,
+                    approvalState: 'rejected',
+                };
+            }
+        }
+        return await this.fallback.authorize(skill, request);
+    }
+}
 export class SkillDispatcher {
     constructor(registry, runtime, options = {}) {
         this.registry = registry;
         this.runtime = runtime;
         this.options = options;
         this.records = [];
-        this.authorizer = options.authorizer ?? new AllowAllSkillAuthorizer();
+        this.authorizer = new MetadataSkillAuthorizer(options.authorizer);
         this.recordLimit = options.recordLimit ?? 200;
     }
     async execute(request) {

@@ -9,6 +9,15 @@ import (
 	"github.com/codeflow/backend/internal/memory"
 )
 
+func requireMemoryService(c *gin.Context) (memory.IMemoryService, bool) {
+	svc := memory.GetMemoryService()
+	if svc == nil {
+		respondError(c, http.StatusServiceUnavailable, "Memory service is not initialized")
+		return nil, false
+	}
+	return svc, true
+}
+
 // GetMemoryItems handles GET /api/v1/memory/items
 func GetMemoryItems(c *gin.Context) {
 	var opts memory.MemoryListOptions
@@ -17,7 +26,7 @@ func GetMemoryItems(c *gin.Context) {
 		return
 	}
 
-	svc := memory.GetMemoryService()
+	svc, ok := requireMemoryService(c); if !ok { return }
 	result, err := svc.List(c.Request.Context(), &opts)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to list memory items: "+err.Error())
@@ -35,7 +44,7 @@ func CreateMemoryItem(c *gin.Context) {
 		return
 	}
 
-	svc := memory.GetMemoryService()
+	svc, ok := requireMemoryService(c); if !ok { return }
 	item, err := svc.Create(c.Request.Context(), &req)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to create memory item: "+err.Error())
@@ -59,7 +68,7 @@ func UpdateMemoryItem(c *gin.Context) {
 		return
 	}
 
-	svc := memory.GetMemoryService()
+	svc, ok := requireMemoryService(c); if !ok { return }
 	item, err := svc.Update(c.Request.Context(), id, &req)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to update memory item: "+err.Error())
@@ -81,7 +90,7 @@ func DeleteMemoryItem(c *gin.Context) {
 		return
 	}
 
-	svc := memory.GetMemoryService()
+	svc, ok := requireMemoryService(c); if !ok { return }
 
 	// Check if item exists
 	item, err := svc.Get(c.Request.Context(), id)
@@ -110,7 +119,7 @@ func ArchiveMemoryItem(c *gin.Context) {
 		return
 	}
 
-	svc := memory.GetMemoryService()
+	svc, ok := requireMemoryService(c); if !ok { return }
 	item, err := svc.Archive(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to archive memory item: "+err.Error())
@@ -132,7 +141,7 @@ func RestoreMemoryItem(c *gin.Context) {
 		return
 	}
 
-	svc := memory.GetMemoryService()
+	svc, ok := requireMemoryService(c); if !ok { return }
 	item, err := svc.Restore(c.Request.Context(), id)
 	if err != nil {
 		respondError(c, http.StatusInternalServerError, "Failed to restore memory item: "+err.Error())

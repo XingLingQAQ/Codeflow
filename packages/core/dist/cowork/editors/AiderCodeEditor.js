@@ -219,6 +219,12 @@ export class AiderCodeEditor {
         }
         this.backupStack = [];
     }
+    getAdapter() {
+        return this.adapter;
+    }
+    getConfig() {
+        return { ...this.config };
+    }
     // ==================== 私有方法 ====================
     resolvePath(file) {
         if (this.config.cwd) {

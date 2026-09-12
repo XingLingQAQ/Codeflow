@@ -3,7 +3,8 @@
  * 基于 OpenAI API（兼容 Codex 端点）
  */
 import OpenAI from 'openai';
-import { APIError, TimeoutError } from './types.js';
+import { APIError, TimeoutError, toHookPayload, applyHookPayload, rewindHistoryByTurns, compactHistoryWithSummary, } from './types.js';
+import { getMessageText } from '../hooks/types.js';
 export class CodexAdapter {
     constructor(config, hookManager) {
         this.history = [];
@@ -33,35 +34,35 @@ export class CodexAdapter {
     getHookManager() {
         return this.hookManager;
     }
+    buildPayloadContext(options) {
+        return {
+            messages: [...this.history],
+            model: options?.model || this.config.model,
+            temperature: options?.temperature ?? this.config.temperature,
+            maxTokens: options?.maxTokens || this.config.maxTokens,
+        };
+    }
+    async applyBeforeSendHooks(context) {
+        if (!this.hookManager) {
+            return context;
+        }
+        const processedPayload = await this.hookManager.hook_before_send(toHookPayload(context));
+        return applyHookPayload(context, processedPayload);
+    }
     async send(prompt, options) {
         if (options?.stream) {
             throw new Error('Use stream() for streaming responses');
         }
-        const mergedOptions = { ...this.config, ...options };
         const userMessage = {
             role: 'user',
             content: prompt,
             timestamp: Date.now(),
         };
         this.history.push(userMessage);
-        let payload = {
-            messages: [...this.history],
-            model: mergedOptions.model,
-            temperature: mergedOptions.temperature,
-            maxTokens: mergedOptions.maxTokens,
-        };
-        if (this.hookManager) {
-            const processedPayload = await this.hookManager.hook_before_send(payload);
-            payload = {
-                messages: [...processedPayload.messages],
-                model: processedPayload.model || payload.model,
-                temperature: processedPayload.temperature ?? payload.temperature,
-                maxTokens: processedPayload.maxTokens || payload.maxTokens,
-            };
-        }
+        const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
         const messages = payload.messages.map((msg) => ({
             role: msg.role,
-            content: msg.content,
+            content: getMessageText(msg.content),
         }));
         try {
             const completion = await this.client.chat.completions.create({
@@ -96,31 +97,16 @@ export class CodexAdapter {
         }
     }
     async *stream(prompt, options) {
-        const mergedOptions = { ...this.config, ...options };
         const userMessage = {
             role: 'user',
             content: prompt,
             timestamp: Date.now(),
         };
         this.history.push(userMessage);
-        let payload = {
-            messages: [...this.history],
-            model: mergedOptions.model,
-            temperature: mergedOptions.temperature,
-            maxTokens: mergedOptions.maxTokens,
-        };
-        if (this.hookManager) {
-            const processedPayload = await this.hookManager.hook_before_send(payload);
-            payload = {
-                messages: [...processedPayload.messages],
-                model: processedPayload.model || payload.model,
-                temperature: processedPayload.temperature ?? payload.temperature,
-                maxTokens: processedPayload.maxTokens || payload.maxTokens,
-            };
-        }
+        const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
         const messages = payload.messages.map((msg) => ({
             role: msg.role,
-            content: msg.content,
+            content: getMessageText(msg.content),
         }));
         const streamGenerator = this.createStreamGenerator({
             messages,
@@ -154,20 +140,20 @@ export class CodexAdapter {
         this.history = [...messages];
     }
     async rewind(steps) {
-        if (steps <= 0 || steps > this.history.length) {
-            throw new Error('Invalid rewind steps');
-        }
-        this.history = this.history.slice(0, -steps);
+        this.history = rewindHistoryByTurns(this.history, steps);
     }
     async compact() {
-        // 保留最近 10 条消息
-        if (this.history.length > 10) {
-            this.history = this.history.slice(-10);
-        }
+        this.history = await compactHistoryWithSummary(this.history, {
+            buildSkeleton: this.hookManager
+                ? async (messages, tokenCount) => this.hookManager.hook_before_compress({
+                    messages,
+                    tokenCount,
+                })
+                : undefined,
+        });
     }
     configure(config) {
         this.config = { ...this.config, ...config };
-        // 重新创建客户端（如果 API key 或 baseURL 变更）
         if (config.apiKey || config.baseURL) {
             this.client = new OpenAI({
                 apiKey: this.config.apiKey,

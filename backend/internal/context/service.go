@@ -15,7 +15,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // FileNode 文件树节点
@@ -181,12 +182,11 @@ ON context_presets(created_at DESC, id DESC);
 
 // NewSQLiteContextService 创建 SQLite 持久化上下文服务。
 func NewSQLiteContextService(dbPath string) (*SQLiteContextService, error) {
-	connStr, err := buildContextSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareContextDBDir(dbPath); err != nil {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", connStr)
+	db, err := dbx.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -204,19 +204,17 @@ func NewSQLiteContextService(dbPath string) (*SQLiteContextService, error) {
 	return svc, nil
 }
 
-func buildContextSQLiteConnString(dbPath string) (string, error) {
+func prepareContextDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
-
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create context db dir: %w", err)
+			return fmt.Errorf("create context db dir: %w", err)
 		}
 	}
-
-	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	return nil
 }
 
 func (s *SQLiteContextService) initialize() error {

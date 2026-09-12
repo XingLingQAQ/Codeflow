@@ -98,6 +98,7 @@ const (
 type Flow struct {
 	ID         string      `json:"id"`
 	ProjectID  string      `json:"project_id"`
+	SessionID  string      `json:"session_id,omitempty"`
 	TemplateID TemplateID  `json:"template_id"`
 	Status     FlowStatus  `json:"status"`
 	Stages     []Stage     `json:"stages"`
@@ -114,6 +115,7 @@ type Stage struct {
 	Type       StageType   `json:"type"`
 	Name       string      `json:"name"`
 	Canvas     string      `json:"canvas"`
+	AgentID    string      `json:"agent_id,omitempty"`
 	Status     StageStatus `json:"status"`
 	Optional   bool        `json:"optional"`
 	SnapshotID string      `json:"snapshot_id,omitempty"`

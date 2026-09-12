@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "response.schema.json",
+  "title": "ResponseEnvelope",
+  "description": "新统一响应 envelope，固定自 §20.1/§20.2 实例：成功为 {data, meta}，失败为 {error, meta}，二者互斥。meta.request_id 为服务端单次 HTTP trace ID（§20.4）；meta.command_id 仅在写命令响应中出现，等于客户端发送前生成的 Idempotency-Key（§20.1/§20.4）；meta.revision 为资源修订号（§20.1 实例 revision:1）。旧 {success,data,error:string} 形状不被本 schema 接受：§20 未定义该形状，§15 T0.03 步骤 4 要求旧客户端逐个迁移而不是让新契约兼容旧形状。",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["data", "meta"],
+      "properties": {
+        "data": {
+          "description": "成功负载，结构按端点各自契约（Run、事件页、Task 等），本 envelope 不限制类型。"
+        },
+        "meta": { "$ref": "#/definitions/meta" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error", "meta"],
+      "properties": {
+        "error": { "$ref": "error.schema.json" },
+        "meta": { "$ref": "#/definitions/meta" }
+      }
+    }
+  ],
+  "definitions": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "服务端单次 HTTP trace ID，如 rq_1（§20.1/§20.4）。"
+        },
+        "command_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "可选。客户端发送前生成的 Idempotency-Key，用于命令对账（§20.1/§20.4）。"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "可选。响应所代表资源的修订号（§20.1 实例 revision:1；§19.1 revision >= 1）。"
+        }
+      }
+    }
+  }
+}

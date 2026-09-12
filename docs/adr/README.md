@@ -33,6 +33,12 @@
 
 | ID | 标题 | 状态 | 日期 |
 |---|---|---|---|
+| [0006](0006-project-workspace-flow-session-binding.md) | Project / Workspace / Flow / Session binding and recoverable lifecycle | Accepted | 2026-08-19 |
+| [0007](0007-unified-execution-policy-and-aead-migration.md) | Unified execution policy, audited denials, and AES-GCM migration | Accepted | 2026-08-19 |
+| [0008](0008-durable-runtime-state-and-audit-retention.md) | Durable runtime state, explicit injection, and anchored audit retention | Accepted | 2026-08-19 |
 | [0001](0001-docs-information-architecture.md) | 文档信息架构（design/plans/adr） | Accepted | 2026-07-13 |
 | [0002](0002-directory-structure-and-archive.md) | 目录结构与归档（Nx 逻辑边界） | Accepted | 2026-03（迁入 2026-07-13） |
 | [0003](0003-sqlite-cgo.md) | CGO / SQLite 基线（go-sqlite3 + CGO=1） | Accepted | 2026-07-15 |
+| [0004](0004-sidecar-trust-boundary.md) | Sidecar 信任边界（loopback、启动令牌、Origin、WS scope） | Accepted | 2026-08-18 |
+| [0005](0005-api-credential-secret-store.md) | API 凭据与配置分离存储（DPAPI / AES-GCM、迁移、公开 DTO） | Accepted | 2026-08-19 |
+| [0009](0009-sqlite-driver-modernc-migration.md) | SQLite 驱动迁移至 modernc.org/sqlite（CGO=0 基线；决策已定，实施在途 T0.01.b/T0.01.c） | Accepted | 2026-09-10 |

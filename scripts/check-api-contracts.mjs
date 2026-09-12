@@ -45,6 +45,19 @@ const operations = parseOpenApiOperations();
 
 const checks = [
   {
+    id: 'sidecar-trust-boundary',
+    expected: [
+      '  - SidecarBearer: []',
+      '      security: []',
+      '    SidecarBearer:',
+      '      bearerFormat: opaque-process-token',
+      '/api/v1/conversations/{sessionId}/stream:',
+      '/api/v1/debates/{id}/stream:',
+      '/api/v1/projects/{id}/stream:',
+      '`codeflow.v1` and `codeflow.token.<token>`',
+    ],
+  },
+  {
     id: 'memory-items-list-envelope',
     expected: [
       '/api/v1/memory/items:',
@@ -238,6 +251,7 @@ const requiredOperations = [
   ['/api/v1/projects/{id}', 'GET'],
   ['/api/v1/projects/{id}', 'PUT'],
   ['/api/v1/projects/{id}', 'DELETE'],
+  ['/api/v1/projects/{id}/stream', 'GET'],
   ['/api/v1/projects/{id}/plans', 'GET'],
   ['/api/v1/projects/{id}/plans', 'POST'],
   ['/api/v1/projects/{id}/plans/{planId}', 'DELETE'],
@@ -257,6 +271,8 @@ const requiredOperations = [
   ['/api/v1/debates', 'GET'],
   ['/api/v1/debates', 'POST'],
   ['/api/v1/debates/{id}/solutions', 'POST'],
+  ['/api/v1/debates/{id}/stream', 'GET'],
+  ['/api/v1/conversations/{sessionId}/stream', 'GET'],
   ['/api/v1/agents', 'POST'],
   ['/api/v1/agents/{id}', 'GET'],
   ['/api/v1/agents/{id}', 'PUT'],

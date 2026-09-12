@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/codeflow/backend/internal/api/middleware"
 	"github.com/codeflow/backend/internal/snapshot"
@@ -40,6 +41,25 @@ func setupSnapshotRouter() *gin.Engine {
 	}
 
 	return router
+}
+
+// mustCreateSnapshot creates one snapshot and stops the test immediately when
+// the service cannot capture state (the default state provider needs process
+// globals these tests do not install).
+//
+// It must stay a require, not an assert: the discarded error used to let a nil
+// snapshot and an empty item list reach the assertions below, where `created.ID`
+// and `resp.Items[0]` panicked. A panic kills the whole test binary, so every
+// test declared after this file never ran — 45 of the package's 215 test
+// functions, including the summarize/compress handler tests. Failing here keeps
+// these tests red (the underlying global-service gap is owned by S1/S3) while
+// leaving the rest of the package executable.
+func mustCreateSnapshot(t *testing.T, svc *snapshot.InMemorySnapshotService, req *snapshot.SnapshotCreateRequest) *snapshot.Snapshot {
+	t.Helper()
+	created, err := svc.Create(nil, req)
+	require.NoError(t, err, "snapshot create failed")
+	require.NotNil(t, created, "snapshot create returned no snapshot")
+	return created
 }
 
 func assertExperimentalResponse(t *testing.T, w *httptest.ResponseRecorder, target interface{}) {
@@ -91,11 +111,10 @@ func TestGetSnapshotsAPI(t *testing.T) {
 
 	// Create test snapshots
 	for i := 0; i < 3; i++ {
-		req := &snapshot.SnapshotCreateRequest{
+		mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 			Description: "Test snapshot",
 			SessionID:   "session-123",
-		}
-		_, _ = svc.Create(nil, req)
+		})
 	}
 
 	req, _ := http.NewRequest("GET", "/api/v1/snapshots?limit=10", nil)
@@ -117,17 +136,14 @@ func TestGetSnapshotsWithFiltersAPI(t *testing.T) {
 	snapshot.SetSnapshotService(svc)
 
 	// Create test snapshots with different session IDs
-	req1 := &snapshot.SnapshotCreateRequest{
+	mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 		Description: "Session 1 snapshot",
 		SessionID:   "session-1",
-	}
-	_, _ = svc.Create(nil, req1)
-
-	req2 := &snapshot.SnapshotCreateRequest{
+	})
+	mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 		Description: "Session 2 snapshot",
 		SessionID:   "session-2",
-	}
-	_, _ = svc.Create(nil, req2)
+	})
 
 	// Filter by session ID
 	req, _ := http.NewRequest("GET", "/api/v1/snapshots?session_id=session-1", nil)
@@ -140,6 +156,7 @@ func TestGetSnapshotsWithFiltersAPI(t *testing.T) {
 	var resp snapshot.SnapshotListResponse
 	assertExperimentalResponse(t, w, &resp)
 	assert.Equal(t, 1, resp.Total)
+	require.Len(t, resp.Items, 1)
 	assert.Equal(t, "session-1", resp.Items[0].SessionID)
 }
 
@@ -149,10 +166,9 @@ func TestGetSnapshotAPI(t *testing.T) {
 	snapshot.SetSnapshotService(svc)
 
 	// Create a test snapshot
-	req := &snapshot.SnapshotCreateRequest{
+	created := mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 		Description: "Test snapshot",
-	}
-	created, _ := svc.Create(nil, req)
+	})
 
 	// Get the snapshot
 	httpReq, _ := http.NewRequest("GET", "/api/v1/snapshots/"+created.ID, nil)
@@ -173,10 +189,9 @@ func TestRestoreSnapshotAPI(t *testing.T) {
 	snapshot.SetSnapshotService(svc)
 
 	// Create a test snapshot
-	req := &snapshot.SnapshotCreateRequest{
+	created := mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 		Description: "Test snapshot",
-	}
-	created, _ := svc.Create(nil, req)
+	})
 
 	// Restore the snapshot
 	startTime := time.Now()
@@ -206,10 +221,9 @@ func TestDeleteSnapshotAPI(t *testing.T) {
 	snapshot.SetSnapshotService(svc)
 
 	// Create a test snapshot
-	req := &snapshot.SnapshotCreateRequest{
+	created := mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 		Description: "Test snapshot",
-	}
-	created, _ := svc.Create(nil, req)
+	})
 
 	// Delete the snapshot
 	httpReq, _ := http.NewRequest("DELETE", "/api/v1/snapshots/"+created.ID, nil)
@@ -235,10 +249,9 @@ func TestGetSnapshotsPaginationAPI(t *testing.T) {
 
 	// Create 5 test snapshots
 	for i := 0; i < 5; i++ {
-		req := &snapshot.SnapshotCreateRequest{
+		mustCreateSnapshot(t, svc, &snapshot.SnapshotCreateRequest{
 			Description: "Test snapshot",
-		}
-		_, _ = svc.Create(nil, req)
+		})
 	}
 
 	// Get first page

@@ -2,7 +2,11 @@
 package privacy
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"testing"
 )
 
@@ -67,6 +71,9 @@ func TestChainKeyDerivation_EncryptDecrypt(t *testing.T) {
 	if encrypted.IntegrityHash == "" {
 		t.Error("expected non-empty integrity hash")
 	}
+	if encrypted.Algorithm != "aes-256-gcm-chain" {
+		t.Fatalf("new chain write used %q", encrypted.Algorithm)
+	}
 
 	// Decrypt
 	decrypted, err := ckd.Decrypt(ctx, encrypted)
@@ -76,6 +83,31 @@ func TestChainKeyDerivation_EncryptDecrypt(t *testing.T) {
 
 	if decrypted != plaintext {
 		t.Errorf("expected %q, got %q", plaintext, decrypted)
+	}
+}
+
+func TestChainKeyDerivationReadsLegacyCBC(t *testing.T) {
+	ckd, err := NewChainKeyDerivation("test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := ckd.GetCurrentNode()
+	iv := bytes.Repeat([]byte{0x33}, aes.BlockSize)
+	padded := pkcs7Pad([]byte("legacy chain"), aes.BlockSize)
+	ciphertext := make([]byte, len(padded))
+	block, err := aes.NewCipher(node.DerivedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+	record := &ChainEncryptedData{
+		NodeID: node.ID, Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
+		IV: base64.StdEncoding.EncodeToString(iv), Algorithm: "aes-256-cbc-chain",
+	}
+	record.IntegrityHash = ckd.calculateDataIntegrityHash(ciphertext, iv, node.ID)
+	plaintext, err := ckd.Decrypt(context.Background(), record)
+	if err != nil || plaintext != "legacy chain" {
+		t.Fatalf("legacy chain read failed: plaintext=%q err=%v", plaintext, err)
 	}
 }
 

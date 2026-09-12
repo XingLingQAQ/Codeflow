@@ -63,6 +63,39 @@ function listTrackedFiles() {
     .filter(Boolean);
 }
 
+/**
+ * Untracked, non-ignored files sitting directly in the repository root.
+ *
+ * `git ls-files` only sees the index, so scratch files an agent leaves behind
+ * (a.ts, main.go, test.ts ...) were invisible to this check no matter how many
+ * rules it had. `--others --exclude-standard` is the complement: untracked and
+ * not covered by .gitignore. Scoped to the root because that is where stray
+ * scratch lands and where nothing legitimate should appear unannounced.
+ */
+function listUntrackedRootFiles() {
+  const gitBin = resolveGit();
+  const result = spawnSync(gitBin, ['ls-files', '-z', '--others', '--exclude-standard', '--directory'], {
+    cwd: repoRoot,
+    encoding: 'buffer',
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (result.status !== 0) {
+    const stderr = result.stderr?.toString('utf8') || 'git ls-files --others failed';
+    throw new Error(`${stderr.trim()} (git=${gitBin})`);
+  }
+  return result.stdout
+    .toString('utf8')
+    .split('\0')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(toPosix)
+    .filter((file) => !file.includes('/'));
+}
+
+/** Root files that are expected to exist untracked (local-only config). */
+const allowedUntrackedRoot = new Set(['.env', '.env.local', 'CLAUDE.local.md']);
+
 function toPosix(p) {
   return p.split(path.sep).join('/');
 }
@@ -108,8 +141,21 @@ for (const rule of rules) {
   }
 }
 
+const strayRoot = listUntrackedRootFiles().filter((file) => !allowedUntrackedRoot.has(file));
+if (strayRoot.length > 0) {
+  violations.push({
+    id: 'stray-root-files',
+    message:
+      'Untracked scratch files in the repository root. Delete them, or add them to .gitignore if they are legitimate local artifacts.',
+    count: strayRoot.length,
+    samples: strayRoot.slice(0, 12),
+  });
+}
+
 if (violations.length === 0) {
-  console.log(`[check-repo-hygiene] OK (${tracked.length} tracked files)`);
+  console.log(
+    `[check-repo-hygiene] OK (${tracked.length} tracked files, no stray root files)`,
+  );
   process.exit(0);
 }
 

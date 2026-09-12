@@ -1,0 +1,12 @@
+{
+  "id": "evt_42",
+  "scope": "run:run_88",
+  "project_id": "p_123",
+  "run_id": "run_88",
+  "sequence": 42,
+  "type": "tool.requested",
+  "schema_version": 1,
+  "occurred_at": "2026-09-06T08:00:00Z",
+  "identity": {"project_id": "p_123", "run_id": "run_88", "attempt_id": "att_1", "agent_revision_id": "ar_12", "actor": {"type": "agent", "id": "agent_claude_bugfix"}},
+  "payload": {"tool": "read_file", "path": "src/x.go"}
+}

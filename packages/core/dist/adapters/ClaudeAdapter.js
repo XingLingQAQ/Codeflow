@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { APIError, TimeoutError } from './types.js';
+import { APIError, TimeoutError, toHookPayload, applyHookPayload, cloneMessages, } from './types.js';
+import { getMessageText } from '../hooks/types.js';
 /**
  * Claude API Adapter 实现
  * 封装 Anthropic SDK，提供统一的 ICliAdapter 接口
@@ -23,10 +24,19 @@ export class ClaudeAdapter {
         });
         this.hookManager = hookManager;
     }
+    setHookManager(hookManager) {
+        this.hookManager = hookManager;
+    }
+    getHookManager() {
+        return this.hookManager;
+    }
     /**
      * 发送消息并获取响应
      */
     async send(prompt, options) {
+        if (options?.stream) {
+            throw new Error('Use stream() for streaming responses');
+        }
         // 添加用户消息到历史
         const userMessage = {
             role: 'user',
@@ -34,45 +44,18 @@ export class ClaudeAdapter {
             timestamp: Date.now(),
         };
         this.history.push(userMessage);
-        // 构建请求 payload
-        let payload = {
-            messages: this.history.map((msg) => ({
-                role: msg.role,
-                content: msg.content,
-            })),
-            model: options?.model || this.config.model,
-            temperature: options?.temperature ?? this.config.temperature,
-            max_tokens: options?.maxTokens || this.config.maxTokens,
-        };
-        // 触发 hook_before_send
-        if (this.hookManager) {
-            const processedPayload = await this.hookManager.hook_before_send({
-                messages: this.history,
-                model: payload.model,
-                temperature: payload.temperature,
-                maxTokens: payload.max_tokens,
-            });
-            payload = {
-                messages: processedPayload.messages.map((msg) => ({
-                    role: msg.role,
-                    content: msg.content,
-                })),
-                model: processedPayload.model || payload.model,
-                temperature: processedPayload.temperature ?? payload.temperature,
-                max_tokens: processedPayload.maxTokens || payload.max_tokens,
-            };
-        }
+        const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+        const system = this.extractSystemPrompt(payload.messages);
+        const messages = this.mapMessagesToProviderPayload(payload.messages);
         try {
             // 发送请求
             const response = await this.executeWithRetry(async () => {
-                if (options?.stream) {
-                    throw new Error('Use receive() for streaming responses');
-                }
                 return await this.client.messages.create({
-                    messages: payload.messages,
+                    messages,
+                    system,
                     model: payload.model,
                     temperature: payload.temperature,
-                    max_tokens: payload.max_tokens,
+                    max_tokens: payload.maxTokens,
                     stream: false,
                 });
             }, options?.timeout);
@@ -110,9 +93,14 @@ export class ClaudeAdapter {
      */
     async *receive() {
         if (!this.currentStream) {
-            throw new Error('No active stream. Call send() with stream: true first');
+            throw new Error('No active stream');
         }
-        yield* this.currentStream;
+        try {
+            yield* this.currentStream;
+        }
+        finally {
+            this.currentStream = undefined;
+        }
     }
     /**
      * 开始流式请求
@@ -125,102 +113,62 @@ export class ClaudeAdapter {
             timestamp: Date.now(),
         };
         this.history.push(userMessage);
-        // 构建请求 payload
-        let payload = {
-            messages: this.history.map((msg) => ({
-                role: msg.role,
-                content: msg.content,
-            })),
-            model: options?.model || this.config.model,
-            temperature: options?.temperature ?? this.config.temperature,
-            max_tokens: options?.maxTokens || this.config.maxTokens,
-        };
-        // 触发 hook_before_send
-        if (this.hookManager) {
-            const processedPayload = await this.hookManager.hook_before_send({
-                messages: this.history,
-                model: payload.model,
-                temperature: payload.temperature,
-                maxTokens: payload.max_tokens,
-            });
-            payload = {
-                messages: processedPayload.messages.map((msg) => ({
-                    role: msg.role,
-                    content: msg.content,
-                })),
-                model: processedPayload.model || payload.model,
-                temperature: processedPayload.temperature ?? payload.temperature,
-                max_tokens: processedPayload.maxTokens || payload.max_tokens,
-            };
-        }
+        const payload = await this.applyBeforeSendHooks(this.buildPayloadContext(options));
+        const system = this.extractSystemPrompt(payload.messages);
+        const messages = this.mapMessagesToProviderPayload(payload.messages);
+        const streamGenerator = this.createStreamGenerator({
+            messages,
+            system,
+            model: payload.model,
+            temperature: payload.temperature,
+            maxTokens: payload.maxTokens,
+        });
+        this.currentStream = streamGenerator;
         try {
-            const stream = await this.client.messages.create({
-                messages: payload.messages,
-                model: payload.model,
-                temperature: payload.temperature,
-                max_tokens: payload.max_tokens,
-                stream: true,
-            });
-            let fullContent = '';
-            let index = 0;
-            for await (const event of stream) {
-                if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-                    const chunk = {
-                        delta: event.delta.text,
-                        index: index++,
-                        done: false,
-                    };
-                    fullContent += event.delta.text;
-                    // 触发 hook_on_stream
-                    if (this.hookManager) {
-                        this.hookManager.hook_on_stream(chunk);
-                    }
-                    yield chunk;
-                }
-                if (event.type === 'message_stop') {
-                    const finalChunk = {
-                        delta: '',
-                        index: index,
-                        done: true,
-                    };
-                    // 触发 hook_on_stream
-                    if (this.hookManager) {
-                        this.hookManager.hook_on_stream(finalChunk);
-                    }
-                    yield finalChunk;
-                }
-            }
-            // 添加助手消息到历史
-            const assistantMessage = {
-                role: 'assistant',
-                content: fullContent,
-                timestamp: Date.now(),
-            };
-            this.history.push(assistantMessage);
-            // 触发 hook_post_response
-            if (this.hookManager) {
-                await this.hookManager.hook_post_response({
-                    content: fullContent,
-                    model: payload.model,
-                });
-            }
+            yield* streamGenerator;
         }
-        catch (error) {
-            this.handleError(error);
-            throw error;
+        finally {
+            this.currentStream = undefined;
         }
     }
-    /**
-     * 获取对话历史
-     */
+    buildPayloadContext(options) {
+        return {
+            messages: [...this.history],
+            model: options?.model || this.config.model,
+            temperature: options?.temperature ?? this.config.temperature,
+            maxTokens: options?.maxTokens || this.config.maxTokens,
+        };
+    }
+    mapMessagesToProviderPayload(messages) {
+        return messages
+            .filter((message) => message.role === 'user' || message.role === 'assistant')
+            .map((message) => ({
+            role: message.role,
+            content: getMessageText(message.content),
+        }));
+    }
+    extractSystemPrompt(messages) {
+        const systemMessages = messages.filter((message) => message.role === 'system');
+        if (systemMessages.length === 0) {
+            return undefined;
+        }
+        return systemMessages.map((message) => getMessageText(message.content)).join('\n\n');
+    }
+    async applyBeforeSendHooks(context) {
+        if (!this.hookManager) {
+            return context;
+        }
+        const processedPayload = await this.hookManager.hook_before_send(toHookPayload(context));
+        return applyHookPayload(context, processedPayload);
+    }
     getHistory() {
-        return [...this.history];
+        return cloneMessages(this.history);
     }
     /**
      * 设置对话历史
      */
     setHistory(messages) {
-        this.history = [...messages];
+        this.history = cloneMessages(messages);
     }
     /**
      * 回退指定步数
@@ -248,16 +196,15 @@ export class ClaudeAdapter {
                 messages: this.history,
                 tokenCount: this.estimateTokens(this.history),
             });
-            // 保留最近 20% 的对话 + 决策骨架
             const keepCount = Math.ceil(this.history.length * 0.2);
             const recentMessages = this.history.slice(-keepCount);
-            // 构建压缩后的历史
+            const preservedSystemMessages = this.history.filter((message) => message.role === 'system' && !getMessageText(message.content).startsWith('[Compressed Context]'));
             const summaryMessage = {
                 role: 'system',
                 content: `[Compressed Context]\nEntities: ${skeleton.entities.join(', ')}\nDecisions: ${skeleton.decisions.join('; ')}\nRelations: ${skeleton.relations.map((r) => `${r.from} ${r.type} ${r.to}`).join(', ')}`,
                 timestamp: Date.now(),
             };
-            this.history = [summaryMessage, ...recentMessages];
+            this.history = [summaryMessage, ...preservedSystemMessages, ...recentMessages];
         }
     }
     /**
@@ -278,6 +225,61 @@ export class ClaudeAdapter {
      */
     getConfig() {
         return { ...this.config };
+    }
+    async *createStreamGenerator(payload) {
+        try {
+            const stream = await this.client.messages.create({
+                messages: payload.messages,
+                system: payload.system,
+                model: payload.model,
+                temperature: payload.temperature,
+                max_tokens: payload.maxTokens,
+                stream: true,
+            });
+            let fullContent = '';
+            let index = 0;
+            for await (const event of stream) {
+                if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+                    const chunk = {
+                        delta: event.delta.text,
+                        index: index++,
+                        done: false,
+                    };
+                    fullContent += event.delta.text;
+                    if (this.hookManager) {
+                        this.hookManager.hook_on_stream(chunk);
+                    }
+                    yield chunk;
+                }
+                if (event.type === 'message_stop') {
+                    const finalChunk = {
+                        delta: '',
+                        index,
+                        done: true,
+                    };
+                    if (this.hookManager) {
+                        this.hookManager.hook_on_stream(finalChunk);
+                    }
+                    yield finalChunk;
+                }
+            }
+            const assistantMessage = {
+                role: 'assistant',
+                content: fullContent,
+                timestamp: Date.now(),
+            };
+            this.history.push(assistantMessage);
+            if (this.hookManager) {
+                await this.hookManager.hook_post_response({
+                    content: fullContent,
+                    model: payload.model,
+                });
+            }
+        }
+        catch (error) {
+            this.handleError(error);
+            throw error;
+        }
     }
     /**
      * 执行带重试的请求
@@ -346,7 +348,7 @@ export class ClaudeAdapter {
      * 使用改进的启发式算法，考虑不同语言和内容类型
      */
     estimateTokens(messages) {
-        return messages.reduce((sum, msg) => sum + this.estimateContentTokens(msg.content), 0);
+        return messages.reduce((sum, msg) => sum + this.estimateContentTokens(getMessageText(msg.content)), 0);
     }
     /**
      * 估算单个内容的 Token 数量

@@ -129,26 +129,32 @@ func TestBuildAgentConfigFromResolved(t *testing.T) {
 
 func TestBuildAgentFromResolved(t *testing.T) {
 	maxTokens := 256
-	resolved := &config.ResolvedConfig{
-		Model:        "claude-runtime-model",
-		Temperature:  0.4,
-		MaxTokens:    &maxTokens,
-		SystemPrompt: "Runtime prompt",
-		AnswerStyle:  "detailed",
-		Capabilities: []string{"analysis"},
-		AllowedHooks: []string{"audit"},
-		APIChannel: &config.APIChannel{
+	mgr := config.NewConfigManager(nil)
+	global := mgr.LoadGlobalConfig()
+	global.APIPool = []config.APIChannel{
+		{
 			ID:       "default",
 			Name:     "Default",
 			Provider: config.ProviderAnthropic,
 			APIKey:   "test-key",
 			Enabled:  true,
 		},
-		Timeout:    12000,
-		MaxRetries: 4,
 	}
+	if err := mgr.SaveGlobalConfig(global); err != nil {
+		t.Fatalf("SaveGlobalConfig() error = %v", err)
+	}
+	resolved := mgr.ResolveConfig("", "")
+	resolved.Model = "claude-runtime-model"
+	resolved.Temperature = 0.4
+	resolved.MaxTokens = &maxTokens
+	resolved.SystemPrompt = "Runtime prompt"
+	resolved.AnswerStyle = "detailed"
+	resolved.Capabilities = []string{"analysis"}
+	resolved.AllowedHooks = []string{"audit"}
+	resolved.Timeout = 12000
+	resolved.MaxRetries = 4
 
-	agent, err := BuildAgentFromResolved(RoleMain, resolved)
+	agent, err := BuildAgentFromResolved(context.Background(), RoleMain, resolved)
 	if err != nil {
 		t.Fatalf("BuildAgentFromResolved() error = %v", err)
 	}

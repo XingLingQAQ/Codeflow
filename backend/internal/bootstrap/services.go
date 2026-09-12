@@ -10,11 +10,14 @@ import (
 	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/guard"
+	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
 	"github.com/codeflow/backend/internal/summarize"
+	"github.com/codeflow/backend/internal/storage"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
@@ -39,6 +42,16 @@ type Services struct {
 	Guard      guard.Service
 	Skill          skill.Registry
 	AgentRegistry  agent.AgentRegistry
+	// B5 durable boundaries. These are optional for focused unit-test
+	// containers, but production bootstrap must provide all of them.
+	Session        storage.ISessionStorage
+	Memory         memory.IMemoryService
+	RawArchive     memory.IRawArchive
+	AtomicMemory   *memory.AtomicMemoryService
+	MemoryAgent    *memory.MemoryAgent
+	SAMG           *samg.SAMGService
+	Preflight      memory.IMemoryPreflight
+	RequireDurable bool
 }
 
 // Validate checks that every required service dependency has been provided.
@@ -83,6 +96,15 @@ func (s Services) Validate() error {
 	if s.AgentRegistry == nil {
 		missing = append(missing, "agent_registry")
 	}
+	if s.RequireDurable {
+		if s.Session == nil { missing = append(missing, "session") }
+		if s.Memory == nil { missing = append(missing, "memory") }
+		if s.RawArchive == nil { missing = append(missing, "raw_archive") }
+		if s.AtomicMemory == nil { missing = append(missing, "atomic_memory") }
+		if s.MemoryAgent == nil { missing = append(missing, "memory_agent") }
+		if s.SAMG == nil { missing = append(missing, "samg") }
+		if s.Preflight == nil { missing = append(missing, "preflight") }
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing bootstrap services: %v", missing)
 	}
@@ -107,6 +129,13 @@ func (s Services) Apply() error {
 	guard.SetService(s.Guard)
 	skill.SetRegistry(s.Skill)
 	agent.SetAgentRegistry(s.AgentRegistry)
+	if s.Session != nil { project.SetSessionStorage(s.Session) }
+	memory.SetMemoryService(s.Memory)
+	memory.SetRawArchive(s.RawArchive)
+	memory.SetAtomicMemoryService(s.AtomicMemory)
+	memory.SetMemoryAgent(s.MemoryAgent)
+	samg.SetSAMGService(s.SAMG)
+	memory.SetPreflightService(s.Preflight)
 	// Keep workspace write path forced through the same guard instance when possible.
 	if fs, ok := s.Workspace.(*workspace.FSService); ok {
 		if ge, ok := s.Guard.(*guard.Engine); ok {
@@ -133,4 +162,11 @@ func (s Services) Reset() {
 	guard.SetService(nil)
 	skill.SetRegistry(nil)
 	agent.SetAgentRegistry(nil)
+	project.SetSessionStorage(nil)
+	memory.SetMemoryService(nil)
+	memory.SetRawArchive(nil)
+	memory.SetAtomicMemoryService(nil)
+	memory.SetMemoryAgent(nil)
+	samg.SetSAMGService(nil)
+	memory.SetPreflightService(nil)
 }

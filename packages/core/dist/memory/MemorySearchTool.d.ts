@@ -31,7 +31,7 @@ export interface MemorySearchResult {
 /**
  * MCP 兼容的工具定义
  */
-export interface ToolDefinition {
+export interface MemorySearchToolDefinition {
     name: string;
     description: string;
     inputSchema: {
@@ -46,7 +46,7 @@ export declare class MemorySearchTool {
     /**
      * 返回 MCP 兼容的工具定义
      */
-    getToolDefinition(): ToolDefinition;
+    getToolDefinition(): MemorySearchToolDefinition;
     /**
      * 执行记忆搜索
      */

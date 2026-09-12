@@ -140,7 +140,7 @@ func Encrypt(c *gin.Context) {
 			"algorithm": encrypted.Algorithm,
 		})
 	} else {
-		// Use standard AES-CBC (Method A) - default
+		// Use standard AES-GCM (Method A) - default.
 		response.Method = "standard"
 		encrypted, err := svc.Encrypt(ctx, req.Plaintext, req.Policy)
 		if err != nil {

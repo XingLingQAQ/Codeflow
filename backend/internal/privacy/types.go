@@ -4,6 +4,7 @@ package privacy
 type EncryptionAlgorithm string
 
 const (
+	AES256GCM EncryptionAlgorithm = "aes-256-gcm"
 	AES256CBC EncryptionAlgorithm = "aes-256-cbc"
 	AES128CBC EncryptionAlgorithm = "aes-128-cbc"
 )
@@ -45,11 +46,11 @@ type EncryptionConfig struct {
 
 // DefaultEncryptionConfig 默认加密配置
 var DefaultEncryptionConfig = EncryptionConfig{
-	Algorithm:     AES256CBC,
+	Algorithm:     AES256GCM,
 	KeyDerivation: PBKDF2,
 	Iterations:    100000,
 	SaltLength:    16,
-	IVLength:      16,
+	IVLength:      12,
 }
 
 // EncryptedData 加密结果
@@ -65,6 +66,7 @@ type EncryptedData struct {
 type DecryptedData struct {
 	Plaintext string `json:"plaintext"`
 	Verified  bool   `json:"verified"`
+	Legacy    bool   `json:"legacy,omitempty"`
 }
 
 // KeyInfo 密钥信息

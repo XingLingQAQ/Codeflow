@@ -58,14 +58,14 @@ func GetPrivacyService() *PrivacyService {
 	return globalPrivacyService
 }
 
-// === Method A: AES-CBC Encryption ===
+// === Method A: AES-GCM encryption with legacy CBC reads ===
 
-// Encrypt encrypts data using AES-CBC (Method A)
+// Encrypt encrypts data using AES-GCM (Method A).
 func (s *PrivacyService) Encrypt(ctx context.Context, plaintext string, policy *PrivacyPolicy) (*EncryptedData, error) {
 	return s.manager.Encrypt(ctx, plaintext, policy)
 }
 
-// Decrypt decrypts data using AES-CBC (Method A)
+// Decrypt decrypts AES-GCM data and read-only legacy CBC records (Method A).
 func (s *PrivacyService) Decrypt(ctx context.Context, encrypted *EncryptedData) (*DecryptedData, error) {
 	return s.manager.Decrypt(ctx, encrypted)
 }

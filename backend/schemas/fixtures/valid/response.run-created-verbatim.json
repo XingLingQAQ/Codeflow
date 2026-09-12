@@ -1,0 +1,13 @@
+{
+  "data": {
+    "id": "run_88",
+    "status": "queued",
+    "project_id": "p_123",
+    "task_id": "task_21",
+    "binding_revision": 7,
+    "base_commit": "abc123",
+    "agent_revision_id": "ar_12",
+    "base_manifest_hash": "sha256:<base-manifest-hash>"
+  },
+  "meta": {"request_id": "rq_1", "command_id": "req_01JRUN_CREATE_001", "revision": 1}
+}

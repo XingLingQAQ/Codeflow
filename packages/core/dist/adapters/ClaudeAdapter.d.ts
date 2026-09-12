@@ -12,6 +12,8 @@ export declare class ClaudeAdapter implements ICliAdapter {
     private hookManager?;
     private currentStream?;
     constructor(config: AdapterConfig, hookManager?: HookManager);
+    setHookManager(hookManager?: HookManager): void;
+    getHookManager(): HookManager | undefined;
     /**
      * 发送消息并获取响应
      */
@@ -24,9 +26,10 @@ export declare class ClaudeAdapter implements ICliAdapter {
      * 开始流式请求
      */
     stream(prompt: string, options?: SendOptions): AsyncGenerator<StreamChunk>;
-    /**
-     * 获取对话历史
-     */
+    private buildPayloadContext;
+    private mapMessagesToProviderPayload;
+    private extractSystemPrompt;
+    private applyBeforeSendHooks;
     getHistory(): Message[];
     /**
      * 设置对话历史
@@ -48,6 +51,7 @@ export declare class ClaudeAdapter implements ICliAdapter {
      * 获取配置
      */
     getConfig(): AdapterConfig;
+    private createStreamGenerator;
     /**
      * 执行带重试的请求
      */

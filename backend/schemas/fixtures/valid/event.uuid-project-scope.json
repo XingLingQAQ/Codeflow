@@ -1,0 +1,17 @@
+{
+  "id": "9f8e7d6c-5b4a-4321-9876-01abcdef2345",
+  "scope": "project:b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+  "project_id": "b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+  "sequence": 7,
+  "type": "approval.decided",
+  "schema_version": 1,
+  "occurred_at": "2026-09-10T02:30:00Z",
+  "identity": {
+    "project_id": "b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+    "run_id": null,
+    "attempt_id": null,
+    "agent_revision_id": null,
+    "actor": {"type": "user", "id": "local-user"}
+  },
+  "payload": {"approval_id": "ap_9", "decision": "approved"}
+}

@@ -192,17 +192,27 @@ func (s *MemoryPreflightService) AddMemory(memory *MemoryMatch) {
 }
 
 // Global service instance
-var defaultPreflightService IMemoryPreflight
+var (
+	defaultPreflightService IMemoryPreflight
+	defaultPreflightMu      sync.RWMutex
+)
 
 // GetPreflightService returns the global preflight service instance.
 func GetPreflightService() IMemoryPreflight {
-	if defaultPreflightService == nil {
-		defaultPreflightService = NewMemoryPreflightService()
-	}
+	defaultPreflightMu.RLock()
+	defer defaultPreflightMu.RUnlock()
 	return defaultPreflightService
 }
 
 // SetPreflightService sets the global preflight service instance (for testing).
 func SetPreflightService(svc IMemoryPreflight) {
+	defaultPreflightMu.Lock()
+	defer defaultPreflightMu.Unlock()
 	defaultPreflightService = svc
+}
+
+func HasPreflightService() bool {
+	defaultPreflightMu.RLock()
+	defer defaultPreflightMu.RUnlock()
+	return defaultPreflightService != nil
 }

@@ -11,15 +11,18 @@ type stageDef struct {
 	Type     StageType
 	Name     string
 	Canvas   string
+	AgentID  string
 	Optional bool
 	Gates    []Gate
 }
 
 // templateDef is a built-in flow template.
 type templateDef struct {
-	ID     TemplateID
-	Stages []stageDef
-	Loops  []LoopEdge
+	ID          TemplateID
+	Name        string
+	Description string
+	Stages      []stageDef
+	Loops       []LoopEdge
 }
 
 func autoExitGate() []Gate {
@@ -33,7 +36,9 @@ func autoExitGate() []Gate {
 
 var builtinTemplates = map[TemplateID]templateDef{
 	TemplateNewProject: {
-		ID: TemplateNewProject,
+		ID:          TemplateNewProject,
+		Name:        "新建项目",
+		Description: "从想法、设计到提交的完整七阶段研发流程。",
 		Stages: []stageDef{
 			{Type: StageTypeIdea, Name: "想法提出", Canvas: "intent", Gates: autoExitGate()},
 			{Type: StageTypeDesign, Name: "设计", Canvas: "design_doc", Gates: autoExitGate()},
@@ -50,7 +55,9 @@ var builtinTemplates = map[TemplateID]templateDef{
 		},
 	},
 	TemplateImport: {
-		ID: TemplateImport,
+		ID:          TemplateImport,
+		Name:        "导入项目",
+		Description: "理解已有代码库后进入规划、编码、评审与提交。",
 		Stages: []stageDef{
 			{Type: StageTypeImport, Name: "导入", Canvas: "import_pipeline", Gates: autoExitGate()},
 			{Type: StageTypeComprehend, Name: "理解", Canvas: "comprehension", Gates: autoExitGate()},
@@ -84,17 +91,22 @@ func ListTemplates() []TemplateID {
 
 // TemplateInfo is a public view of a built-in template.
 type TemplateInfo struct {
-	ID     TemplateID   `json:"id"`
-	Stages []StageBrief `json:"stages"`
-	Loops  []LoopEdge   `json:"loops"`
+	ID          TemplateID   `json:"id"`
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	Source      string       `json:"source"`
+	Stages      []StageBrief `json:"stages"`
+	Loops       []LoopEdge   `json:"loops"`
 }
 
 // StageBrief describes a template stage without instance IDs.
 type StageBrief struct {
-	Type     StageType `json:"type"`
-	Name     string    `json:"name"`
-	Canvas   string    `json:"canvas"`
-	Optional bool      `json:"optional"`
+	Type     StageType    `json:"type"`
+	Name     string       `json:"name"`
+	Canvas   string       `json:"canvas"`
+	AgentID  string       `json:"agent_id,omitempty"`
+	Optional bool         `json:"optional"`
+	Gates    []CustomGate `json:"gates,omitempty"`
 }
 
 // DescribeTemplate returns a public template description.
@@ -103,11 +115,22 @@ func DescribeTemplate(id TemplateID) (*TemplateInfo, bool) {
 	if !ok {
 		return nil, false
 	}
-	info := &TemplateInfo{ID: t.ID, Loops: append([]LoopEdge(nil), t.Loops...)}
+	source := "custom"
+	if _, ok := builtinTemplates[id]; ok {
+		source = "builtin"
+	}
+	info := &TemplateInfo{
+		ID: t.ID, Name: t.Name, Description: t.Description, Source: source,
+		Loops: append([]LoopEdge(nil), t.Loops...),
+	}
 	for _, s := range t.Stages {
-		info.Stages = append(info.Stages, StageBrief{
-			Type: s.Type, Name: s.Name, Canvas: s.Canvas, Optional: s.Optional,
-		})
+		brief := StageBrief{Type: s.Type, Name: s.Name, Canvas: s.Canvas, AgentID: s.AgentID, Optional: s.Optional}
+		for _, g := range s.Gates {
+			brief.Gates = append(brief.Gates, CustomGate{
+				Phase: g.Phase, Kind: g.Kind, OnFail: g.OnFail, Config: cloneStringMap(g.Config),
+			})
+		}
+		info.Stages = append(info.Stages, brief)
 	}
 	return info, true
 }
@@ -159,21 +182,27 @@ type CustomStage struct {
 	Type     StageType    `json:"type"`
 	Name     string       `json:"name"`
 	Canvas   string       `json:"canvas"`
+	AgentID  string       `json:"agent_id,omitempty"`
 	Optional bool         `json:"optional"`
 	Gates    []CustomGate `json:"gates,omitempty"`
 }
 
 // CustomTemplate is a plugin-provided flow template (design §3.3, §7).
 type CustomTemplate struct {
-	ID     TemplateID    `json:"id"`
-	Stages []CustomStage `json:"stages"`
-	Loops  []LoopEdge    `json:"loops,omitempty"`
+	ID          TemplateID    `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Stages      []CustomStage `json:"stages"`
+	Loops       []LoopEdge    `json:"loops,omitempty"`
 }
 
 func (c CustomTemplate) toTemplateDef() templateDef {
-	td := templateDef{ID: c.ID, Loops: append([]LoopEdge(nil), c.Loops...)}
+	td := templateDef{
+		ID: c.ID, Name: c.Name, Description: c.Description,
+		Loops: append([]LoopEdge(nil), c.Loops...),
+	}
 	for _, s := range c.Stages {
-		sd := stageDef{Type: s.Type, Name: s.Name, Canvas: s.Canvas, Optional: s.Optional}
+		sd := stageDef{Type: s.Type, Name: s.Name, Canvas: s.Canvas, AgentID: s.AgentID, Optional: s.Optional}
 		for _, g := range s.Gates {
 			sd.Gates = append(sd.Gates, Gate{Phase: g.Phase, Kind: g.Kind, OnFail: g.OnFail, Config: cloneStringMap(g.Config)})
 		}
@@ -206,16 +235,7 @@ func RegisterTemplate(def CustomTemplate) error {
 // UnregisterTemplate removes a custom template. Built-in templates cannot be
 // unregistered. Returns an error if the id is unknown among custom templates.
 func UnregisterTemplate(id TemplateID) error {
-	if _, isBuiltin := builtinTemplates[id]; isBuiltin {
-		return fmt.Errorf("cannot unregister built-in template %s", id)
-	}
-	customMu.Lock()
-	defer customMu.Unlock()
-	if _, ok := customTemplates[id]; !ok {
-		return fmt.Errorf("template not found: %s", id)
-	}
-	delete(customTemplates, id)
-	return nil
+	return DeleteTemplate(id)
 }
 
 // validateTemplateDef enforces the editor/plugin constraints from design §7:

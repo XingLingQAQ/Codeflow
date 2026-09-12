@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,9 +13,27 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
 )
+
+type createProjectAPIResponse struct {
+	project.Project
+	Flow    *floweng.Flow  `json:"flow"`
+	Session map[string]any `json:"session"`
+}
+
+type failingFlowStore struct{}
+
+func (failingFlowStore) Put(*floweng.Flow) error { return errors.New("flow store unavailable") }
+func (failingFlowStore) Get(string) (*floweng.Flow, error) {
+	return nil, errors.New("flow store unavailable")
+}
+func (failingFlowStore) List(string) ([]*floweng.Flow, error) {
+	return nil, errors.New("flow store unavailable")
+}
+func (failingFlowStore) Delete(string) error { return errors.New("flow store unavailable") }
 
 func setupProjectsRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -41,6 +60,184 @@ func setupProjectsRouter() *gin.Engine {
 	}
 
 	return router
+}
+
+func TestCreateProjectProvisionsDefaultFlow(t *testing.T) {
+	router := setupProjectsRouter()
+	projectSvc := project.NewInMemoryProjectService()
+	flowEngine := floweng.NewInMemoryEngine(nil)
+	previousProjectSvc := project.GetProjectService()
+	previousFlowEngine := floweng.GetEngine()
+	project.SetProjectService(projectSvc)
+	floweng.SetEngine(flowEngine)
+	t.Cleanup(func() {
+		project.SetProjectService(previousProjectSvc)
+		floweng.SetEngine(previousFlowEngine)
+	})
+
+	body, _ := json.Marshal(map[string]any{"title": "new runnable project"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusCreated, resp.Code)
+	created := decodeContextResponseData[createProjectAPIResponse](t, resp.Body.Bytes())
+	assert.NotEmpty(t, created.ID)
+	if assert.NotNil(t, created.Flow) {
+		assert.Equal(t, created.ID, created.Flow.ProjectID)
+		assert.Equal(t, floweng.TemplateNewProject, created.Flow.TemplateID)
+		assert.Len(t, created.Flow.Stages, 7)
+		assert.Equal(t, floweng.StageTypeIdea, created.Flow.Stages[0].Type)
+		assert.Equal(t, floweng.StageStatusActive, created.Flow.Stages[0].Status)
+		assert.Equal(t, created.DefaultSessionID, created.Flow.SessionID)
+	}
+	assert.NotEmpty(t, created.DefaultFlowID)
+	assert.NotEmpty(t, created.DefaultSessionID)
+	assert.Equal(t, created.DefaultSessionID, created.Session["id"])
+
+	flows, err := flowEngine.List(context.Background(), created.ID)
+	assert.NoError(t, err)
+	assert.Len(t, flows, 1)
+}
+
+func TestCreateProjectIdempotencyKeyReturnsOriginalBindings(t *testing.T) {
+	router := setupProjectsRouter()
+	projectSvc := project.NewInMemoryProjectService()
+	flowEngine := floweng.NewInMemoryEngine(nil)
+	previousProjectSvc := project.GetProjectService()
+	previousFlowEngine := floweng.GetEngine()
+	project.SetProjectService(projectSvc)
+	floweng.SetEngine(flowEngine)
+	t.Cleanup(func() { project.SetProjectService(previousProjectSvc); floweng.SetEngine(previousFlowEngine) })
+	request := func(title string) createProjectAPIResponse {
+		body, _ := json.Marshal(map[string]any{"title": title})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "project-create-1")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		assert.Equal(t, http.StatusCreated, resp.Code)
+		return decodeContextResponseData[createProjectAPIResponse](t, resp.Body.Bytes())
+	}
+	one := request("original")
+	two := request("retry payload")
+	assert.Equal(t, one.ID, two.ID)
+	assert.Equal(t, one.DefaultFlowID, two.DefaultFlowID)
+	assert.Equal(t, one.DefaultSessionID, two.DefaultSessionID)
+}
+
+// TestCreationDifferentPayloadConflicts is the HTTP-layer half of the §28
+// acceptance pair: replaying the create endpoint under the same
+// Idempotency-Key with a different payload is a 409 naming the conflicting
+// operation and the differing journaled fields, while the original payload
+// still replays the original operation. The service-layer half lives in
+// backend/internal/project (typed *ProjectCreateConflictError).
+func TestCreationDifferentPayloadConflicts(t *testing.T) {
+	router := setupProjectsRouter()
+	projectSvc, err := project.NewSQLiteProjectService(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLiteProjectService failed: %v", err)
+	}
+	flowEngine := floweng.NewInMemoryEngine(nil)
+	previousProjectSvc := project.GetProjectService()
+	previousFlowEngine := floweng.GetEngine()
+	project.SetProjectService(projectSvc)
+	floweng.SetEngine(flowEngine)
+	t.Cleanup(func() {
+		project.SetProjectService(previousProjectSvc)
+		floweng.SetEngine(previousFlowEngine)
+		_ = projectSvc.Close()
+	})
+
+	post := func(title string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"title": title})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "http-conflict-key")
+		resp := httptest.NewRecorder()
+		router.ServeHTTP(resp, req)
+		return resp
+	}
+
+	first := post("alpha")
+	assert.Equal(t, http.StatusCreated, first.Code)
+	created := decodeContextResponseData[createProjectAPIResponse](t, first.Body.Bytes())
+	assert.NotEmpty(t, created.ID)
+
+	conflict := post("beta")
+	assert.Equal(t, http.StatusConflict, conflict.Code)
+	var envelope struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+		Data    struct {
+			IdempotencyKey  string   `json:"idempotency_key"`
+			ProjectID       string   `json:"project_id"`
+			DifferingFields []string `json:"differing_fields"`
+		} `json:"data"`
+	}
+	assert.NoError(t, json.Unmarshal(conflict.Body.Bytes(), &envelope))
+	assert.False(t, envelope.Success)
+	assert.NotEmpty(t, envelope.Error)
+	assert.Equal(t, "http-conflict-key", envelope.Data.IdempotencyKey)
+	assert.Equal(t, created.ID, envelope.Data.ProjectID)
+	assert.Equal(t, []string{"title"}, envelope.Data.DifferingFields)
+
+	replay := post("alpha")
+	assert.Equal(t, http.StatusCreated, replay.Code)
+	replayed := decodeContextResponseData[createProjectAPIResponse](t, replay.Body.Bytes())
+	assert.Equal(t, created.ID, replayed.ID)
+	assert.Equal(t, created.DefaultFlowID, replayed.DefaultFlowID)
+	assert.Equal(t, created.DefaultSessionID, replayed.DefaultSessionID)
+}
+
+func TestCreateProjectDoesNotPersistProjectWhenFlowCreationFails(t *testing.T) {
+	router := setupProjectsRouter()
+	projectSvc := project.NewInMemoryProjectService()
+	flowEngine := floweng.NewEngineWithStore(failingFlowStore{}, nil)
+	previousProjectSvc := project.GetProjectService()
+	previousFlowEngine := floweng.GetEngine()
+	project.SetProjectService(projectSvc)
+	floweng.SetEngine(flowEngine)
+	t.Cleanup(func() {
+		project.SetProjectService(previousProjectSvc)
+		floweng.SetEngine(previousFlowEngine)
+	})
+
+	body, _ := json.Marshal(map[string]any{"title": "must not be partial"})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusInternalServerError, resp.Code)
+	listed, err := projectSvc.ListProjects(context.Background(), &project.ProjectListRequest{})
+	assert.NoError(t, err)
+	assert.Zero(t, listed.Total)
+}
+
+func TestCreateProjectRejectsWhitespaceOnlyTitle(t *testing.T) {
+	router := setupProjectsRouter()
+	projectSvc := project.NewInMemoryProjectService()
+	flowEngine := floweng.NewInMemoryEngine(nil)
+	previousProjectSvc := project.GetProjectService()
+	previousFlowEngine := floweng.GetEngine()
+	project.SetProjectService(projectSvc)
+	floweng.SetEngine(flowEngine)
+	t.Cleanup(func() {
+		project.SetProjectService(previousProjectSvc)
+		floweng.SetEngine(previousFlowEngine)
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", bytes.NewBufferString(`{"title":"   "}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	flows, err := flowEngine.List(context.Background(), "")
+	assert.NoError(t, err)
+	assert.Empty(t, flows)
 }
 
 func TestGenerateProjectPlanAllowsPromptOnlyInput(t *testing.T) {

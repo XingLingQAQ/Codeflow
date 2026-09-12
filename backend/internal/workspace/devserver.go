@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/policy"
 )
 
 // ScriptInfo describes one npm-style script detected in package.json.
@@ -163,6 +166,14 @@ func devKey(root, script string) string { return root + "\x00" + script }
 // call returns the existing handle. Returns an error when the per-process cap
 // is reached.
 func (m *DevServerManager) Start(root, script string) (*DevServerHandle, error) {
+	return m.StartContext(context.Background(), root, script)
+}
+
+// StartContext launches a dev server with the caller's project/agent trace.
+func (m *DevServerManager) StartContext(ctx context.Context, root, script string) (*DevServerHandle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	absRoot, err := m.svc.Resolve(root, ".")
 	if err != nil {
 		return nil, err
@@ -182,6 +193,15 @@ func (m *DevServerManager) Start(root, script string) (*DevServerHandle, error) 
 	if command == "" {
 		return nil, fmt.Errorf("script %q not found in package.json", script)
 	}
+	trace := audit.TraceFromContext(ctx)
+	policyReq := policy.Request{Operation: policy.OperationProcessStart, Resource: command}
+	if trace != nil {
+		policyReq.ProjectID, policyReq.AgentID = trace.ProjectID, trace.AgentID
+	}
+	decision := policy.EvaluateBoundary(ctx, policyReq)
+	if err := policy.DenialError(decision); err != nil {
+		return nil, err
+	}
 
 	key := devKey(absRoot, script)
 
@@ -198,7 +218,7 @@ func (m *DevServerManager) Start(root, script string) (*DevServerHandle, error) 
 	m.nextID++
 	id := fmt.Sprintf("dev-%d", m.nextID)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
@@ -337,6 +357,32 @@ func (m *DevServerManager) Stop(id string) error {
 
 	stopEntry(entry)
 	return nil
+}
+
+// StopRoot terminates every tracked dev-server owned by root. It is idempotent
+// and returns the number of entries removed.
+func (m *DevServerManager) StopRoot(root string) int {
+	root = filepath.Clean(root)
+	m.mu.Lock()
+	entries := make([]*devEntry, 0)
+	for id, entry := range m.byID {
+		entryRoot := filepath.Clean(entry.handle.Root)
+		matches := entryRoot == root
+		if runtime.GOOS == "windows" {
+			matches = strings.EqualFold(entryRoot, root)
+		}
+		if !matches {
+			continue
+		}
+		delete(m.byID, id)
+		delete(m.byKey, devKey(entry.handle.Root, entry.handle.Script))
+		entries = append(entries, entry)
+	}
+	m.mu.Unlock()
+	for _, entry := range entries {
+		stopEntry(entry)
+	}
+	return len(entries)
 }
 
 // Logs returns the most recent n lines of combined stdout/stderr for the given

@@ -2,6 +2,7 @@ package git
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeflow/backend/internal/policy"
 	"github.com/google/uuid"
 )
 
@@ -34,6 +36,13 @@ func NewGitManager(workDir string) *GitManager {
 
 // execGit 执行git命令
 func (m *GitManager) execGit(ctx context.Context, args ...string) (string, error) {
+	decision := policy.EvaluateBoundary(ctx, policy.Request{
+		Operation: policy.OperationProcessStart,
+		Resource:  "git " + strings.Join(args, " "),
+	})
+	if err := policy.DenialError(decision); err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = m.workDir
 	output, err := cmd.CombinedOutput()
@@ -41,6 +50,30 @@ func (m *GitManager) execGit(ctx context.Context, args ...string) (string, error
 		return string(output), fmt.Errorf("git %s: %w (output: %s)", strings.Join(args, " "), err, string(output))
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+// execGitRaw 执行 git 命令，返回未裁剪的 stdout 原始字节，stderr 独立捕获。
+// 仅供 NUL 分隔（-z）等机器可读格式使用：porcelain 状态/差异的字节流不能被
+// TrimSpace/Fields 破坏（见 E-14）。既有文本格式方法（hash/branch/log）继续
+// 使用 execGit 的文本裁剪，不经过本 helper。
+func (m *GitManager) execGitRaw(ctx context.Context, args ...string) (stdout []byte, stderr []byte, err error) {
+	decision := policy.EvaluateBoundary(ctx, policy.Request{
+		Operation: policy.OperationProcessStart,
+		Resource:  "git " + strings.Join(args, " "),
+	})
+	if err := policy.DenialError(decision); err != nil {
+		return nil, nil, err
+	}
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = m.workDir
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return outBuf.Bytes(), errBuf.Bytes(),
+			fmt.Errorf("git %s: %w (stderr: %s)", strings.Join(args, " "), err, errBuf.String())
+	}
+	return outBuf.Bytes(), errBuf.Bytes(), nil
 }
 
 // Init 初始化Git仓库
@@ -59,46 +92,54 @@ func (m *GitManager) IsRepo(ctx context.Context) (bool, error) {
 }
 
 // Status 获取仓库状态
+//
+// 走 `status --porcelain=v1 -z` 原始字节 + NUL 解析器：不再对整个输出
+// TrimSpace、不按文本行切分（E-13：旧文本解析会丢首个未暂存文件名的首字符、
+// 无法表达 rename 双路径）。File 指向目标路径（rename 的新路径），OldPath
+// 保留 rename/copy 来源。
 func (m *GitManager) Status(ctx context.Context) ([]GitDiff, error) {
-	output, err := m.execGit(ctx, "status", "--porcelain")
+	stdout, _, err := m.execGitRaw(ctx, "status", "--porcelain=v1", "-z")
 	if err != nil {
 		return nil, err
 	}
 
-	if output == "" {
+	if len(stdout) == 0 {
 		return []GitDiff{}, nil
 	}
 
-	var diffs []GitDiff
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if len(line) < 3 {
-			continue
-		}
+	entries, err := ParseStatusPorcelainZ(stdout)
+	if err != nil {
+		return nil, err
+	}
 
-		status := strings.TrimSpace(line[:2])
-		file := line[3:]
-
-		var diffStatus GitDiffStatus
-		switch status {
-		case "A", "??":
-			diffStatus = DiffAdded
-		case "D":
-			diffStatus = DiffDeleted
-		case "R":
-			diffStatus = DiffRenamed
-		default:
-			diffStatus = DiffModified
-		}
-
+	diffs := make([]GitDiff, 0, len(entries))
+	for _, entry := range entries {
 		diffs = append(diffs, GitDiff{
-			File:   file,
-			Status: diffStatus,
+			File:    entry.Path,
+			Status:  mapPorcelainStatus(entry),
+			OldPath: entry.OldPath,
 		})
 	}
 
 	return diffs, nil
+}
+
+// mapPorcelainStatus 将 v1 porcelain 的 XY 两列状态归类为既有 GitDiffStatus。
+// 未跟踪（??）与新增（A）-> added；删除（D）-> deleted；rename/copy（R/C）->
+// renamed；其余（M/T/U 等）-> modified，与旧文本解析的归类口径一致。
+func mapPorcelainStatus(entry PorcelainStatusEntry) GitDiffStatus {
+	switch {
+	case entry.IndexStatus == '?' || entry.WorktreeStatus == '?':
+		return DiffAdded
+	case isRenameOrCopy(entry.IndexStatus) || isRenameOrCopy(entry.WorktreeStatus):
+		return DiffRenamed
+	case entry.IndexStatus == 'D' || entry.WorktreeStatus == 'D':
+		return DiffDeleted
+	case entry.IndexStatus == 'A' || entry.WorktreeStatus == 'A':
+		return DiffAdded
+	default:
+		return DiffModified
+	}
 }
 
 // Add 添加文件到暂存区
@@ -424,47 +465,55 @@ func (m *GitManager) GetMappingByGitHash(gitHash string) *SnapshotMapping {
 }
 
 // DiffBetween 获取两个提交之间的差异
+//
+// 走 `diff --name-status -z -M` 原始字节 + NUL 解析器：-z 下路径按 NUL 分隔，
+// 不再用 Fields 拆路径（空格/中文路径安全）；-M 开启 rename 检测，File 指向
+// 新路径，OldPath 保留 rename/copy 来源，Score 携带相似度分数。
 func (m *GitManager) DiffBetween(ctx context.Context, from, to string) ([]GitDiff, error) {
-	output, err := m.execGit(ctx, "diff", "--name-status", from, to)
+	stdout, _, err := m.execGitRaw(ctx, "diff", "--name-status", "-z", "-M", from, to)
 	if err != nil {
 		return nil, err
 	}
 
-	if output == "" {
+	if len(stdout) == 0 {
 		return []GitDiff{}, nil
 	}
 
-	var diffs []GitDiff
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
+	entries, err := ParseNameStatusZ(stdout)
+	if err != nil {
+		return nil, err
+	}
+
+	diffs := make([]GitDiff, 0, len(entries))
+	for _, entry := range entries {
+		diff := GitDiff{
+			File:    entry.Path,
+			Status:  mapNameStatus(entry.Status),
+			OldPath: entry.OldPath,
 		}
-
-		status := parts[0]
-		file := parts[1]
-
-		var diffStatus GitDiffStatus
-		switch status {
-		case "A":
-			diffStatus = DiffAdded
-		case "D":
-			diffStatus = DiffDeleted
-		case "R":
-			diffStatus = DiffRenamed
-		default:
-			diffStatus = DiffModified
+		if entry.Score >= 0 {
+			score := entry.Score
+			diff.Score = &score
 		}
-
-		diffs = append(diffs, GitDiff{
-			File:   file,
-			Status: diffStatus,
-		})
+		diffs = append(diffs, diff)
 	}
 
 	return diffs, nil
+}
+
+// mapNameStatus 将 name-status 的单字母状态归类为既有 GitDiffStatus，
+// 与旧文本解析的归类口径一致（copy 与 rename 同归 renamed，均携带 OldPath）。
+func mapNameStatus(status byte) GitDiffStatus {
+	switch status {
+	case 'A':
+		return DiffAdded
+	case 'D':
+		return DiffDeleted
+	case 'R', 'C':
+		return DiffRenamed
+	default:
+		return DiffModified
+	}
 }
 
 // generateStateHash 生成状态哈希

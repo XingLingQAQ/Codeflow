@@ -1,7 +1,19 @@
 // Agent registry client (experimental API /api/v1/agents/registry) with a
 // static fallback copy of the five builtin agents for when the registry is
 // unreachable (403/503/network). Dev-mock is served from fixtures.
-import { get, getApiBase } from '../../api';
+import { del, get, getApiBase, patch, post } from '../../api';
+
+export interface AgentBinding {
+  model?: string;
+  channel?: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface AgentMounts {
+  mcp_tools?: string[];
+  skills?: string[];
+}
 
 export interface AgentInfo {
   id: string;
@@ -13,7 +25,25 @@ export interface AgentInfo {
   stage_tags?: string[];
   source?: string;
   enabled?: boolean;
+  version?: string;
+  binding?: AgentBinding;
+  mounts?: AgentMounts;
+  stats?: { usage_count: number; score: number };
+  created_at?: string;
+  updated_at?: string;
 }
+
+export interface AgentInput {
+  name: string;
+  description?: string;
+  role_base: string;
+  system_prompt?: string;
+  binding?: AgentBinding;
+  mounts?: AgentMounts;
+  stage_tags?: string[];
+}
+
+export type AgentUpdateInput = Partial<AgentInput> & { enabled?: boolean };
 
 /** Chinese labels for registry role_base values (UI copy). */
 export const ROLE_LABEL: Record<string, string> = {
@@ -86,9 +116,85 @@ export const FALLBACK_AGENTS: AgentInfo[] = [
   },
 ];
 
-function filterByStage(items: AgentInfo[], stage?: string): AgentInfo[] {
-  if (!stage) return items;
-  return items.filter((a) => a.stage_tags?.includes(stage));
+export function filterAvailableAgents(items: AgentInfo[], stage?: string): AgentInfo[] {
+  return items.filter((agent) => {
+    if (agent.enabled === false) return false;
+    return !stage || agent.stage_tags?.includes(stage);
+  });
+}
+
+const registryBase = () => `${getApiBase()}/api/v1/agents/registry`;
+
+/** Strict registry listing for management surfaces; backend errors stay visible. */
+export async function listAgents(signal?: AbortSignal): Promise<AgentInfo[]> {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      return [...store.MOCK_AGENTS] as AgentInfo[];
+    }
+  }
+  const res = await get<{ items: AgentInfo[]; total: number }>(registryBase(), undefined, signal);
+  return res.items ?? [];
+}
+
+export async function createAgent(input: AgentInput, signal?: AbortSignal): Promise<AgentInfo> {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      const now = new Date().toISOString();
+      const item: AgentInfo = {
+        ...input,
+        id: `agent-mock-${Math.random().toString(36).slice(2, 9)}`,
+        source: 'user',
+        version: '0.1.0',
+        enabled: true,
+        stats: { usage_count: 0, score: 0 },
+        created_at: now,
+        updated_at: now,
+      };
+      (store.MOCK_AGENTS as AgentInfo[]).unshift(item);
+      return item;
+    }
+  }
+  return post<AgentInfo>(registryBase(), input, signal);
+}
+
+export async function updateAgent(id: string, input: AgentUpdateInput, signal?: AbortSignal): Promise<AgentInfo> {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      const items = store.MOCK_AGENTS as AgentInfo[];
+      const index = items.findIndex((item) => item.id === id);
+      if (index < 0) throw new Error('Agent 不存在');
+      if (items[index].source === 'builtin') throw new Error('内置 Agent 不可修改');
+      items[index] = { ...items[index], ...input, updated_at: new Date().toISOString() };
+      return items[index];
+    }
+  }
+  return patch<AgentInfo>(`${registryBase()}/${encodeURIComponent(id)}`, input, signal);
+}
+
+export async function deleteAgent(id: string, signal?: AbortSignal): Promise<void> {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      const items = store.MOCK_AGENTS as AgentInfo[];
+      const index = items.findIndex((item) => item.id === id);
+      if (index < 0) throw new Error('Agent 不存在');
+      if (items[index].source === 'builtin') throw new Error('内置 Agent 不可删除');
+      items.splice(index, 1);
+      return;
+    }
+  }
+  await del<{ deleted: boolean }>(`${registryBase()}/${encodeURIComponent(id)}`, signal);
 }
 
 /**
@@ -102,18 +208,18 @@ export async function listStageAgents(stage?: string, signal?: AbortSignal): Pro
     if (isMockActive()) {
       await jitter();
       const store = await getMockStore();
-      return filterByStage([...store.MOCK_AGENTS] as AgentInfo[], stage);
+      return filterAvailableAgents([...store.MOCK_AGENTS] as AgentInfo[], stage);
     }
   }
   try {
     const res = await get<{ items: AgentInfo[]; total: number }>(
-      `${getApiBase()}/api/v1/agents/registry`,
+      registryBase(),
       stage ? { stage } : undefined,
       signal,
     );
-    return res.items ?? [];
+    return filterAvailableAgents(res.items ?? [], stage);
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    return filterByStage(FALLBACK_AGENTS, stage);
+    return filterAvailableAgents(FALLBACK_AGENTS, stage);
   }
 }

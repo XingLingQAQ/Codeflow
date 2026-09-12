@@ -10,4 +10,5 @@ export * from './UserProfileService.js';
 export * from './FolderMemoryService.js';
 export * from './PassiveRAG.js';
 export * from './MemorySearchTool.js';
+export * from './MemoryAgentClient.js';
 //# sourceMappingURL=index.js.map

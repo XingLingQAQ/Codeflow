@@ -38,6 +38,10 @@ const (
 type WriteRequest struct {
 	// Root is the absolute project root directory.
 	Root string `json:"-"`
+	// ProjectID, AgentID, and PluginID carry policy identity for direct service callers.
+	ProjectID string `json:"-"`
+	AgentID   string `json:"-"`
+	PluginID  string `json:"-"`
 	// Path is relative to Root (slash or OS separators accepted).
 	Path string `json:"path" binding:"required"`
 	// Content is the full file body to write.

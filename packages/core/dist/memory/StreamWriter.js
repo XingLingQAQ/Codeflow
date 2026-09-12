@@ -2,6 +2,7 @@
  * 流式写入器
  * 支持 hook_post_response → Chunking → Embedding 流程
  */
+import { getMessageText } from '../hooks/types.js';
 import { DEFAULT_STREAM_CONFIG, } from './types.js';
 import { TextChunker } from './TextChunker.js';
 export class StreamWriter {
@@ -27,7 +28,7 @@ export class StreamWriter {
         }
     }
     async writeMessage(message, sessionId, gitCommitHash) {
-        await this.write(message.content, {
+        await this.write(getMessageText(message.content), {
             sessionId,
             agentRole: 'main',
             gitCommitHash,

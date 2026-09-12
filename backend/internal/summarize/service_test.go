@@ -21,7 +21,7 @@ func TestSummarizeConversation(t *testing.T) {
 
 	req := &SummarizeRequest{
 		Messages:          messages,
-		CompressionTarget: 0.6,
+		CompressionTarget: f64(0.6),
 	}
 
 	summary, err := svc.SummarizeConversation(req)
@@ -30,7 +30,9 @@ func TestSummarizeConversation(t *testing.T) {
 	assert.Equal(t, 4, summary.OriginalMessages)
 	assert.Greater(t, len(summary.SummaryText), 0)
 	assert.Greater(t, len(summary.KeyPoints), 0)
-	assert.Equal(t, 0.6, summary.CompressionRatio)
+	// T13.04.b 行为修正（E-06）：CompressionRatio 为实测值，不再回填请求目标 0.6。
+	assert.Equal(t, MeasuredCompressionRatio(summary.OriginalTokens, summary.CompressedTokens), summary.CompressionRatio)
+	assert.Equal(t, ModeLocalExtractive, summary.Mode)
 }
 
 func TestSummarizeConversation_Empty(t *testing.T) {
@@ -58,8 +60,8 @@ We should implement rate limiting to prevent abuse.`
 
 	req := &CompressRequest{
 		Context:           context,
-		CompressionRatio:  0.6,
-		PreserveRecentPct: 0.2,
+		CompressionRatio:  f64(0.6),
+		PreserveRecentPct: f64(0.2),
 	}
 
 	result, err := svc.CompressContext(req)
@@ -93,8 +95,8 @@ func TestCompressContext_60PercentReduction(t *testing.T) {
 
 	req := &CompressRequest{
 		Context:           context,
-		CompressionRatio:  0.6,
-		PreserveRecentPct: 0.2,
+		CompressionRatio:  f64(0.6),
+		PreserveRecentPct: f64(0.2),
 	}
 
 	result, err := svc.CompressContext(req)

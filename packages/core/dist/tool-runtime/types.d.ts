@@ -164,6 +164,62 @@ export interface MCPServerInfo {
     timeoutMs: number;
     toolIds: string[];
 }
+export type ToolRuntimeRiskLevel = ToolRiskLevel;
+export type ToolRuntimeDecision = 'allow' | 'allow_with_isolation' | 'require_approval' | 'deny';
+export interface ToolRuntimeBoundary {
+    type: 'command' | 'path' | 'network' | 'resource';
+    value: string;
+    risk: ToolRuntimeRiskLevel;
+    required?: boolean;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+}
+export interface PermissionProfile {
+    id: string;
+    name: string;
+    defaultDecision: ToolRuntimeDecision;
+    boundaries: ToolRuntimeBoundary[];
+    metadata?: Record<string, unknown>;
+}
+export interface RuntimeToolExecutionRequest {
+    command: string;
+    args?: string[];
+    cwd?: string;
+    env?: Record<string, string>;
+    actor: AuditActor;
+    boundaries: ToolRuntimeBoundary[];
+    metadata?: Record<string, unknown>;
+}
+export interface PolicyDecisionResult {
+    decision: ToolRuntimeDecision;
+    risk: ToolRuntimeRiskLevel;
+    matchedBoundaries: ToolRuntimeBoundary[];
+    missingBoundaries: ToolRuntimeBoundary[];
+    notes: string[];
+}
+export interface ToolRuntimeExecutionSnapshot {
+    decision: ToolRuntimeDecision;
+    risk: ToolRuntimeRiskLevel;
+    isolated: boolean;
+    processId?: string;
+    command: string;
+    args: string[];
+    cwd?: string;
+    envKeys: string[];
+    boundarySummary: {
+        matched: number;
+        missing: number;
+        required: number;
+    };
+    metadataPreview?: Record<string, unknown>;
+    notes: string[];
+}
+export interface ExecutionSandboxResult {
+    processId?: string;
+    decision: PolicyDecisionResult;
+    isolated: boolean;
+    snapshot: ToolRuntimeExecutionSnapshot;
+}
 export interface ToolExecutorOptions {
     policyGuard?: ToolPolicyGuard;
     auditManager?: {
@@ -185,4 +241,99 @@ export interface ToolExecutorOptions {
     traceLimit?: number;
 }
 export type ToolLikeOutput = SearchResponse | Diff | EditResult | EditResult[] | FileUndoResult | Record<string, unknown> | unknown[] | string | number | boolean | null;
+export type SkillSource = 'internal' | 'official' | 'imported';
+export type SkillApprovalState = 'not_required' | 'approved' | 'pending' | 'rejected';
+export type SkillLifecycleState = 'registered' | 'authorized' | 'loaded' | 'executed' | 'recorded' | 'deprecated';
+export interface SkillManifest {
+    skillId: string;
+    version: string;
+    description: string;
+    tags: string[];
+    aliases?: string[];
+    riskLevel: ToolRiskLevel;
+    source: SkillSource;
+    entryPoints: ToolEntryPoint[];
+    inputSchema: ToolSchema;
+    outputSchema?: ToolSchema;
+    defaultTimeoutMs?: number;
+    auditLevel?: 'basic' | 'detailed';
+    applicableRoles?: string[];
+    manifestPath?: string;
+    toolIds?: string[];
+    deprecated?: boolean;
+    metadata?: Record<string, unknown>;
+}
+export interface SkillRuntimeFacade {
+    execute<TOutput = ToolLikeOutput>(toolId: string, input: unknown, context: ToolContext): Promise<ToolExecutionResult<TOutput>>;
+    executeSearch(kind: SearchProviderKind, request: SearchRequest, context: ToolContext): Promise<ToolExecutionResult<SearchResponse>>;
+    getToolTraces(): ToolCallTrace[];
+    getToolTraceCount(): number;
+}
+export interface SkillExecutionContext extends ToolContext {
+    runtime: SkillRuntimeFacade;
+    triggerReason?: string;
+    approvalState?: SkillApprovalState;
+}
+export interface SkillHandler<TInput = unknown, TOutput = unknown> {
+    execute(input: TInput, context: SkillExecutionContext): Promise<TOutput> | TOutput;
+}
+export interface SkillRegistration<TInput = unknown, TOutput = unknown> {
+    manifest: SkillManifest;
+    handler: SkillHandler<TInput, TOutput>;
+}
+export interface SkillExecutionRequest<TInput = unknown> {
+    skillId: string;
+    version?: string;
+    input: TInput;
+    context: ToolContext;
+    triggerReason?: string;
+}
+export interface SkillAuthorizationDecision {
+    allowed: boolean;
+    reason?: string;
+    approvalState?: SkillApprovalState;
+}
+export interface SkillAuthorizer {
+    authorize(skill: SkillManifest, request: SkillExecutionRequest): Promise<SkillAuthorizationDecision> | SkillAuthorizationDecision;
+}
+export interface SkillExecutionRecord {
+    recordId: string;
+    skillId: string;
+    version: string;
+    source: SkillSource;
+    entryPoint: ToolEntryPoint;
+    startedAt: number;
+    completedAt: number;
+    duration: number;
+    status: 'success' | 'failed';
+    lifecycle: SkillLifecycleState[];
+    approvalState: SkillApprovalState;
+    agentId?: string;
+    taskId?: string;
+    sessionId?: string;
+    triggerReason?: string;
+    inputSummary: string;
+    outputSummary?: string;
+    error?: string;
+    toolIds: string[];
+    toolCallIds: string[];
+    artifacts?: ToolTraceArtifact[];
+}
+export interface SkillExecutionResult<TOutput = unknown> {
+    ok: boolean;
+    output?: TOutput;
+    error?: ToolExecutionError;
+    record: SkillExecutionRecord;
+}
+export interface RegisterSkillOptions {
+    replace?: boolean;
+}
+export interface SkillRegistryFilter {
+    entryPoint?: ToolEntryPoint;
+    tag?: string;
+    riskLevel?: ToolRiskLevel;
+    includeDeprecated?: boolean;
+    source?: SkillSource;
+    role?: string;
+}
 //# sourceMappingURL=types.d.ts.map

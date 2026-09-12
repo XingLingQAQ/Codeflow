@@ -14,9 +14,11 @@ export declare class CodexAdapter implements ICliAdapter {
     constructor(config: AdapterConfig, hookManager?: HookManager);
     setHookManager(hookManager?: HookManager): void;
     getHookManager(): HookManager | undefined;
+    private buildPayloadContext;
+    private applyBeforeSendHooks;
     send(prompt: string, options?: SendOptions): Promise<AIResponse>;
-    receive(): AsyncGenerator<StreamChunk>;
     stream(prompt: string, options?: SendOptions): AsyncGenerator<StreamChunk>;
+    receive(): AsyncGenerator<StreamChunk>;
     getHistory(): Message[];
     setHistory(messages: Message[]): void;
     rewind(steps: number): Promise<void>;

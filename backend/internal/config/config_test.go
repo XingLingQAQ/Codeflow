@@ -169,9 +169,10 @@ func TestConfigServiceWithContextCancellation(t *testing.T) {
 
 func TestConfigServiceWithContextTimeout(t *testing.T) {
 	wrapped := NewConfigServiceWithContextTimeout(NewConfigManager(nil), time.Nanosecond)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	// 使用已过期 deadline：WithDeadline 在构造时同步置错，不依赖 1ns
+	// AfterFunc 回调先被调度（Windows 下该竞态导致此测试约 1/5 概率拿到 nil）。
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	time.Sleep(time.Millisecond)
 
 	if _, err := wrapped.LoadRoleConfigWithContext(ctx, RoleMain); err != context.DeadlineExceeded {
 		t.Fatalf("expected context deadline exceeded, got %v", err)
@@ -296,8 +297,8 @@ func TestConfigManagerAPIChannel(t *testing.T) {
 	}
 
 	// 移除通道
-	if !manager.RemoveAPIChannel("channel-001") {
-		t.Error("expected to remove channel")
+	if err := manager.RemoveAPIChannel("channel-001"); err != nil {
+		t.Fatalf("expected to remove channel: %v", err)
 	}
 	global = manager.LoadGlobalConfig()
 	if len(global.APIPool) != 0 {

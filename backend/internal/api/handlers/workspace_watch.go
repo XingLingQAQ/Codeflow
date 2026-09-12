@@ -89,6 +89,7 @@ func clampWatchInterval(ms int) int {
 
 type createWatchBody struct {
 	Root       string `json:"root"`
+	ProjectID  string `json:"project_id"`
 	IntervalMs int    `json:"interval_ms"`
 }
 
@@ -110,6 +111,9 @@ func CreateWorkspaceWatch(c *gin.Context) {
 			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 			return
 		}
+	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
 	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {
@@ -246,4 +250,26 @@ func ShutdownWorkspaceWatches() {
 		e.cancel()
 		e.watcher.Stop()
 	}
+}
+
+// StopWorkspaceWatchesForRoot stops the process-local watcher owned by root.
+// At most one exists because the registry is idempotent per canonical root.
+func StopWorkspaceWatchesForRoot(root string) int {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return 0
+	}
+	watchRegistry.mu.Lock()
+	entry, ok := watchRegistry.byRoot[root]
+	if ok {
+		delete(watchRegistry.byID, entry.id)
+		delete(watchRegistry.byRoot, root)
+	}
+	watchRegistry.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	entry.cancel()
+	entry.watcher.Stop()
+	return 1
 }

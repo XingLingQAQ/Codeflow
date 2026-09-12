@@ -1,0 +1,5 @@
+{
+  "code": "made_up_code",
+  "message": "this error code is not in the pinned enum",
+  "retryable": false
+}

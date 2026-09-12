@@ -2,17 +2,13 @@ package memory
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/codeflow/backend/internal/samg"
 )
@@ -55,42 +51,13 @@ func GetMemoryAgent() (*MemoryAgent, error) {
 	if globalMemoryAgent != nil {
 		return globalMemoryAgent, nil
 	}
+	return nil, fmt.Errorf("memory agent is not initialized")
+}
 
-	archiveImpl, err := GetRawArchive()
-	if err != nil {
-		return nil, fmt.Errorf("init raw archive for agent: %w", err)
-	}
-
-	dataDir := filepath.Join(".", "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create agent data dir: %w", err)
-	}
-
-	dbPath := filepath.Join(dataDir, "atomic_memory.db")
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return nil, fmt.Errorf("open atomic memory db for agent: %w", err)
-	}
-
-	vectorDBPath := filepath.Join(dataDir, "atomic_vectors.db")
-	vectorStore, err := CreateSQLiteVectorStore(&VectorStoreConfig{
-		CollectionName: "atomic_memory",
-		DBPath:         vectorDBPath,
-		WALMode:        true,
-	}, NewSimpleEmbeddingProvider(384))
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create vector store for agent: %w", err)
-	}
-
-	atomicSvc, err := NewAtomicMemoryService(context.Background(), db, vectorStore, NewSimpleEmbeddingProvider(384))
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create atomic service for agent: %w", err)
-	}
-
-	globalMemoryAgent = NewMemoryAgent(archiveImpl, atomicSvc, samg.GetSAMGService())
-	return globalMemoryAgent, nil
+func HasMemoryAgent() bool {
+	memoryAgentMu.Lock()
+	defer memoryAgentMu.Unlock()
+	return globalMemoryAgent != nil
 }
 
 // SetAtomicService 注入 AtomicMemoryService。

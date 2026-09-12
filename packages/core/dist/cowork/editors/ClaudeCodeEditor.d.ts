@@ -60,6 +60,8 @@ export declare class ClaudeCodeEditor implements ICodeEditor {
      * 清理所有备份
      */
     clearBackups(): Promise<void>;
+    getAdapter(): ClaudeAdapter;
+    getConfig(): ClaudeEditorConfig;
     private resolvePath;
     private backup;
     private emptyDiff;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Palette, Keyboard, ShieldCheck, FlaskConical, TerminalSquare, Sun, Moon, Monitor } from 'lucide-react';
@@ -7,6 +7,17 @@ import { Card, CardBody, Switch, Kbd, Button } from '../../ui';
 import { staggerItem } from '../../lib/motion';
 import { modLabel } from '../../lib/platform';
 import { useShellStore, type ThemeMode } from '../../stores/shell';
+import {
+  buildExperimentalSettingsAvailability,
+  type ExperimentalSettingId,
+} from './settingsAvailability';
+
+// 实验性开关的静态展示信息；可用性（可否编辑、禁用理由）由 settingsAvailability
+// view-model 裁决，见下方 experimental 区块注释。
+const experimentalMeta: Record<ExperimentalSettingId, { title: string; desc: string }> = {
+  autoSnapshot: { title: '阶段自动快照', desc: '每个阶段完成时创建原子快照，便于回环恢复' },
+  livePreview: { title: 'Live Preview 检查器桥', desc: '圈选反馈与编辑闭环（M6 预览）' },
+};
 
 function switchToLegacy() {
   try {
@@ -30,13 +41,19 @@ function Row({ title, desc, control }: { title: string; desc: string; control: R
 }
 
 export default function Settings() {
-  const [autoSnapshot, setAutoSnapshot] = useState(true);
-  const [livePreview, setLivePreview] = useState(false);
   const themeMode = useShellStore((s) => s.themeMode);
   const setThemeMode = useShellStore((s) => s.setThemeMode);
   const motionPref = useShellStore((s) => s.motionPref);
   const setMotionPref = useShellStore((s) => s.setMotionPref);
   const { hash } = useLocation();
+
+  // E-13：实验性开关不做本地假状态。可用性由 view-model 裁决——当前
+  // autoSnapshot/livePreview 均无功能消费者，只能呈现为 unavailable 禁用态并
+  // 展示理由，不做任何本地持久化。将来真实能力/配置/消费者齐全时，先在
+  // settingsAvailability.ts 的 experimentalSettingCapabilities 中声明 hasConsumer
+  // 并接入真实读写，此处才会变为可编辑（settingsAvailability.test.ts 钉住当前
+  // 两个开关均为 unavailable，声明变更会被测试拦住，倒逼接线而不是复活假开关）。
+  const experimentalSettings = buildExperimentalSettingsAvailability();
 
   // Palette section jumps land here as /settings#appearance etc.
   useEffect(() => {
@@ -137,16 +154,23 @@ export default function Settings() {
           </SectionTitle>
           <Card>
             <CardBody className="py-1">
-              <Row
-                title="阶段自动快照"
-                desc="每个阶段完成时创建原子快照，便于回环恢复"
-                control={<Switch checked={autoSnapshot} onCheckedChange={setAutoSnapshot} />}
-              />
-              <Row
-                title="Live Preview 检查器桥"
-                desc="圈选反馈与编辑闭环（M6 预览）"
-                control={<Switch checked={livePreview} onCheckedChange={setLivePreview} />}
-              />
+              {experimentalSettings.map((setting) => {
+                const meta = experimentalMeta[setting.id as ExperimentalSettingId];
+                return (
+                  <Row
+                    key={setting.id}
+                    title={meta.title}
+                    desc={setting.reason ? `${meta.desc}。${setting.reason}` : meta.desc}
+                    control={
+                      <Switch
+                        checked={false}
+                        disabled={!setting.editable}
+                        aria-label={meta.title}
+                      />
+                    }
+                  />
+                );
+              })}
             </CardBody>
           </Card>
         </section>

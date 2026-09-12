@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/policy"
 	"github.com/google/uuid"
 )
 
@@ -178,6 +179,9 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload Ho
 		if !hook.Config.Enabled {
 			continue
 		}
+		if decision := policy.EvaluateBoundary(ctx, hookPolicyRequest(hook, hook.Config.Name)); !decision.Allowed {
+			return result, policy.DenialError(decision)
+		}
 
 		event := &HookEvent{
 			ID:        uuid.New().String(),
@@ -233,6 +237,9 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload Hook
 		return payload, nil
 	}
 	m.mu.RUnlock()
+	if decision := policy.EvaluateBoundary(ctx, hookPolicyRequest(hook, name)); !decision.Allowed {
+		return payload, policy.DenialError(decision)
+	}
 
 	event := &HookEvent{
 		ID:        uuid.New().String(),
@@ -264,6 +271,23 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload Hook
 	m.recordAuditEvent(hookCtx, event, hook.Config, true)
 	m.recordEvent(event)
 	return output, nil
+}
+
+func hookPolicyRequest(hook *Hook, resource string) policy.Request {
+	req := policy.Request{Operation: policy.OperationHookExecute, Resource: resource}
+	if hook == nil || hook.Config.Metadata == nil {
+		return req
+	}
+	if value, ok := hook.Config.Metadata["project_id"].(string); ok {
+		req.ProjectID = value
+	}
+	if value, ok := hook.Config.Metadata["agent_id"].(string); ok {
+		req.AgentID = value
+	}
+	if value, ok := hook.Config.Metadata["plugin_id"].(string); ok {
+		req.PluginID = value
+	}
+	return req
 }
 
 func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, config HookConfig, success bool) {

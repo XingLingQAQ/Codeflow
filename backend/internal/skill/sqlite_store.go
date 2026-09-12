@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // sqliteSkillStore persists Skill JSON documents.
@@ -17,15 +17,13 @@ type sqliteSkillStore struct {
 }
 
 func openSQLiteSkillStore(dbPath string) (*sqliteSkillStore, error) {
-	conn, err := buildSkillSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareSkillDBDir(dbPath); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", conn)
+	db, err := dbx.Open(dbPath, dbx.WithMaxOpenConns(1))
 	if err != nil {
 		return nil, fmt.Errorf("open skill db: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 	s := &sqliteSkillStore{db: db}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
@@ -34,17 +32,17 @@ func openSQLiteSkillStore(dbPath string) (*sqliteSkillStore, error) {
 	return s, nil
 }
 
-func buildSkillSQLiteConnString(dbPath string) (string, error) {
+func prepareSkillDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file:skill_mem?mode=memory&cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create skill db dir: %w", err)
+			return fmt.Errorf("create skill db dir: %w", err)
 		}
 	}
-	return fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", filepath.ToSlash(dbPath)), nil
+	return nil
 }
 
 func (s *sqliteSkillStore) initSchema() error {
@@ -73,8 +71,18 @@ CREATE INDEX IF NOT EXISTS idx_skill_versions_skill ON skill_versions(skill_id);
 	return nil
 }
 
+// sqlExecer is satisfied by *sql.DB and *sql.Tx, letting the statement
+// helpers serve one-shot writes and the transactional UpdateWithHistory.
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // archiveVersion inserts a snapshot of sk into skill_versions and returns its row id.
 func (s *sqliteSkillStore) archiveVersion(sk *Skill, archivedAt time.Time) (int64, error) {
+	return archiveVersionExec(s.db, sk, archivedAt)
+}
+
+func archiveVersionExec(ex sqlExecer, sk *Skill, archivedAt time.Time) (int64, error) {
 	if sk == nil || sk.ID == "" {
 		return 0, fmt.Errorf("skill id required")
 	}
@@ -82,7 +90,7 @@ func (s *sqliteSkillStore) archiveVersion(sk *Skill, archivedAt time.Time) (int6
 	if err != nil {
 		return 0, err
 	}
-	res, err := s.db.Exec(
+	res, err := ex.Exec(
 		`INSERT INTO skill_versions (skill_id, version, payload, archived_at) VALUES (?, ?, ?, ?)`,
 		sk.ID, sk.Version, string(payload), archivedAt.UTC().UnixMilli(),
 	)
@@ -92,9 +100,59 @@ func (s *sqliteSkillStore) archiveVersion(sk *Skill, archivedAt time.Time) (int6
 	return res.LastInsertId()
 }
 
+// UpdateWithHistory writes the new current skill payload, archives previous
+// into skill_versions, and prunes the per-skill archive to keep snapshots in
+// a single SQLite transaction: all three effects commit together or none do
+// (E-03 contract; defined in T13.03.a, the registry is wired to it in
+// T13.03.b). current and previous must be non-nil and share the same skill
+// ID. keep must be >= 0 and bounds how many archived snapshots the skill
+// retains after archiving; keep == 0 retains none, including the
+// just-archived previous. On success it returns the row id and archive
+// timestamp of the archived previous snapshot, so the caller can publish its
+// in-memory history only after durability is known. A non-nil error means no
+// fact changed.
+func (s *sqliteSkillStore) UpdateWithHistory(current, previous *Skill, keep int) (archiveRowID int64, archivedAt time.Time, err error) {
+	if current == nil || current.ID == "" {
+		return 0, time.Time{}, fmt.Errorf("skill id required")
+	}
+	if previous == nil || previous.ID == "" {
+		return 0, time.Time{}, fmt.Errorf("previous skill snapshot required")
+	}
+	if previous.ID != current.ID {
+		return 0, time.Time{}, fmt.Errorf("current and previous must reference the same skill id")
+	}
+	if keep < 0 {
+		return 0, time.Time{}, fmt.Errorf("keep must be >= 0")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("begin skill update tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // no-op once Commit succeeds
+	if err := putSkillExec(tx, current); err != nil {
+		return 0, time.Time{}, fmt.Errorf("write current skill: %w", err)
+	}
+	archivedAt = time.Now().UTC()
+	archiveRowID, err = archiveVersionExec(tx, previous, archivedAt)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("archive previous skill: %w", err)
+	}
+	if err := pruneVersionsExec(tx, current.ID, keep); err != nil {
+		return 0, time.Time{}, fmt.Errorf("prune skill versions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, time.Time{}, fmt.Errorf("commit skill update tx: %w", err)
+	}
+	return archiveRowID, archivedAt, nil
+}
+
 // pruneVersions keeps only the newest keep snapshots for skillID.
 func (s *sqliteSkillStore) pruneVersions(skillID string, keep int) error {
-	_, err := s.db.Exec(`
+	return pruneVersionsExec(s.db, skillID, keep)
+}
+
+func pruneVersionsExec(ex sqlExecer, skillID string, keep int) error {
+	_, err := ex.Exec(`
 DELETE FROM skill_versions
 WHERE skill_id = ?
   AND id NOT IN (
@@ -145,6 +203,10 @@ func (s *sqliteSkillStore) Close() error {
 }
 
 func (s *sqliteSkillStore) put(sk *Skill) error {
+	return putSkillExec(s.db, sk)
+}
+
+func putSkillExec(ex sqlExecer, sk *Skill) error {
 	if sk == nil || sk.ID == "" {
 		return fmt.Errorf("skill id required")
 	}
@@ -156,7 +218,7 @@ func (s *sqliteSkillStore) put(sk *Skill) error {
 	if sk.Enabled {
 		enabled = 1
 	}
-	_, err = s.db.Exec(`
+	_, err = ex.Exec(`
 INSERT INTO skills (id, name, source, enabled, payload, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET

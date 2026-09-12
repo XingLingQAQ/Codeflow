@@ -1,0 +1,9 @@
+{
+  "data": {"id": "run_88", "status": "queued"},
+  "error": {
+    "code": "conflict",
+    "message": "both data and error present is not a legal envelope",
+    "retryable": false
+  },
+  "meta": {"request_id": "rq_1"}
+}

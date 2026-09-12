@@ -193,7 +193,13 @@ func (r *InMemoryRegistry) ListFiltered(ctx context.Context, stage string, inclu
 	return out, nil
 }
 
-// Update patches a skill.
+// Update patches a skill. With a durable store attached, the current write,
+// the archive of the previous state, and the retention prune commit as one
+// SQLite transaction (UpdateWithHistory, E-03); the in-memory skill and
+// version history are replaced only after that transaction commits. A
+// non-nil error therefore means no fact changed: the previous in-memory
+// state and the entire prior history are kept as-is, and there is no
+// compensating write-back to fail or ignore.
 func (r *InMemoryRegistry) Update(ctx context.Context, id string, req *UpdateRequest) (*Skill, error) {
 	if req == nil {
 		return nil, fmt.Errorf("update request is required")
@@ -208,75 +214,59 @@ func (r *InMemoryRegistry) Update(ctx context.Context, id string, req *UpdateReq
 		return nil, fmt.Errorf("cannot update builtin skill: %s", id)
 	}
 	prev := cloneSkill(s)
+	next := cloneSkill(s)
 	if req.Name != nil {
-		s.Name = strings.TrimSpace(*req.Name)
+		next.Name = strings.TrimSpace(*req.Name)
 	}
 	if req.Description != nil {
-		s.Description = *req.Description
+		next.Description = *req.Description
 	}
 	if req.Version != nil {
-		s.Version = *req.Version
+		next.Version = *req.Version
 	}
 	if req.Body != nil {
-		s.Body = *req.Body
+		next.Body = *req.Body
 	}
 	if req.Triggers != nil {
-		s.Triggers = append([]string(nil), req.Triggers...)
+		next.Triggers = append([]string(nil), req.Triggers...)
 	}
 	if req.StageTags != nil {
-		s.StageTags = append([]string(nil), req.StageTags...)
+		next.StageTags = append([]string(nil), req.StageTags...)
 	}
 	if req.Enabled != nil {
-		s.Enabled = *req.Enabled
+		next.Enabled = *req.Enabled
 	}
-	s.UpdatedAt = time.Now().UTC()
+	next.UpdatedAt = time.Now().UTC()
 	if r.store != nil {
-		if err := r.store.put(s); err != nil {
-			r.skills[id] = prev
+		rowID, archivedAt, err := r.store.UpdateWithHistory(next, prev, maxSkillVersions)
+		if err != nil {
 			return nil, err
 		}
+		r.skills[id] = next
+		r.publishVersionLocked(prev, rowID, archivedAt)
+		return cloneSkill(next), nil
 	}
-	// Snapshot the prior state into version history after the new state is durable.
-	// Capture the version slice length so a partial failure can be unwound cleanly
-	// (archiveVersionLocked may append in-memory before a store prune failure).
-	// Note: the store field is a concrete *sqliteSkillStore, so injecting a prune
-	// fault for testing would require an interface refactor; the truncation is
-	// correct by inspection (idempotent undo of a single append).
-	prevVerLen := len(r.versions[id])
-	if err := r.archiveVersionLocked(prev); err != nil {
-		r.skills[id] = prev
-		if r.store != nil {
-			_ = r.store.put(prev)
-		}
-		if vl := r.versions[id]; len(vl) > prevVerLen {
-			r.versions[id] = vl[:prevVerLen]
-		}
-		return nil, err
-	}
-	return cloneSkill(s), nil
+	r.verSeq++
+	r.skills[id] = next
+	r.publishVersionLocked(prev, r.verSeq, time.Now().UTC())
+	return cloneSkill(next), nil
 }
 
-// archiveVersionLocked snapshots prev into version history (memory + store) and
-// enforces the per-skill retention cap. Caller must hold r.mu.
-func (r *InMemoryRegistry) archiveVersionLocked(prev *Skill) error {
+// publishVersionLocked appends the archived previous snapshot to the
+// in-memory history and enforces the per-skill retention cap, mirroring the
+// prune the durable store applied in the same transaction. Call it only
+// after durability is known (post-commit), never as part of a speculative
+// write. Caller must hold r.mu.
+func (r *InMemoryRegistry) publishVersionLocked(prev *Skill, rowID int64, archivedAt time.Time) {
 	if prev == nil {
-		return nil
+		return
 	}
 	ver := SkillVersion{
+		RowID:      rowID,
 		SkillID:    prev.ID,
 		Version:    prev.Version,
-		ArchivedAt: time.Now().UTC(),
+		ArchivedAt: archivedAt,
 		Skill:      cloneSkill(prev),
-	}
-	if r.store != nil {
-		rowID, err := r.store.archiveVersion(prev, ver.ArchivedAt)
-		if err != nil {
-			return err
-		}
-		ver.RowID = rowID
-	} else {
-		r.verSeq++
-		ver.RowID = r.verSeq
 	}
 	if r.versions == nil {
 		r.versions = make(map[string][]SkillVersion)
@@ -288,12 +278,6 @@ func (r *InMemoryRegistry) archiveVersionLocked(prev *Skill) error {
 		list = trimmed
 	}
 	r.versions[prev.ID] = list
-	if r.store != nil {
-		if err := r.store.pruneVersions(prev.ID, maxSkillVersions); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ListVersions returns archived snapshots for a skill, newest first.
@@ -311,8 +295,13 @@ func (r *InMemoryRegistry) ListVersions(ctx context.Context, skillID string) ([]
 }
 
 // RollbackVersion restores an archived snapshot as a fresh Update. The current
-// state is archived by that Update, so rollback is itself reversible. Builtins
-// and unknown row ids are rejected.
+// state is archived by that Update, so rollback is itself reversible. Rollback
+// shares the exact Update path above, including its single durable
+// transaction: a failed rollback changes no fact, and an unknown row id is
+// rejected before anything is written. Builtins cannot be rolled back. Only
+// the body, description, version label, and trigger/stage matching rules roll
+// back; the current Enabled state is kept (enable/disable stays an explicit
+// Update operation), so rollback never silently re-enables a disabled skill.
 func (r *InMemoryRegistry) RollbackVersion(ctx context.Context, skillID string, versionRowID int64) (*Skill, error) {
 	r.mu.RLock()
 	cur, ok := r.skills[skillID]
@@ -336,6 +325,9 @@ func (r *InMemoryRegistry) RollbackVersion(ctx context.Context, skillID string, 
 		return nil, fmt.Errorf("skill version not found: %d", versionRowID)
 	}
 	// Restore the archived content via the normal Update path (archives current).
+	// Update skips nil fields ("leave unchanged"), so restoring an archived
+	// empty rule set requires explicit non-nil empty slices: a nil slice here
+	// would keep the newer triggers/stage tags instead of clearing them (E-08).
 	name := snap.Name
 	desc := snap.Description
 	version := snap.Version
@@ -345,8 +337,8 @@ func (r *InMemoryRegistry) RollbackVersion(ctx context.Context, skillID string, 
 		Description: &desc,
 		Version:     &version,
 		Body:        &body,
-		Triggers:    append([]string(nil), snap.Triggers...),
-		StageTags:   append([]string(nil), snap.StageTags...),
+		Triggers:    append([]string{}, snap.Triggers...),
+		StageTags:   append([]string{}, snap.StageTags...),
 	})
 }
 

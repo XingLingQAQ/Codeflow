@@ -34,7 +34,7 @@ export const nextMessageId = () =>
 
 interface ChatState {
   messagesByProject: Record<string, ChatMessage[]>;
-  /** Remembered agent choice per stage (design: stage-following system prompt). */
+  /** Explicit user choices keyed by projectId + stage. */
   agentByStage: Record<string, string | undefined>;
   /** Id of the agent message currently receiving deltas (session only). */
   streamingId: string | null;
@@ -45,7 +45,7 @@ interface ChatState {
   patchMessage: (projectId: string, id: string, patch: Partial<ChatMessage>) => void;
   appendDelta: (projectId: string, id: string, delta: string) => void;
   clearProject: (projectId: string) => void;
-  setAgentForStage: (stage: string, agentId: string) => void;
+  setAgentForStage: (projectId: string, stage: string, agentId?: string) => void;
   setStreamingId: (id: string | null) => void;
   setQuote: (quote: ChatQuote | null) => void;
 }
@@ -92,8 +92,13 @@ export const useChatStore = create<ChatState>()(
           return { messagesByProject: rest };
         }),
 
-      setAgentForStage: (stage, agentId) =>
-        set((s) => ({ agentByStage: { ...s.agentByStage, [stage]: agentId } })),
+      setAgentForStage: (projectId, stage, agentId) =>
+        set((s) => {
+          const key = `${projectId}:${stage}`;
+          if (agentId) return { agentByStage: { ...s.agentByStage, [key]: agentId } };
+          const { [key]: _removed, ...rest } = s.agentByStage;
+          return { agentByStage: rest };
+        }),
 
       setStreamingId: (streamingId) => set({ streamingId }),
 

@@ -1,7 +1,6 @@
 package adapters
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/policy"
 )
 
 // BaseAdapter 基础适配器实现
@@ -147,6 +149,9 @@ func (a *BaseAdapter) DoRequest(ctx context.Context, method, url string, body JS
 		}
 
 		lastErr = err
+		if _, denied := err.(*policy.DeniedError); denied {
+			return nil, err
+		}
 
 		// 检查是否可重试
 		if apiErr, ok := err.(*APIError); ok && !apiErr.Retryable {
@@ -202,6 +207,15 @@ func resolveToolTurnControls(config AdapterConfig, req *ToolTurnRequest) request
 }
 
 func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, body JSONValue, headers map[string]string) (*http.Response, error) {
+	trace := audit.TraceFromContext(ctx)
+	reqPolicy := policy.Request{Operation: policy.OperationOutboundRequest, Resource: url}
+	if trace != nil {
+		reqPolicy.ProjectID, reqPolicy.AgentID = trace.ProjectID, trace.AgentID
+	}
+	decision := policy.EvaluateBoundary(ctx, reqPolicy)
+	if err := policy.DenialError(decision); err != nil {
+		return nil, err
+	}
 	var bodyReader io.Reader
 	if body != nil {
 		jsonBody, err := json.Marshal(body)
@@ -215,7 +229,6 @@ func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, bod
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -227,6 +240,16 @@ func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, bod
 			return nil, &TimeoutError{Message: "request timeout"}
 		}
 		return nil, NewAPIError(err.Error(), 0, "", true)
+	}
+	responseDecision := policy.EvaluateBoundary(ctx, policy.Request{
+		Operation: policy.OperationResponseReceive,
+		Resource:  url,
+		ProjectID: reqPolicy.ProjectID,
+		AgentID:   reqPolicy.AgentID,
+	})
+	if err := policy.DenialError(responseDecision); err != nil {
+		resp.Body.Close()
+		return nil, err
 	}
 
 	// 检查状态码
@@ -457,59 +480,12 @@ func (a *ClaudeAdapter) Stream(ctx context.Context, prompt string, options *Send
 		defer close(ch)
 		defer resp.Body.Close()
 
-		var fullContent strings.Builder
-		index := 0
-
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-
-			data := strings.TrimPrefix(line, "data: ")
-			if data == "[DONE]" {
-				break
-			}
-
-			var event struct {
-				Type  string `json:"type"`
-				Delta struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"delta"`
-			}
-
-			if err := json.Unmarshal([]byte(data), &event); err != nil {
-				continue
-			}
-
-			if event.Type == "content_block_delta" && event.Delta.Type == "text_delta" {
-				fullContent.WriteString(event.Delta.Text)
-				chunk := StreamChunk{Delta: event.Delta.Text, Index: index, Done: false}
-				notifyAdapterStreamChunk(ctx, controls.SemanticsControl(), chunk)
-				ch <- chunk
-				index++
-			}
-		}
-
-		assistantMsg := Message{
-			Role:      RoleAssistant,
-			Content:   fullContent.String(),
-			Blocks:    []ContentBlock{{Type: "text", Text: fullContent.String()}},
-			Timestamp: time.Now(),
-		}
-		a.AddMessage(assistantMsg)
-
-		finalChunk := StreamChunk{Delta: "", Index: index, Done: true}
-		notifyAdapterStreamChunk(ctx, controls.SemanticsControl(), finalChunk)
-		ch <- finalChunk
-		_ = notifyAdapterPostResponse(ctx, controls.SemanticsControl(), &AIResponse{
-			Content:      assistantMsg.Content,
-			Blocks:       cloneBlocks(assistantMsg.Blocks),
-			Model:        processed.Model,
-			FinishReason: "stop",
-		})
+		// T13.04.b：帧序列与终结状态由 a 步 parser 结果驱动（§31.3 契约）。
+		// 与旧内联实现的差异：parser 跳过空 text_delta，Delta="" 的空帧不再转发。
+		// 内容帧边解析边投递（不等整条流读完）；断流/provider error/扫描
+		// 失败/帧损坏 -> error 终结且不写成功历史；取消 -> 停止扫描并关闭
+		// body 与 channel，不阻塞发送。
+		streamProviderBody(ctx, a.BaseAdapter, controls.SemanticsControl(), processed.Model, resp.Body, parseClaudeStreamBodyInto, ch)
 	}()
 
 	return ch, nil

@@ -12,14 +12,14 @@ import (
 
 // BenchmarkResult 单次基准测试结果
 type BenchmarkResult struct {
-	DataSize               int     `json:"data_size"`
-	DataSizeLabel          string  `json:"data_size_label"`
-	EncryptOpsPerSec       float64 `json:"encrypt_ops_per_sec"`
-	DecryptOpsPerSec       float64 `json:"decrypt_ops_per_sec"`
-	EncryptThroughputMBps  float64 `json:"encrypt_throughput_mbps"`
-	DecryptThroughputMBps  float64 `json:"decrypt_throughput_mbps"`
-	AvgEncryptTimeMs       float64 `json:"avg_encrypt_time_ms"`
-	AvgDecryptTimeMs       float64 `json:"avg_decrypt_time_ms"`
+	DataSize              int     `json:"data_size"`
+	DataSizeLabel         string  `json:"data_size_label"`
+	EncryptOpsPerSec      float64 `json:"encrypt_ops_per_sec"`
+	DecryptOpsPerSec      float64 `json:"decrypt_ops_per_sec"`
+	EncryptThroughputMBps float64 `json:"encrypt_throughput_mbps"`
+	DecryptThroughputMBps float64 `json:"decrypt_throughput_mbps"`
+	AvgEncryptTimeMs      float64 `json:"avg_encrypt_time_ms"`
+	AvgDecryptTimeMs      float64 `json:"avg_decrypt_time_ms"`
 }
 
 // KeyDerivationResult 密钥派生基准测试结果
@@ -41,9 +41,9 @@ type BenchmarkReport struct {
 
 // BenchmarkSummary 基准测试汇总
 type BenchmarkSummary struct {
-	AvgEncryptThroughputMBps   float64       `json:"avg_encrypt_throughput_mbps"`
-	AvgDecryptThroughputMBps   float64       `json:"avg_decrypt_throughput_mbps"`
-	RecommendedKeyDerivation   KeyDerivation `json:"recommended_key_derivation"`
+	AvgEncryptThroughputMBps float64       `json:"avg_encrypt_throughput_mbps"`
+	AvgDecryptThroughputMBps float64       `json:"avg_decrypt_throughput_mbps"`
+	RecommendedKeyDerivation KeyDerivation `json:"recommended_key_derivation"`
 }
 
 // BenchmarkConfig 基准测试配置
@@ -130,7 +130,7 @@ func (b *EncryptionBenchmark) Run() (*BenchmarkReport, error) {
 
 	return &BenchmarkReport{
 		Timestamp:     time.Now().UnixMilli(),
-		Algorithm:     "aes-256-cbc",
+		Algorithm:     "aes-256-gcm",
 		TestSizes:     testSizes,
 		KeyDerivation: keyDerivation,
 		Summary: BenchmarkSummary{

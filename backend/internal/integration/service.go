@@ -12,6 +12,7 @@ import (
 
 	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
 	"github.com/codeflow/backend/internal/snapshot"
 )
 
@@ -34,6 +35,13 @@ func NewInMemoryIntegrationService() *InMemoryIntegrationService {
 func (s *InMemoryIntegrationService) Register(ctx context.Context, req *RegisterIntegrationRequest) (*Integration, error) {
 	if req == nil {
 		return nil, ErrInvalidManifest
+	}
+	operation := policy.OperationIntegrationInvoke
+	if req.Manifest.Type == IntegrationTypePlugin {
+		operation = policy.OperationPluginRegister
+	}
+	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: operation, Resource: req.Manifest.Name, ActorID: req.Actor.ID}); !decision.Allowed {
+		return nil, policy.DenialError(decision)
 	}
 	if err := validateRegistration(req); err != nil {
 		return nil, err
@@ -105,6 +113,13 @@ func (s *InMemoryIntegrationService) Invoke(ctx context.Context, id string, req 
 	integration, err := s.Get(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	operation := policy.OperationIntegrationInvoke
+	if integration.Manifest.Type == IntegrationTypePlugin {
+		operation = policy.OperationPluginInvoke
+	}
+	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: operation, Resource: id, PluginID: pluginID(integration), ActorID: req.Actor.ID}); !decision.Allowed {
+		return nil, policy.DenialError(decision)
 	}
 	if err := authorize(integration.Policy, req.Actor); err != nil {
 		_ = logAudit(ctx, audit.EventSecurity, audit.SeverityWarning, req.Actor, audit.OutcomeFailure, audit.AuditResource{
@@ -197,6 +212,13 @@ func (s *InMemoryIntegrationService) Replay(ctx context.Context, id string, req 
 	if err != nil {
 		return nil, err
 	}
+	operation := policy.OperationIntegrationInvoke
+	if integration.Manifest.Type == IntegrationTypePlugin {
+		operation = policy.OperationPluginInvoke
+	}
+	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: operation, Resource: id, PluginID: pluginID(integration), ActorID: req.Actor.ID}); !decision.Allowed {
+		return nil, policy.DenialError(decision)
+	}
 	if err := authorize(integration.Policy, req.Actor); err != nil {
 		return nil, err
 	}
@@ -242,6 +264,16 @@ func (s *InMemoryIntegrationService) Replay(ctx context.Context, id string, req 
 		Restore:            restoreResult,
 		Invocation:         invocation,
 	}, nil
+}
+
+func pluginID(item *Integration) string {
+	if item == nil || item.Manifest.Metadata == nil {
+		return ""
+	}
+	if id, ok := item.Manifest.Metadata["plugin_id"].(string); ok {
+		return id
+	}
+	return ""
 }
 
 func validateRegistration(req *RegisterIntegrationRequest) error {

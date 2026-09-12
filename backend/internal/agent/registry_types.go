@@ -1,9 +1,16 @@
 package agent
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"time"
 )
+
+// ErrAgentDisabled rejects starting a new run with a disabled asset
+// (T1.03.b). The run entry point (S1) calls AssertRunnable before wiring a
+// run; disabling never erases history, so revision queries stay valid.
+var ErrAgentDisabled = fmt.Errorf("agent asset is disabled")
 
 // AgentSource identifies where an agent asset came from.
 type AgentSource string
@@ -110,6 +117,23 @@ type UpdateAgentRequest struct {
 	Mounts       *Mounts   `json:"mounts,omitempty"`
 	StageTags    []string  `json:"stage_tags,omitempty"`
 	Enabled      *bool     `json:"enabled,omitempty"`
+}
+
+// AssertRunnable reports whether the agent may start a new run: nil for an
+// enabled asset, ErrAgentDisabled for a disabled one, ErrAgentAssetNotFound
+// for an unknown id. It gates new runs only — a disabled asset keeps its
+// revisions readable through the store's headRevision/revisionAsset queries.
+func (r *InMemoryAgentRegistry) AssertRunnable(ctx context.Context, id string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	a, ok := r.agents[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrAgentAssetNotFound, id)
+	}
+	if !a.Enabled {
+		return fmt.Errorf("%w: %s", ErrAgentDisabled, id)
+	}
+	return nil
 }
 
 // cloneAgent returns a deep copy of a, safe to return across lock boundaries.

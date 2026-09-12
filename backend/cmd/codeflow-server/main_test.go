@@ -51,7 +51,7 @@ func TestConfigureHookRuntimeControls(t *testing.T) {
 func TestRegisterConfiguredAgents(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "config.db")
-	cfgSvc, err := config.NewSQLiteConfigService(dbPath)
+	cfgSvc, err := config.NewSQLiteConfigServiceWithSecretStore(dbPath, config.NewMemorySecretStore())
 	if err != nil {
 		t.Fatalf("NewSQLiteConfigService() error = %v", err)
 	}
@@ -70,7 +70,7 @@ func TestRegisterConfiguredAgents(t *testing.T) {
 	}
 
 	agentSvc := agent.NewInMemoryAgentService()
-	if err := registerConfiguredAgents(cfgSvc, agentSvc); err != nil {
+	if err := registerConfiguredAgents(context.Background(), cfgSvc, agentSvc); err != nil {
 		t.Fatalf("registerConfiguredAgents() error = %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestRegisterConfiguredAgentsSkipsMissingAPIChannel(t *testing.T) {
 	cfgSvc := config.NewConfigManager(nil)
 	agentSvc := agent.NewInMemoryAgentService()
 
-	if err := registerConfiguredAgents(cfgSvc, agentSvc); err != nil {
+	if err := registerConfiguredAgents(context.Background(), cfgSvc, agentSvc); err != nil {
 		t.Fatalf("registerConfiguredAgents() error = %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestRegisterConfiguredAgentsSkipsMissingAPIChannel(t *testing.T) {
 func TestRegisterConfiguredAgentsFailsOnUnsupportedProvider(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "config.db")
-	cfgSvc, err := config.NewSQLiteConfigService(dbPath)
+	cfgSvc, err := config.NewSQLiteConfigServiceWithSecretStore(dbPath, config.NewMemorySecretStore())
 	if err != nil {
 		t.Fatalf("NewSQLiteConfigService() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRegisterConfiguredAgentsFailsOnUnsupportedProvider(t *testing.T) {
 	}
 
 	agentSvc := agent.NewInMemoryAgentService()
-	if err := registerConfiguredAgents(cfgSvc, agentSvc); err == nil {
+	if err := registerConfiguredAgents(context.Background(), cfgSvc, agentSvc); err == nil {
 		t.Fatal("expected unsupported provider error")
 	}
 }
@@ -166,5 +166,40 @@ func TestInitConfigService(t *testing.T) {
 
 	if svc == nil {
 		t.Fatal("expected config service")
+	}
+}
+
+func TestLoadTrustConfigDefaultsToLoopback(t *testing.T) {
+	t.Setenv("CODEFLOW_HOST", "")
+	t.Setenv("CODEFLOW_REMOTE_MODE", "")
+	t.Setenv("CODEFLOW_SIDECAR_TOKEN", "")
+	t.Setenv("CODEFLOW_REMOTE_TOKEN", "")
+
+	config, err := loadTrustConfig()
+	if err != nil {
+		t.Fatalf("loadTrustConfig() error = %v", err)
+	}
+	if config.host != "127.0.0.1" || config.remoteMode || config.authToken != "" {
+		t.Fatalf("unexpected default trust config: %+v", config)
+	}
+}
+
+func TestLoadTrustConfigRequiresExplicitRemoteToken(t *testing.T) {
+	t.Setenv("CODEFLOW_HOST", "0.0.0.0")
+	t.Setenv("CODEFLOW_REMOTE_MODE", "true")
+	t.Setenv("CODEFLOW_SIDECAR_TOKEN", "sidecar-token-must-not-be-reused-remotely")
+	t.Setenv("CODEFLOW_REMOTE_TOKEN", "")
+	if _, err := loadTrustConfig(); err == nil {
+		t.Fatal("remote mode accepted without CODEFLOW_REMOTE_TOKEN")
+	}
+
+	const remoteToken = "remote-token-0123456789abcdef0123456789"
+	t.Setenv("CODEFLOW_REMOTE_TOKEN", remoteToken)
+	config, err := loadTrustConfig()
+	if err != nil {
+		t.Fatalf("loadTrustConfig() error = %v", err)
+	}
+	if !config.remoteMode || config.host != "0.0.0.0" || config.authToken != remoteToken {
+		t.Fatalf("unexpected remote trust config: %+v", config)
 	}
 }

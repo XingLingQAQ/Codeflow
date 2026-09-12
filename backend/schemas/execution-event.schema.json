@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "execution-event.schema.json",
+  "title": "ExecutionEvent",
+  "description": "运行域统一事件 envelope。必填 9 字段固定自 §15 T0.03 卡：id/scope/project_id/sequence/type/schema_version/occurred_at/identity/payload。sequence 由服务端在同一数据库事务内分配（§19.1/§19.3/§27.4），禁止客户端自定义（§15 T0.03 卡）；事件在 project 与 run 两个 scope 各有独立序号，响应按订阅 scope 投影为 sequence，不混用（§27.4）。occurred_at 为 RFC3339 UTC（§27.1）。type 为封闭枚举，列出计划文档已命名的事件类型；未知事件处理规则：计划未给出“消费者忽略未知 type”的原文，本契约固定为——生产端禁止发送枚举外 type，schema 校验必须拒绝枚举外 type；新增事件类型必须在同一变更内扩展此枚举、fixtures 并视兼容性提升 schema_version；消费端库遇到本地枚举外 type 时不得中断事件流，按 §27.4 继续推进游标并做 sequence 缺口检测，仅忽略该事件的 payload 语义。单事件默认最大 256 KiB（§27.4），超出部分存限额 artifact 并发截断/引用事件；该字节上限不在本 schema 表达。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "scope", "project_id", "sequence", "type", "schema_version", "occurred_at", "identity", "payload"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "事件 ID（event store 分配）。消费者按 event_id 幂等（§15 T1.02），同一 event 从 project/run 两个视图收到时只展示一次（§27.4）。"
+    },
+    "scope": {
+      "type": "string",
+      "pattern": "^(project|run):[^:]{1,127}$",
+      "maxLength": 129,
+      "description": "事件所属 scope，形如 run:<run_id> 或 project:<project_id>（§20.2 实例 \"run:run_88\"；§27.3 WS 订阅 run/project scope）。"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "run_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "run scope 事件必填；project scope 事件可为 null 或缺省（§19.1 events 表 run_id 可空）。"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "scope 内单调序号，服务端事务分配；首个序号为 1（§20.2：after=0 且 floor=1 是合法首次回放）。禁止客户端自定义。"
+    },
+    "type": {
+      "enum": [
+        "approval.approved",
+        "approval.decided",
+        "approval.required",
+        "budget.soft_exceeded",
+        "budget.warning",
+        "checkpoint.acknowledged",
+        "merge.completed",
+        "process.exited",
+        "process.started",
+        "process.terminated",
+        "run.completed",
+        "run.failed",
+        "scheduler.claimed",
+        "server.restart",
+        "tool.requested"
+      ],
+      "description": "封闭枚举：计划文档已命名的事件类型（§20.2 tool.requested；§21.1 scheduler.claimed/process.started/approval.required/approval.approved/budget.soft_exceeded/checkpoint.acknowledged/process.exited/process.terminated/server.restart；§19.3 approval.decided/merge.completed；§15 T9.01 approval.required/run.failed/run.completed/budget.warning）。§21.1 的 run.cancel/run.resume 是命令不是事件，process_kill_failed 是失败 code，均不在此枚举。规则见外层 description。"
+    },
+    "schema_version": {
+      "const": 1,
+      "description": "当前固定为 1（§20.2 实例 schema_version:1；§19.1 events 表 schema_version 列）。任何 envelope 不兼容变更必须提升该版本并更新本枚举/fixtures；版本不匹配按 protocol_mismatch 处理（§15 T0.07）。"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "RFC3339 UTC，如 2026-09-06T08:00:00Z（§20.2 实例；§27.1：HTTP 输出 RFC3339 UTC，库内 Unix 毫秒）。"
+    },
+    "identity": {
+      "$ref": "execution-identity.schema.json"
+    },
+    "payload": {
+      "type": "object",
+      "description": "事件族负载。§20 仅给出 tool.requested 实例 {\"tool\": \"read_file\", \"path\": \"src/x.go\"}，未按事件族固定结构；schema_version=1 只要求 object，键集合允许任意（additionalProperties 不限制），各事件族 payload 的最小结构由后续 T 卡在本 schema 基础上固定。"
+    }
+  }
+}

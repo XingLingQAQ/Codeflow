@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "base_changed",
+    "message": "workspace base changed since task was prepared",
+    "retryable": true,
+    "details": {"expected_commit": "abc123", "current_commit": "def456"}
+  },
+  "meta": {"request_id": "rq_1"}
+}

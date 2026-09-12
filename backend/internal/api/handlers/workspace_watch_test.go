@@ -66,11 +66,11 @@ func watchTestRouter(t *testing.T) *gin.Engine {
 
 func createWatch(t *testing.T, r *gin.Engine, root string, intervalMs int) (int, watchView) {
 	t.Helper()
-	payload := map[string]interface{}{"root": root}
+	payload := map[string]interface{}{}
 	if intervalMs != 0 {
 		payload["interval_ms"] = intervalMs
 	}
-	w := rexRequest(t, r, http.MethodPost, "/api/v1/workspace/watch", rexMustJSON(t, payload), nil)
+	w := rexRequest(t, r, http.MethodPost, "/api/v1/workspace/watch", rexMustJSON(t, payload), map[string]string{"X-Codeflow-Workspace-Root": root})
 	var view watchView
 	env := rexDecode(t, w)
 	if env.Success && len(env.Data) > 0 {
@@ -195,7 +195,7 @@ func TestWorkspaceWatchCapEnforced(t *testing.T) {
 	}
 	// One more distinct root exceeds the cap.
 	w := rexRequest(t, r, http.MethodPost, "/api/v1/workspace/watch",
-		rexMustJSON(t, map[string]interface{}{"root": t.TempDir()}), nil)
+		rexMustJSON(t, map[string]interface{}{}), map[string]string{"X-Codeflow-Workspace-Root": t.TempDir()})
 	rexData(t, w, http.StatusConflict, false, nil)
 }
 

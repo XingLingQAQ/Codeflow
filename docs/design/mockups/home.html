@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeFlow · 首页</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="shared.css" />
+<style>
+  /* ---------- 页面框架 ---------- */
+  .app{display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr);min-height:100vh}
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{position:sticky;top:0;z-index:5}
+  .topbar .search{margin-left:auto}
+  .content{padding:20px 28px 56px;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+  .col{display:flex;flex-direction:column;gap:24px;min-width:0}
+  .side{display:flex;flex-direction:column;gap:14px;position:sticky;top:calc(var(--topbar-h) + 20px)}
+
+  /* ---------- 主区：问候 + 输入 ---------- */
+  .hero h1{font-weight:600;font-size:20px;letter-spacing:-.02em;margin:6px 0 4px;line-height:1.3}
+  .hero h1 .t{color:var(--ink-3);font-weight:500}
+  .hero p{margin:0;color:var(--ink-2);font-size:13px}
+  .hero p b{color:var(--ink);font-weight:600}
+  .hero p .sep{color:var(--ink-4);margin:0 8px}
+  .composer{margin-top:16px;background:var(--paper);border-radius:var(--r-card);box-shadow:var(--shadow-raised);overflow:hidden;position:relative}
+  .composer::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--flow);opacity:.9}
+  .composer textarea{width:100%;border:0;resize:none;padding:18px 18px 6px;font:inherit;font-size:14.5px;line-height:1.5;color:var(--ink);background:transparent;min-height:80px;outline:none;display:block;letter-spacing:-.01em}
+  .composer textarea::placeholder{color:var(--ink-3)}
+  .composer .bar{display:flex;align-items:center;gap:4px;padding:6px 10px 10px 10px}
+  .composer .add{width:28px;height:28px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--ink-2)}
+  .composer .add:hover{background:var(--hover);color:var(--ink)}
+  .composer .go{margin-left:auto;height:32px;padding:0 6px 0 14px;border-radius:999px;background:var(--ink);color:#fff;font-weight:500;display:inline-flex;align-items:center;gap:8px;font-size:13px}
+  .composer .go:hover{background:#333844}
+  .composer .go .i{width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.14);padding:4px;stroke-width:2.2}
+  .composer .go .kbd{color:rgba(255,255,255,.55)}
+
+  /* ---------- 等你处理 ---------- */
+  .inbox{padding:4px 0}
+  .inbox .row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:12px 16px;border-top:1px solid var(--line-soft)}
+  .inbox .row:first-child{border-top:0}
+  .risk{width:30px;height:30px;border-radius:50%;display:grid;place-items:center}
+  .risk .i{width:15px;height:15px;stroke-width:2}
+  .risk.hi{background:var(--amber-bg);color:var(--amber-ink)}
+  .risk.fail{background:var(--red-bg);color:var(--red-ink)}
+  .risk.mem{background:var(--inset);color:var(--ink-2)}
+  .inbox .t{font-weight:500;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink)}
+  .inbox .t code{font-size:12px;background:var(--inset);padding:2px 6px;border-radius:6px;color:var(--ink-2)}
+  .inbox .m{font-size:12.5px;color:var(--ink-3);margin-top:3px;display:flex;gap:8px;align-items:center;white-space:nowrap;overflow:hidden}
+  .inbox .m .who{display:inline-flex;align-items:center;gap:5px;color:var(--ink-2);font-weight:500}
+  .inbox .m .who i{width:14px;height:14px;border-radius:4px;display:inline-block;font-style:normal;font-size:9.5px;line-height:14px;text-align:center;background:var(--ink);color:#fff;font-weight:600}
+  .acts{display:flex;gap:6px}
+  .inbox .foot{display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-3)}
+  .inbox .foot .btn{margin-left:auto}
+
+  /* ---------- 正在运行 ---------- */
+  .runs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .run-card{padding:14px 16px 12px;display:flex;flex-direction:column;gap:10px;transition:transform .18s ease,box-shadow .18s ease}
+  .run-card:hover{transform:translateY(-1px);box-shadow:var(--shadow-raised)}
+  .run-card .head{display:flex;align-items:center;gap:10px}
+  .run-card .ag{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-weight:600;font-size:12px;background:var(--ink);color:#fff}
+  .run-card .ag.b{background:#fff;color:var(--ink);box-shadow:var(--ring)}
+  .run-card .title{font-weight:500;font-size:13.5px;line-height:1.3;color:var(--ink)}
+  .run-card .sub{font-size:12px;color:var(--ink-3);display:flex;gap:7px;align-items:center;margin-top:2px}
+  .run-card .sub .id{font-family:var(--mono);font-size:11.5px;letter-spacing:0}
+  .run-card .sub .bk{color:var(--ink-2);background:var(--inset);border-radius:5px;padding:0 6px;font-size:11px;line-height:18px;font-weight:500}
+  .run-card .elapsed{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-3);letter-spacing:0}
+  .run-card .fp{margin-top:2px}
+  .run-card .last{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2);margin-top:6px;min-width:0}
+  .run-card .last .i{width:14px;height:14px;color:var(--ink-3);stroke-width:2}
+  .run-card .last code{font-size:11.5px;color:var(--ink-2);background:var(--inset);padding:2px 6px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .run-card .foot{display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--ink-3);font-family:var(--mono);letter-spacing:0;padding-top:10px;border-top:1px solid var(--line-soft)}
+  .run-card .foot .btn{margin-left:auto}
+  .run-card.wait{box-shadow:0 0 0 1px var(--amber-line),var(--shadow-sm);background:#FFFBF8}
+
+  /* ---------- 项目 ---------- */
+  .projects{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+  .proj{padding:14px 16px;display:flex;flex-direction:column;gap:10px;transition:transform .18s ease,box-shadow .18s ease}
+  .proj:hover{transform:translateY(-1px);box-shadow:var(--shadow-raised)}
+  .proj .name{font-weight:600;font-size:14px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;min-width:0}
+  .proj .name span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj .name .g{width:8px;height:8px;border-radius:50%;background:var(--green);margin-left:auto;flex:none}
+  .proj .name .g.w{background:var(--amber)}
+  .proj .path{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj .stats{display:flex;gap:12px;font-size:12px;color:var(--ink-3);margin-top:2px;white-space:nowrap}
+  .proj .stats b{font-weight:600;color:var(--ink);font-size:13px;margin-right:3px}
+  .proj .flows{display:flex;flex-direction:column;gap:6px;margin-top:4px;padding-top:10px;border-top:1px solid var(--line-2)}
+  .proj .fl{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink-2);min-width:0}
+  .proj .fl span:first-of-type{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .proj .fl i{width:6px;height:6px;border-radius:50%;background:var(--ink-4);flex:none}
+  .proj .fl i.live{background:var(--cobalt)}
+  .proj .fl .s{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-3);flex:none}
+  .proj .fl.empty{color:var(--ink-4)}
+
+  /* ---------- 右栏面板 ---------- */
+  .panel{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+  .panel h3{margin:0;font-weight:600;font-size:13px;display:flex;align-items:center;gap:8px}
+  .panel h3 .r{margin-left:auto;font-size:12px;color:var(--ink-3);font-weight:500}
+  .big{font-weight:600;font-size:24px;letter-spacing:-.02em;line-height:1}
+  .big small{font-size:12px;color:var(--ink-3);font-weight:500;letter-spacing:0;margin-left:6px}
+  .bars{display:flex;align-items:flex-end;gap:4px;height:38px}
+  .bars i{flex:1;background:var(--hover-2);border-radius:3px 3px 0 0;display:block}
+  .bars i.t{background:var(--accent)}
+  .kv{display:flex;flex-direction:column;gap:8px}
+  .kv .row{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink-2)}
+  .kv .row b{font-weight:600;color:var(--ink);margin-left:auto;font-variant-numeric:tabular-nums}
+  .kv .row .d{width:7px;height:7px;border-radius:50%;flex:none}
+  .kv .row .d.g{background:var(--green)}.kv .row .d.a{background:var(--amber)}.kv .row .d.r{background:var(--red)}.kv .row .d.n{background:var(--ink-4)}
+  .mini{display:flex;flex-direction:column;gap:9px}
+  .mini .it{display:flex;gap:10px;font-size:12.5px;line-height:1.35}
+  .mini .it .tm{font-family:var(--mono);font-size:11px;color:var(--ink-4);flex:none;width:36px;padding-top:2px;letter-spacing:0}
+  .mini .it .tx{color:var(--ink-2)}
+  .mini .it .tx b{color:var(--ink);font-weight:500}
+  .mini .it .tx code{font-size:11.5px;color:var(--ink-2)}
+  .panel .link{font-size:12.5px;color:var(--ink-3);margin-top:2px}
+  .panel .link:hover{color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){.run-card,.proj{transition:none}}
+  @media (max-width:1480px){
+    .content{grid-template-columns:minmax(0,1fr) 272px}
+    .projects{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .acts .btn.quiet{display:none}
+  }
+  @media (max-width:1280px){
+    .content{grid-template-columns:1fr}
+    .side{position:static;display:grid;grid-template-columns:repeat(2,1fr)}
+    .projects{grid-template-columns:repeat(2,1fr)}
+  }
+  @media (max-width:900px){
+    .app{grid-template-columns:1fr}
+    .rail{display:none}
+    .runs,.projects,.side{grid-template-columns:1fr}
+    .search{width:auto;flex:1}
+    .content{padding:14px 16px 40px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= 导轨（共享组件） ================= -->
+  <aside class="rail" aria-label="全局导航">
+    <a class="brand" href="home.html" aria-label="CodeFlow 首页">
+      <span class="mark"><svg viewBox="0 0 26 26" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#1F5EFF"/><stop offset="1" stop-color="#06B6D4"/></linearGradient></defs><path d="M4 19 C10 19 9 7 15 7 S20 12 22 7" fill="none" stroke="url(#g)" stroke-width="2.6" stroke-linecap="round"/><circle cx="4" cy="19" r="2.4" fill="#0E1116"/><circle cx="22" cy="7" r="2.4" fill="url(#g)"/></svg></span>
+      <span class="name">CodeFlow</span><span class="ver">3.0</span>
+    </a>
+    <nav class="nav">
+      <a class="active" href="home.html" title="首页"><svg class="i" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg><span>首页</span><kbd>G H</kbd></a>
+      <a href="#" title="项目"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>项目</span><kbd>G P</kbd></a>
+      <a href="#" title="运行"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg><span>运行</span><kbd>G R</kbd></a>
+      <a href="#" title="Agent"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M9 11h.01M15 11h.01M9 15h6"/></svg><span>Agent</span></a>
+      <a href="#" title="守卫"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg><span>守卫</span></a>
+      <a href="#" title="记忆"><svg class="i" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>记忆</span></a>
+      <a href="#" title="密钥库"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>密钥库</span></a>
+    </nav>
+
+    <div>
+      <div class="rail-sec">项目</div>
+      <div class="plist">
+        <a href="workbench.html"><span class="dot live"></span>codeflow-backend<span class="n">2</span></a>
+        <a href="workbench.html"><span class="dot live"></span>billing-service<span class="n">1</span></a>
+        <a href="#"><span class="dot warn"></span>docs-site</a>
+        <a href="#"><span class="dot"></span>ml-pipeline</a>
+      </div>
+    </div>
+
+    <div class="rail-foot">
+      <a href="#" title="帮助与快捷键"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.5 9.5a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5M12 17h.01"/></svg><span>帮助与快捷键</span></a>
+      <a href="#" title="设置"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>设置</span></a>
+      <button class="collapse" title="收起导航" data-toggle-rail><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg><span>收起</span></button>
+      <a class="me" href="#" title="XingLing"><i>X</i><span>XingLing</span></a>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb"><b>首页</b><span>·</span><span>9 月 6 日 星期日</span></div>
+      <div class="search" role="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>搜索项目、运行、记忆、代码</span><span class="kbd">⌘K</span></div>
+      <button class="backends" aria-label="执行后端：3 个已安装，2 个就绪"><span class="stack"><i>C</i><i>X</i><i class="off">G</i></span><span><b>2</b> / 3 就绪</span><svg class="caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <button class="iconbtn" aria-label="通知，3 条未读"><svg class="i" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span class="badge">3</span></button>
+    </header>
+
+    <div class="content">
+      <!-- ---------- 左列 ---------- -->
+      <div class="col">
+
+        <section class="hero reveal">
+          <h1>下午好。<span class="t">3 件事在等你，2 个 Agent 正在工作。</span></h1>
+          <p>今天已合入 <b>5</b> 次运行<span class="sep">·</span>守卫拦下 <b>4</b> 次重复代码并已改正<span class="sep">·</span>没有失败</p>
+          <div class="composer" role="group" aria-label="交给 AI 做一件事">
+            <textarea rows="2" placeholder="把一件事交给 AI。比如：给 PaymentService.Refund 补齐单元测试，覆盖超时和重复退款。"></textarea>
+            <div class="bar">
+              <button class="add" aria-label="附上文件或上下文"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+              <button class="chip"><svg class="i" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>codeflow-backend<svg class="i caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+              <button class="chip"><span class="sw"></span>Claude Code<svg class="i caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+              <button class="chip"><svg class="i" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg>新功能流程<svg class="i caret" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+              <button class="go">开始运行<span class="kbd">⌘↵</span><svg class="i" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+            </div>
+          </div>
+        </section>
+
+        <section class="reveal">
+          <div class="sec-h"><h2>等你处理</h2><span class="cnt">3</span><span class="desc">需要你决定的审批、阻止与记忆确认</span><a class="more" href="#">查看全部 →</a></div>
+          <div class="card inbox">
+            <div class="row">
+              <div class="risk hi" title="高风险操作"><svg class="i" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg></div>
+              <div>
+                <div class="t">要执行 <code>rm -rf node_modules && pnpm install</code></div>
+                <div class="m"><span class="who"><i>C</i>Code Artisan · Claude Code</span><span>·</span><span>billing-service / 修复 #412 退款重复扣款</span><span>·</span><span>2 分钟前</span></div>
+              </div>
+              <div class="acts"><button class="btn quiet pill">查看</button><button class="btn soft pill">拒绝</button><button class="btn primary pill">允许一次</button></div>
+            </div>
+            <div class="row">
+              <div class="risk fail" title="合入被阻止"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9 9l6 6M15 9l-6 6"/></svg></div>
+              <div>
+                <div class="t">合入被守卫阻止：<code>handlers/refund_v2.go</code> 与 <code>handlers/refund.go</code> 结构相似 91%</div>
+                <div class="m"><span class="who"><i>C</i>Code Artisan · Codex</span><span>·</span><span>codeflow-backend / 重构退款处理器</span><span>·</span><span>14 分钟前</span></div>
+              </div>
+              <div class="acts"><button class="btn quiet pill">看 diff</button><button class="btn soft pill">申请豁免</button><button class="btn primary pill">让它重做</button></div>
+            </div>
+            <div class="row">
+              <div class="risk mem" title="记忆待确认"><svg class="i" viewBox="0 0 24 24"><path d="M4 7c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z"/><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
+              <div>
+                <div class="t">新记忆待确认：「退款接口必须幂等，用 idempotency_key 去重」</div>
+                <div class="m"><span>来源：运行 <code>run_8f3a</code></span><span>·</span><span>置信度 0.82</span><span>·</span><span>1 小时前</span></div>
+              </div>
+              <div class="acts"><button class="btn soft pill">丢弃</button><button class="btn primary pill">记住</button></div>
+            </div>
+            <div class="foot">
+              <span>另有 6 个低风险操作已自动放行，可在运行详情里回看。</span>
+              <button class="btn pill">允许所有低风险 · 今天</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="reveal">
+          <div class="sec-h"><h2>正在运行</h2><span class="cnt">2</span><span class="desc">各在自己的影子副本里，合入前经守卫</span><a class="more" href="#">所有运行 →</a></div>
+          <div class="runs">
+            <article class="card run-card">
+              <div class="head">
+                <div class="ag">C</div>
+                <div><div class="title">修复 #412 退款重复扣款</div><div class="sub"><span class="id">run_9c21</span><span class="bk">Claude Code</span><span>billing-service</span></div></div>
+                <div class="elapsed">06:42</div>
+              </div>
+              <div class="fp" aria-label="进度：运行中">
+                <div class="track"></div><div class="fill" style="width:46%"></div>
+                <div class="st done" style="left:0"><i></i><span>准备</span></div>
+                <div class="st now" style="left:46%"><i></i><span>运行</span></div>
+                <div class="st" style="left:74%"><i></i><span>审阅</span></div>
+                <div class="st" style="left:100%"><i></i><span>合入</span></div>
+              </div>
+              <div class="last"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg>正在改 <code>internal/payment/refund.go</code></div>
+              <div class="foot"><span>12 次工具调用</span><span>3 文件</span><span>¥1.86</span><a class="btn pill" href="workbench.html?state=agents">打开</a></div>
+            </article>
+            <article class="card run-card wait">
+              <div class="head">
+                <div class="ag b">S</div>
+                <div><div class="title">为 auth 模块补齐集成测试</div><div class="sub"><span class="id">run_9c1d</span><span class="bk">Codex</span><span>codeflow-backend</span></div></div>
+                <div class="elapsed">11:08</div>
+              </div>
+              <div class="fp wait" aria-label="进度：等待审批">
+                <div class="track"></div><div class="fill" style="width:46%"></div>
+                <div class="st done" style="left:0"><i></i><span>准备</span></div>
+                <div class="st now" style="left:46%"><i></i><span>等待审批</span></div>
+                <div class="st" style="left:74%"><i></i><span>审阅</span></div>
+                <div class="st" style="left:100%"><i></i><span>合入</span></div>
+              </div>
+              <div class="last"><span class="pill warn">等你审批</span><span>要执行 <code>rm -rf node_modules …</code></span></div>
+              <div class="foot"><span>27 次工具调用</span><span>6 文件</span><span>¥3.12</span><a class="btn primary pill" href="workbench.html?state=agents">去处理</a></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="reveal">
+          <div class="sec-h"><h2>项目</h2><span class="cnt">4</span><button class="btn pill"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建或导入</button></div>
+          <div class="projects">
+            <a class="card proj" href="workbench.html">
+              <div class="name"><span>codeflow-backend</span><span class="g" title="守卫健康"></span></div>
+              <div class="path">D:\Project\Codeflow\backend</div>
+              <div class="stats"><span><b>2</b>运行中</span><span><b>3</b>流程</span><span><b>128</b>记忆</span></div>
+              <div class="flows">
+                <div class="fl"><i class="live"></i><span>重构退款处理器</span><span class="s">审阅</span></div>
+                <div class="fl"><i class="live"></i><span>auth 集成测试</span><span class="s">运行</span></div>
+                <div class="fl"><i></i><span>迁移到单库</span><span class="s">规划</span></div>
+              </div>
+            </a>
+            <a class="card proj" href="workbench.html">
+              <div class="name"><span>billing-service</span><span class="g"></span></div>
+              <div class="path">D:\Project\billing</div>
+              <div class="stats"><span><b>1</b>运行中</span><span><b>1</b>流程</span><span><b>41</b>记忆</span></div>
+              <div class="flows"><div class="fl"><i class="live"></i><span>修复 #412 重复扣款</span><span class="s">运行</span></div></div>
+            </a>
+            <a class="card proj" href="#">
+              <div class="name"><span>docs-site</span><span class="g w" title="有待批豁免"></span></div>
+              <div class="path">D:\Project\docs-site</div>
+              <div class="stats"><span><b>0</b>运行中</span><span><b>1</b>流程</span><span><b>9</b>记忆</span></div>
+              <div class="flows"><div class="fl"><i></i><span>更新 API 文档</span><span class="s">待豁免</span></div></div>
+            </a>
+            <a class="card proj" href="#">
+              <div class="name"><span>ml-pipeline</span><span class="g"></span></div>
+              <div class="path">D:\Project\ml-pipeline</div>
+              <div class="stats"><span><b>0</b>运行中</span><span><b>0</b>流程</span><span><b>2</b>记忆</span></div>
+              <div class="flows"><div class="fl empty"><i></i><span>还没有流程，交给 AI 一件事就会开始</span></div></div>
+            </a>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- ---------- 右列 ---------- -->
+      <aside class="side">
+        <div class="card panel reveal">
+          <h3>用量<span class="r">最近 7 天</span></h3>
+          <div class="big">¥12.40<small>今天 · 约 218k tokens</small></div>
+          <div class="bars" aria-hidden="true"><i style="height:40%"></i><i style="height:55%"></i><i style="height:30%"></i><i style="height:70%"></i><i style="height:48%"></i><i style="height:62%"></i><i class="t" style="height:85%"></i></div>
+          <div class="kv">
+            <div class="row"><span class="d n"></span>Claude Code<b>¥8.90</b></div>
+            <div class="row"><span class="d n"></span>Codex<b>¥3.12</b></div>
+            <div class="row"><span class="d n"></span>直连模型（追问 / 记忆）<b>¥0.38</b></div>
+          </div>
+          <a class="link" href="#">预算：本月上限 ¥300，已用 41% →</a>
+        </div>
+        <div class="card panel reveal">
+          <h3>守卫<span class="r">今天</span></h3>
+          <div class="kv">
+            <div class="row"><span class="d g"></span>通过的写入<b>63</b></div>
+            <div class="row"><span class="d a"></span>拦下并自动改正<b>4</b></div>
+            <div class="row"><span class="d r"></span>阻止合入<b>1</b></div>
+            <div class="row"><span class="d n"></span>豁免待批<b>1</b></div>
+          </div>
+          <a class="link" href="#">最常触发：结构相似 · 堆叠命名 →</a>
+        </div>
+        <div class="card panel reveal">
+          <h3>记忆<span class="r">codeflow-backend</span></h3>
+          <div class="kv">
+            <div class="row">已确认<b>128</b></div>
+            <div class="row">待确认<b>3</b></div>
+            <div class="row">本周被引用<b>27 次</b></div>
+          </div>
+          <a class="link" href="#">打开记忆浏览器 →</a>
+        </div>
+        <div class="card panel reveal">
+          <h3>最近合入</h3>
+          <div class="mini">
+            <div class="it"><span class="tm">14:20</span><span class="tx"><b>给 Cache 加过期回调</b> · 3 文件 · <code>run_8f3a</code></span></div>
+            <div class="it"><span class="tm">11:47</span><span class="tx"><b>修 flaky 测试 TestWatch</b> · 1 文件 · <code>run_8e90</code></span></div>
+            <div class="it"><span class="tm">10:05</span><span class="tx"><b>OpenAPI 补 runs 路由</b> · 2 文件 · <code>run_8d12</code></span></div>
+            <div class="it"><span class="tm">昨天</span><span class="tx"><b>撤销</b>：错误的迁移脚本 · <code>run_8b77</code></span></div>
+          </div>
+          <a class="link" href="#">全部历史 →</a>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('[data-toggle-rail]').forEach(b=>b.addEventListener('click',()=>document.body.classList.toggle('rail-collapsed')));
+</script>
+</body>
+</html>

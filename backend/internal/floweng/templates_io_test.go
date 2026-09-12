@@ -143,11 +143,16 @@ func TestExportDeterministic(t *testing.T) {
 // describeCustomTemplate builds a TemplateInfo from a CustomTemplate for
 // comparison (mirrors what DescribeTemplate returns after registration).
 func describeCustomTemplate(ct CustomTemplate) *TemplateInfo {
-	info := &TemplateInfo{ID: ct.ID, Loops: append([]LoopEdge(nil), ct.Loops...)}
+	info := &TemplateInfo{
+		ID: ct.ID, Name: ct.Name, Description: ct.Description, Source: "custom",
+		Loops: append([]LoopEdge(nil), ct.Loops...),
+	}
 	for _, s := range ct.Stages {
-		info.Stages = append(info.Stages, StageBrief{
-			Type: s.Type, Name: s.Name, Canvas: s.Canvas, Optional: s.Optional,
-		})
+		brief := StageBrief{
+			Type: s.Type, Name: s.Name, Canvas: s.Canvas, AgentID: s.AgentID, Optional: s.Optional,
+			Gates: append([]CustomGate(nil), s.Gates...),
+		}
+		info.Stages = append(info.Stages, brief)
 	}
 	return info
 }

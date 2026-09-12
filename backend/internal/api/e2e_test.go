@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/config"
 	ctxsvc "github.com/codeflow/backend/internal/context"
@@ -77,6 +78,8 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 
 	preflightSvc := memory.NewMemoryPreflightService()
 	memory.SetPreflightService(preflightSvc)
+	memory.SetMemoryService(memory.NewInMemoryService())
+	agent.SetAgentService(agent.NewInMemoryAgentService())
 
 	summarizeSvc := summarize.NewSummarizerService()
 	summarize.SetSummarizer(summarizeSvc)
@@ -102,13 +105,19 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 	// Create server
 	cfg := &Config{
 		Port:            "0",
-		AllowedOrigins:  []string{"*"},
+		AuthToken:       testAuthToken,
+		AllowedOrigins:  []string{"http://localhost:3000"},
 		EnableDebugMode: true,
 	}
 	server := NewServer(cfg)
-	ts := httptest.NewServer(server.Router())
+	ts := httptest.NewServer(authenticatedTestHandler(server.Router()))
 	t.Cleanup(func() {
 		ctxsvc.SetContextService(nil)
+		agent.SetAgentService(nil)
+		memory.SetMemoryService(nil)
+		memory.SetPreflightService(nil)
+		samg.SetSAMGService(nil)
+		audit.SetAuditService(nil)
 		project.SetProjectService(nil)
 		planner.SetPlanner(nil)
 		config.SetConfigService(nil)

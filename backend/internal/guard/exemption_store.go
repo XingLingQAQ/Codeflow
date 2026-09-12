@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // sqliteExemptionStore persists temporary path exemptions across restarts.
@@ -17,15 +17,13 @@ type sqliteExemptionStore struct {
 }
 
 func openSQLiteExemptionStore(dbPath string) (*sqliteExemptionStore, error) {
-	conn, err := buildExemptionSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareExemptionDBDir(dbPath); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", conn)
+	db, err := dbx.Open(dbPath, dbx.WithMaxOpenConns(1))
 	if err != nil {
 		return nil, fmt.Errorf("open guard exemption db: %w", err)
 	}
-	db.SetMaxOpenConns(1)
 	s := &sqliteExemptionStore{db: db}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
@@ -34,17 +32,17 @@ func openSQLiteExemptionStore(dbPath string) (*sqliteExemptionStore, error) {
 	return s, nil
 }
 
-func buildExemptionSQLiteConnString(dbPath string) (string, error) {
+func prepareExemptionDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file:guard_exemptions_mem?mode=memory&cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create guard exemption db dir: %w", err)
+			return fmt.Errorf("create guard exemption db dir: %w", err)
 		}
 	}
-	return fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", filepath.ToSlash(dbPath)), nil
+	return nil
 }
 
 func (s *sqliteExemptionStore) initSchema() error {

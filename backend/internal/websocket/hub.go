@@ -10,10 +10,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeflow/backend/internal/api/middleware"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+// ContextAccessPolicy is the gin context key used by the API server to pass
+// the validated sidecar trust policy to websocket handlers.
+const ContextAccessPolicy = "codeflow.websocket.access_policy"
 
 // MessageType 消息类型
 type MessageType string
@@ -46,10 +51,44 @@ type Client struct {
 	Conn      *websocket.Conn
 	SessionID string
 	// topics are optional fan-out keys (e.g. "flow_event"); independent of SessionID.
-	topics map[string]struct{}
-	Send   chan []byte
-	Hub    *Hub
-	mu     sync.Mutex
+	topics        map[string]struct{}
+	Send          chan []byte
+	Hub           *Hub
+	mu            sync.Mutex
+	allowedTopics map[string]struct{}
+}
+
+// AccessPolicy carries the process identity and the exact browser/topic
+// allowlists authorized for websocket connections.
+type AccessPolicy struct {
+	token          string
+	allowedOrigins map[string]struct{}
+}
+
+// NewAccessPolicy creates the immutable process identity and Origin policy.
+// Resource topics are supplied separately by the route that owns the scope.
+func NewAccessPolicy(token string, origins []string) *AccessPolicy {
+	policy := &AccessPolicy{
+		token:          token,
+		allowedOrigins: make(map[string]struct{}, len(origins)),
+	}
+	for _, origin := range origins {
+		policy.allowedOrigins[origin] = struct{}{}
+	}
+	return policy
+}
+
+// OriginAllowed requires an exact configured Origin value.
+func (p *AccessPolicy) OriginAllowed(origin string) bool {
+	if p == nil || origin == "" {
+		return false
+	}
+	_, ok := p.allowedOrigins[origin]
+	return ok
+}
+
+func (p *AccessPolicy) authorized(r *http.Request) bool {
+	return p != nil && middleware.AccessTokenMatches(r, p.token)
 }
 
 // Hub WebSocket连接管理中心
@@ -313,26 +352,51 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许所有来源（生产环境应限制）
+		policy, _ := r.Context().Value(accessPolicyContextKey{}).(*AccessPolicy)
+		return policy != nil && policy.OriginAllowed(r.Header.Get("Origin"))
 	},
 }
 
-// HandleWebSocket 处理WebSocket连接
-func HandleWebSocket(hub *Hub, c *gin.Context) {
-	sessionID := c.Param("sessionId")
+type accessPolicyContextKey struct{}
 
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+// HandleScopedWebSocket upgrades a connection whose resource scope has already
+// been authorized by its HTTP route. The client cannot change that scope or
+// subscribe to a topic outside the exact route-owned allowlist.
+func HandleScopedWebSocket(hub *Hub, c *gin.Context, scopeID string, allowedTopics ...string) {
+	policyValue, ok := c.Get(ContextAccessPolicy)
+	policy, policyOK := policyValue.(*AccessPolicy)
+	if !ok || !policyOK || !policy.authorized(c.Request) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "error": "unauthorized"})
+		return
+	}
+	if !policy.OriginAllowed(c.GetHeader("Origin")) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, "error": "origin not allowed"})
+		return
+	}
+	if scopeID == "" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"success": false, "error": "missing websocket scope"})
+		return
+	}
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), accessPolicyContextKey{}, policy))
+
+	responseHeader := http.Header{}
+	if middleware.WebSocketProtocolTokenMatches(c.Request, policy.token) {
+		responseHeader.Set("Sec-WebSocket-Protocol", middleware.WebSocketProtocolV1)
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, responseHeader)
 	if err != nil {
 		log.Printf("[WS] Upgrade failed: %v", err)
 		return
 	}
 
 	client := &Client{
-		ID:        generateClientID(),
-		Conn:      conn,
-		SessionID: sessionID,
-		Send:      make(chan []byte, 256),
-		Hub:       hub,
+		ID:            generateClientID(),
+		Conn:          conn,
+		SessionID:     scopeID,
+		Send:          make(chan []byte, 256),
+		Hub:           hub,
+		allowedTopics: topicSet(allowedTopics),
 	}
 
 	hub.register <- client
@@ -366,6 +430,9 @@ func (c *Client) readPump() {
 
 		var msg Message
 		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		if !c.bindMessageScope(&msg) {
 			continue
 		}
 
@@ -420,40 +487,44 @@ func (c *Client) handleMessage(msg *Message) {
 		// 心跳响应，不需要处理
 	case MsgTypeSubscribe:
 		// Topic subscribe: {type:subscribe, data:{topic:"flow_event"}} or content as topic.
-		if topic := topicFromMessage(msg); topic != "" {
+		if topic := topicFromMessage(msg); topic != "" && c.topicAllowed(topic) {
 			c.Hub.SubscribeTopic(c, topic)
-		}
-		// Session subscribe (legacy path)
-		if msg.SessionID != "" && msg.SessionID != c.SessionID {
-			c.Hub.mu.Lock()
-			if c.SessionID != "" {
-				if sessionClients, ok := c.Hub.sessions[c.SessionID]; ok {
-					delete(sessionClients, c.ID)
-				}
-			}
-			c.SessionID = msg.SessionID
-			if _, ok := c.Hub.sessions[c.SessionID]; !ok {
-				c.Hub.sessions[c.SessionID] = make(map[string]*Client)
-			}
-			c.Hub.sessions[c.SessionID][c.ID] = c
-			c.Hub.mu.Unlock()
 		}
 	case MsgTypeUnsubscribe:
 		if topic := topicFromMessage(msg); topic != "" {
 			c.Hub.UnsubscribeTopic(c, topic)
-			break
 		}
-		// 取消会话订阅
-		c.Hub.mu.Lock()
-		if c.SessionID != "" {
-			if sessionClients, ok := c.Hub.sessions[c.SessionID]; ok {
-				delete(sessionClients, c.ID)
-			}
-			c.SessionID = ""
-		}
-		c.Hub.mu.Unlock()
 	}
 	notifyMessageCompleteHook(msg)
+}
+
+func (c *Client) topicAllowed(topic string) bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.allowedTopics[normalizeTopic(topic)]
+	return ok
+}
+
+func (c *Client) bindMessageScope(msg *Message) bool {
+	if c == nil || msg == nil || c.SessionID == "" {
+		return false
+	}
+	if msg.SessionID != "" && msg.SessionID != c.SessionID {
+		return false
+	}
+	msg.SessionID = c.SessionID
+	return true
+}
+
+func topicSet(topics []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(topics))
+	for _, topic := range topics {
+		if normalized := normalizeTopic(topic); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
 }
 
 func notifyMessageCompleteHook(msg *Message) {

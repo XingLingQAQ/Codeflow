@@ -1,11 +1,15 @@
+import { HookManager } from '../hooks/HookManager.js';
+import type { HookRuntimeControls } from '../hooks/types.js';
 import type { IAuditManager } from '../audit/types.js';
 import { FileOperationService } from './FileOperationService.js';
 import { MCPGateway } from './MCPGateway.js';
 import { SearchGateway, SearchProviderRegistry } from './SearchProvider.js';
+import { SkillDispatcher } from './SkillDispatcher.js';
+import { SkillRegistry } from './SkillRegistry.js';
 import type { SearchRegistrationOptions } from './SearchProvider.js';
 import { ToolExecutor } from './ToolExecutor.js';
 import { ToolRegistry } from './ToolRegistry.js';
-import type { RegisteredTool, SearchProvider, SearchProviderKind, SearchRequest, SearchResponse, ToolContext, ToolExecutionResult, ToolLikeOutput, MCPServerRegistration } from './types.js';
+import type { MCPServerRegistration, RegisteredTool, SearchProvider, SearchProviderKind, SearchRequest, SearchResponse, SkillExecutionRequest, SkillExecutionResult, SkillManifest, SkillRegistration, SkillRegistryFilter, ToolContext, ToolExecutionResult, ToolLikeOutput } from './types.js';
 export interface HeadlessToolRuntimeDeps {
     auditManager?: IAuditManager;
     toolRegistry?: ToolRegistry;
@@ -14,6 +18,10 @@ export interface HeadlessToolRuntimeDeps {
     searchProviderRegistry?: SearchProviderRegistry;
     searchGateway?: SearchGateway;
     mcpGateway?: MCPGateway;
+    skillRegistry?: SkillRegistry;
+    skillDispatcher?: SkillDispatcher;
+    hookManager?: HookManager;
+    hookControls?: HookRuntimeControls;
 }
 /**
  * HeadlessToolRuntime
@@ -26,6 +34,9 @@ export declare class HeadlessToolRuntime {
     private readonly searchProviderRegistry;
     private readonly searchGateway;
     private readonly mcpGateway;
+    private readonly skillRegistry;
+    private readonly skillDispatcher;
+    private readonly hookManager;
     constructor(deps?: HeadlessToolRuntimeDeps);
     getToolRegistry(): ToolRegistry;
     getToolExecutor(): ToolExecutor;
@@ -33,10 +44,18 @@ export declare class HeadlessToolRuntime {
     getSearchProviderRegistry(): SearchProviderRegistry;
     getSearchGateway(): SearchGateway;
     getMCPGateway(): MCPGateway;
+    getSkillRegistry(): SkillRegistry;
+    getSkillDispatcher(): SkillDispatcher;
+    getHookManager(): HookManager;
+    getToolTraceCount(): number;
     getToolTraces(): import("./types.js").ToolCallTrace[];
+    getSkillExecutionRecords(): import("./types.js").SkillExecutionRecord[];
     registerTool(tool: RegisteredTool, replace?: boolean): void;
+    registerSkill(skill: SkillRegistration, replace?: boolean): void;
     registerSkillTool(tool: Omit<RegisteredTool, 'source'>, replace?: boolean): void;
+    listSkills(filter?: SkillRegistryFilter): SkillManifest[];
     execute<TOutput = ToolLikeOutput>(toolId: string, input: unknown, context: ToolContext): Promise<ToolExecutionResult<TOutput>>;
+    executeSkill<TOutput = ToolLikeOutput>(request: SkillExecutionRequest): Promise<SkillExecutionResult<TOutput>>;
     registerSearchProvider(provider: SearchProvider, options?: SearchRegistrationOptions): void;
     executeSearch(kind: SearchProviderKind, request: SearchRequest, context: ToolContext): Promise<ToolExecutionResult<SearchResponse>>;
     registerMCPServer(registration: MCPServerRegistration): import("./types.js").MCPServerInfo;

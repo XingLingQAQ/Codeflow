@@ -19,7 +19,11 @@ func CreateSkill(c *gin.Context) {
 	}
 	s, err := skill.GetRegistry().Create(c.Request.Context(), &req)
 	if err != nil {
-		respondError(c, http.StatusBadRequest, err.Error())
+		if strings.Contains(err.Error(), "required") {
+			respondError(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		respondInternalError(c, "create skill", err)
 		return
 	}
 	respondCreated(c, s)
@@ -60,15 +64,7 @@ func UpdateSkill(c *gin.Context) {
 	}
 	s, err := skill.GetRegistry().Update(c.Request.Context(), c.Param("id"), &req)
 	if err != nil {
-		if strings.Contains(err.Error(), "builtin") {
-			respondError(c, http.StatusConflict, err.Error())
-			return
-		}
-		if strings.Contains(err.Error(), "not found") {
-			respondError(c, http.StatusNotFound, err.Error())
-			return
-		}
-		respondError(c, http.StatusBadRequest, err.Error())
+		respondSkillWriteError(c, "update skill", err)
 		return
 	}
 	respondOK(c, s)
@@ -77,14 +73,28 @@ func UpdateSkill(c *gin.Context) {
 // DeleteSkill handles DELETE /api/v1/skills/:id
 func DeleteSkill(c *gin.Context) {
 	if err := skill.GetRegistry().Delete(c.Request.Context(), c.Param("id")); err != nil {
-		if strings.Contains(err.Error(), "builtin") {
-			respondError(c, http.StatusConflict, err.Error())
-			return
-		}
-		respondError(c, http.StatusNotFound, err.Error())
+		respondSkillWriteError(c, "delete skill", err)
 		return
 	}
 	respondOK(c, gin.H{"deleted": true})
+}
+
+// respondSkillWriteError maps a registry write failure to an HTTP status:
+// builtin protection is a 409 conflict and a missing skill/version is a 404;
+// anything else is a durable-store/transaction failure surfaced by
+// UpdateWithHistory or the store delete/put path — a 5xx server error, never
+// a client 4xx (input validation happens at binding time, and the registry's
+// only client-side validation message carries "required").
+func respondSkillWriteError(c *gin.Context, context string, err error) {
+	if strings.Contains(err.Error(), "builtin") {
+		respondError(c, http.StatusConflict, err.Error())
+		return
+	}
+	if strings.Contains(err.Error(), "not found") {
+		respondError(c, http.StatusNotFound, err.Error())
+		return
+	}
+	respondInternalError(c, context, err)
 }
 
 // MatchSkills handles POST /api/v1/skills/match

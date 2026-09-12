@@ -1,6 +1,7 @@
 import { get, post, put, del } from '../api';
 import { API_ENDPOINTS } from '../api';
-import type { Project, ProjectListResponse } from '../types';
+import { createFlow } from '../src/services-bridge/flows';
+import type { Project, ProjectCreationResult, ProjectListResponse } from '../types';
 
 export interface ProjectCreateInput {
   title: string;
@@ -42,7 +43,11 @@ export async function listProjects(params?: ProjectListParams, signal?: AbortSig
       return { projects, total: projects.length, has_more: false };
     }
   }
-  return get<ProjectListResponse>(getBase(), params as Record<string, string | number | undefined>, signal);
+  return get<ProjectListResponse>(
+    getBase(),
+    params as Record<string, string | number | undefined>,
+    signal
+  );
 }
 
 export async function createProject(input: ProjectCreateInput, signal?: AbortSignal) {
@@ -65,10 +70,19 @@ export async function createProject(input: ProjectCreateInput, signal?: AbortSig
         last_active: now,
       };
       (store.MOCK_PROJECTS as Project[]).unshift(p);
-      return p;
+      try {
+        const flow = await createFlow({ project_id: p.id, template_id: 'new_project' }, signal);
+        return { ...p, flow } satisfies ProjectCreationResult;
+      } catch (error) {
+        const index = (store.MOCK_PROJECTS as Project[]).findIndex(
+          (project) => project.id === p.id
+        );
+        if (index >= 0) (store.MOCK_PROJECTS as Project[]).splice(index, 1);
+        throw error;
+      }
     }
   }
-  return post<Project>(getBase(), input, signal);
+  return post<ProjectCreationResult>(getBase(), input, signal);
 }
 
 export function getProject(id: string, signal?: AbortSignal) {
@@ -88,9 +102,16 @@ export function getProjectPlans(id: string, signal?: AbortSignal) {
 }
 
 export function addPlanToProject(id: string, planId: string, signal?: AbortSignal) {
-  return post<{ project_id: string; plan_id: string; associated: boolean }>(`${getBase()}/${id}/plans`, { plan_id: planId }, signal);
+  return post<{ project_id: string; plan_id: string; associated: boolean }>(
+    `${getBase()}/${id}/plans`,
+    { plan_id: planId },
+    signal
+  );
 }
 
 export function removePlanFromProject(id: string, planId: string, signal?: AbortSignal) {
-  return del<{ project_id: string; plan_id: string; removed: boolean }>(`${getBase()}/${id}/plans/${planId}`, signal);
+  return del<{ project_id: string; plan_id: string; removed: boolean }>(
+    `${getBase()}/${id}/plans/${planId}`,
+    signal
+  );
 }

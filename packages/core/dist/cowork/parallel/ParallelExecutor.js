@@ -3,6 +3,11 @@
  * 在独立的 Git Worktree 中并行执行多个 Agent 任务
  */
 import { EventEmitter } from 'events';
+import { AgentRuntime } from '../runtime.js';
+import { AiderCodeEditor } from '../editors/AiderCodeEditor.js';
+import { ClaudeCodeEditor } from '../editors/ClaudeCodeEditor.js';
+import { CodexCodeEditor } from '../editors/CodexCodeEditor.js';
+import { GeminiCodeEditor } from '../editors/GeminiCodeEditor.js';
 /**
  * 默认配置
  */
@@ -14,34 +19,70 @@ const DEFAULT_CONFIG = {
     cleanupOnComplete: true,
 };
 /**
+ * 执行器注册信息
+ */
+/**
  * ParallelExecutor - 多 Agent 并行执行器
  */
 export class ParallelExecutor extends EventEmitter {
-    constructor(worktreeManager, config = {}) {
+    constructor(worktreeManager, config = {}, runtime) {
         super();
         this.workers = new Map();
-        this.executors = new Map();
         this.isRunning = false;
         this.worktreeManager = worktreeManager;
         this.config = { ...DEFAULT_CONFIG, ...config };
+        this.runtime = runtime || new AgentRuntime();
+    }
+    cloneEditorForCwd(editor, cwd) {
+        if (editor instanceof AiderCodeEditor) {
+            return new AiderCodeEditor(editor.getAdapter(), {
+                ...editor.getConfig(),
+                cwd,
+            });
+        }
+        if (editor instanceof ClaudeCodeEditor) {
+            return new ClaudeCodeEditor(editor.getAdapter(), {
+                ...editor.getConfig(),
+                cwd,
+            });
+        }
+        if (editor instanceof CodexCodeEditor) {
+            return new CodexCodeEditor(editor.getAdapter(), {
+                ...editor.getConfig(),
+                cwd,
+            });
+        }
+        if (editor instanceof GeminiCodeEditor) {
+            return new GeminiCodeEditor(editor.getAdapter(), {
+                ...editor.getConfig(),
+                cwd,
+            });
+        }
+        return editor;
+    }
+    createSandboxedExecutor(executor, worktree) {
+        return {
+            ...executor,
+            editor: this.cloneEditorForCwd(executor.editor, worktree.path),
+        };
     }
     /**
      * 注册执行器
      */
     registerExecutor(name, editor, capabilities, modelId) {
-        this.executors.set(name, { name, editor, capabilities, modelId });
+        this.runtime.registerExecutor(name, editor, capabilities, modelId);
     }
     /**
      * 获取执行器
      */
     getExecutor(name) {
-        return this.executors.get(name);
+        return this.runtime.getExecutor(name);
     }
     /**
      * 获取所有执行器
      */
     getAllExecutors() {
-        return Array.from(this.executors.values());
+        return this.runtime.getAllExecutors();
     }
     /**
      * 创建 Worker
@@ -72,7 +113,7 @@ export class ParallelExecutor extends EventEmitter {
         worker.startedAt = Date.now();
         this.emit('worker:started', worker);
         try {
-            const executor = this.executors.get(worker.name);
+            const executor = this.runtime.getExecutor(worker.name);
             if (!executor) {
                 throw new Error(`Executor not found: ${worker.name}`);
             }
@@ -95,6 +136,9 @@ export class ParallelExecutor extends EventEmitter {
             this.emit('worker:failed', worker, err);
             return {
                 taskId: worker.task?.id || worker.id,
+                status: 'failed',
+                output: { error: err.message },
+                executor: worker.name,
                 success: false,
                 error: err.message,
                 duration: Date.now() - (worker.startedAt || Date.now()),
@@ -105,29 +149,12 @@ export class ParallelExecutor extends EventEmitter {
      * 在 Worktree 中执行任务
      */
     async executeTaskInWorktree(executor, task, worktree) {
-        const startTime = Date.now();
-        try {
-            // 使用编辑器执行任务
-            const editResults = await executor.editor.editMultiple(task.input.files, task.input.instruction);
-            const success = editResults.every(r => r.success);
-            const diffs = editResults.map(r => r.diff);
-            return {
-                taskId: task.id,
-                success,
-                diffs,
-                duration: Date.now() - startTime,
-                output: success ? 'Task completed successfully' : 'Some edits failed',
-            };
-        }
-        catch (error) {
-            const err = error instanceof Error ? error : new Error(String(error));
-            return {
-                taskId: task.id,
-                success: false,
-                error: err.message,
-                duration: Date.now() - startTime,
-            };
-        }
+        const sandboxedExecutor = this.createSandboxedExecutor(executor, worktree);
+        return this.runtime.executeTask(task, {
+            cwd: worktree.path,
+            worktreePath: worktree.path,
+            executorOverride: sandboxedExecutor,
+        });
     }
     /**
      * 并行执行多个任务
@@ -147,11 +174,11 @@ export class ParallelExecutor extends EventEmitter {
             // 创建所有 workers
             const workers = [];
             for (const { executorName, task } of tasks) {
-                const executor = this.executors.get(executorName);
+                const executor = this.runtime.getExecutor(executorName);
                 if (!executor) {
                     throw new Error(`Executor not found: ${executorName}`);
                 }
-                const worker = await this.createWorker(executorName, executor.modelId, task);
+                const worker = await this.createWorker(executorName, executor.modelId || executorName, task);
                 workers.push(worker);
             }
             this.emit('execution:started', workers);
@@ -200,6 +227,9 @@ export class ParallelExecutor extends EventEmitter {
                 this.emit('worker:failed', worker, worker.error);
                 resolve({
                     taskId: worker.task?.id || worker.id,
+                    status: 'failed',
+                    output: { error: 'Worker timeout' },
+                    executor: worker.name,
                     success: false,
                     error: 'Worker timeout',
                     duration: this.config.timeout,
@@ -218,6 +248,9 @@ export class ParallelExecutor extends EventEmitter {
                 else {
                     resolve({
                         taskId: worker.task?.id || worker.id,
+                        status: 'failed',
+                        output: { error: error.message },
+                        executor: worker.name,
                         success: false,
                         error: error.message,
                         duration: Date.now() - (worker.startedAt || Date.now()),

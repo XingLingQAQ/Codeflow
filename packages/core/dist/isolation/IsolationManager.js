@@ -3,6 +3,7 @@
  * 隔离式上下文容器 + RBAC 访问控制
  */
 import { DEFAULT_ROLES, PERMISSION_PRIORITY, } from './types.js';
+import { getMessageText } from '../hooks/types.js';
 export class IsolationManager {
     constructor() {
         this.containers = new Map();
@@ -134,7 +135,7 @@ export class IsolationManager {
         if (!hasWriteAccess)
             return false;
         // 合并消息（过滤敏感内容）
-        const filteredMessages = source.messages.filter(m => !this.containsSensitiveData(m.content));
+        const filteredMessages = source.messages.filter(m => !this.containsSensitiveData(getMessageText(m.content)));
         target.messages.push(...filteredMessages);
         target.tokenCount += this.estimateTokens(filteredMessages);
         target.metadata.parentContainerId = sourceId;
@@ -301,7 +302,7 @@ export class IsolationManager {
             .replace(/\b(?:password|secret|token|key)\s*[:=]\s*\S+/gi, '[REDACTED]');
     }
     estimateTokens(messages) {
-        return messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
+        return messages.reduce((sum, m) => sum + Math.ceil(getMessageText(m.content).length / 4), 0);
     }
 }
 /**

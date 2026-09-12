@@ -1,0 +1,7 @@
+{
+  "project_id": "b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+  "run_id": null,
+  "attempt_id": null,
+  "agent_revision_id": null,
+  "actor": {"type": "user", "id": "local-user", "source": "desktop"}
+}

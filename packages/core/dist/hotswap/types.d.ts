@@ -1,14 +1,23 @@
 /**
  * 模型热切换类型定义
  */
+import type { ResolvedConfig, RuntimeProviderFamily } from '../config/types.js';
 import { Message } from '../hooks/types.js';
+export declare const CLI_PROVIDER_MODEL_IDS: {
+    readonly 'gemini-cli': readonly ["gemini-2.0-flash-exp", "gemini-2.5-pro"];
+    readonly 'codex-cli': readonly ["gpt-5.4", "gpt-5-codex"];
+};
+export type CliAdapterId = keyof typeof CLI_PROVIDER_MODEL_IDS;
+export type CliProviderModelId<TAdapterId extends CliAdapterId = CliAdapterId> = (typeof CLI_PROVIDER_MODEL_IDS)[TAdapterId][number];
+export type GeminiCliProviderModelId = CliProviderModelId<'gemini-cli'>;
+export type CodexCliProviderModelId = CliProviderModelId<'codex-cli'>;
 /**
  * 模型信息
  */
 export interface ModelInfo {
     id: string;
     name: string;
-    provider: 'claude' | 'gemini' | 'codex' | 'openai' | 'custom';
+    provider: RuntimeProviderFamily;
     capabilities: ModelCapabilities;
     contextWindow: number;
     maxOutputTokens: number;
@@ -16,6 +25,10 @@ export interface ModelInfo {
     costPer1kOutput?: number;
     available: boolean;
     status?: 'online' | 'degraded' | 'offline';
+    adapterKind?: 'api' | 'cli';
+    adapterId?: string;
+    modelId?: string;
+    supportedModelIds?: readonly string[];
 }
 /**
  * 模型能力
@@ -35,6 +48,7 @@ export interface SwitchOptions {
     migrateContext: boolean;
     fallbackOnError: boolean;
     retryCount?: number;
+    resolvedConfig?: ResolvedConfig;
 }
 /**
  * 切换结果
@@ -86,7 +100,7 @@ export interface IHotSwapManager {
     switchModel(modelId: string, options?: Partial<SwitchOptions>): Promise<SwitchResult>;
     canSwitch(modelId: string): boolean;
     retry(options?: Partial<RetryStrategy>): Promise<SwitchResult>;
-    relay(fallbackChain?: string[]): Promise<SwitchResult>;
+    relay(fallbackChain?: string[], options?: Partial<SwitchOptions>): Promise<SwitchResult>;
     migrateContext(targetModel: string): Promise<ContextMigrationResult>;
     configure(config: Partial<HotSwapConfig>): void;
     setRelayConfig(config: Partial<RelayConfig>): void;

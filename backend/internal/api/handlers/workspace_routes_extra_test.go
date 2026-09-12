@@ -6,11 +6,14 @@ package handlers
 // and staging is emptied. Uses a fresh FSService over a temp root (no guard).
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
@@ -94,5 +97,38 @@ func TestWorkspaceStagedReadThenPromoteRoutesExtra(t *testing.T) {
 	rexData(t, w, http.StatusOK, true, &stagedList)
 	if stagedList.Total != 0 {
 		t.Fatalf("staged after promote total=%d want=0", stagedList.Total)
+	}
+}
+
+func TestWorkspaceReadResolvesAuthoritativeProjectRoot(t *testing.T) {
+	r, root := rexWorkspaceRouter(t)
+	projectSvc := project.NewInMemoryProjectService()
+	projectSvc.SetAllowedWorkspaceRoots([]string{root})
+	created, err := projectSvc.CreateProject(context.Background(), &project.ProjectCreateRequest{Title: "bound workspace", WorkspaceRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := project.GetProjectService()
+	project.SetProjectService(projectSvc)
+	t.Cleanup(func() { project.SetProjectService(previous) })
+	writeBody := rexMustJSON(t, map[string]interface{}{"project_id": created.ID, "relative_path": "bound.txt", "content_text": "bound"})
+	w := rexRequest(t, r, http.MethodPost, "/api/v1/workspace/write", writeBody, nil)
+	rexData(t, w, http.StatusOK, true, nil)
+	w = rexRequest(t, r, http.MethodGet, "/api/v1/workspace/read?project_id="+created.ID+"&relative_path=bound.txt", nil, nil)
+	var out struct {
+		ContentText string `json:"content_text"`
+	}
+	rexData(t, w, http.StatusOK, true, &out)
+	if out.ContentText != "bound" {
+		t.Fatalf("content=%q", out.ContentText)
+	}
+}
+
+func TestWorkspaceReadRejectsArbitraryLegacyQueryRoot(t *testing.T) {
+	t.Setenv("CODEFLOW_ALLOW_LEGACY_WORKSPACE_ROOT", "")
+	r, root := rexWorkspaceRouter(t)
+	w := rexRequest(t, r, http.MethodGet, "/api/v1/workspace/read?root="+url.QueryEscape(root)+"&path=file.txt", nil, nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d want=400 body=%s", w.Code, w.Body.String())
 	}
 }

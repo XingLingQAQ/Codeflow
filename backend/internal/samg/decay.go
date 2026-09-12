@@ -33,15 +33,15 @@ var DefaultDecayConfig = DecayConfig{
 
 // NodeActivation 节点激活状态
 type NodeActivation struct {
-	NodeID         string    `json:"node_id"`
-	Label          string    `json:"label"`
-	Type           string    `json:"type"`
-	Activation     float64   `json:"activation"`
-	AccessCount    int       `json:"access_count"`
-	LastAccessTime int64     `json:"last_access_time"`
-	CreatedTime    int64     `json:"created_time"`
-	AccessHistory  []int64   `json:"access_history"`
-	Hidden         bool      `json:"hidden"`
+	NodeID         string  `json:"node_id"`
+	Label          string  `json:"label"`
+	Type           string  `json:"type"`
+	Activation     float64 `json:"activation"`
+	AccessCount    int     `json:"access_count"`
+	LastAccessTime int64   `json:"last_access_time"`
+	CreatedTime    int64   `json:"created_time"`
+	AccessHistory  []int64 `json:"access_history"`
+	Hidden         bool    `json:"hidden"`
 }
 
 // DecayManager BLA衰减管理器
@@ -50,6 +50,12 @@ type DecayManager struct {
 	store       ITripleStore
 	activations map[string]*NodeActivation
 	mu          sync.RWMutex
+	persistence activationPersistence
+}
+
+type activationPersistence interface {
+	LoadActivations(context.Context) ([]NodeActivation, error)
+	SaveActivation(context.Context, NodeActivation) error
 }
 
 // NewDecayManager 创建衰减管理器
@@ -63,6 +69,29 @@ func NewDecayManager(store ITripleStore, config *DecayConfig) *DecayManager {
 		store:       store,
 		activations: make(map[string]*NodeActivation),
 	}
+}
+
+func (dm *DecayManager) SetPersistence(p activationPersistence) { dm.persistence = p }
+
+func (dm *DecayManager) LoadPersisted(ctx context.Context) error {
+	if dm.persistence == nil {
+		return nil
+	}
+	items, err := dm.persistence.LoadActivations(ctx)
+	if err != nil {
+		return err
+	}
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+	for i := range items {
+		item := items[i]
+		copied := item
+		if copied.AccessHistory == nil {
+			copied.AccessHistory = []int64{}
+		}
+		dm.activations[copied.NodeID] = &copied
+	}
+	return nil
 }
 
 // RecordAccess 记录节点访问
@@ -117,6 +146,9 @@ func (dm *DecayManager) RecordAccess(ctx context.Context, nodeID string) error {
 		activation.Hidden = false
 	}
 
+	if dm.persistence != nil {
+		return dm.persistence.SaveActivation(ctx, *activation)
+	}
 	return nil
 }
 
@@ -179,6 +211,11 @@ func (dm *DecayManager) ApplyDecay(ctx context.Context) (int, int, error) {
 		if newActivation < dm.config.HideThreshold && !activation.Hidden {
 			activation.Hidden = true
 			hidden++
+		}
+		if dm.persistence != nil {
+			if err := dm.persistence.SaveActivation(ctx, *activation); err != nil {
+				return decayed, hidden, err
+			}
 		}
 	}
 
@@ -337,12 +374,12 @@ func (dm *DecayManager) GetStats() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"total_nodes":       totalNodes,
-		"hidden_nodes":      hiddenCount,
-		"visible_nodes":     totalNodes - hiddenCount,
-		"total_accesses":    totalAccess,
+		"total_nodes":        totalNodes,
+		"hidden_nodes":       hiddenCount,
+		"visible_nodes":      totalNodes - hiddenCount,
+		"total_accesses":     totalAccess,
 		"average_activation": avgActivation,
-		"config":            dm.config,
+		"config":             dm.config,
 	}
 }
 

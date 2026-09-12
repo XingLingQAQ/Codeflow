@@ -6,11 +6,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // SQLiteTripleStore SQLite三元组存储实现
@@ -27,7 +29,21 @@ func NewSQLiteTripleStore(dbPath string, config *TripleStoreConfig) (*SQLiteTrip
 		cfg = *config
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL")
+	if dbPath != ":memory:" {
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+			return nil, fmt.Errorf("create samg db dir: %w", err)
+		}
+	}
+	var db *sql.DB
+	var err error
+	if dbPath == ":memory:" {
+		// 原内存库 DSN 带 _foreign_keys=on：保持工厂默认开启。
+		db, err = dbx.Open(":memory:")
+	} else {
+		// T0.01.c 裁定：samg 全部建表 SQL 未声明任何 FOREIGN KEY 约束，
+		// FK 开关为 no-op，回归工厂默认 on（面向未来保护）。
+		db, err = dbx.Open(dbPath, dbx.WithSynchronous("NORMAL"))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -36,10 +52,17 @@ func NewSQLiteTripleStore(dbPath string, config *TripleStoreConfig) (*SQLiteTrip
 		config: cfg,
 		db:     db,
 	}
+	db.SetMaxOpenConns(1)
 
 	if err := store.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+	}
+	var quick string
+	if err := db.QueryRow("PRAGMA quick_check").Scan(&quick); err != nil || quick != "ok" {
+		_ = db.Close()
+		if err == nil { err = fmt.Errorf("quick_check returned %q", quick) }
+		return nil, fmt.Errorf("samg integrity check failed: %w", err)
 	}
 
 	return store, nil
@@ -96,10 +119,64 @@ func (s *SQLiteTripleStore) initSchema() error {
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS node_activations (
+		node_id TEXT PRIMARY KEY,
+		label TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL DEFAULT '',
+		activation REAL NOT NULL,
+		access_count INTEGER NOT NULL,
+		last_access_time INTEGER NOT NULL,
+		created_time INTEGER NOT NULL,
+		access_history TEXT NOT NULL DEFAULT '[]',
+		hidden INTEGER NOT NULL DEFAULT 0
+	);
 	`
 
 	_, err := s.db.Exec(schema)
 	return err
+}
+
+// LoadActivations restores SAMG access metadata after a process restart.
+func (s *SQLiteTripleStore) LoadActivations(ctx context.Context) ([]NodeActivation, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT node_id,label,type,activation,access_count,last_access_time,created_time,access_history,hidden FROM node_activations ORDER BY node_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]NodeActivation, 0)
+	for rows.Next() {
+		var item NodeActivation
+		var history string
+		var hidden int
+		if err := rows.Scan(&item.NodeID, &item.Label, &item.Type, &item.Activation, &item.AccessCount, &item.LastAccessTime, &item.CreatedTime, &history, &hidden); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(history), &item.AccessHistory); err != nil {
+			return nil, fmt.Errorf("decode activation history: %w", err)
+		}
+		item.Hidden = hidden != 0
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// SaveActivation atomically replaces one node's access metadata.
+func (s *SQLiteTripleStore) SaveActivation(ctx context.Context, item NodeActivation) error {
+	history, err := json.Marshal(item.AccessHistory)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO node_activations (node_id,label,type,activation,access_count,last_access_time,created_time,access_history,hidden)
+		VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(node_id) DO UPDATE SET label=excluded.label,type=excluded.type,activation=excluded.activation,access_count=excluded.access_count,last_access_time=excluded.last_access_time,created_time=excluded.created_time,access_history=excluded.access_history,hidden=excluded.hidden`, item.NodeID, item.Label, item.Type, item.Activation, item.AccessCount, item.LastAccessTime, item.CreatedTime, string(history), sqliteBool(item.Hidden))
+	return err
+}
+
+func sqliteBool(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // Close 关闭数据库连接

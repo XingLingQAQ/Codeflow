@@ -1,6 +1,6 @@
 // Flow engine client (experimental API /api/v1/flows). Reuses the dynamic
 // api base + envelope handling from apps/workbench/api.ts.
-import { get, post, getApiBase } from '../../api';
+import { del, get, post, getApiBase } from '../../api';
 
 export type FlowStatus = 'active' | 'completed' | 'aborted';
 export type StageStatus = 'pending' | 'active' | 'waiting_gate' | 'done' | 'skipped';
@@ -28,6 +28,7 @@ export interface Stage {
   type: StageType;
   name: string;
   canvas: string;
+  agent_id?: string;
   status: StageStatus;
   optional: boolean;
   snapshot_id?: string;
@@ -70,8 +71,33 @@ export interface FlowTemplateInfo {
   id: string;
   name?: string;
   description?: string;
-  stages?: { type: StageType; name?: string; optional?: boolean }[];
+  source?: 'builtin' | 'custom';
+  stages?: FlowTemplateStage[];
+  loops?: { from: StageType; to: StageType }[];
   [k: string]: unknown;
+}
+
+export interface FlowTemplateGate {
+  phase: 'enter' | 'exit';
+  kind: 'auto' | 'human_approval' | 'agent_check';
+  on_fail?: 'block' | 'escalate_to_debate';
+}
+
+export interface FlowTemplateStage {
+  type: StageType;
+  name: string;
+  canvas: string;
+  agent_id?: string;
+  optional: boolean;
+  gates?: FlowTemplateGate[];
+}
+
+export interface FlowTemplateInput {
+  id: string;
+  name: string;
+  description?: string;
+  stages: FlowTemplateStage[];
+  loops?: { from: StageType; to: StageType }[];
 }
 
 const base = () => `${getApiBase()}/api/v1/flows`;
@@ -125,7 +151,8 @@ export async function createFlow(
           id: 'ms-' + i,
           type: s.type as StageType,
           name: s.name ?? s.type,
-          canvas: s.type,
+          canvas: s.canvas ?? s.type,
+          agent_id: s.agent_id,
           status: i === 0 ? 'active' as const : 'pending' as const,
           optional: !!s.optional,
           order: i,
@@ -155,6 +182,43 @@ export async function listFlowTemplates(signal?: AbortSignal) {
     }
   }
   return get<{ items: FlowTemplateInfo[]; ids: string[]; total: number }>(`${base()}/templates`, undefined, signal);
+}
+
+export async function saveFlowTemplate(input: FlowTemplateInput, signal?: AbortSignal) {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      const templates = store.MOCK_TEMPLATES as FlowTemplateInfo[];
+      const index = templates.findIndex((item) => item.id === input.id);
+      if (index >= 0 && templates[index].source !== 'custom') {
+        throw new Error('内置模板不可修改');
+      }
+      const item: FlowTemplateInfo = { ...input, source: 'custom' };
+      if (index >= 0) templates[index] = item;
+      else templates.push(item);
+      return { id: input.id };
+    }
+  }
+  return post<{ id: string }>(`${base()}/templates/import`, input, signal);
+}
+
+export async function deleteFlowTemplate(id: string, signal?: AbortSignal): Promise<void> {
+  if (import.meta.env.DEV) {
+    const { isMockActive, jitter, getMockStore } = await import('../mocks');
+    if (isMockActive()) {
+      await jitter();
+      const store = await getMockStore();
+      const templates = store.MOCK_TEMPLATES as FlowTemplateInfo[];
+      const index = templates.findIndex((item) => item.id === id);
+      if (index < 0) throw new Error('模板不存在');
+      if (templates[index].source !== 'custom') throw new Error('内置模板不可删除');
+      templates.splice(index, 1);
+      return;
+    }
+  }
+  await del<{ deleted: boolean }>(`${base()}/templates/${encodeURIComponent(id)}`, signal);
 }
 
 // ---- Stage lifecycle (advance / skip / loop / gate decisions) ----

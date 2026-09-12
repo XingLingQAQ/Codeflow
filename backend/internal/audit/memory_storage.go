@@ -49,6 +49,9 @@ func (m *MemoryStorage) Get(ctx context.Context, id string) (*AuditLogEntry, err
 func (m *MemoryStorage) Query(ctx context.Context, query *AuditQuery) ([]AuditLogEntry, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if query == nil {
+		query = &AuditQuery{}
+	}
 
 	var filtered []AuditLogEntry
 
@@ -102,7 +105,7 @@ func (m *MemoryStorage) GetLastEntry(ctx context.Context) (*AuditLogEntry, error
 	defer m.mu.RUnlock()
 
 	if len(m.entries) == 0 {
-		return nil, fmt.Errorf("no entries found")
+		return nil, nil
 	}
 
 	return &m.entries[len(m.entries)-1], nil

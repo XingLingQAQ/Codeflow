@@ -256,16 +256,16 @@ export class PrefixCache<T = unknown> implements IPrefixCache<T> {
   private ensureCapacity(newTokens: number): void {
     // 检查条目数量
     while (this.cache.size >= this.config.maxEntries) {
-      this.evictOne();
+      if (!this.evictOne()) break;
     }
 
     // 检查 token 总量
     while (this.stats.totalTokens + newTokens > this.config.maxTokens) {
-      this.evictOne();
+      if (!this.evictOne()) break;
     }
   }
 
-  private evictOne(): void {
+  private evictOne(): boolean {
     let victimKey: string | null = null;
 
     switch (this.config.evictionPolicy) {
@@ -283,7 +283,10 @@ export class PrefixCache<T = unknown> implements IPrefixCache<T> {
     if (victimKey) {
       this.cache.delete(victimKey);
       this.stats.evictions++;
+      this.updateStats();
+      return true;
     }
+    return false;
   }
 
   private findLRUVictim(): string | null {

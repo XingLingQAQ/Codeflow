@@ -58,6 +58,8 @@ export declare class AiderCodeEditor implements ICodeEditor {
      * 清理所有备份
      */
     clearBackups(): Promise<void>;
+    getAdapter(): AiderAdapter;
+    getConfig(): AiderEditorConfig;
     private resolvePath;
     private backup;
     private emptyDiff;

@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "step_id": "T0.06.a",
+  "plan_version": "v3.0-dispatch-4",
+  "created": "2026-09-10",
+  "hash_algorithm": "sha256",
+  "line_endings": "LF for every file, enforced by .gitattributes ('* text=lf') so the hashes below stay valid on any platform regardless of core.autocrlf",
+  "usage": [
+    "Copy the fixture directory into a temp dir (t.TempDir / os.MkdirTemp) before any mutation or command execution; the source tree under backend/internal/api/testdata/journeys/ must stay byte-identical to this manifest.",
+    "Never point a destructive test case at a real repository or at this source tree.",
+    "Journey test helpers (T0.06.b) should verify copied files against the hashes below before use."
+  ],
+  "meta_files": [
+    { "path": ".gitattributes", "sha256": "5e4b796bda3ea206eaf2dfa81c4413c3ca6f8865327db18ba5710741ffd82aea", "bytes": 196, "note": "pins LF endings so fixture hashes stay valid across platforms" },
+    { "path": "manifest.json", "note": "this file; excluded from hashing because it cannot hash itself" }
+  ],
+  "prohibitions": [
+    "no network access in any fixture command (the verified commands below need none)",
+    "no writes outside the fixture copy",
+    "no real credentials, tokens, or .env files (.env.example holds comments only)",
+    "no .git directories and no real repositories",
+    "no files larger than 100KB and no binary files",
+    "never edit a fixture to make a failing product check pass; extend the fixture set through the plan instead"
+  ],
+  "fixtures": [
+    {
+      "name": "project-go-small",
+      "path": "project-go-small",
+      "kind": "go-module",
+      "purpose": "Small independent Go module for journey E2E: one testable function plus one duplicate-name candidate pair for guard rename/similarity scenarios. Own go.mod, zero external dependencies (no go.sum on purpose), does not import any codeflow package.",
+      "testable_function": {
+        "name": "Add",
+        "package": "mathx",
+        "source": "mathx/mathx.go",
+        "test": "mathx/mathx_test.go"
+      },
+      "duplicate_name_candidate": {
+        "function": "Normalize",
+        "files": ["slug/slug.go", "ident/ident.go"],
+        "note": "Same function name in two packages with deliberately different implementations (lowercase+dash vs uppercase+underscore). Separate packages are required: same-name functions in one package would not compile. Both implementations compile (verified via go build ./...)."
+      },
+      "files": [
+        { "path": "README.md", "sha256": "1ce99794d33eec835c83520cf178f0364b796caae8015ccf6a56548305aed2c6", "bytes": 851 },
+        { "path": "go.mod", "sha256": "fc2894cfdb4fc37af5fe23ef44e434a2125df31b7d83bb50113f36fc9aca6f69", "bytes": 57 },
+        { "path": "ident/ident.go", "sha256": "9249ae50ba881d2ad83f01e5dcb7312071d31fbd19fedf1d89499683517f2dbc", "bytes": 401 },
+        { "path": "mathx/mathx.go", "sha256": "6c76cb54121fe607311d5c2f0a923555d5925ecb4c3821f1fdd44fe7765af5d5", "bytes": 160 },
+        { "path": "mathx/mathx_test.go", "sha256": "842e4f62353bc21de9e3b249132c12a708404b8d5d35f51a4e8d73709618fce2", "bytes": 308 },
+        { "path": "slug/slug.go", "sha256": "b2025780263e77636a48ec327ed2ad03b0a19d851771c6567472fa2106775a19", "bytes": 389 }
+      ],
+      "expected_commands": [
+        {
+          "name": "test",
+          "argv": ["go", "test", "./..."],
+          "env": { "CGO_ENABLED": "0" },
+          "expect_exit": 0,
+          "note": "mathx test passes; slug/ident report '[no test files]' which still exits 0"
+        }
+      ],
+      "verified": {
+        "date": "2026-09-10",
+        "platform": "windows/amd64, Git Bash",
+        "toolchain": "go1.26.6",
+        "runs": [
+          { "command": "CGO_ENABLED=0 go test ./...", "cwd": "temp-dir copy", "exit_code": 0, "log": ".tmp/t0.06a/go-test.log" },
+          { "command": "CGO_ENABLED=0 go build ./...", "cwd": "temp-dir copy", "exit_code": 0, "log": ".tmp/t0.06a/go-build-fixture.log", "note": "proves the duplicate-name pair compiles" },
+          { "command": "CGO_ENABLED=0 go vet ./...", "cwd": "temp-dir copy", "exit_code": 0, "log": ".tmp/t0.06a/go-vet.log" }
+        ]
+      }
+    },
+    {
+      "name": "project-node-small",
+      "path": "project-node-small",
+      "kind": "node-project",
+      "purpose": "Zero-dependency Node project for journey E2E: lint/typecheck/test scripts that really run, plus a comments-only .env.example. Sources use erasable TypeScript syntax parsed by Node's built-in type stripping; tests use node:test + node:assert only.",
+      "scripts": {
+        "lint": "node scripts/lint.js  (local zero-dependency lint rules over src/ and test/)",
+        "typecheck": "node --experimental-strip-types --check src/greet.ts && node --experimental-strip-types --check test/greet.test.ts",
+        "test": "node --test"
+      },
+      "files": [
+        { "path": ".env.example", "sha256": "3906d77056dcff0d607d75175e18c9cf1e9a998b42794f53d1ed4374d6e71315", "bytes": 268, "note": "comments only, no values" },
+        { "path": "README.md", "sha256": "8710b3b7ed7fa8e6483a2b3269ded37bca051bed72f9ec549f1fcf687a9da379", "bytes": 860 },
+        { "path": "package.json", "sha256": "7ebd31469d6d051ed848137d139ee694611f9a93c9f33d7e099f282c1b16a14c", "bytes": 428 },
+        { "path": "scripts/lint.js", "sha256": "b1208eeda2a290735a8a5be89f5c9f9e1b7f4bb23520b89900b672fb3657a391", "bytes": 1299 },
+        { "path": "src/greet.ts", "sha256": "ddadb22209a4466c1f4c6075e56c0317cfe9a29fed48c6dacdb3241447368efc", "bytes": 76 },
+        { "path": "test/greet.test.ts", "sha256": "7bde59193db6733cb37fed1890da209b2621063e3e63bcb8d32ad776efc456a2", "bytes": 318 }
+      ],
+      "expected_commands": [
+        { "name": "lint", "argv": ["npm", "run", "lint"], "expect_exit": 0 },
+        { "name": "typecheck", "argv": ["npm", "run", "typecheck"], "expect_exit": 0 },
+        { "name": "test", "argv": ["npm", "run", "test"], "expect_exit": 0, "note": "equivalent to 'node --test'" }
+      ],
+      "verified": {
+        "date": "2026-09-10",
+        "platform": "windows/amd64, Git Bash",
+        "toolchain": "node v24.19.0, npm (bundled)",
+        "runs": [
+          { "command": "npm run lint", "cwd": "temp-dir copy", "exit_code": 0, "log": ".tmp/t0.06a/node-lint.log" },
+          { "command": "npm run typecheck", "cwd": "temp-dir copy", "exit_code": 0, "log": ".tmp/t0.06a/node-typecheck.log" },
+          { "command": "npm run test", "cwd": "temp-dir copy", "exit_code": 0, "tests": "2 passed, 0 failed", "log": ".tmp/t0.06a/node-test.log" },
+          { "command": "node --test", "cwd": "temp-dir copy", "exit_code": 0, "tests": "2 passed, 0 failed", "log": ".tmp/t0.06a/node-test-direct.log" }
+        ],
+        "negative_probes": [
+          { "probe": "append 'var x = eval(\"1\")' to src/greet.ts", "command": "node scripts/lint.js", "exit_code": 1, "note": "lint reports no-eval and no-var" },
+          { "probe": "add non-erasable TS (enum) file", "command": "node --experimental-strip-types --check src/broken.ts", "exit_code": 1 },
+          { "probe": "append a failing test case", "command": "node --test", "exit_code": 1 }
+        ]
+      }
+    },
+    {
+      "name": "project-no-git",
+      "path": "project-no-git",
+      "kind": "plain-directory",
+      "purpose": "Small plain-text tree with no .git directory, for verifying the copy-based shadow path (runworkspace must build the shadow from a controlled directory copy plus a content-hash manifest, not from git). Consumed as data; it has no executable commands.",
+      "guarantees": [
+        "no .git directory anywhere in the tree (scanned 2026-09-10)",
+        "plain text only; no symlinks/junctions; no binaries"
+      ],
+      "files": [
+        { "path": "README.md", "sha256": "c14f7bf178e80aabc90a626469acd8c348033c155e8077b93689dc3daf8b8201", "bytes": 668 },
+        { "path": "docs/notes.md", "sha256": "8e3c0c89e12c205f256258d857ba752ca1ded4df0ce28cc918b8c217aa8567b1", "bytes": 266 },
+        { "path": "src/hello.txt", "sha256": "364743706fbaae26dbf1ccbd0d93893f58bdf20d0509c705fc47d5131a908b6f", "bytes": 156 }
+      ],
+      "expected_commands": []
+    }
+  ]
+}

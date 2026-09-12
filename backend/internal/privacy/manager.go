@@ -67,30 +67,31 @@ func (m *PrivacyManager) Encrypt(_ context.Context, plaintext string, policy *Pr
 		return nil, fmt.Errorf("generate salt: %w", err)
 	}
 
-	iv := make([]byte, m.config.IVLength)
+	iv := make([]byte, 12)
 	if _, err := rand.Read(iv); err != nil {
-		return nil, fmt.Errorf("generate iv: %w", err)
+		return nil, fmt.Errorf("generate nonce: %w", err)
 	}
 
 	// 派生密钥
-	key, err := m.deriveKey(m.masterPassword, salt)
+	key, err := m.deriveKeyForAlgorithm(m.masterPassword, salt, AES256GCM)
 	if err != nil {
 		return nil, fmt.Errorf("derive key: %w", err)
 	}
 
-	// AES-CBC 加密
+	// AES-GCM authenticated encryption.
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("create cipher: %w", err)
 	}
 
-	// PKCS7 填充
-	plainBytes := []byte(plaintext)
-	paddedPlain := pkcs7Pad(plainBytes, aes.BlockSize)
-
-	ciphertext := make([]byte, len(paddedPlain))
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext, paddedPlain)
+	// Keep the GCM authentication tag separate for wire compatibility.
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("create gcm: %w", err)
+	}
+	sealed := gcm.Seal(nil, iv, []byte(plaintext), []byte(AES256GCM))
+	tagOffset := len(sealed) - gcm.Overhead()
+	ciphertext, tag := sealed[:tagOffset], sealed[tagOffset:]
 
 	// 更新性能指标
 	elapsed := time.Since(startTime)
@@ -100,12 +101,16 @@ func (m *PrivacyManager) Encrypt(_ context.Context, plaintext string, policy *Pr
 		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
 		IV:         base64.StdEncoding.EncodeToString(iv),
 		Salt:       base64.StdEncoding.EncodeToString(salt),
-		Algorithm:  m.config.Algorithm,
+		Algorithm:  AES256GCM,
+		Tag:        base64.StdEncoding.EncodeToString(tag),
 	}, nil
 }
 
 // Decrypt 解密数据
 func (m *PrivacyManager) Decrypt(_ context.Context, encrypted *EncryptedData) (*DecryptedData, error) {
+	if encrypted == nil {
+		return &DecryptedData{Verified: false}, nil
+	}
 	startTime := time.Now()
 
 	// 解码 salt 和 IV
@@ -125,29 +130,58 @@ func (m *PrivacyManager) Decrypt(_ context.Context, encrypted *EncryptedData) (*
 	}
 
 	// 派生密钥
-	key, err := m.deriveKey(m.masterPassword, salt)
+	algorithm := encrypted.Algorithm
+	if algorithm == "" {
+		algorithm = AES256CBC
+	}
+	key, err := m.deriveKeyForAlgorithm(m.masterPassword, salt, algorithm)
 	if err != nil {
 		return &DecryptedData{Verified: false}, nil
 	}
 
-	// AES-CBC 解密
+	// Dispatch authenticated records and the read-only legacy CBC format.
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return &DecryptedData{Verified: false}, nil
 	}
 
-	if len(ciphertext)%aes.BlockSize != 0 {
+	var plaintext []byte
+	legacy := false
+	switch algorithm {
+	case AES256GCM:
+		if len(iv) != 12 {
+			return &DecryptedData{Verified: false}, nil
+		}
+		tag, decodeErr := base64.StdEncoding.DecodeString(encrypted.Tag)
+		if decodeErr != nil {
+			return &DecryptedData{Verified: false}, nil
+		}
+		gcm, gcmErr := cipher.NewGCM(block)
+		if gcmErr != nil || len(tag) != gcm.Overhead() {
+			return &DecryptedData{Verified: false}, nil
+		}
+		plaintext, err = gcm.Open(nil, iv, append(ciphertext, tag...), []byte(AES256GCM))
+		if err != nil {
+			return &DecryptedData{Verified: false}, nil
+		}
+	case AES256CBC, AES128CBC:
+		legacy = true
+		if len(iv) != aes.BlockSize || len(ciphertext) == 0 || len(ciphertext)%aes.BlockSize != 0 {
+			return &DecryptedData{Verified: false}, nil
+		}
+		plaintext = make([]byte, len(ciphertext))
+		cipher.NewCBCDecrypter(block, iv).CryptBlocks(plaintext, ciphertext)
+	default:
 		return &DecryptedData{Verified: false}, nil
 	}
 
-	plaintext := make([]byte, len(ciphertext))
-	mode := cipher.NewCBCDecrypter(block, iv)
-	mode.CryptBlocks(plaintext, ciphertext)
-
-	// PKCS7 去填充
-	unpaddedPlain, err := pkcs7Unpad(plaintext)
-	if err != nil {
-		return &DecryptedData{Verified: false}, nil
+	// Only legacy CBC records require padding removal.
+	unpaddedPlain := plaintext
+	if legacy {
+		unpaddedPlain, err = pkcs7Unpad(plaintext)
+		if err != nil {
+			return &DecryptedData{Verified: false}, nil
+		}
 	}
 
 	// 更新性能指标
@@ -157,6 +191,7 @@ func (m *PrivacyManager) Decrypt(_ context.Context, encrypted *EncryptedData) (*
 	return &DecryptedData{
 		Plaintext: string(unpaddedPlain),
 		Verified:  true,
+		Legacy:    legacy,
 	}, nil
 }
 
@@ -175,7 +210,7 @@ func (m *PrivacyManager) GenerateKey(_ context.Context) (*KeyInfo, error) {
 
 	keyInfo := &KeyInfo{
 		ID:        keyID,
-		Algorithm: m.config.Algorithm,
+		Algorithm: AES256GCM,
 		CreatedAt: time.Now().UnixMilli(),
 	}
 
@@ -272,6 +307,18 @@ func (m *PrivacyManager) DecryptDocument(ctx context.Context, doc *PrivacyAwareD
 		}
 		if decrypted.Verified {
 			doc.Content = decrypted.Plaintext
+			if decrypted.Legacy {
+				migrated, migrateErr := m.Encrypt(ctx, decrypted.Plaintext, &doc.Policy)
+				if migrateErr != nil {
+					return nil, fmt.Errorf("migrate legacy encryption: %w", migrateErr)
+				}
+				doc.EncryptedContent = migrated
+				m.mu.Lock()
+				if stored, ok := m.documents[doc.ID]; ok {
+					stored.EncryptedContent = migrated
+				}
+				m.mu.Unlock()
+			}
 		}
 	}
 	return doc, nil
@@ -358,8 +405,12 @@ func (m *PrivacyManager) ResetMetrics() {
 
 // deriveKey 派生密钥
 func (m *PrivacyManager) deriveKey(password string, salt []byte) ([]byte, error) {
+	return m.deriveKeyForAlgorithm(password, salt, AES256GCM)
+}
+
+func (m *PrivacyManager) deriveKeyForAlgorithm(password string, salt []byte, algorithm EncryptionAlgorithm) ([]byte, error) {
 	keyLength := 32 // AES-256
-	if m.config.Algorithm == AES128CBC {
+	if algorithm == AES128CBC {
 		keyLength = 16
 	}
 

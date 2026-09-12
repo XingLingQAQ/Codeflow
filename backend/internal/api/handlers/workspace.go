@@ -11,14 +11,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
-// workspaceRootFromRequest resolves the absolute root.
-// Prefer header X-Codeflow-Workspace-Root; fallback JSON/query "root".
+// workspaceRootFromRequest resolves the authoritative Project root. The old
+// JSON/query root input is available only behind an explicit migration switch;
+// the legacy header remains temporarily supported for desktop clients.
 func workspaceRootFromRequest(c *gin.Context, bodyRoot string) string {
+	projectID := strings.TrimSpace(c.GetHeader("X-Codeflow-Project-ID"))
+	if projectID == "" {
+		projectID = strings.TrimSpace(c.Query("project_id"))
+	}
+	if projectID != "" {
+		if p, err := project.GetProjectService().GetProject(c.Request.Context(), projectID); err == nil && p != nil && p.BindingState == project.BindingStateBound && p.WorkspaceRoot != "" {
+			return p.WorkspaceRoot
+		}
+	}
 	if h := strings.TrimSpace(c.GetHeader("X-Codeflow-Workspace-Root")); h != "" {
 		return h
+	}
+	if os.Getenv("CODEFLOW_ALLOW_LEGACY_WORKSPACE_ROOT") != "1" {
+		return ""
 	}
 	if bodyRoot != "" {
 		return bodyRoot
@@ -26,10 +40,18 @@ func workspaceRootFromRequest(c *gin.Context, bodyRoot string) string {
 	return strings.TrimSpace(c.Query("root"))
 }
 
+func workspacePathFromRequest(c *gin.Context) string {
+	path := strings.TrimSpace(c.Query("path"))
+	if path == "" {
+		path = strings.TrimSpace(c.Query("relative_path"))
+	}
+	return path
+}
+
 // ListWorkspace handles GET /api/v1/workspace/list?root=&path=
 func ListWorkspace(c *gin.Context) {
 	root := workspaceRootFromRequest(c, "")
-	path := c.Query("path")
+	path := workspacePathFromRequest(c)
 	if root == "" {
 		respondError(c, http.StatusBadRequest, "root is required (query root= or header X-Codeflow-Workspace-Root)")
 		return
@@ -53,7 +75,7 @@ func ListWorkspace(c *gin.Context) {
 // ReadWorkspaceFile handles GET /api/v1/workspace/read?root=&path=&staged=
 func ReadWorkspaceFile(c *gin.Context) {
 	root := workspaceRootFromRequest(c, "")
-	path := c.Query("path")
+	path := workspacePathFromRequest(c)
 	if root == "" || path == "" {
 		respondError(c, http.StatusBadRequest, "root and path are required")
 		return
@@ -77,9 +99,9 @@ func ReadWorkspaceFile(c *gin.Context) {
 	}
 	// Return content as base64 to stay JSON-safe for binary files.
 	respondOK(c, gin.H{
-		"path":     fc.Path,
-		"size":     fc.Size,
-		"mod_time": fc.ModTime,
+		"path":           fc.Path,
+		"size":           fc.Size,
+		"mod_time":       fc.ModTime,
 		"content_base64": base64.StdEncoding.EncodeToString(fc.Content),
 		"content_text":   string(fc.Content), // convenience for text
 	})
@@ -87,7 +109,9 @@ func ReadWorkspaceFile(c *gin.Context) {
 
 type writeWorkspaceBody struct {
 	Root          string `json:"root"`
-	Path          string `json:"path" binding:"required"`
+	ProjectID     string `json:"project_id"`
+	Path          string `json:"path"`
+	RelativePath  string `json:"relative_path"`
 	ContentText   string `json:"content_text"`
 	ContentBase64 string `json:"content_base64"`
 	CreateParents bool   `json:"create_parents"`
@@ -95,8 +119,10 @@ type writeWorkspaceBody struct {
 }
 
 type promoteWorkspaceBody struct {
-	Root string `json:"root"`
-	Path string `json:"path" binding:"required"`
+	Root         string `json:"root"`
+	ProjectID    string `json:"project_id"`
+	Path         string `json:"path"`
+	RelativePath string `json:"relative_path"`
 }
 
 // WriteWorkspaceFile handles POST /api/v1/workspace/write
@@ -105,6 +131,16 @@ func WriteWorkspaceFile(c *gin.Context) {
 	if err := c.ShouldBindJSON(&body); err != nil {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
+	}
+	if body.RelativePath != "" {
+		body.Path = body.RelativePath
+	}
+	if strings.TrimSpace(body.Path) == "" {
+		respondError(c, http.StatusBadRequest, "relative_path is required")
+		return
+	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
 	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {
@@ -133,6 +169,7 @@ func WriteWorkspaceFile(c *gin.Context) {
 	}
 	ent, err := workspace.GetService().Write(c.Request.Context(), &workspace.WriteRequest{
 		Root:          root,
+		ProjectID:     body.ProjectID,
 		Path:          body.Path,
 		Content:       content,
 		CreateParents: body.CreateParents,
@@ -153,11 +190,10 @@ func WriteWorkspaceFile(c *gin.Context) {
 	respondOK(c, ent)
 }
 
-
 // StatWorkspaceFile handles GET /api/v1/workspace/stat?root=&path=
 func StatWorkspaceFile(c *gin.Context) {
 	root := workspaceRootFromRequest(c, "")
-	path := c.Query("path")
+	path := workspacePathFromRequest(c)
 	if root == "" || path == "" {
 		respondError(c, http.StatusBadRequest, "root and path are required")
 		return
@@ -200,6 +236,16 @@ func PromoteWorkspaceFile(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
+	if body.RelativePath != "" {
+		body.Path = body.RelativePath
+	}
+	if strings.TrimSpace(body.Path) == "" {
+		respondError(c, http.StatusBadRequest, "relative_path is required")
+		return
+	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
+	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {
 		respondError(c, http.StatusBadRequest, "root is required")
@@ -224,6 +270,16 @@ func DiscardWorkspaceStaged(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
+	if body.RelativePath != "" {
+		body.Path = body.RelativePath
+	}
+	if strings.TrimSpace(body.Path) == "" {
+		respondError(c, http.StatusBadRequest, "relative_path is required")
+		return
+	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
+	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {
 		respondError(c, http.StatusBadRequest, "root is required")
@@ -243,7 +299,8 @@ func DiscardWorkspaceStaged(c *gin.Context) {
 // PromoteAllWorkspace handles POST /api/v1/workspace/promote-all
 func PromoteAllWorkspace(c *gin.Context) {
 	var body struct {
-		Root string `json:"root"`
+		Root      string `json:"root"`
+		ProjectID string `json:"project_id"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		// Empty body is allowed when root is provided via header.
@@ -251,6 +308,9 @@ func PromoteAllWorkspace(c *gin.Context) {
 			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 			return
 		}
+	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
 	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {
@@ -263,11 +323,11 @@ func PromoteAllWorkspace(c *gin.Context) {
 		// clients see what landed; HTTP stays 200 with error detail.
 		blocked := strings.Contains(err.Error(), "blocked by guard")
 		respondOK(c, gin.H{
-			"items":          items,
-			"total":          len(items),
-			"error":          err.Error(),
-			"partial":        true,
-			"guard_blocked":  blocked,
+			"items":         items,
+			"total":         len(items),
+			"error":         err.Error(),
+			"partial":       true,
+			"guard_blocked": blocked,
 		})
 		return
 	}
@@ -277,13 +337,17 @@ func PromoteAllWorkspace(c *gin.Context) {
 // DiscardAllWorkspaceStaged handles POST /api/v1/workspace/discard-all
 func DiscardAllWorkspaceStaged(c *gin.Context) {
 	var body struct {
-		Root string `json:"root"`
+		Root      string `json:"root"`
+		ProjectID string `json:"project_id"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		if c.Request.ContentLength > 0 {
 			respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 			return
 		}
+	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
 	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {

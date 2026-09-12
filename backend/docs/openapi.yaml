@@ -4,6 +4,13 @@ info:
   description: |
     CodeFlow Backend API provides endpoints for memory management, search, context analysis,
     agent management, blackboard collaboration, debate system, and task planning.
+    The desktop launcher reads `CODEFLOW_HANDSHAKE:{...}` from the sidecar process and keeps
+    its process-lifetime token in memory. All operations except `/health` require that token.
+    Session messages, conversation traces, memory items, atomic/vector memory, and SAMG graph
+    state use durable SQLite stores in production. A missing required store returns 503 instead
+    of creating an empty in-memory service. Every authenticated mutation produces a baseline
+    audit record for both success and failure; retained audit files remain verifiable from a
+    persisted rotation anchor.
   version: 0.1.0
   contact:
     name: CodeFlow Team
@@ -11,14 +18,20 @@ info:
     name: MIT
 
 servers:
-  - url: http://localhost:8080
-    description: Local development server
+  - url: http://127.0.0.1:{port}
+    description: Loopback sidecar; the actual port comes from the startup handshake
+    variables:
+      port:
+        default: '8080'
+
+security:
+  - SidecarBearer: []
 
 tags:
   - name: Health
     description: Health check endpoints
   - name: Memory
-    description: STM/LTM memory management
+    description: Durable STM/LTM memory management with stable limit/offset pagination
   - name: MemoryPreflight
     description: Progressive memory disclosure with semantic preflight
   - name: Search
@@ -48,7 +61,7 @@ tags:
   - name: Summarize
     description: Conversation summarization and context compression
   - name: Audit
-    description: Immutable audit logging with hash chain verification
+    description: Tamper-evident mutation history with startup verification and anchored retention
   - name: Privacy
     description: Privacy-aware encryption, decryption, and PII redaction
   - name: Isolation
@@ -63,12 +76,15 @@ tags:
     description: Skill registry (experimental) — match and prompt injection
   - name: Guard
     description: Write policy guard (experimental) — dry-run check and AST index
+  - name: Runs
+    description: Run execution (experimental) — CodeFlow 3.0 run/event/command contracts, contract-first per plan §20/§27.3
 
 paths:
   /health:
     get:
       tags: [Health]
       summary: Health check
+      security: []
       responses:
         '200':
           description: Server is healthy
@@ -128,7 +144,7 @@ paths:
           in: query
           schema:
             type: integer
-            default: 20
+            default: 50
         - name: offset
           in: query
           schema:
@@ -141,6 +157,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MemoryListEnvelope'
+        '503':
+          description: Durable memory service is not initialized
     post:
       tags: [Memory]
       summary: Create memory item
@@ -157,6 +175,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MemoryItemEnvelope'
+        '503':
+          description: Durable memory service is not initialized
 
   /api/v1/memory/items/{id}:
     patch:
@@ -842,6 +862,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CallTraceResponse'
+        '503':
+          description: Durable conversation service is not initialized
 
   /api/v1/conversations/{sessionId}/stop:
     post:
@@ -875,6 +897,10 @@ paths:
     get:
       tags: [Conversations]
       summary: WebSocket stream for conversation
+      description: |
+        The route fixes the connection to this session. The client cannot switch session or
+        subscribe to project/debate topics. Native clients use Bearer auth; browser clients
+        offer `codeflow.v1` and `codeflow.token.<token>` WebSocket subprotocols.
       parameters:
         - name: sessionId
           in: path
@@ -884,6 +910,12 @@ paths:
       responses:
         '101':
           description: WebSocket upgrade
+        '401':
+          description: Missing or invalid process token
+        '403':
+          description: Origin is not in the exact allowlist
+        '404':
+          description: Conversation not found
 
   /api/v1/blackboard/entries:
     get:
@@ -1175,6 +1207,9 @@ paths:
     get:
       tags: [Debates]
       summary: WebSocket stream for debate
+      description: |
+        The connection may subscribe only to `debate:{id}`. Browser clients authenticate with
+        the `codeflow.v1` and `codeflow.token.<token>` WebSocket subprotocols.
       parameters:
         - name: id
           in: path
@@ -1184,6 +1219,12 @@ paths:
       responses:
         '101':
           description: WebSocket upgrade
+        '401':
+          description: Missing or invalid process token
+        '403':
+          description: Origin is not in the exact allowlist
+        '404':
+          description: Debate not found
 
   /api/v1/plans:
     get:
@@ -1629,7 +1670,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AtomicMemoryEnvelope'
+                $ref: '#/components/schemas/AtomicMemoryMutationEnvelope'
 
   /api/v1/memory/atomic/search:
     get:
@@ -1694,7 +1735,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AtomicMemoryEnvelope'
+                $ref: '#/components/schemas/AtomicMemoryMutationEnvelope'
     delete:
       tags: [Memory]
       summary: Delete atomic memory
@@ -1710,7 +1751,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericMessageEnvelope'
+                $ref: '#/components/schemas/AtomicMemoryDeleteEnvelope'
 
   /api/v1/memory/atomic/decay:
     post:
@@ -1916,6 +1957,13 @@ paths:
     post:
       tags: [Projects]
       summary: Create project
+      description: Creates Project, default Session, and runnable default Flow through a durable forward-only saga. Retrying the same Idempotency-Key returns the original bindings. workspace_root must be under CODEFLOW_WORKSPACE_ROOTS unless CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1 is explicitly set.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -1927,7 +1975,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectEnvelope'
+                $ref: '#/components/schemas/ProjectCreationEnvelope'
+        '409':
+          description: The Idempotency-Key already accepted a different create payload. The response names the conflicting operation and the journaled intent fields that differ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCreateConflictEnvelope'
 
   /api/v1/projects/{id}:
     get:
@@ -1970,6 +2024,7 @@ paths:
     delete:
       tags: [Projects]
       summary: Delete project
+      description: Archives the Project, aborts active owned Flows, stops process-local workspace runtimes, and records a recoverable lifecycle journal. Session and Flow history are retained for the retention janitor.
       parameters:
         - name: id
           in: path
@@ -1983,6 +2038,71 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericMessageEnvelope'
+
+  /api/v1/projects/{id}/stream:
+    get:
+      tags: [Projects]
+      summary: WebSocket stream for project events
+      description: |
+        The connection may subscribe only to `flow:project:{id}`. Browser clients authenticate
+        with the `codeflow.v1` and `codeflow.token.<token>` WebSocket subprotocols.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '101':
+          description: WebSocket upgrade
+        '401':
+          description: Missing or invalid process token
+        '403':
+          description: Origin is not in the exact allowlist
+        '404':
+          description: Project not found
+
+  /api/v1/projects/{id}/restore:
+    post:
+      tags: [Projects]
+      summary: Restore an archived project
+      description: Reuses the retained Session and creates a runnable default Flow when the archived Flow is terminal. Progress is recorded in a lifecycle journal.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Restored project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCreationEnvelope'
+
+  /api/v1/projects/{id}/bind-workspace:
+    post:
+      tags: [Projects]
+      summary: Bind an existing directory as the authoritative workspace
+      description: The directory is canonicalized and checked against CODEFLOW_WORKSPACE_ROOTS. New roots are rejected when no allow-list is configured unless CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1 is set.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace_root]
+              properties:
+                workspace_root: { type: string }
+      responses:
+        '200':
+          description: Project with canonical workspace binding
 
   /api/v1/projects/{id}/plans:
     get:
@@ -2285,6 +2405,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkflowReplayEnvelope'
+        '403':
+          description: Session is not authorized for this project
 
   # ==================== Memory Preflight ====================
   /api/v1/memory/preflight:
@@ -2362,7 +2484,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GlobalConfig'
+              $ref: '#/components/schemas/GlobalConfigWrite'
       responses:
         '200':
           description: Config updated
@@ -2499,6 +2621,8 @@ paths:
       responses:
         '201':
           description: Variable created
+        '409':
+          description: Category conflict with an existing variable
 
   /api/v1/config/papi/{name}:
     get:
@@ -2531,6 +2655,8 @@ paths:
       responses:
         '200':
           description: Variable updated
+        '409':
+          description: Category conflict with an existing variable
     delete:
       tags: [PAPI]
       summary: Delete PAPI variable
@@ -2557,6 +2683,8 @@ paths:
       responses:
         '200':
           description: Resolved configuration
+        '409':
+          description: Category claimed by multiple persisted variables (deterministic conflict, no random pick)
 
   /api/v1/config/papi/hotswap:
     post:
@@ -2571,6 +2699,10 @@ paths:
       responses:
         '200':
           description: Variable hot-swapped
+        '404':
+          description: Variable not found
+        '409':
+          description: Category conflict with an existing variable
 
   /api/v1/config/papi/conflicts:
     get:
@@ -2578,7 +2710,7 @@ paths:
       summary: Detect PAPI conflicts
       responses:
         '200':
-          description: Conflict detection results
+          description: Conflict detection results plus load-time diagnostics for legacy persisted conflicts
 
   # ==================== Hooks ====================
   /api/v1/hooks:
@@ -2716,6 +2848,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SummarizeResponse'
+        '400':
+          description: Invalid parameter value (typed validation error) — the error envelope carries field (parameter name) and reason (§31.3)
 
   /api/v1/summarize/context:
     post:
@@ -2734,6 +2868,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CompressResponse'
+        '400':
+          description: Invalid parameter value (typed validation error) — the error envelope carries field (parameter name) and reason (§31.3)
+        '422':
+          description: budget_unsatisfiable — the preserved region plus the summary marker alone exceeds target_tokens; the error envelope carries code=budget_unsatisfiable with target_tokens and preserved_tokens, and the preserved region is never truncated (§31.3)
 
   /api/v1/summarize/skeleton:
     post:
@@ -4200,13 +4338,19 @@ paths:
       summary: List directory under project root
       x-codeflow-experimental: true
       parameters:
-        - name: root
+        - name: project_id
           in: query
           required: true
           schema:
             type: string
-        - name: path
+        - name: relative_path
           in: query
+          schema:
+            type: string
+        - name: root
+          in: query
+          deprecated: true
+          description: Legacy migration input; prefer project_id
           schema:
             type: string
         - name: X-Codeflow-Workspace-Root
@@ -4223,14 +4367,19 @@ paths:
       summary: Read file under project root
       x-codeflow-experimental: true
       parameters:
-        - name: root
+        - name: project_id
           in: query
           required: true
           schema:
             type: string
-        - name: path
+        - name: relative_path
           in: query
           required: true
+          schema:
+            type: string
+        - name: root
+          in: query
+          deprecated: true
           schema:
             type: string
         - name: staged
@@ -4249,14 +4398,19 @@ paths:
       summary: Stat file or directory under project root
       x-codeflow-experimental: true
       parameters:
-        - name: root
+        - name: project_id
           in: query
           required: true
           schema:
             type: string
-        - name: path
+        - name: relative_path
           in: query
           required: true
+          schema:
+            type: string
+        - name: root
+          in: query
+          deprecated: true
           schema:
             type: string
       responses:
@@ -4271,9 +4425,14 @@ paths:
       summary: List files in shadow staging (.codeflow/staging)
       x-codeflow-experimental: true
       parameters:
-        - name: root
+        - name: project_id
           in: query
           required: true
+          schema:
+            type: string
+        - name: root
+          in: query
+          deprecated: true
           schema:
             type: string
         - name: X-Codeflow-Workspace-Root
@@ -4928,7 +5087,152 @@ paths:
         '503':
           description: Guard engine unavailable
 
+  # ==================== Runs (experimental) ====================
+  /api/v1/projects/{pid}/runs:
+    post:
+      tags: [Runs]
+      summary: Create a run for a prepared task
+      description: Contract-first CodeFlow 3.0 endpoint (plan §20.1/§27.3); not yet registered in the backend router, implementation lands with the S1 run cards. The client generates the Idempotency-Key before sending and reconciles it as command_id (§20.4); the server never fabricates a queued run when the backend is unavailable (§27.3).
+      operationId: createRun
+      x-codeflow-experimental: true
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated command id; echoed as meta.command_id (§20.1/§20.4)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '202':
+          description: Run accepted (§20.1 success instance; meta carries command_id and revision)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunEnvelope'
+        '409':
+          description: Business-state or idempotency conflict — conflict, idempotency_key_reused, or base_changed with details.expected_commit/current_commit (§20.1 failure instance, §27.3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          description: Field or contract invalid — invalid_request (§27.3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          description: Execution backend unavailable — backend_unavailable (§27.3); no placeholder run is created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+
+  /api/v1/projects/{pid}/runs/{rid}/events:
+    get:
+      tags: [Runs]
+      summary: Replay run events after a sequence cursor
+      description: Contract-first CodeFlow 3.0 endpoint (plan §20.2/§27.3-§27.4); not yet registered in the backend router. after=0 with retention_floor=1 is a legal first replay (§20.2); sequence is the server-assigned run-scope projection, never client-supplied (§27.4). The client reads a consistent snapshot first, then resumes from the returned cursor (§20.2).
+      operationId: listRunEvents
+      x-codeflow-experimental: true
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: rid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: true
+          description: Replay strictly after this scope sequence, 0 or greater (§27.3)
+          schema:
+            type: integer
+            minimum: 0
+        - name: limit
+          in: query
+          required: false
+          description: Page size — default 200, maximum 1000 (§27.3)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        '200':
+          description: Event page (§20.2 instance — events/next_after/has_more/retention_floor/high_watermark)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunEventsEnvelope'
+        '410':
+          description: Cursor older than retention_floor-1 — event_gap with details.snapshot_url for snapshot-based resync (§20.2/§27.4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          description: after exceeds the current high_watermark (§27.4) — invalid_request; the flow-control reason invalid_cursor travels in details.reason per the §15 T0.03 namespace ruling (outside the closed error-code enum)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+
+  /api/v1/projects/{pid}/commands/{command_id}:
+    get:
+      tags: [Runs]
+      summary: Reconcile a command by client idempotency key
+      description: Contract-first CodeFlow 3.0 endpoint (plan §20.4/§27.3); not yet registered in the backend router. After a client-side timeout the client keeps the Idempotency-Key it generated before sending and reconciles here; re-sending the same key with an identical body is safe, and a command with external side effects whose outcome is unknown stays reconciling and must not be started a second time (§20.4).
+      operationId: getCommand
+      x-codeflow-experimental: true
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: command_id
+          in: path
+          required: true
+          description: The client-generated Idempotency-Key of the original write command (§20.4)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Command status — accepted/applied/rejected/reconciling (§20.4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandEnvelope'
+        '404':
+          description: No command record for this key, principal and project (§20.4) — the error body uses the unified ErrorEnvelope; command_not_found is the command-layer reason and per the §15 T0.03 namespace ruling is not part of the closed error-code enum, it is carried in error.details.reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+
 components:
+  securitySchemes:
+    SidecarBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-process-token
+      description: Process-lifetime token received from the sidecar startup handshake.
   schemas:
     Response:
       type: object
@@ -5818,8 +6122,43 @@ components:
             type: string
 
     # ==================== Config Schemas ====================
-    APIChannel:
+    APIChannelPublic:
       type: object
+      required: [id, name, provider, enabled, secret_status]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+          enum: [anthropic, openai, google, custom]
+        base_url:
+          type: string
+        enabled:
+          type: boolean
+        secret_ref:
+          type: string
+          readOnly: true
+        secret_status:
+          type: string
+          enum: [missing, configured]
+          readOnly: true
+        masked_value:
+          type: string
+          readOnly: true
+          example: "****cdef"
+        secret_version:
+          type: integer
+          readOnly: true
+        secret_updated_at:
+          type: integer
+          format: int64
+          readOnly: true
+
+    APIChannelWrite:
+      type: object
+      required: [id, provider, enabled]
       properties:
         id:
           type: string
@@ -5830,6 +6169,12 @@ components:
           enum: [anthropic, openai, google, custom]
         api_key:
           type: string
+          writeOnly: true
+          description: New credential value. Omit to preserve the existing credential. Never returned.
+        delete_secret:
+          type: boolean
+          default: false
+          description: Explicitly delete the existing credential. Mutually exclusive with api_key.
         base_url:
           type: string
         enabled:
@@ -5843,7 +6188,27 @@ components:
         api_pool:
           type: array
           items:
-            $ref: '#/components/schemas/APIChannel'
+            $ref: '#/components/schemas/APIChannelPublic'
+        public_mcp:
+          type: array
+          items:
+            type: string
+        summary_threshold:
+          type: integer
+        max_retries:
+          type: integer
+        timeout:
+          type: integer
+
+    GlobalConfigWrite:
+      type: object
+      properties:
+        default_model:
+          type: string
+        api_pool:
+          type: array
+          items:
+            $ref: '#/components/schemas/APIChannelWrite'
         public_mcp:
           type: array
           items:
@@ -5900,7 +6265,7 @@ components:
         max_tokens:
           type: integer
         api_channel:
-          $ref: '#/components/schemas/APIChannel'
+          $ref: '#/components/schemas/APIChannelPublic'
         mcp_tools:
           type: array
           items:
@@ -6193,41 +6558,109 @@ components:
     # ==================== Privacy Schemas ====================
     EncryptRequest:
       type: object
-      required: [data]
+      required: [plaintext]
       properties:
-        data:
+        plaintext:
           type: string
         method:
           type: string
-          enum: [A, B]
-          default: A
-        key_id:
-          type: string
+          enum: [standard, chain]
+          default: standard
+        policy:
+          $ref: '#/components/schemas/PrivacyPolicy'
 
     EncryptResponse:
       type: object
+      required: [method]
       properties:
-        encrypted:
-          type: string
-        key_id:
-          type: string
         method:
           type: string
+          enum: [standard, chain]
+        encrypted_data:
+          $ref: '#/components/schemas/EncryptedData'
+        chain_encrypted:
+          $ref: '#/components/schemas/ChainEncryptedData'
 
     DecryptRequest:
       type: object
-      required: [data]
+      required: [method]
       properties:
-        data:
+        method:
           type: string
-        key_id:
-          type: string
+          enum: [standard, chain]
+        encrypted_data:
+          $ref: '#/components/schemas/EncryptedData'
+        chain_encrypted:
+          $ref: '#/components/schemas/ChainEncryptedData'
 
     DecryptResponse:
       type: object
+      required: [plaintext, verified]
       properties:
-        decrypted:
+        plaintext:
           type: string
+        verified:
+          type: boolean
+
+    EncryptedData:
+      type: object
+      required: [ciphertext, iv, salt, algorithm]
+      properties:
+        ciphertext:
+          type: string
+          format: byte
+        iv:
+          type: string
+          format: byte
+        salt:
+          type: string
+          format: byte
+        algorithm:
+          type: string
+          enum: [aes-256-gcm, aes-256-cbc, aes-128-cbc]
+          description: New writes use aes-256-gcm; CBC values are accepted only for legacy reads.
+        tag:
+          type: string
+          format: byte
+          description: Required for aes-256-gcm records.
+
+    ChainEncryptedData:
+      type: object
+      required: [node_id, ciphertext, iv, integrity_hash, algorithm]
+      properties:
+        node_id:
+          type: string
+        ciphertext:
+          type: string
+          format: byte
+        iv:
+          type: string
+          format: byte
+        integrity_hash:
+          type: string
+        algorithm:
+          type: string
+          enum: [aes-256-gcm-chain, aes-256-cbc-chain]
+          description: New writes use aes-256-gcm-chain; CBC is legacy read-only.
+
+    PrivacyPolicy:
+      type: object
+      properties:
+        level:
+          type: string
+          enum: [public, internal, confidential, secret]
+        encrypt_at_rest:
+          type: boolean
+        encrypt_in_transit:
+          type: boolean
+        allowed_roles:
+          type: array
+          items:
+            type: string
+        retention_days:
+          type: integer
+        auto_redact:
+          type: boolean
 
     RedactRequest:
       type: object
@@ -6386,6 +6819,7 @@ components:
 
     AccessDecision:
       type: object
+      required: [allowed, reason, rule_version]
       properties:
         allowed:
           type: boolean
@@ -6396,6 +6830,18 @@ components:
           items:
             type: string
         audit_id:
+          type: string
+        rule_version:
+          type: string
+        operation:
+          type: string
+        resource:
+          type: string
+        project_id:
+          type: string
+        agent_id:
+          type: string
+        plugin_id:
           type: string
 
     AccessCheckResponse:
@@ -7203,6 +7649,26 @@ components:
         tier:
           type: string
           enum: [hot, warm, cold]
+        search_report:
+          $ref: '#/components/schemas/AtomicSearchReport'
+        incomplete_reason:
+          type: string
+
+    AtomicSearchReport:
+      type: object
+      properties:
+        candidates_scanned:
+          type: integer
+        batches:
+          type: integer
+        exhausted:
+          type: boolean
+        budget_limited:
+          type: boolean
+        index_pending_jobs:
+          type: integer
+        index_failed_jobs:
+          type: integer
 
     AtomicMemoryListEnvelope:
       type: object
@@ -7221,6 +7687,54 @@ components:
           type: boolean
         data:
           $ref: '#/components/schemas/AtomicMemory'
+        error:
+          type: string
+
+    AtomicMemoryMutationResponse:
+      allOf:
+        - $ref: '#/components/schemas/AtomicMemory'
+        - type: object
+          properties:
+            revision:
+              type: integer
+            index_sync:
+              type: string
+              enum: [pending, synced, failed]
+            index_error:
+              type: string
+
+    AtomicMemoryMutationEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/AtomicMemoryMutationResponse'
+        error:
+          type: string
+
+    AtomicMemoryDeleteResponse:
+      type: object
+      properties:
+        deleted:
+          type: boolean
+        id:
+          type: string
+        revision:
+          type: integer
+        index_sync:
+          type: string
+          enum: [pending, synced, failed]
+        index_error:
+          type: string
+
+    AtomicMemoryDeleteEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: '#/components/schemas/AtomicMemoryDeleteResponse'
         error:
           type: string
 
@@ -7512,6 +8026,16 @@ components:
         metadata:
           type: object
           additionalProperties: true
+        workspace_root:
+          type: string
+          description: Canonical server-authoritative workspace directory
+        default_flow_id:
+          type: string
+        default_session_id:
+          type: string
+        binding_state:
+          type: string
+          enum: [unbound, bound, deleting, archived]
 
     ProjectCreateRequest:
       type: object
@@ -7532,6 +8056,9 @@ components:
         metadata:
           type: object
           additionalProperties: true
+        workspace_root:
+          type: string
+          description: Existing directory to bind; canonicalized and checked against allowed roots
 
     ProjectUpdateRequest:
       type: object
@@ -7553,6 +8080,8 @@ components:
         metadata:
           type: object
           additionalProperties: true
+        workspace_root:
+          type: string
 
     ProjectListEnvelope:
       type: object
@@ -7580,6 +8109,46 @@ components:
           type: boolean
         data:
           $ref: '#/components/schemas/Project'
+        error:
+          type: string
+
+    ProjectCreateConflictEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            idempotency_key:
+              type: string
+              description: Idempotency key whose journaled create operation first accepted a different payload
+            project_id:
+              type: string
+              description: Project id reserved by the conflicting operation
+            differing_fields:
+              type: array
+              items:
+                type: string
+              description: Journaled intent fields (title, workspace_root) known to differ; empty means the difference is in non-journaled fields
+        error:
+          type: string
+
+    ProjectCreationEnvelope:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          allOf:
+            - $ref: '#/components/schemas/Project'
+          properties:
+            flow:
+              type: object
+              description: Durable default Flow bound to the project
+            session:
+              type: object
+              description: Durable default Session bound to the project
         error:
           type: string
 
@@ -7760,6 +8329,66 @@ components:
       properties:
         enabled:
           type: boolean
+
+    PluginOverview:
+      type: object
+      required: [total, installed, enabled, marketplace, unhealthy]
+      description: Installed-plugin summary counters (mirrors backend/internal/plugin/types.go PluginOverview).
+      properties:
+        total:
+          type: integer
+        installed:
+          type: integer
+        enabled:
+          type: integer
+        marketplace:
+          type: integer
+        unhealthy:
+          type: integer
+        categories:
+          type: object
+          additionalProperties:
+            type: integer
+
+    PluginListResponse:
+      type: object
+      required: [plugins, total]
+      description: Data payload of GET /api/v1/plugins (mirrors backend/internal/plugin/types.go PluginListResponse).
+      properties:
+        plugins:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginManifest'
+        total:
+          type: integer
+        has_more:
+          type: boolean
+        summary:
+          $ref: '#/components/schemas/PluginOverview'
+
+    PluginCatalogResponse:
+      type: object
+      required: [plugins, total]
+      description: Data payload of GET /api/v1/plugins/marketplace (mirrors backend/internal/plugin/types.go PluginCatalogResponse).
+      properties:
+        plugins:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginManifest'
+        total:
+          type: integer
+        featured:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginManifest'
+
+    PluginDetailResponse:
+      type: object
+      required: [plugin]
+      description: Data payload of GET /api/v1/plugins/{id} and the mutating plugin routes (mirrors backend/internal/plugin/types.go PluginDetailResponse).
+      properties:
+        plugin:
+          $ref: '#/components/schemas/PluginManifest'
 
     PluginListEnvelope:
       type: object
@@ -8169,8 +8798,14 @@ components:
       type: object
       required: [path]
       properties:
+        project_id:
+          type: string
+          description: Preferred authoritative project binding
+        relative_path:
+          type: string
         root:
           type: string
+          deprecated: true
         path:
           type: string
         content_text:
@@ -8265,3 +8900,267 @@ components:
         limit:
           type: integer
 
+    # ==================== CodeFlow 3.0 unified envelope (plan §20/§27.3; mirrors backend/schemas/*.schema.json) ====================
+    ApiMeta:
+      type: object
+      required: [request_id]
+      description: Response meta (backend/schemas/response.schema.json definitions/meta). request_id is the server-side single-HTTP-trace id (§20.4); command_id appears only on write-command responses and equals the client Idempotency-Key (§20.1/§20.4); revision is the represented resource revision (§20.1).
+      properties:
+        request_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        revision:
+          type: integer
+          minimum: 1
+
+    ErrorBody:
+      type: object
+      required: [code, message, retryable]
+      description: Unified error body (backend/schemas/error.schema.json). code is the closed 13-value enum fixed in §15 T0.03; clients must branch on code, never on message text. details carries optional structured context (e.g. base_changed expected_commit/current_commit, §20.1).
+      properties:
+        code:
+          type: string
+          enum: [unauthorized, auth_expired, protocol_mismatch, forbidden, invalid_request, conflict, idempotency_key_reused, event_gap, policy_denied, backend_unavailable, base_changed, merge_conflict, budget_exceeded]
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        retryable:
+          type: boolean
+        details:
+          type: object
+
+    ApiErrorEnvelope:
+      type: object
+      required: [error, meta]
+      description: Failure branch of the unified response envelope (backend/schemas/response.schema.json); mutually exclusive with the success {data, meta} branch.
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+        meta:
+          $ref: '#/components/schemas/ApiMeta'
+
+    CreateRunRequest:
+      type: object
+      required: [task_id, agent_revision_id, expected_task_revision, expected_binding_revision, prompt, budget]
+      description: §20.1 request instance verbatim (field set; field order insignificant). expected_* revisions are optimistic-concurrency preconditions revalidated server-side (§27.3).
+      properties:
+        task_id:
+          type: string
+        agent_revision_id:
+          type: string
+        expected_task_revision:
+          type: integer
+          minimum: 1
+        expected_binding_revision:
+          type: integer
+          minimum: 1
+        prompt:
+          type: string
+        budget:
+          $ref: '#/components/schemas/RunBudget'
+
+    RunBudget:
+      type: object
+      required: [wall_time_seconds, tokens]
+      description: §20.1 budget instance. Server-side defaults, soft/hard limits and deadlines follow §27.6.
+      properties:
+        wall_time_seconds:
+          type: integer
+          minimum: 1
+        tokens:
+          type: integer
+          minimum: 1
+
+    Run:
+      type: object
+      required: [id, status, project_id, task_id, binding_revision, base_commit, agent_revision_id, base_manifest_hash]
+      description: Run resource as returned at creation (§20.1 success data instance verbatim). status uses the §21.1 run-state enum; creation always returns queued.
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [queued, starting, running, waiting_approval, paused, completed, failed, cancelling, cancelled, recovering, expired]
+        project_id:
+          type: string
+        task_id:
+          type: string
+        binding_revision:
+          type: integer
+          minimum: 1
+        base_commit:
+          type: string
+        agent_revision_id:
+          type: string
+        base_manifest_hash:
+          type: string
+
+    CreateRunEnvelope:
+      type: object
+      required: [data, meta]
+      description: Success branch of the unified envelope for run creation (§20.1; meta includes command_id and revision).
+      properties:
+        data:
+          $ref: '#/components/schemas/Run'
+        meta:
+          $ref: '#/components/schemas/ApiMeta'
+
+    ExecutionIdentity:
+      type: object
+      required: [project_id, actor]
+      description: Execution identity (backend/schemas/execution-identity.schema.json). project_id + actor are required; run_id is present on run events; attempt_id/agent_revision_id exist only while an attempt is alive (§27.1). The server verifies parent/child relations from authoritative resources and never trusts a client-reported actor (§27.1).
+      properties:
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        actor:
+          type: object
+          required: [type, id]
+          properties:
+            type:
+              type: string
+              enum: [user, agent, system, integration]
+            id:
+              type: string
+              minLength: 1
+              maxLength: 128
+            source:
+              type: string
+              minLength: 1
+              maxLength: 128
+        run_id:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        attempt_id:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        agent_revision_id:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+
+    ExecutionEvent:
+      type: object
+      required: [id, scope, project_id, sequence, type, schema_version, occurred_at, identity, payload]
+      description: Unified run-domain event (backend/schemas/execution-event.schema.json). sequence is assigned by the server inside one database transaction per scope (§27.4) and is never client-supplied; project-scope and run-scope sequences are independent projections. type is the closed 15-value enum of plan-named event types; payload is event-family data whose per-family minimum structure is fixed by later cards.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        scope:
+          type: string
+          pattern: '^(project|run):[^:]{1,127}$'
+          maxLength: 129
+        project_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        run_id:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        sequence:
+          type: integer
+          minimum: 1
+        type:
+          type: string
+          enum: [approval.approved, approval.decided, approval.required, budget.soft_exceeded, budget.warning, checkpoint.acknowledged, merge.completed, process.exited, process.started, process.terminated, run.completed, run.failed, scheduler.claimed, server.restart, tool.requested]
+        schema_version:
+          type: integer
+          enum: [1]
+        occurred_at:
+          type: string
+          format: date-time
+        identity:
+          $ref: '#/components/schemas/ExecutionIdentity'
+        payload:
+          type: object
+
+    RunEventsPage:
+      type: object
+      required: [events, next_after, has_more, retention_floor, high_watermark]
+      description: Event replay page (§20.2 data instance verbatim). after=0 with retention_floor=1 is the legal first replay; next_after is the cursor for the next request or subscription resume.
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExecutionEvent'
+        next_after:
+          type: integer
+          minimum: 0
+        has_more:
+          type: boolean
+        retention_floor:
+          type: integer
+          minimum: 1
+        high_watermark:
+          type: integer
+          minimum: 0
+
+    RunEventsEnvelope:
+      type: object
+      required: [data, meta]
+      description: Success branch of the unified envelope for event replay (§20.2).
+      properties:
+        data:
+          $ref: '#/components/schemas/RunEventsPage'
+        meta:
+          $ref: '#/components/schemas/ApiMeta'
+
+    CommandStatus:
+      type: object
+      required: [command_id, status]
+      description: Command reconciliation view (§20.4/§27.3). status is the closed 4-value command-state enum. This is the §20.4-frozen minimum; operation-specific result fields are added by the owning S1 cards.
+      properties:
+        command_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, applied, rejected, reconciling]
+
+    CommandEnvelope:
+      type: object
+      required: [data, meta]
+      description: Success branch of the unified envelope for command reconciliation (§20.4).
+      properties:
+        data:
+          $ref: '#/components/schemas/CommandStatus'
+        meta:
+          $ref: '#/components/schemas/ApiMeta'
+
+    StreamSubscribeFrame:
+      type: object
+      required: [type, data]
+      description: §20.3 WebSocket client first frame over the existing GET /api/v1/projects/{id}/stream route (§27.3 keeps the current bearer/subprotocol auth and Origin checks; no random conversation IDs). Server frame order is subscribed, replay_started, zero or more events, replay_finished, then live events; every live event carries a sequence above the replayed ones. Server control-frame shapes are frozen by the WS-implementing card, not here.
+      properties:
+        type:
+          type: string
+          enum: [subscribe]
+        data:
+          type: object
+          required: [resource_type, resource_id, after, client_request_id]
+          properties:
+            resource_type:
+              type: string
+              enum: [run, project]
+            resource_id:
+              type: string
+            after:
+              type: integer
+              minimum: 0
+            client_request_id:
+              type: string

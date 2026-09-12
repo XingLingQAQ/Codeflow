@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func f64ptr(v float64) *float64 { return &v }
+
 func TestSummarizeConversation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -29,7 +31,7 @@ func TestSummarizeConversation(t *testing.T) {
 			{Role: "user", Content: "Let's implement authentication", Timestamp: time.Now()},
 			{Role: "assistant", Content: "I'll create the auth module", Timestamp: time.Now()},
 		},
-		CompressionTarget: 0.6,
+		CompressionTarget: f64ptr(0.6),
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -98,8 +100,8 @@ func TestCompressContext(t *testing.T) {
 	// Test compress request
 	reqBody := summarize.CompressRequest{
 		Context:           "This is a long context that needs compression. We discussed many topics and made several decisions.",
-		CompressionRatio:  0.6,
-		PreserveRecentPct: 0.2,
+		CompressionRatio:  f64ptr(0.6),
+		PreserveRecentPct: f64ptr(0.2),
 	}
 	body, _ := json.Marshal(reqBody)
 
@@ -168,8 +170,8 @@ func TestCompressContext_CustomRatio(t *testing.T) {
 	// Custom compression ratio
 	reqBody := summarize.CompressRequest{
 		Context:           "This is a test context with custom compression ratio settings.",
-		CompressionRatio:  0.7,
-		PreserveRecentPct: 0.3,
+		CompressionRatio:  f64ptr(0.7),
+		PreserveRecentPct: f64ptr(0.3),
 	}
 	body, _ := json.Marshal(reqBody)
 

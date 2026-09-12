@@ -17,7 +17,8 @@ import (
 
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 var ErrPlanNotFound = errors.New("plan not found")
@@ -923,12 +924,11 @@ type plannerStateSnapshot struct {
 }
 
 func NewSQLitePlanner(dbPath string) (*SQLitePlanner, error) {
-	connStr, err := buildPlannerSQLiteConnString(dbPath)
-	if err != nil {
+	if err := preparePlannerDBDir(dbPath); err != nil {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", connStr)
+	db, err := dbx.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open planner database: %w", err)
 	}
@@ -946,19 +946,17 @@ func NewSQLitePlanner(dbPath string) (*SQLitePlanner, error) {
 	return svc, nil
 }
 
-func buildPlannerSQLiteConnString(dbPath string) (string, error) {
+func preparePlannerDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
-
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create planner db dir: %w", err)
+			return fmt.Errorf("create planner db dir: %w", err)
 		}
 	}
-
-	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	return nil
 }
 
 func (p *SQLitePlanner) initialize() error {

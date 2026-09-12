@@ -44,6 +44,17 @@ func NewSQLiteEngine(dbPath string, snapshots SnapshotCreator) (*InMemoryEngine,
 	if err != nil {
 		return nil, err
 	}
+	defs, err := store.ListTemplateDefinitions()
+	if err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	for _, def := range defs {
+		if err := RegisterTemplate(def); err != nil {
+			_ = store.Close()
+			return nil, fmt.Errorf("load flow template %s: %w", def.ID, err)
+		}
+	}
 	return NewEngineWithStore(store, snapshots), nil
 }
 
@@ -114,6 +125,7 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 	flow := &Flow{
 		ID:         uuid.New().String(),
 		ProjectID:  req.ProjectID,
+		SessionID:  req.SessionID,
 		TemplateID: tmpl.ID,
 		Status:     FlowStatusActive,
 		Loops:      append([]LoopEdge(nil), tmpl.Loops...),
@@ -145,6 +157,7 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 			Type:     def.Type,
 			Name:     def.Name,
 			Canvas:   def.Canvas,
+			AgentID:  def.AgentID,
 			Status:   status,
 			Optional: def.Optional,
 			Gates:    gates,
@@ -247,6 +260,12 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	}
 
 	stage.Status = StageStatusDone
+	for i := range flow.Artifacts {
+		if flow.Artifacts[i].StageID == stage.ID && flow.Artifacts[i].Status == ArtifactStatusDraft {
+			flow.Artifacts[i].Status = ArtifactStatusApproved
+			e.appendEvent(flow, "artifact.approved", stage.ID, fmt.Sprintf("artifact %s approved on stage completion", flow.Artifacts[i].ID))
+		}
+	}
 	e.appendEvent(flow, "stage.done", stage.ID, fmt.Sprintf("completed stage type=%s", stage.Type))
 
 	next := -1
@@ -587,6 +606,17 @@ func (e *InMemoryEngine) AttachArtifactBy(ctx context.Context, flowID, stageID, 
 	}
 	if stageIndexByID(flow, stageID) < 0 {
 		return nil, fmt.Errorf("stage not found: %s", stageID)
+	}
+	// A content reference identifies an immutable artifact payload. Returning
+	// the existing record makes client retries safe when the first response was
+	// lost after persistence.
+	if contentRef != "" {
+		for i := len(flow.Artifacts) - 1; i >= 0; i-- {
+			existing := flow.Artifacts[i]
+			if existing.StageID == stageID && existing.Type == artType && existing.ContentRef == contentRef && existing.Status != ArtifactStatusStale {
+				return &existing, nil
+			}
+		}
 	}
 	ver := 1
 	for _, a := range flow.Artifacts {

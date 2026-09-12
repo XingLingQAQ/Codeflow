@@ -5,7 +5,7 @@
 import { EventEmitter } from 'events';
 import { WorktreeManager } from '../../git/WorktreeManager.js';
 import { AgentWorker } from './ParallelExecutor.js';
-import { CoworkTask, ICodeEditor, ExecutorCapabilities } from '../types.js';
+import { AgentRuntimeLike, CoworkTask, ICodeEditor, ExecutorCapabilities, ExecutorRegistration } from '../types.js';
 /**
  * Worker 池配置
  */
@@ -37,33 +37,24 @@ export interface WorkerPoolEvents {
     'pool:available': () => void;
 }
 /**
- * 执行器注册信息
- */
-interface ExecutorInfo {
-    name: string;
-    editor: ICodeEditor;
-    capabilities: ExecutorCapabilities;
-    modelId: string;
-}
-/**
  * WorkerPool - Worker 池
  */
 export declare class WorkerPool extends EventEmitter {
     private config;
     private worktreeManager;
     private workers;
-    private executors;
+    private runtime;
     private idleTimers;
     private workerCounter;
-    constructor(worktreeManager: WorktreeManager, config?: Partial<WorkerPoolConfig>);
+    constructor(worktreeManager: WorktreeManager, config?: Partial<WorkerPoolConfig>, runtime?: AgentRuntimeLike);
     /**
      * 注册执行器
      */
-    registerExecutor(name: string, editor: ICodeEditor, capabilities: ExecutorCapabilities, modelId: string): void;
+    registerExecutor(name: string, editor: ICodeEditor, capabilities: ExecutorCapabilities, modelId?: string): void;
     /**
      * 获取执行器
      */
-    getExecutor(name: string): ExecutorInfo | undefined;
+    getExecutor(name: string): ExecutorRegistration | undefined;
     /**
      * 创建新 Worker
      */
@@ -149,5 +140,4 @@ export declare class WorkerPool extends EventEmitter {
      */
     updateConfig(config: Partial<WorkerPoolConfig>): void;
 }
-export {};
 //# sourceMappingURL=WorkerPool.d.ts.map

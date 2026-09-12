@@ -25,7 +25,7 @@ func ImportTemplateJSON(data []byte) (TemplateID, error) {
 	if err := json.Unmarshal(data, &ct); err != nil {
 		return "", fmt.Errorf("invalid template JSON: %w", err)
 	}
-	if err := RegisterTemplate(ct); err != nil {
+	if err := SaveTemplate(ct); err != nil {
 		return "", err
 	}
 	return ct.ID, nil
@@ -35,14 +35,17 @@ func ImportTemplateJSON(data []byte) (TemplateID, error) {
 // CustomTemplate shape for export (builtins and custom alike).
 func templateDefToCustom(td templateDef) CustomTemplate {
 	ct := CustomTemplate{
-		ID:    td.ID,
-		Loops: append([]LoopEdge(nil), td.Loops...),
+		ID:          td.ID,
+		Name:        td.Name,
+		Description: td.Description,
+		Loops:       append([]LoopEdge(nil), td.Loops...),
 	}
 	for _, sd := range td.Stages {
 		cs := CustomStage{
 			Type:     sd.Type,
 			Name:     sd.Name,
 			Canvas:   sd.Canvas,
+			AgentID:  sd.AgentID,
 			Optional: sd.Optional,
 		}
 		for _, g := range sd.Gates {

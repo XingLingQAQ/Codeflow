@@ -2,6 +2,7 @@
  * Map Agent 实现
  * 决策骨架提取与导图构建
  */
+import { getMessageText } from '../hooks/types.js';
 import { DEFAULT_MAP_AGENT_CONFIG, ENTITY_TYPES, RELATION_TYPES, } from './types.js';
 export class MapAgent {
     constructor(adapter, config) {
@@ -161,7 +162,7 @@ export class MapAgent {
         const entitySet = new Set();
         const decisionSet = new Set();
         for (const msg of messages) {
-            const content = msg.content;
+            const content = getMessageText(msg.content);
             // 提取实体（大写开头的词、代码标识符）
             const entityMatches = content.match(/\b[A-Z][a-zA-Z]+\b/g) || [];
             const codeMatches = content.match(/`([^`]+)`/g) || [];
@@ -225,8 +226,9 @@ export class MapAgent {
                 const e1 = entityList[i];
                 const e2 = entityList[j];
                 for (const msg of messages) {
-                    if (msg.content.includes(e1) && msg.content.includes(e2)) {
-                        const relationType = this.inferRelationType(msg.content, e1, e2);
+                    const content = getMessageText(msg.content);
+                    if (content.includes(e1) && content.includes(e2)) {
+                        const relationType = this.inferRelationType(content, e1, e2);
                         relations.push({
                             from: e1,
                             to: e2,
@@ -248,7 +250,7 @@ export class MapAgent {
     buildExtractionPrompt(messages) {
         const content = messages
             .slice(-10)
-            .map((m) => `[${m.role}]: ${m.content.slice(0, 300)}`)
+            .map((m) => `[${m.role}]: ${getMessageText(m.content).slice(0, 300)}`)
             .join('\n\n');
         return `Analyze the following conversation and extract:
 1. Key entities (people, technologies, concepts, files, functions)
@@ -300,7 +302,7 @@ Respond in JSON format:
     calculateImportance(entity, messages) {
         let count = 0;
         for (const msg of messages) {
-            const matches = msg.content.match(new RegExp(entity, 'gi'));
+            const matches = getMessageText(msg.content).match(new RegExp(entity, 'gi'));
             if (matches)
                 count += matches.length;
         }

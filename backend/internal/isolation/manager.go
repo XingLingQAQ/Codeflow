@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/policy"
 )
 
 var (
@@ -337,6 +338,41 @@ func resolveResourceName(request AccessRequest) string {
 	return request.Action
 }
 
+func accessIdentity(ctx context.Context, request AccessRequest) (projectID, agentID, pluginID string) {
+	if trace := audit.TraceFromContext(ctx); trace != nil {
+		projectID, agentID = trace.ProjectID, trace.AgentID
+	}
+	if request.Context != nil {
+		if value, ok := request.Context["project_id"].(string); ok && projectID == "" {
+			projectID = value
+		}
+		if value, ok := request.Context["agent_id"].(string); ok && agentID == "" {
+			agentID = value
+		}
+		if value, ok := request.Context["plugin_id"].(string); ok {
+			pluginID = value
+		}
+	}
+	if agentID == "" {
+		agentID = request.ContainerID
+	}
+	return
+}
+
+func accessOperation(request AccessRequest) string {
+	switch request.Resource {
+	case ResourceNetwork:
+		return policy.OperationOutboundRequest
+	case ResourceProcess:
+		return policy.OperationProcessStart
+	case ResourceFile:
+		if request.Action == "write" || request.Action == "admin" {
+			return policy.OperationWorkspaceWrite
+		}
+	}
+	return "isolation_access"
+}
+
 // IsolationManager 隔离管理器
 type IsolationManager struct {
 	containers map[string]*ContextContainer
@@ -470,6 +506,8 @@ func (m *IsolationManager) CheckAccess(ctx context.Context, request AccessReques
 	default:
 	}
 
+	projectID, agentID, pluginID := accessIdentity(ctx, request)
+	operation := accessOperation(request)
 	m.mu.RLock()
 	container, ok := m.containers[request.ContainerID]
 	m.mu.RUnlock()
@@ -484,9 +522,9 @@ func (m *IsolationManager) CheckAccess(ctx context.Context, request AccessReques
 			"context_keys":  sortedContextKeys(request.Context),
 		})
 		return &AccessDecision{
-			Allowed: false,
-			Reason:  "container not found",
-			AuditID: entryID,
+			Allowed: false, Reason: "container not found", AuditID: entryID,
+			RuleVersion: policy.RuleVersion, Operation: operation, Resource: resolveResourceID(request),
+			ProjectID: projectID, AgentID: agentID, PluginID: pluginID,
 		}, nil
 	}
 
@@ -503,6 +541,18 @@ func (m *IsolationManager) CheckAccess(ctx context.Context, request AccessReques
 	} else {
 		decision.Reason = "access denied: insufficient permissions"
 	}
+	decision.RuleVersion = policy.RuleVersion
+	decision.Operation = operation
+	decision.Resource = resolveResourceID(request)
+	decision.ProjectID, decision.AgentID, decision.PluginID = projectID, agentID, pluginID
+	if allowed && operation != "isolation_access" {
+		shared := policy.EvaluateBoundary(ctx, policy.Request{
+			Operation: operation, Resource: decision.Resource, ProjectID: projectID,
+			AgentID: agentID, PluginID: pluginID, Context: request.Context,
+		})
+		decision.Allowed, decision.Reason, decision.RuleVersion = shared.Allowed, shared.Reason, shared.RuleVersion
+		allowed = shared.Allowed
+	}
 
 	decision.AuditID = m.recordIsolationAudit(ctx, container, "check_access", boolToOutcome(allowed), boolToSeverity(allowed), string(request.Resource), resolveResourceID(request), request.ResourcePath, map[string]interface{}{
 		"container_id":   resolveContainerID(container, request.ContainerID),
@@ -512,6 +562,11 @@ func (m *IsolationManager) CheckAccess(ctx context.Context, request AccessReques
 		"action":         request.Action,
 		"allowed":        allowed,
 		"reason":         decision.Reason,
+		"rule_version":   decision.RuleVersion,
+		"project_id":     projectID,
+		"agent_id":       agentID,
+		"plugin_id":      pluginID,
+		"operation":      operation,
 		"context_keys":   sortedContextKeys(request.Context),
 	})
 

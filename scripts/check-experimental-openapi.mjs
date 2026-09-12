@@ -95,6 +95,10 @@ const required = [
   ["GET", "/api/v1/flows/templates/{tid}/export"],
   ["POST", "/api/v1/flows/templates/import"],
   ["DELETE", "/api/v1/flows/templates/{tid}"],
+  // Contract-first CodeFlow 3.0 endpoints (plan §20/§27.3; router registration lands with S1)
+  ["POST", "/api/v1/projects/{pid}/runs"],
+  ["GET", "/api/v1/projects/{pid}/runs/{rid}/events"],
+  ["GET", "/api/v1/projects/{pid}/commands/{command_id}"],
 ];
 
 // Sanity: experimental handlers still in router

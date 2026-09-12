@@ -4,15 +4,18 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/codeflow/backend/internal/config"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 func setupPAPITestRouter() (*gin.Engine, *config.SQLiteConfigService) {
@@ -319,33 +322,117 @@ func TestHotSwapPAPI_NotFound(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestDetectPAPIConflicts seeds persisted rows from before the category rule
+// existed: the current write path rejects conflicting categories, so the
+// detection surface is exercised with legacy rows written straight into
+// papi_variables (E-10). The endpoint must report the deterministic conflict
+// and the load-time diagnostics, keep the legacy rows visible, and never
+// delete them across a reopen.
 func TestDetectPAPIConflicts(t *testing.T) {
-	router, svc := setupPAPITestRouter()
-	defer cleanupPAPITest(svc)
+	gin.SetMode(gin.TestMode)
+	dbPath := filepath.Join(t.TempDir(), "papi_conflicts.db")
 
-	// Define variables with overlapping categories
-	svc.DefinePAPIVariable(&config.PAPIVariable{
-		Name:     "VAR1",
-		Model:    "model1",
-		Category: []string{"backend", "api"},
-	})
-	svc.DefinePAPIVariable(&config.PAPIVariable{
-		Name:     "VAR2",
-		Model:    "model2",
-		Category: []string{"backend", "database"},
-	})
+	// Establish the schema through the normal constructor, then seed the
+	// legacy conflict rows over a raw connection so the service's load path
+	// picks them up exactly as pre-rule persisted data.
+	seedSvc, err := config.NewSQLiteConfigService(dbPath)
+	if err != nil {
+		t.Fatalf("create seed service: %v", err)
+	}
+	if err := seedSvc.Close(); err != nil {
+		t.Fatalf("close seed service: %v", err)
+	}
+	raw, err := dbx.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	seed := func(v config.PAPIVariable) {
+		payload, err := json.Marshal(&v)
+		if err != nil {
+			t.Fatalf("marshal seed variable: %v", err)
+		}
+		if _, err := raw.Exec("INSERT INTO papi_variables (name, variable_json) VALUES (?, ?)", v.Name, string(payload)); err != nil {
+			t.Fatalf("seed %s: %v", v.Name, err)
+		}
+	}
+	seed(config.PAPIVariable{Name: "LEGACY_ONE", Model: "m1", Category: []string{"Backend"}})
+	seed(config.PAPIVariable{Name: "LEGACY_TWO", Model: "m2", Category: []string{" backend "}})
+	seed(config.PAPIVariable{Name: "CLEAN_VAR", Model: "m3", Category: []string{"docs"}})
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
 
-	req, _ := http.NewRequest("GET", "/api/v1/config/papi/conflicts", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+	svc, err := config.NewSQLiteConfigService(dbPath)
+	if err != nil {
+		t.Fatalf("reopen service: %v", err)
+	}
+	config.SetConfigService(svc)
+	defer svc.Close()
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	router := gin.New()
+	router.GET("/api/v1/config/papi", GetPAPIVariables)
+	router.GET("/api/v1/config/papi/conflicts", DetectPAPIConflicts)
 
-	var response map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &response)
-	conflicts := response["conflicts"].([]interface{})
-	assert.NotEmpty(t, conflicts)
+	assertConflictsVisible := func() {
+		req, _ := http.NewRequest("GET", "/api/v1/config/papi/conflicts", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode conflicts response: %v (body=%s)", err, w.Body.String())
+		}
+		conflicts, ok := response["conflicts"].([]interface{})
+		if !ok || len(conflicts) == 0 {
+			t.Fatalf("conflicts must be a non-empty list, body=%s", w.Body.String())
+		}
+		joined := fmt.Sprint(conflicts)
+		assert.Contains(t, joined, "backend")
+		assert.Contains(t, joined, "LEGACY_ONE")
+		assert.Contains(t, joined, "LEGACY_TWO")
+
+		diagnostics, ok := response["diagnostics"].([]interface{})
+		if !ok || len(diagnostics) == 0 {
+			t.Fatalf("diagnostics must be a non-empty list, body=%s", w.Body.String())
+		}
+		joinedDiag := fmt.Sprint(diagnostics)
+		assert.Contains(t, joinedDiag, "backend")
+		assert.Contains(t, joinedDiag, "LEGACY_ONE")
+		assert.Contains(t, joinedDiag, "LEGACY_TWO")
+
+		// The legacy rows stay visible and are not deleted.
+		req, _ = http.NewRequest("GET", "/api/v1/config/papi", nil)
+		w = httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		var listResponse map[string]interface{}
+		if err := json.Unmarshal(w.Body.Bytes(), &listResponse); err != nil {
+			t.Fatalf("decode list response: %v (body=%s)", err, w.Body.String())
+		}
+		variables, ok := listResponse["variables"].([]interface{})
+		if !ok {
+			t.Fatalf("variables must be a list, body=%s", w.Body.String())
+		}
+		assert.Len(t, variables, 3)
+	}
+
+	assertConflictsVisible()
+
+	// A close/reopen cycle must not repair or drop the legacy conflict data:
+	// it remains loadable and reported exactly the same way.
+	if err := svc.Close(); err != nil {
+		t.Fatalf("close service: %v", err)
+	}
+	reopened, err := config.NewSQLiteConfigService(dbPath)
+	if err != nil {
+		t.Fatalf("reopen after cycle: %v", err)
+	}
+	config.SetConfigService(reopened)
+	defer reopened.Close()
+	assertConflictsVisible()
 }

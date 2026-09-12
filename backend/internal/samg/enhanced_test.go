@@ -461,7 +461,7 @@ func TestGlobalSAMGService(t *testing.T) {
 
 	// 初始获取应触发懒初始化
 	svc := GetSAMGService()
-	assert.NotNil(t, svc)
+	assert.Nil(t, svc)
 
 	// 设置全局服务
 	newSvc := NewSAMGService(nil)

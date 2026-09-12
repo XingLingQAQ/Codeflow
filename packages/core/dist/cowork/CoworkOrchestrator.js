@@ -5,111 +5,62 @@
 import { EventEmitter } from 'events';
 import { CLIProcessManager } from './process/CLIProcessManager.js';
 import { GitConflictDetector } from './GitConflictDetector.js';
+import { AgentRuntime } from './runtime.js';
 /**
  * Cowork Orchestrator
  */
 export class CoworkOrchestrator extends EventEmitter {
-    constructor(processManager, cwd) {
+    constructor(processManager, cwd, runtime) {
         super();
-        this.executors = new Map();
         this.blackboard = new Map();
         this.runningTasks = new Map();
         this.processManager = processManager || new CLIProcessManager();
         this.gitConflictDetector = new GitConflictDetector({ cwd });
+        this.runtime = runtime || new AgentRuntime();
     }
     /**
      * 注册执行器
      */
-    registerExecutor(name, editor, capabilities) {
-        this.executors.set(name, { name, editor, capabilities });
+    registerExecutor(name, editor, capabilities, modelId) {
+        this.runtime.registerExecutor(name, editor, capabilities, modelId);
         this.emitEvent({ type: 'task:start', task: { id: `register_${name}` } });
     }
     /**
      * 获取执行器
      */
     getExecutor(name) {
-        return this.executors.get(name);
+        return this.runtime.getExecutor(name);
     }
     /**
      * 获取所有执行器
      */
     getAllExecutors() {
-        return Array.from(this.executors.values());
+        return this.runtime.getAllExecutors();
+    }
+    getHookManager() {
+        return this.runtime.getHookManager?.();
     }
     /**
      * 执行单个任务
      */
     async execute(task) {
         const startTime = Date.now();
-        // 获取执行器
-        const executor = this.executors.get(task.executor);
-        if (!executor) {
-            return {
-                taskId: task.id,
-                status: 'failed',
-                output: { error: `Executor '${task.executor}' not found` },
-                executor: task.executor,
-                duration: Date.now() - startTime,
-            };
-        }
-        // 更新任务状态
         task.status = 'running';
         task.startedAt = startTime;
         this.runningTasks.set(task.id, task);
         this.emitEvent({ type: 'task:start', task });
-        try {
-            // 执行编辑
-            const diffs = [];
-            if (task.input.files.length === 1) {
-                const result = await executor.editor.edit(task.input.files[0], task.input.instruction);
-                if (result.success) {
-                    diffs.push(result.diff);
-                }
-            }
-            else if (task.input.files.length > 1) {
-                const results = await executor.editor.editMultiple(task.input.files, task.input.instruction);
-                for (const result of results) {
-                    if (result.success) {
-                        diffs.push(result.diff);
-                    }
-                }
-            }
-            // 更新任务状态
-            task.status = 'completed';
-            task.completedAt = Date.now();
-            task.output = {
-                diffs,
-                metrics: {
-                    duration: Date.now() - startTime,
-                },
-            };
-            const result = {
-                taskId: task.id,
-                status: 'completed',
-                output: task.output,
-                executor: task.executor,
-                duration: Date.now() - startTime,
-            };
+        const result = await this.runtime.executeTask(task);
+        task.status = result.status;
+        task.completedAt = Date.now();
+        task.output = result.output;
+        if (result.status === 'completed') {
             this.emitEvent({ type: 'task:complete', taskId: task.id, result });
-            this.runningTasks.delete(task.id);
-            return result;
         }
-        catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            task.status = 'failed';
-            task.completedAt = Date.now();
-            task.output = { error: errorMessage };
-            const result = {
-                taskId: task.id,
-                status: 'failed',
-                output: task.output,
-                executor: task.executor,
-                duration: Date.now() - startTime,
-            };
-            this.emitEvent({ type: 'task:error', taskId: task.id, error: errorMessage });
-            this.runningTasks.delete(task.id);
-            return result;
+        else {
+            this.emitEvent({ type: 'task:error', taskId: task.id, error: result.output?.error || 'Unknown error' });
         }
+        this.runningTasks.delete(task.id);
+        return result;
     }
     /**
      * 并行执行多个任务
@@ -240,9 +191,8 @@ export class CoworkOrchestrator extends EventEmitter {
             if (passContext && i > 0) {
                 const prevResult = results[i - 1];
                 if (prevResult.status === 'completed' && prevResult.output) {
-                    // 将前一个任务的输出添加到当前任务的上下文
-                    task.input.context = this.buildContextFromResult(prevResult);
-                    // 写入 Blackboard
+                    const nextTask = this.runtime.attachPreviousResult(task, prevResult);
+                    task.input.context = nextTask.input.context;
                     this.setBlackboardEntry(`task_${tasks[i - 1].id}_output`, prevResult.output, tasks[i - 1].executor);
                 }
             }
@@ -289,8 +239,8 @@ export class CoworkOrchestrator extends EventEmitter {
         let finalDiffs;
         let interrupted = false;
         // 获取执行器
-        const generatorExecutor = this.executors.get(generator);
-        const criticExecutor = this.executors.get(critic);
+        const generatorExecutor = this.runtime.getExecutor(generator);
+        const criticExecutor = this.runtime.getExecutor(critic);
         if (!generatorExecutor || !criticExecutor) {
             return {
                 mode: 'debate',
@@ -464,18 +414,6 @@ export class CoworkOrchestrator extends EventEmitter {
     // ==================== 私有方法 ====================
     emitEvent(event) {
         this.emit('event', event);
-    }
-    buildContextFromResult(result) {
-        if (!result.output)
-            return '';
-        const parts = [];
-        if (result.output.result) {
-            parts.push(`Previous output:\n${result.output.result}`);
-        }
-        if (result.output.diffs && result.output.diffs.length > 0) {
-            parts.push(`Previous changes:\n${result.output.diffs.map((d) => `- ${d.file}: +${d.additions}/-${d.deletions}`).join('\n')}`);
-        }
-        return parts.join('\n\n');
     }
     parseIssues(criticOutput) {
         const issues = [];

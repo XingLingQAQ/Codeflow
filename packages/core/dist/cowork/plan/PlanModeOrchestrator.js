@@ -3,6 +3,7 @@
  * 整合 OpenSpec 约束驱动和 Aha-Loop 愿景构建能力
  */
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import { VisionBuilder } from './VisionBuilder.js';
 import { ConstraintExtractor } from './ConstraintExtractor.js';
 import { PlanArtifactManager } from './PlanArtifactManager.js';
@@ -43,7 +44,7 @@ export class PlanModeOrchestrator extends EventEmitter {
         // 初始化工件目录
         await this.artifactManager.initialize();
         const session = {
-            id: `plan-${Date.now()}`,
+            id: `plan-${randomUUID()}`,
             name,
             status: 'running',
             currentPhase: 'vision',
@@ -327,17 +328,23 @@ export class PlanModeOrchestrator extends EventEmitter {
     getArtifactManager() {
         return this.artifactManager;
     }
-    /**
-     * 添加事件监听器
-     */
-    addListener(listener) {
-        this.on('event', listener);
+    addListener(eventNameOrListener, listener) {
+        if (typeof eventNameOrListener === 'function') {
+            return super.addListener('event', eventNameOrListener);
+        }
+        if (!listener) {
+            return this;
+        }
+        return super.addListener(eventNameOrListener, listener);
     }
-    /**
-     * 移除事件监听器
-     */
-    removeListener(listener) {
-        this.off('event', listener);
+    removeListener(eventNameOrListener, listener) {
+        if (typeof eventNameOrListener === 'function') {
+            return super.removeListener('event', eventNameOrListener);
+        }
+        if (!listener) {
+            return this;
+        }
+        return super.removeListener(eventNameOrListener, listener);
     }
     /**
      * 清理资源

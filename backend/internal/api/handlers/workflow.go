@@ -69,9 +69,30 @@ func GetWorkflowReplay(c *gin.Context) {
 			respondError(c, http.StatusNotFound, "Project not found")
 			return
 		}
+		if errors.Is(err, workflow.ErrSessionNotInProject) {
+			respondSessionNotInProject(c, err)
+			return
+		}
 		respondError(c, http.StatusInternalServerError, "Failed to get workflow replay: "+err.Error())
 		return
 	}
 
 	respondOK(c, result)
+}
+
+// respondSessionNotInProject answers a replay request whose explicit session_id
+// is not authorized for the path project: 403, with the envelope data naming
+// both IDs so the caller can tell which scope rejected it (E-01).
+func respondSessionNotInProject(c *gin.Context, err error) {
+	data := gin.H{}
+	var mismatch *workflow.SessionNotInProjectError
+	if errors.As(err, &mismatch) {
+		data["project_id"] = mismatch.ProjectID
+		data["session_id"] = mismatch.SessionID
+	}
+	c.JSON(http.StatusForbidden, Response{
+		Success: false,
+		Error:   "Session is not authorized for this project",
+		Data:    data,
+	})
 }

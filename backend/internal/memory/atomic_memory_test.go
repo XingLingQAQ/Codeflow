@@ -2,13 +2,12 @@ package memory
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 func TestAtomicMemoryValidate(t *testing.T) {
@@ -89,7 +88,7 @@ func TestEnsureAtomicMemorySchema(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "atomic.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := dbx.Open(dbPath, dbx.WithWAL(false), dbx.WithForeignKeys(false), dbx.WithBusyTimeout(0))
 	if err != nil {
 		t.Fatalf("open db failed: %v", err)
 	}

@@ -1,7 +1,11 @@
 package privacy
 
 import (
+	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"testing"
 )
 
@@ -25,8 +29,8 @@ func TestPrivacyManagerEncryptDecrypt(t *testing.T) {
 	if encrypted.Salt == "" {
 		t.Error("expected non-empty salt")
 	}
-	if encrypted.Algorithm != AES256CBC {
-		t.Errorf("expected algorithm %s, got %s", AES256CBC, encrypted.Algorithm)
+	if encrypted.Algorithm != AES256GCM || encrypted.Tag == "" {
+		t.Errorf("expected authenticated algorithm %s, got %+v", AES256GCM, encrypted)
 	}
 
 	// 测试解密
@@ -107,8 +111,8 @@ func TestPrivacyManagerKeyGeneration(t *testing.T) {
 	if keyInfo.ID == "" {
 		t.Error("expected non-empty key ID")
 	}
-	if keyInfo.Algorithm != AES256CBC {
-		t.Errorf("expected algorithm %s, got %s", AES256CBC, keyInfo.Algorithm)
+	if keyInfo.Algorithm != AES256GCM {
+		t.Errorf("expected algorithm %s, got %s", AES256GCM, keyInfo.Algorithm)
 	}
 	if keyInfo.CreatedAt == 0 {
 		t.Error("expected non-zero creation time")
@@ -118,6 +122,61 @@ func TestPrivacyManagerKeyGeneration(t *testing.T) {
 	activeKey := manager.GetActiveKey()
 	if activeKey == nil || activeKey.ID != keyInfo.ID {
 		t.Error("active key mismatch")
+	}
+}
+
+func legacyCBCFixture(t *testing.T, manager *PrivacyManager, plaintext string) *EncryptedData {
+	t.Helper()
+	salt := bytes.Repeat([]byte{0x11}, 16)
+	iv := bytes.Repeat([]byte{0x22}, aes.BlockSize)
+	key, err := manager.deriveKeyForAlgorithm("test-password", salt, AES256CBC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	padded := pkcs7Pad([]byte(plaintext), aes.BlockSize)
+	ciphertext := make([]byte, len(padded))
+	cipher.NewCBCEncrypter(block, iv).CryptBlocks(ciphertext, padded)
+	return &EncryptedData{
+		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
+		IV:         base64.StdEncoding.EncodeToString(iv), Salt: base64.StdEncoding.EncodeToString(salt), Algorithm: AES256CBC,
+	}
+}
+
+func TestPrivacyManagerLegacyCBCReadMigratesDocumentOnce(t *testing.T) {
+	manager := NewPrivacyManager("test-password", nil)
+	doc := &PrivacyAwareDocument{ID: "legacy-doc", Policy: DefaultPrivacyPolicy,
+		EncryptedContent: legacyCBCFixture(t, manager, "legacy secret")}
+
+	result, err := manager.DecryptDocument(context.Background(), doc)
+	if err != nil || result.Content != "legacy secret" {
+		t.Fatalf("legacy decrypt failed: result=%+v err=%v", result, err)
+	}
+	if result.EncryptedContent.Algorithm != AES256GCM || result.EncryptedContent.Tag == "" {
+		t.Fatalf("legacy record was not migrated: %+v", result.EncryptedContent)
+	}
+	firstCiphertext := result.EncryptedContent.Ciphertext
+	if _, err := manager.DecryptDocument(context.Background(), result); err != nil {
+		t.Fatal(err)
+	}
+	if result.EncryptedContent.Ciphertext != firstCiphertext {
+		t.Fatal("GCM document was migrated more than once")
+	}
+}
+
+func TestPrivacyManagerGCMRejectsTamperedTag(t *testing.T) {
+	manager := NewPrivacyManager("test-password", nil)
+	encrypted, err := manager.Encrypt(context.Background(), "authenticated", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted.Tag = base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0}, 16))
+	decrypted, err := manager.Decrypt(context.Background(), encrypted)
+	if err != nil || decrypted.Verified {
+		t.Fatalf("tampered GCM tag verified: result=%+v err=%v", decrypted, err)
 	}
 }
 

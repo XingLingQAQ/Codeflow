@@ -3,10 +3,17 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	nethttp "net/http"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -15,18 +22,27 @@ import (
 	"github.com/codeflow/backend/internal/api/handlers"
 	"github.com/codeflow/backend/internal/api/middleware"
 	"github.com/codeflow/backend/internal/web"
+	"github.com/codeflow/backend/internal/websocket"
 )
 
 // Config holds API server configuration.
 type Config struct {
+	Host            string
 	Port            string
+	AuthToken       string
 	AllowedOrigins  []string
 	EnableDebugMode bool
+	// AllowRemote permits a non-loopback bind only when AuthToken was supplied
+	// explicitly by the caller (never generated as a sidecar token).
+	AllowRemote bool
+	// HandshakeWriter receives the one-line startup handshake. nil means stdout.
+	HandshakeWriter io.Writer
 }
 
 // DefaultConfig returns default API configuration.
 func DefaultConfig() *Config {
 	return &Config{
+		Host:            "127.0.0.1",
 		Port:            "8080",
 		AllowedOrigins:  []string{"http://localhost:3000", "http://localhost:5173", "tauri://localhost", "https://tauri.localhost"},
 		EnableDebugMode: false,
@@ -35,8 +51,13 @@ func DefaultConfig() *Config {
 
 // Server represents the API server.
 type Server struct {
-	config *Config
-	router *gin.Engine
+	config    *Config
+	router    *gin.Engine
+	configErr error
+	// processStartID uniquely identifies this server process instance. The
+	// desktop shell uses it to detect a backend restart (including port
+	// reuse) and drop stale connections instead of re-pairing blindly.
+	processStartID string
 }
 
 // NewServer creates a new API server with the given configuration.
@@ -44,22 +65,62 @@ func NewServer(config *Config) *Server {
 	if config == nil {
 		config = DefaultConfig()
 	}
+	// Copy caller-owned slices before normalizing so construction never mutates
+	// configuration shared with bootstrap or tests.
+	copyConfig := *config
+	copyConfig.AllowedOrigins = append([]string(nil), config.AllowedOrigins...)
+	if copyConfig.Host == "" {
+		copyConfig.Host = "127.0.0.1"
+	}
+	if copyConfig.Port == "" {
+		copyConfig.Port = "0"
+	}
+	// Generate the process-start ID once per server instance: startup
+	// timestamp (UnixNano, hex) + 128 bits of crypto/rand, base64url. It
+	// stays constant for the whole process lifetime and changes on every
+	// restart, which is exactly the signal the sidecar consumer needs.
+	processStartID, err := generateProcessStartID()
+	if err != nil {
+		server := &Server{config: &copyConfig, configErr: err}
+		server.router = gin.New()
+		return server
+	}
+	if copyConfig.AuthToken == "" {
+		if copyConfig.AllowRemote {
+			copyConfigErr := errors.New("remote mode requires an explicitly configured auth token")
+			copyConfig.AuthToken = ""
+			server := &Server{config: &copyConfig, configErr: copyConfigErr, processStartID: processStartID}
+			server.router = gin.New()
+			return server
+		}
+		token, err := generateAuthToken()
+		if err != nil {
+			server := &Server{config: &copyConfig, configErr: err, processStartID: processStartID}
+			server.router = gin.New()
+			return server
+		}
+		copyConfig.AuthToken = token
+	}
+	configErr := validateConfig(&copyConfig)
 
-	if !config.EnableDebugMode {
+	if !copyConfig.EnableDebugMode {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	router := gin.New()
 
+	wsPolicy := websocket.NewAccessPolicy(copyConfig.AuthToken, copyConfig.AllowedOrigins)
 	// Apply middleware
 	router.Use(gin.Recovery())
 	router.Use(middleware.Trace())
 	router.Use(middleware.Logger())
+	router.Use(func(c *gin.Context) {
+		c.Set(websocket.ContextAccessPolicy, wsPolicy)
+		c.Next()
+	})
 	router.Use(cors.New(cors.Config{
-		AllowOriginFunc: func(origin string) bool {
-			return true // Desktop app — all local origins allowed
-		},
-		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowOriginFunc: wsPolicy.OriginAllowed,
+		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders: []string{
 			"Origin",
 			"Content-Type",
@@ -71,6 +132,8 @@ func NewServer(config *Config) *Server {
 			middleware.HeaderAgentID,
 			// Workspace APIs prefer this header for project root.
 			"X-Codeflow-Workspace-Root",
+			"X-Codeflow-Project-ID",
+			"Idempotency-Key",
 		},
 		ExposeHeaders: []string{
 			"Content-Length",
@@ -83,9 +146,14 @@ func NewServer(config *Config) *Server {
 	}))
 
 	server := &Server{
-		config: config,
-		router: router,
+		config:         &copyConfig,
+		router:         router,
+		configErr:      configErr,
+		processStartID: processStartID,
 	}
+	auth := middleware.RequireAccessToken(copyConfig.AuthToken)
+	router.GET("/ready", auth, handlers.ReadinessCheck)
+	router.GET("/metrics", auth, handlers.Metrics)
 
 	server.setupRoutes()
 
@@ -96,11 +164,11 @@ func NewServer(config *Config) *Server {
 func (s *Server) setupRoutes() {
 	// Health check
 	s.router.GET("/health", handlers.HealthCheck)
-	s.router.GET("/ready", handlers.ReadinessCheck)
-	s.router.GET("/metrics", handlers.Metrics)
 
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
+	v1.Use(middleware.RequireAccessToken(s.config.AuthToken))
+	v1.Use(middleware.AuditMutations())
 	{
 		// Snapshot routes (experimental: core capture/restore functions are placeholder implementations)
 		snapshots := v1.Group("/snapshots")
@@ -118,22 +186,22 @@ func (s *Server) setupRoutes() {
 		flows.Use(middleware.Experimental("floweng"))
 		{
 			flows.GET("/templates", handlers.ListFlowTemplates)
-				flows.GET("/templates/:tid", handlers.GetFlowTemplate)
-				flows.GET("/templates/:tid/export", handlers.ExportFlowTemplate)
-				flows.DELETE("/templates/:tid", handlers.DeleteFlowTemplate)
+			flows.GET("/templates/:tid", handlers.GetFlowTemplate)
+			flows.GET("/templates/:tid/export", handlers.ExportFlowTemplate)
+			flows.DELETE("/templates/:tid", handlers.DeleteFlowTemplate)
 			flows.POST("/templates/import", handlers.ImportFlowTemplate)
 			flows.POST("", handlers.CreateFlow)
 			flows.GET("", handlers.ListFlows)
 			flows.GET("/:id", handlers.GetFlow)
 			flows.DELETE("/:id", handlers.DeleteFlow)
 			flows.GET("/:id/events", handlers.ListFlowEvents)
-				flows.GET("/:id/active-stage", handlers.GetActiveFlowStage)
-				flows.GET("/:id/gates", handlers.ListFlowGates)
+			flows.GET("/:id/active-stage", handlers.GetActiveFlowStage)
+			flows.GET("/:id/gates", handlers.ListFlowGates)
 			flows.GET("/:id/stages", handlers.ListFlowStages)
-				flows.GET("/:id/stages/:sid", handlers.GetFlowStage)
+			flows.GET("/:id/stages/:sid", handlers.GetFlowStage)
 			flows.GET("/:id/artifacts", handlers.ListFlowArtifacts)
 			flows.GET("/:id/artifacts/:aid", handlers.GetFlowArtifact)
-				flows.PATCH("/:id/artifacts/:aid", handlers.UpdateFlowArtifactStatus)
+			flows.PATCH("/:id/artifacts/:aid", handlers.UpdateFlowArtifactStatus)
 			flows.POST("/:id/stages/:sid/advance", handlers.AdvanceFlowStage)
 			flows.POST("/:id/stages/:sid/skip", handlers.SkipFlowStage)
 			flows.POST("/:id/stages/:sid/artifacts", handlers.AttachFlowArtifact)
@@ -148,22 +216,22 @@ func (s *Server) setupRoutes() {
 		{
 			ws.GET("/list", handlers.ListWorkspace)
 			ws.GET("/read", handlers.ReadWorkspaceFile)
-				ws.GET("/stat", handlers.StatWorkspaceFile)
-				ws.GET("/staged", handlers.ListWorkspaceStaged)
+			ws.GET("/stat", handlers.StatWorkspaceFile)
+			ws.GET("/staged", handlers.ListWorkspaceStaged)
 			ws.POST("/write", handlers.WriteWorkspaceFile)
 			ws.POST("/promote", handlers.PromoteWorkspaceFile)
-				ws.POST("/promote-all", handlers.PromoteAllWorkspace)
-				ws.POST("/discard", handlers.DiscardWorkspaceStaged)
-				ws.POST("/discard-all", handlers.DiscardAllWorkspaceStaged)
-				// File watcher (experimental): static paths only, no param routes in this group.
-				ws.GET("/watches", handlers.ListWorkspaceWatches)
-				ws.POST("/watch", handlers.CreateWorkspaceWatch)
-				ws.DELETE("/watch", handlers.DeleteWorkspaceWatch)
-				ws.GET("/scripts", handlers.DetectWorkspaceScripts)
-				ws.GET("/dev-servers", handlers.ListWorkspaceDevServers)
-				ws.POST("/dev-servers", handlers.StartWorkspaceDevServer)
-				ws.DELETE("/dev-servers", handlers.DeleteWorkspaceDevServer)
-				ws.GET("/dev-servers/:id/logs", handlers.GetWorkspaceDevServerLogs)
+			ws.POST("/promote-all", handlers.PromoteAllWorkspace)
+			ws.POST("/discard", handlers.DiscardWorkspaceStaged)
+			ws.POST("/discard-all", handlers.DiscardAllWorkspaceStaged)
+			// File watcher (experimental): static paths only, no param routes in this group.
+			ws.GET("/watches", handlers.ListWorkspaceWatches)
+			ws.POST("/watch", handlers.CreateWorkspaceWatch)
+			ws.DELETE("/watch", handlers.DeleteWorkspaceWatch)
+			ws.GET("/scripts", handlers.DetectWorkspaceScripts)
+			ws.GET("/dev-servers", handlers.ListWorkspaceDevServers)
+			ws.POST("/dev-servers", handlers.StartWorkspaceDevServer)
+			ws.DELETE("/dev-servers", handlers.DeleteWorkspaceDevServer)
+			ws.GET("/dev-servers/:id/logs", handlers.GetWorkspaceDevServerLogs)
 		}
 
 		// Skill registry (experimental: M5.0 minimal)
@@ -175,12 +243,12 @@ func (s *Server) setupRoutes() {
 			skills.POST("/match", handlers.MatchSkills)
 			skills.POST("/inject", handlers.InjectSkills)
 			skills.POST("/import", handlers.ImportSkills)
-				skills.GET("/export", handlers.ExportSkills)
+			skills.GET("/export", handlers.ExportSkills)
 			skills.GET("/:id", handlers.GetSkill)
 			skills.PATCH("/:id", handlers.UpdateSkill)
 			skills.DELETE("/:id", handlers.DeleteSkill)
-				skills.GET("/:id/versions", handlers.ListSkillVersions)
-				skills.POST("/:id/rollback", handlers.RollbackSkillVersion)
+			skills.GET("/:id/versions", handlers.ListSkillVersions)
+			skills.POST("/:id/rollback", handlers.RollbackSkillVersion)
 		}
 
 		// Guard policy (experimental)
@@ -188,15 +256,15 @@ func (s *Server) setupRoutes() {
 		guardAPI.Use(middleware.Experimental("guard"))
 		{
 			guardAPI.POST("/check", handlers.GuardCheck)
-				guardAPI.GET("/config", handlers.GuardConfig)
-				guardAPI.GET("/rules", handlers.GuardRules)
+			guardAPI.GET("/config", handlers.GuardConfig)
+			guardAPI.GET("/rules", handlers.GuardRules)
 			guardAPI.POST("/index", handlers.GuardIndexTree)
 			guardAPI.POST("/exempt", handlers.GuardExempt)
-				guardAPI.GET("/exemptions", handlers.GuardListExemptions)
-				guardAPI.DELETE("/exempt", handlers.GuardClearExemption)
-				guardAPI.POST("/exemption-requests", handlers.CreateExemptionRequest)
-				guardAPI.GET("/exemption-requests", handlers.ListExemptionRequests)
-				guardAPI.POST("/exemption-requests/:id/decide", handlers.DecideExemptionRequest)
+			guardAPI.GET("/exemptions", handlers.GuardListExemptions)
+			guardAPI.DELETE("/exempt", handlers.GuardClearExemption)
+			guardAPI.POST("/exemption-requests", handlers.CreateExemptionRequest)
+			guardAPI.GET("/exemption-requests", handlers.ListExemptionRequests)
+			guardAPI.POST("/exemption-requests/:id/decide", handlers.DecideExemptionRequest)
 		}
 
 		// Memory routes
@@ -383,8 +451,11 @@ func (s *Server) setupRoutes() {
 			projects.GET("", handlers.GetProjects)
 			projects.POST("", handlers.CreateProject)
 			projects.GET("/:id", handlers.GetProject)
+			projects.GET("/:id/stream", handlers.StreamProjectEvents)
 			projects.PUT("/:id", handlers.UpdateProject)
 			projects.DELETE("/:id", handlers.DeleteProject)
+			projects.POST("/:id/restore", handlers.RestoreProject)
+			projects.POST("/:id/bind-workspace", handlers.BindProjectWorkspace)
 			projects.GET("/:id/plans", handlers.GetProjectPlans)
 			projects.POST("/:id/plans", handlers.AddPlanToProject)
 			projects.DELETE("/:id/plans/:planId", handlers.RemovePlanFromProject)
@@ -525,12 +596,15 @@ func (s *Server) Run() error {
 
 // RunContext starts the API server and shuts it down when ctx is canceled.
 func (s *Server) RunContext(ctx context.Context) error {
-	addr := ":" + s.config.Port
+	if s.configErr != nil {
+		return s.configErr
+	}
+	addr := net.JoinHostPort(s.config.Host, s.config.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		// If the configured port is occupied, try port 0 (random)
 		if s.config.Port != "0" {
-			listener, err = net.Listen("tcp", ":0")
+			listener, err = net.Listen("tcp", net.JoinHostPort(s.config.Host, "0"))
 			if err != nil {
 				return fmt.Errorf("failed to bind to any port: %w", err)
 			}
@@ -541,7 +615,27 @@ func (s *Server) RunContext(ctx context.Context) error {
 
 	// Extract actual port and emit for Tauri sidecar protocol
 	actualPort := listener.Addr().(*net.TCPAddr).Port
-	fmt.Printf("CODEFLOW_PORT:%d\n", actualPort)
+	handshake := map[string]interface{}{
+		"protocol_version": "1",
+		"host":             s.config.Host,
+		"port":             actualPort,
+		"token":            s.config.AuthToken,
+		"expires_at":       "process",
+		"process_start_id": s.processStartID,
+	}
+	handshakeJSON, err := json.Marshal(handshake)
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("encode sidecar handshake: %w", err)
+	}
+	writer := s.config.HandshakeWriter
+	if writer == nil {
+		writer = os.Stdout
+	}
+	if _, err := fmt.Fprintf(writer, "CODEFLOW_HANDSHAKE:%s\n", handshakeJSON); err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("write sidecar handshake: %w", err)
+	}
 
 	server := &nethttp.Server{Handler: s.router}
 	errCh := make(chan error, 1)
@@ -572,4 +666,117 @@ func (s *Server) RunContext(ctx context.Context) error {
 // Router returns the underlying gin router for testing.
 func (s *Server) Router() *gin.Engine {
 	return s.router
+}
+
+// AuthToken returns the process-local token for bootstrap/tests. It is not
+// exposed by any HTTP handler.
+func (s *Server) AuthToken() string {
+	if s == nil || s.config == nil {
+		return ""
+	}
+	return s.config.AuthToken
+}
+
+// ProcessStartID returns the identifier generated once for this server
+// process instance. It is stable for the process lifetime, changes on every
+// restart, and is emitted in the sidecar handshake so the desktop shell can
+// detect a restarted backend. It is not exposed by any HTTP handler.
+func (s *Server) ProcessStartID() string {
+	if s == nil {
+		return ""
+	}
+	return s.processStartID
+}
+
+// Validate reports startup configuration errors before binding a listener.
+func (s *Server) Validate() error {
+	if s == nil {
+		return errors.New("nil API server")
+	}
+	return s.configErr
+}
+
+func generateAuthToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate sidecar auth token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// generateProcessStartID builds the process-start identifier from the
+// startup timestamp plus 128 bits of randomness: "<unixnano hex>-<base64url>".
+// The timestamp keeps IDs sortable by start order; the random suffix keeps
+// them unique even for two processes started within the same nanosecond
+// clock tick.
+func generateProcessStartID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate process start id: %w", err)
+	}
+	return fmt.Sprintf("%x-%s", time.Now().UnixNano(), base64.RawURLEncoding.EncodeToString(b)), nil
+}
+
+func validateConfig(config *Config) error {
+	if config == nil {
+		return errors.New("nil API config")
+	}
+	if !isLoopbackHost(config.Host) && !config.AllowRemote {
+		return fmt.Errorf("sidecar host %q is not loopback; enable explicit remote mode", config.Host)
+	}
+	if config.AuthToken == "" {
+		return errors.New("auth token must not be empty")
+	}
+	if !validOpaqueToken(config.AuthToken) {
+		return errors.New("auth token must be at least 32 URL-safe characters")
+	}
+	seen := make(map[string]struct{}, len(config.AllowedOrigins))
+	for _, origin := range config.AllowedOrigins {
+		if err := validateOrigin(origin); err != nil {
+			return err
+		}
+		if _, ok := seen[origin]; ok {
+			return fmt.Errorf("duplicate allowed origin %q", origin)
+		}
+		seen[origin] = struct{}{}
+	}
+	return nil
+}
+
+func validateOrigin(origin string) error {
+	if origin == "" || strings.TrimSpace(origin) != origin || origin == "*" {
+		return fmt.Errorf("invalid allowed origin %q", origin)
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("invalid allowed origin %q", origin)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https", "tauri":
+	default:
+		return fmt.Errorf("invalid allowed origin scheme in %q", origin)
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.Trim(host, "[]")
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func validOpaqueToken(token string) bool {
+	if len(token) < 32 {
+		return false
+	}
+	for _, char := range token {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') && char != '-' && char != '_' {
+			return false
+		}
+	}
+	return true
 }

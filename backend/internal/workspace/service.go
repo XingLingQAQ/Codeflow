@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/codeflow/backend/internal/audit"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
 )
 
 // FSService is a real filesystem workspace rooted per-call.
@@ -266,17 +268,32 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 	}
 	if mode == WriteModeStage {
 		targetRoot = filepath.Join(req.Root, ".codeflow", "staging")
+	}
+	// Guard always evaluates against the *intended* final path (project tree), not staging path.
+	finalAbs, err := s.Resolve(req.Root, rel)
+	if err != nil {
+		return nil, err
+	}
+	trace := audit.TraceFromContext(ctx)
+	policyReq := policy.Request{Operation: policy.OperationWorkspaceWrite, Resource: finalAbs,
+		ProjectID: req.ProjectID, AgentID: req.AgentID, PluginID: req.PluginID}
+	if trace != nil {
+		if policyReq.ProjectID == "" {
+			policyReq.ProjectID = trace.ProjectID
+		}
+		if policyReq.AgentID == "" {
+			policyReq.AgentID = trace.AgentID
+		}
+	}
+	if decision := policy.EvaluateBoundary(ctx, policyReq); !decision.Allowed {
+		return nil, policy.DenialError(decision)
+	}
+	if mode == WriteModeStage {
 		if err := os.MkdirAll(targetRoot, 0o755); err != nil {
 			return nil, fmt.Errorf("mkdir staging: %w", err)
 		}
 	}
 	abs, err := s.Resolve(targetRoot, rel)
-	if err != nil {
-		return nil, err
-	}
-
-	// Guard always evaluates against the *intended* final path (project tree), not staging path.
-	finalAbs, err := s.Resolve(req.Root, rel)
 	if err != nil {
 		return nil, err
 	}

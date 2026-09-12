@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // sqliteDebateStore persists Debate JSON documents keyed by id.
@@ -16,15 +16,13 @@ type sqliteDebateStore struct {
 }
 
 func openSQLiteDebateStore(dbPath string) (*sqliteDebateStore, error) {
-	conn, err := buildDebateSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareDebateDBDir(dbPath); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", conn)
+	db, err := dbx.Open(dbPath, dbx.WithMaxOpenConns(1)) // SQLite write serialization
 	if err != nil {
 		return nil, fmt.Errorf("open debate db: %w", err)
 	}
-	db.SetMaxOpenConns(1) // SQLite write serialization
 	s := &sqliteDebateStore{db: db}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
@@ -33,17 +31,17 @@ func openSQLiteDebateStore(dbPath string) (*sqliteDebateStore, error) {
 	return s, nil
 }
 
-func buildDebateSQLiteConnString(dbPath string) (string, error) {
+func prepareDebateDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file:debate_mem?mode=memory&cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create debate db dir: %w", err)
+			return fmt.Errorf("create debate db dir: %w", err)
 		}
 	}
-	return fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", filepath.ToSlash(dbPath)), nil
+	return nil
 }
 
 func (s *sqliteDebateStore) initSchema() error {

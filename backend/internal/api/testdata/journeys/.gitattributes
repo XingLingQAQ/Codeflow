@@ -1,0 +1,4 @@
+# Fixture files must stay byte-identical across platforms so the SHA-256
+# hashes recorded in manifest.json remain valid. Force LF line endings and
+# override any core.autocrlf setting.
+* text eol=lf

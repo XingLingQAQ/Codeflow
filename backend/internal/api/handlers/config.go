@@ -8,19 +8,19 @@ import (
 )
 
 type globalConfigPatch struct {
-	DefaultModel     *string               `json:"default_model"`
-	APIPool          *[]config.APIChannel  `json:"api_pool"`
-	PublicMCP        *[]string             `json:"public_mcp"`
-	SummaryThreshold *int                  `json:"summary_threshold"`
-	MaxRetries       *int                  `json:"max_retries"`
-	Timeout          *int                  `json:"timeout"`
+	DefaultModel     *string                   `json:"default_model"`
+	APIPool          *[]config.APIChannelWrite `json:"api_pool"`
+	PublicMCP        *[]string                 `json:"public_mcp"`
+	SummaryThreshold *int                      `json:"summary_threshold"`
+	MaxRetries       *int                      `json:"max_retries"`
+	Timeout          *int                      `json:"timeout"`
 }
 
 // GetGlobalConfig returns the global configuration.
 func GetGlobalConfig(c *gin.Context) {
 	svc := config.GetConfigService()
 	cfg := svc.LoadGlobalConfig()
-	respondOK(c, cfg)
+	respondOK(c, config.NewPublicGlobalConfig(cfg))
 }
 
 // UpdateGlobalConfig updates the global configuration.
@@ -29,6 +29,14 @@ func UpdateGlobalConfig(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, 400, err.Error())
 		return
+	}
+	if req.APIPool != nil {
+		for _, channel := range *req.APIPool {
+			if channel.APIKey != nil && channel.DeleteSecret {
+				respondError(c, 400, "api_key and delete_secret cannot be used together")
+				return
+			}
+		}
 	}
 
 	svc := config.GetConfigService()
@@ -39,11 +47,11 @@ func UpdateGlobalConfig(c *gin.Context) {
 	merged := mergeGlobalConfig(current, &req)
 
 	if err := svc.SaveGlobalConfig(&merged); err != nil {
-		respondError(c, 500, err.Error())
+		respondInternalError(c, "update global config", err)
 		return
 	}
 
-	respondOK(c, merged)
+	respondOK(c, config.NewPublicGlobalConfig(svc.LoadGlobalConfig()))
 }
 
 func mergeGlobalConfig(current *config.GlobalConfig, updates *globalConfigPatch) config.GlobalConfig {
@@ -56,7 +64,21 @@ func mergeGlobalConfig(current *config.GlobalConfig, updates *globalConfigPatch)
 		merged.DefaultModel = *updates.DefaultModel
 	}
 	if updates.APIPool != nil {
-		merged.APIPool = *updates.APIPool
+		merged.APIPool = make([]config.APIChannel, len(*updates.APIPool))
+		for i, input := range *updates.APIPool {
+			channel := config.APIChannel{
+				ID:           input.ID,
+				Name:         input.Name,
+				Provider:     input.Provider,
+				DeleteSecret: input.DeleteSecret,
+				BaseURL:      input.BaseURL,
+				Enabled:      input.Enabled,
+			}
+			if input.APIKey != nil {
+				channel.APIKey = *input.APIKey
+			}
+			merged.APIPool[i] = channel
+		}
 	}
 	if updates.PublicMCP != nil {
 		merged.PublicMCP = *updates.PublicMCP
@@ -195,5 +217,5 @@ func ResolveConfig(c *gin.Context) {
 	svc := config.GetConfigService()
 	resolved := svc.ResolveConfig(sessionID, role)
 
-	respondOK(c, resolved)
+	respondOK(c, config.NewPublicResolvedConfig(resolved))
 }

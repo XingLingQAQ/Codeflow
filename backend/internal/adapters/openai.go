@@ -1,7 +1,6 @@
 package adapters
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -124,47 +123,11 @@ func (a *OpenAIAdapter) Stream(ctx context.Context, prompt string, options *Send
 		defer close(ch)
 		defer resp.Body.Close()
 
-		var fullContent strings.Builder
-		index := 0
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimSpace(strings.TrimPrefix(line, "data: "))
-			if data == "[DONE]" {
-				break
-			}
-
-			var event struct {
-				Choices []struct {
-					Delta struct {
-						Content string `json:"content"`
-					} `json:"delta"`
-				} `json:"choices"`
-			}
-			if err := json.Unmarshal([]byte(data), &event); err != nil || len(event.Choices) == 0 {
-				continue
-			}
-			delta := event.Choices[0].Delta.Content
-			if delta == "" {
-				continue
-			}
-			fullContent.WriteString(delta)
-			chunk := StreamChunk{Delta: delta, Index: index, Done: false}
-			notifyAdapterStreamChunk(ctx, controls.SemanticsControl(), chunk)
-			ch <- chunk
-			index++
-		}
-
-		content := fullContent.String()
-		assistantMsg := Message{Role: RoleAssistant, Content: content, Blocks: []ContentBlock{{Type: "text", Text: content}}, Timestamp: time.Now()}
-		a.AddMessage(assistantMsg)
-		finalChunk := StreamChunk{Delta: "", Index: index, Done: true}
-		notifyAdapterStreamChunk(ctx, controls.SemanticsControl(), finalChunk)
-		ch <- finalChunk
-		_ = notifyAdapterPostResponse(ctx, controls.SemanticsControl(), &AIResponse{Content: content, Blocks: cloneBlocks(assistantMsg.Blocks), Model: processed.Model, FinishReason: "stop"})
+		// T13.04.b：帧序列与终结状态由 a 步 parser 结果驱动（§31.3 契约）。
+		// 内容帧边解析边投递（不等整条流读完）；断流/provider error/扫描
+		// 失败/帧损坏 -> error 终结且不写成功历史；取消 -> 停止扫描并关闭
+		// body 与 channel，不阻塞发送。
+		streamProviderBody(ctx, a.BaseAdapter, controls.SemanticsControl(), processed.Model, resp.Body, parseOpenAIStreamBodyInto, ch)
 	}()
 
 	return ch, nil

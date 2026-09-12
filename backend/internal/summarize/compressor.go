@@ -337,7 +337,7 @@ func (c *Compressor) generateLocalSummary(messages []adapters.Message) string {
 		for _, msg := range userMessages[len(userMessages)-count:] {
 			topic := msg.Content
 			if len(topic) > 50 {
-				topic = topic[:50]
+				topic = TruncateUTF8(topic, 50)
 			}
 			topic = strings.ReplaceAll(topic, "\n", " ")
 			topics = append(topics, topic)
@@ -354,7 +354,7 @@ func (c *Compressor) buildSummaryPrompt(messages []adapters.Message, config *Sum
 	for _, m := range messages {
 		content := m.Content
 		if len(content) > 500 {
-			content = content[:500]
+			content = TruncateUTF8(content, 500)
 		}
 		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", m.Role, content))
 	}

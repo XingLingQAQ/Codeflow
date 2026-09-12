@@ -5,7 +5,7 @@
 /**
  * Plan 模式阶段
  */
-export type PlanPhase = 'vision' | 'constraints' | 'proposal' | 'specs' | 'design' | 'tasks' | 'execute' | 'completed';
+export type CoworkPlanPhase = 'vision' | 'constraints' | 'proposal' | 'specs' | 'design' | 'tasks' | 'execute' | 'completed';
 /**
  * Plan 模式状态
  */
@@ -203,7 +203,7 @@ export interface PlanSession {
     id: string;
     name: string;
     status: PlanStatus;
-    currentPhase: PlanPhase;
+    currentPhase: CoworkPlanPhase;
     vision?: VisionDocument;
     constraints?: ConstraintSet;
     artifacts: ArtifactMetadata[];
@@ -404,11 +404,11 @@ export interface ResearchFinding {
  */
 export type PlanEvent = {
     type: 'phase:start';
-    phase: PlanPhase;
+    phase: CoworkPlanPhase;
     sessionId: string;
 } | {
     type: 'phase:complete';
-    phase: PlanPhase;
+    phase: CoworkPlanPhase;
     sessionId: string;
 } | {
     type: 'vision:question';

@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupDebateRouteTest(t *testing.T) (*gin.Engine, *debate.Debate) {
+func setupDebateRouteTest(t *testing.T) (http.Handler, *debate.Debate) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -32,8 +32,12 @@ func setupDebateRouteTest(t *testing.T) (*gin.Engine, *debate.Debate) {
 	})
 	require.NoError(t, err)
 
-	server := NewServer(&Config{EnableDebugMode: true})
-	return server.Router(), created
+	server := NewServer(&Config{
+		AuthToken:       testAuthToken,
+		AllowedOrigins:  []string{"http://localhost:3000"},
+		EnableDebugMode: true,
+	})
+	return authenticatedTestHandler(server.Router()), created
 }
 
 func TestProposeSolutionRoute(t *testing.T) {

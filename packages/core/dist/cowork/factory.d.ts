@@ -1,13 +1,17 @@
+import { HookManager } from '../hooks/HookManager.js';
+import type { HookRuntimeControls } from '../hooks/types.js';
 /**
  * Cowork Factory
  * 工厂函数用于创建和注册执行器到 Orchestrator
  */
 import { CoworkOrchestrator } from './CoworkOrchestrator.js';
 import { AiderConfig } from './adapters/AiderAdapter.js';
+import { CodexCLIAdapter } from './adapters/CodexCLIAdapter.js';
+import { GeminiCLIAdapter } from './adapters/GeminiCLIAdapter.js';
 import { AiderCodeEditor, AiderEditorConfig } from './editors/AiderCodeEditor.js';
 import { ClaudeCodeEditor, ClaudeEditorConfig } from './editors/ClaudeCodeEditor.js';
-import { GeminiCodeEditor, GeminiEditorConfig } from './editors/GeminiCodeEditor.js';
-import { CodexCodeEditor, CodexEditorConfig } from './editors/CodexCodeEditor.js';
+import { GeminiCodeEditor, GeminiEditorAdapter, GeminiEditorConfig } from './editors/GeminiCodeEditor.js';
+import { CodexCodeEditor, CodexEditorAdapter, CodexEditorConfig } from './editors/CodexCodeEditor.js';
 import { ClaudeAdapter } from '../adapters/ClaudeAdapter.js';
 import { GeminiAdapter } from '../adapters/GeminiAdapter.js';
 import { CodexAdapter } from '../adapters/CodexAdapter.js';
@@ -58,15 +62,15 @@ export declare function createTask(id: string, executor: string, files: string[]
 /**
  * 创建并注册 Claude 执行器
  */
-export declare function registerClaudeExecutor(orchestrator: CoworkOrchestrator, adapter: ClaudeAdapter, config?: ClaudeEditorConfig, capabilities?: Partial<ExecutorCapabilities>): ClaudeCodeEditor;
+export declare function registerClaudeExecutor(orchestrator: CoworkOrchestrator, adapter: ClaudeAdapter, config?: ClaudeEditorConfig, capabilities?: Partial<ExecutorCapabilities>, hookManager?: HookManager): ClaudeCodeEditor;
 /**
  * 创建并注册 Gemini 执行器
  */
-export declare function registerGeminiExecutor(orchestrator: CoworkOrchestrator, adapter: GeminiAdapter, config?: GeminiEditorConfig, capabilities?: Partial<ExecutorCapabilities>): GeminiCodeEditor;
+export declare function registerGeminiExecutor(orchestrator: CoworkOrchestrator, adapter: GeminiEditorAdapter, config?: GeminiEditorConfig, capabilities?: Partial<ExecutorCapabilities>, hookManager?: HookManager): GeminiCodeEditor;
 /**
  * 创建并注册 Codex 执行器
  */
-export declare function registerCodexExecutor(orchestrator: CoworkOrchestrator, adapter: CodexAdapter, config?: CodexEditorConfig, capabilities?: Partial<ExecutorCapabilities>): CodexCodeEditor;
+export declare function registerCodexExecutor(orchestrator: CoworkOrchestrator, adapter: CodexEditorAdapter, config?: CodexEditorConfig, capabilities?: Partial<ExecutorCapabilities>, hookManager?: HookManager): CodexCodeEditor;
 /**
  * 创建包含所有编辑器的 Orchestrator
  */
@@ -75,9 +79,13 @@ export interface AllEditorsConfig {
     claudeAdapter?: ClaudeAdapter;
     claudeConfig?: ClaudeEditorConfig;
     geminiAdapter?: GeminiAdapter;
+    geminiCliAdapter?: GeminiCLIAdapter;
     geminiConfig?: GeminiEditorConfig;
     codexAdapter?: CodexAdapter;
+    codexCliAdapter?: CodexCLIAdapter;
     codexConfig?: CodexEditorConfig;
+    hookManager?: HookManager;
+    hookControls?: HookRuntimeControls;
 }
 export declare function createOrchestratorWithAllEditors(config?: AllEditorsConfig): {
     orchestrator: CoworkOrchestrator;

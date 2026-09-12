@@ -22,6 +22,7 @@ type FileAuditStorage struct {
 	writeBuffer []*AuditLogEntry
 	entryIndex  map[string]entryLocation
 	lastEntry   *AuditLogEntry
+	anchorHash  string
 	initialized bool
 	mu          sync.RWMutex
 	flushTicker *time.Ticker
@@ -31,6 +32,13 @@ type FileAuditStorage struct {
 type entryLocation struct {
 	File string
 	Line int
+}
+
+type chainManifest struct {
+	Version      int    `json:"version"`
+	AnchorHash   string `json:"anchor_hash"`
+	RotatedAt    int64  `json:"rotated_at,omitempty"`
+	RemovedFiles int    `json:"removed_files,omitempty"`
 }
 
 // NewFileAuditStorage 创建文件审计存储
@@ -75,6 +83,9 @@ func (s *FileAuditStorage) Initialize() error {
 	if err := os.MkdirAll(s.config.LogDir, 0755); err != nil {
 		return fmt.Errorf("create log dir: %w", err)
 	}
+	if err := s.loadChainManifest(); err != nil {
+		return fmt.Errorf("load chain manifest: %w", err)
+	}
 
 	// 获取或创建当前日志文件
 	currentFile, err := s.getCurrentLogFile()
@@ -95,7 +106,7 @@ func (s *FileAuditStorage) Initialize() error {
 			return fmt.Errorf("verify hash chain: %w", err)
 		}
 		if !result.Valid {
-			fmt.Printf("[FileAuditStorage] Warning: Hash chain integrity verification failed\n")
+			return fmt.Errorf("hash chain integrity verification failed at %s", result.BrokenChainAt)
 		}
 	}
 
@@ -156,6 +167,9 @@ func (s *FileAuditStorage) Query(ctx context.Context, query *AuditQuery) ([]Audi
 	if err := s.ensureInitialized(); err != nil {
 		return nil, err
 	}
+	if query == nil {
+		query = &AuditQuery{}
+	}
 
 	// 刷新缓冲区
 	s.mu.Lock()
@@ -178,7 +192,7 @@ func (s *FileAuditStorage) Query(ctx context.Context, query *AuditQuery) ([]Audi
 	for i := len(files) - 1; i >= 0; i-- {
 		entries, err := s.readEntriesFromFile(files[i])
 		if err != nil {
-			continue
+			return nil, err
 		}
 
 		for _, entry := range entries {
@@ -246,7 +260,7 @@ func (s *FileAuditStorage) Count(_ context.Context, query *AuditQuery) (int, err
 	for _, file := range files {
 		entries, err := s.readEntriesFromFile(file)
 		if err != nil {
-			continue
+			return 0, err
 		}
 		for _, entry := range entries {
 			if s.matchesQuery(&entry, query) {
@@ -297,6 +311,7 @@ func (s *FileAuditStorage) Clear(_ context.Context) error {
 	s.writeBuffer = s.writeBuffer[:0]
 	s.entryIndex = make(map[string]entryLocation)
 	s.lastEntry = nil
+	s.anchorHash = GenesisHash
 
 	// 删除所有日志文件
 	files, _ := s.getLogFiles()
@@ -323,8 +338,11 @@ func (s *FileAuditStorage) VerifyHashChain(_ context.Context) (*IntegrityVerific
 		return nil, err
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.flushLocked(); err != nil {
+		return nil, err
+	}
 
 	return s.verifyHashChainInternal()
 }
@@ -392,6 +410,51 @@ func (s *FileAuditStorage) ensureInitialized() error {
 	return nil
 }
 
+func (s *FileAuditStorage) manifestPath() string {
+	return filepath.Join(s.config.LogDir, s.config.FilePrefix+"_chain.json")
+}
+
+func (s *FileAuditStorage) loadChainManifest() error {
+	s.anchorHash = GenesisHash
+	raw, err := os.ReadFile(s.manifestPath())
+	if os.IsNotExist(err) {
+		return s.persistChainManifest(0)
+	}
+	if err != nil {
+		return err
+	}
+	var manifest chainManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("decode chain manifest: %w", err)
+	}
+	if manifest.Version != 1 || len(manifest.AnchorHash) != 64 {
+		return fmt.Errorf("invalid chain manifest")
+	}
+	s.anchorHash = manifest.AnchorHash
+	return nil
+}
+
+func (s *FileAuditStorage) persistChainManifest(removed int) error {
+	manifest := chainManifest{Version: 1, AnchorHash: s.anchorHash, RotatedAt: time.Now().UnixMilli(), RemovedFiles: removed}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(s.manifestPath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 // getCurrentLogFile 获取当前日志文件
 func (s *FileAuditStorage) getCurrentLogFile() (string, error) {
 	files, err := s.getLogFiles()
@@ -418,7 +481,7 @@ func (s *FileAuditStorage) getCurrentLogFile() (string, error) {
 
 // createNewLogFile 创建新日志文件
 func (s *FileAuditStorage) createNewLogFile() (string, error) {
-	timestamp := time.Now().Format("2006-01-02T15-04-05")
+	timestamp := time.Now().Format("2006-01-02T15-04-05.000000000")
 	filename := fmt.Sprintf("%s_%s.jsonl", s.config.FilePrefix, timestamp)
 	filepath := filepath.Join(s.config.LogDir, filename)
 
@@ -427,7 +490,9 @@ func (s *FileAuditStorage) createNewLogFile() (string, error) {
 	}
 
 	// 检查是否需要轮转
-	s.rotateIfNeeded()
+	if err := s.rotateIfNeeded(); err != nil {
+		return "", err
+	}
 
 	return filepath, nil
 }
@@ -456,14 +521,26 @@ func (s *FileAuditStorage) getLogFiles() ([]string, error) {
 }
 
 // rotateIfNeeded 按需轮转日志
-func (s *FileAuditStorage) rotateIfNeeded() {
-	files, _ := s.getLogFiles()
+func (s *FileAuditStorage) rotateIfNeeded() error {
+	files, err := s.getLogFiles()
+	if err != nil {
+		return err
+	}
 
 	if len(files) > s.config.MaxFiles {
 		toDelete := files[:len(files)-s.config.MaxFiles]
 
 		for _, file := range toDelete {
-			os.Remove(file)
+			entries, err := s.readEntriesFromFile(file)
+			if err != nil {
+				return fmt.Errorf("read rotated audit file: %w", err)
+			}
+			for i := range entries {
+				s.anchorHash = entries[i].Hash
+			}
+			if err := os.Remove(file); err != nil {
+				return fmt.Errorf("remove rotated audit file: %w", err)
+			}
 
 			// 从索引中移除
 			for id, location := range s.entryIndex {
@@ -472,7 +549,14 @@ func (s *FileAuditStorage) rotateIfNeeded() {
 				}
 			}
 		}
+		if err := s.persistChainManifest(len(toDelete)); err != nil {
+			return err
+		}
 	}
+	if err := s.persistChainManifest(0); err != nil {
+		return err
+	}
+	return nil
 }
 
 // buildIndex 构建索引
@@ -485,25 +569,38 @@ func (s *FileAuditStorage) buildIndex() error {
 	for _, file := range files {
 		f, err := os.Open(file)
 		if err != nil {
-			continue
+			return err
 		}
 
 		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 		lineNumber := 0
 
 		for scanner.Scan() {
 			line := scanner.Text()
 			if line = strings.TrimSpace(line); line != "" {
 				var entry AuditLogEntry
-				if err := json.Unmarshal([]byte(line), &entry); err == nil {
-					s.entryIndex[entry.ID] = entryLocation{File: file, Line: lineNumber}
-					s.lastEntry = &entry
+				if err := json.Unmarshal([]byte(line), &entry); err != nil {
+					f.Close()
+					return fmt.Errorf("decode %s line %d: %w", filepath.Base(file), lineNumber+1, err)
 				}
+				if entry.ID == "" || entry.Hash == "" {
+					f.Close()
+					return fmt.Errorf("invalid audit entry in %s line %d", filepath.Base(file), lineNumber+1)
+				}
+				s.entryIndex[entry.ID] = entryLocation{File: file, Line: lineNumber}
+				s.lastEntry = &entry
 			}
 			lineNumber++
 		}
 
-		f.Close()
+		if err := scanner.Err(); err != nil {
+			f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -518,6 +615,7 @@ func (s *FileAuditStorage) readEntryFromFile(file string, lineNumber int) (*Audi
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	currentLine := 0
 
 	for scanner.Scan() {
@@ -525,15 +623,19 @@ func (s *FileAuditStorage) readEntryFromFile(file string, lineNumber int) (*Audi
 			line := strings.TrimSpace(scanner.Text())
 			if line != "" {
 				var entry AuditLogEntry
-				if err := json.Unmarshal([]byte(line), &entry); err == nil {
-					return &entry, nil
+				if err := json.Unmarshal([]byte(line), &entry); err != nil {
+					return nil, err
 				}
+				return &entry, nil
 			}
 			return nil, nil
 		}
 		currentLine++
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -547,18 +649,20 @@ func (s *FileAuditStorage) readEntriesFromFile(file string) ([]AuditLogEntry, er
 
 	var entries []AuditLogEntry
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
 			var entry AuditLogEntry
-			if err := json.Unmarshal([]byte(line), &entry); err == nil {
-				entries = append(entries, entry)
+			if err := json.Unmarshal([]byte(line), &entry); err != nil {
+				return nil, err
 			}
+			entries = append(entries, entry)
 		}
 	}
 
-	return entries, nil
+	return entries, scanner.Err()
 }
 
 // matchesQuery 检查条目是否匹配查询
@@ -620,17 +724,25 @@ func (s *FileAuditStorage) flushLocked() error {
 	defer f.Close()
 
 	// 获取当前行数
-	lineCount, _ := s.countLines(s.currentFile)
+	lineCount, err := s.countLines(s.currentFile)
+	if err != nil {
+		return err
+	}
 
 	for i, entry := range s.writeBuffer {
 		data, err := json.Marshal(entry)
 		if err != nil {
-			continue
+			return err
 		}
-		f.WriteString(string(data) + "\n")
+		if _, err := f.WriteString(string(data) + "\n"); err != nil {
+			return err
+		}
 
 		// 更新索引
 		s.entryIndex[entry.ID] = entryLocation{File: s.currentFile, Line: lineCount + i}
+	}
+	if err := f.Sync(); err != nil {
+		return err
 	}
 
 	// 清空缓冲区
@@ -707,12 +819,12 @@ func (s *FileAuditStorage) verifyHashChainInternal() (*IntegrityVerificationResu
 		VerifiedAt:     time.Now().UnixMilli(),
 	}
 
-	expectedPreviousHash := GenesisHash
+	expectedPreviousHash := s.anchorHash
 
 	for _, file := range files {
 		entries, err := s.readEntriesFromFile(file)
 		if err != nil {
-			continue
+			return nil, err
 		}
 
 		for _, entry := range entries {

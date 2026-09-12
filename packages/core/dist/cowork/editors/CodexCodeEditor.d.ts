@@ -1,9 +1,11 @@
 /**
  * Codex Code Editor
- * 基于 CodexAdapter (OpenAI API) 实现 ICodeEditor 接口
+ * 同时支持 Codex API adapter 与 cowork Codex CLI adapter
  */
 import { ICodeEditor, EditResult, Diff } from '../types.js';
 import { CodexAdapter } from '../../adapters/CodexAdapter.js';
+import { CodexCLIAdapter } from '../adapters/CodexCLIAdapter.js';
+export type CodexEditorAdapter = CodexAdapter | CodexCLIAdapter;
 /**
  * Codex Editor 配置
  */
@@ -29,9 +31,10 @@ interface BackupRecord {
 export declare class CodexCodeEditor implements ICodeEditor {
     readonly name = "codex-editor";
     private adapter;
+    private executor;
     private config;
     private backupStack;
-    constructor(adapter: CodexAdapter, config?: CodexEditorConfig);
+    constructor(adapter: CodexEditorAdapter, config?: CodexEditorConfig);
     /**
      * 编辑单个文件
      */
@@ -60,6 +63,10 @@ export declare class CodexCodeEditor implements ICodeEditor {
      * 清理所有备份
      */
     clearBackups(): Promise<void>;
+    getAdapter(): CodexEditorAdapter;
+    getConfig(): CodexEditorConfig;
+    private createPromptExecutor;
+    private executePrompt;
     private resolvePath;
     private backup;
     private emptyDiff;

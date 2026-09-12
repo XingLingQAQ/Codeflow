@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -126,7 +127,7 @@ func NewService(projects project.IProjectService, plannerSvc planner.IPlanner, a
 }
 
 func (s *Service) GetOverview(ctx context.Context, projectID string) (*WorkflowOverview, error) {
-	snapshot, err := s.loadProjectSnapshot(ctx, projectID)
+	snapshot, err := s.loadProjectSnapshot(ctx, projectID, ScopeOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +216,7 @@ func enrichSummaryWithDebates(ctx context.Context, projectID string, summary *Wo
 }
 
 func (s *Service) GetTimeline(ctx context.Context, projectID string) (*WorkflowTimeline, error) {
-	snapshot, err := s.loadProjectSnapshot(ctx, projectID)
+	snapshot, err := s.loadProjectSnapshot(ctx, projectID, ScopeOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -309,12 +310,14 @@ func collectFlowengReplayEvents(ctx context.Context, projectID string) []Workflo
 }
 
 func (s *Service) GetReplay(ctx context.Context, projectID, requestedSessionID string) (*WorkflowReplay, error) {
-	snapshot, err := s.loadProjectSnapshot(ctx, projectID)
+	// An explicit session is authorized against the project scope before any
+	// trace or audit read happens; a foreign session rejects the replay (E-01).
+	snapshot, err := s.loadProjectSnapshot(ctx, projectID, ScopeOptions{SessionID: requestedSessionID})
 	if err != nil {
 		return nil, err
 	}
 
-	sessionID := requestedSessionID
+	sessionID := strings.TrimSpace(requestedSessionID)
 	if sessionID == "" && len(snapshot.sessionIDs) > 0 {
 		sessionID = snapshot.sessionIDs[0]
 	}
@@ -327,10 +330,7 @@ func (s *Service) GetReplay(ctx context.Context, projectID, requestedSessionID s
 		}
 	}
 
-	auditEntries, err := s.loadReplayAuditEntries(ctx, snapshot, sessionID)
-	if err != nil {
-		return nil, err
-	}
+	auditEntries := s.loadReplayAuditEntries(snapshot, sessionID)
 
 	replayEvents, traceCount := buildReplayEvents(traceResp, auditEntries)
 	// G14: merge floweng runtime events into the replay stream so playback is not
@@ -370,12 +370,27 @@ type projectSnapshot struct {
 	latestAudit  *audit.AuditLogEntry
 }
 
-func (s *Service) loadProjectSnapshot(ctx context.Context, projectID string) (*projectSnapshot, error) {
-	if s.projects == nil {
-		return nil, fmt.Errorf("workflow project service unavailable")
+// scopeDependencies adapts the Service collaborators to the scope resolver. A
+// nil audit service is passed as a nil interface so the resolver sees the same
+// optional-dependency semantics as the Service.
+func (s *Service) scopeDependencies() ScopeDependencies {
+	deps := ScopeDependencies{
+		Projects: s.projects,
+		Planner:  s.planner,
+		Agents:   s.agents,
 	}
-	if s.planner == nil {
-		return nil, fmt.Errorf("workflow planner service unavailable")
+	if s.audit != nil {
+		deps.Audit = s.audit
+	}
+	return deps
+}
+
+func (s *Service) loadProjectSnapshot(ctx context.Context, projectID string, opts ScopeOptions) (*projectSnapshot, error) {
+	// ResolveProjectScope is the authorization gate for every workflow view:
+	// only objects inside the returned sets may be read below (E-01).
+	scope, err := ResolveProjectScope(ctx, s.scopeDependencies(), projectID, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	proj, err := s.projects.GetProject(ctx, projectID)
@@ -390,6 +405,7 @@ func (s *Service) loadProjectSnapshot(ctx context.Context, projectID string) (*p
 	if err != nil {
 		return nil, err
 	}
+	plans = filterPlansToScope(plans, scope.PlanIDs)
 
 	tasks := make([]planner.Task, 0)
 	for _, plan := range plans {
@@ -399,21 +415,16 @@ func (s *Service) loadProjectSnapshot(ctx context.Context, projectID string) (*p
 		}
 		tasks = append(tasks, result.Tasks...)
 	}
+	tasks = filterTasksToScope(tasks, scope.TaskIDs)
 
-	auditEntries, latestAudit, err := s.loadRelevantAuditEntries(ctx, proj, plans, tasks)
+	agents, err := s.loadRelevantAgents(ctx, scope.AgentIDs)
 	if err != nil {
 		return nil, err
 	}
 
-	sessionIDs := collectSessionIDs(proj, plans, tasks, auditEntries)
-	agents, err := s.loadRelevantAgents(ctx, sessionIDs)
+	auditEntries, latestAudit, err := s.loadRelevantAuditEntries(ctx, scope)
 	if err != nil {
 		return nil, err
-	}
-	for _, ag := range agents {
-		if ag.SessionID != "" {
-			sessionIDs = appendUnique(sessionIDs, ag.SessionID)
-		}
 	}
 
 	return &projectSnapshot{
@@ -421,34 +432,104 @@ func (s *Service) loadProjectSnapshot(ctx context.Context, projectID string) (*p
 		plans:        plans,
 		tasks:        tasks,
 		agents:       agents,
-		sessionIDs:   sessionIDs,
+		sessionIDs:   scope.SessionIDs,
 		auditEntries: auditEntries,
 		latestAudit:  latestAudit,
 	}, nil
 }
 
-func (s *Service) loadRelevantAuditEntries(ctx context.Context, proj *project.Project, plans []planner.Plan, tasks []planner.Task) ([]audit.AuditLogEntry, *audit.AuditLogEntry, error) {
+// filterPlansToScope keeps only plans the scope authorized, so a concurrent
+// change between scope resolution and snapshot loading cannot widen the view.
+func filterPlansToScope(plans []planner.Plan, planIDs []string) []planner.Plan {
+	allowed := make(map[string]struct{}, len(planIDs))
+	for _, id := range planIDs {
+		allowed[id] = struct{}{}
+	}
+	filtered := make([]planner.Plan, 0, len(plans))
+	for _, plan := range plans {
+		if _, ok := allowed[plan.ID]; ok {
+			filtered = append(filtered, plan)
+		}
+	}
+	return filtered
+}
+
+// filterTasksToScope is the task counterpart of filterPlansToScope.
+func filterTasksToScope(tasks []planner.Task, taskIDs []string) []planner.Task {
+	allowed := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		allowed[id] = struct{}{}
+	}
+	filtered := make([]planner.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if _, ok := allowed[task.ID]; ok {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+// loadRelevantAuditEntries keeps audit entries that reference project-visible
+// objects only: the project itself, authorized plans/tasks, or an authorized
+// session. Entry sessions are a filter input here and never feed back into the
+// project's session set.
+const (
+	// auditScanPageSize 单次审计查询的页大小。
+	auditScanPageSize = 10000
+	// auditScanMaxEntries 一次项目视图最多扫描的审计条目数。AuditQuery 没有
+	// project/session 过滤能力，只能全量取回再按 scope 过滤；以前是单次
+	// Limit: 10000 且不看 HasMore，全局审计量一超过一万，低活跃项目的历史
+	// 就会无声消失（不是越权，是不完整）。改为按页取到耗尽，并以本上限封顶。
+	auditScanMaxEntries = 50000
+)
+
+// scanAuditEntries 按页取回审计条目直到耗尽或达到扫描上限。达到上限时记一行
+// 日志——时间线可能不完整这件事必须是可见的，不能静默截断。
+func (s *Service) scanAuditEntries(ctx context.Context) ([]audit.AuditLogEntry, error) {
+	var all []audit.AuditLogEntry
+	for offset := 0; offset < auditScanMaxEntries; offset += auditScanPageSize {
+		result, err := s.audit.Query(ctx, &audit.AuditQuery{Limit: auditScanPageSize, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		if result == nil {
+			break
+		}
+		all = append(all, result.Entries...)
+		if !result.HasMore || len(result.Entries) == 0 {
+			return all, nil
+		}
+	}
+	log.Printf("workflow audit scan hit the %d entry cap; project timeline may omit older entries", auditScanMaxEntries)
+	return all, nil
+}
+
+func (s *Service) loadRelevantAuditEntries(ctx context.Context, scope *ProjectScope) ([]audit.AuditLogEntry, *audit.AuditLogEntry, error) {
 	if s.audit == nil {
 		return nil, nil, nil
 	}
 
-	result, err := s.audit.Query(ctx, &audit.AuditQuery{Limit: 10000})
+	entriesToScan, err := s.scanAuditEntries(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	idSet := map[string]struct{}{proj.ID: {}}
-	for _, plan := range plans {
-		idSet[plan.ID] = struct{}{}
+	idSet := map[string]struct{}{scope.ProjectID: {}}
+	for _, planID := range scope.PlanIDs {
+		idSet[planID] = struct{}{}
 	}
-	for _, task := range tasks {
-		idSet[task.ID] = struct{}{}
+	for _, taskID := range scope.TaskIDs {
+		idSet[taskID] = struct{}{}
+	}
+	sessionSet := make(map[string]struct{}, len(scope.SessionIDs))
+	for _, sessionID := range scope.SessionIDs {
+		sessionSet[sessionID] = struct{}{}
 	}
 
 	entries := make([]audit.AuditLogEntry, 0)
 	var latest *audit.AuditLogEntry
-	for _, entry := range result.Entries {
-		if !isRelevantAuditEntry(entry, idSet) {
+	for _, entry := range entriesToScan {
+		if !isRelevantAuditEntry(entry, idSet, sessionSet) {
 			continue
 		}
 		entries = append(entries, entry)
@@ -464,53 +545,54 @@ func (s *Service) loadRelevantAuditEntries(ctx context.Context, proj *project.Pr
 	return entries, latest, nil
 }
 
-func (s *Service) loadRelevantAgents(ctx context.Context, sessionIDs []string) ([]agent.Agent, error) {
+// loadRelevantAgents keeps exactly the agents the scope authorized. An empty
+// authorized set yields an empty list — never the global agent list (E-01).
+func (s *Service) loadRelevantAgents(ctx context.Context, agentIDs []string) ([]agent.Agent, error) {
 	if s.agents == nil {
 		return nil, nil
+	}
+	filtered := make([]agent.Agent, 0)
+	if len(agentIDs) == 0 {
+		return filtered, nil
 	}
 	result, err := s.agents.ListAgents(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(sessionIDs) == 0 {
-		return result.Agents, nil
+	if result == nil {
+		return filtered, nil
 	}
 
-	sessionSet := make(map[string]struct{}, len(sessionIDs))
-	for _, sessionID := range sessionIDs {
-		sessionSet[sessionID] = struct{}{}
+	idSet := make(map[string]struct{}, len(agentIDs))
+	for _, agentID := range agentIDs {
+		idSet[agentID] = struct{}{}
 	}
-
-	filtered := make([]agent.Agent, 0)
 	for _, ag := range result.Agents {
-		if _, ok := sessionSet[ag.SessionID]; ok {
+		if _, ok := idSet[ag.ID]; ok {
 			filtered = append(filtered, ag)
 		}
 	}
 	return filtered, nil
 }
 
-func (s *Service) loadReplayAuditEntries(ctx context.Context, snapshot *projectSnapshot, sessionID string) ([]audit.AuditLogEntry, error) {
+// loadReplayAuditEntries intersects the project-visible audit entries of the
+// snapshot with the effective replay session. It never re-queries the global
+// log by session alone: an entry must already belong to the project (E-01).
+func (s *Service) loadReplayAuditEntries(snapshot *projectSnapshot, sessionID string) []audit.AuditLogEntry {
 	if s.audit == nil {
-		return nil, nil
+		return nil
 	}
 	if sessionID == "" {
-		return snapshot.auditEntries, nil
-	}
-
-	result, err := s.audit.Query(ctx, &audit.AuditQuery{Limit: 10000})
-	if err != nil {
-		return nil, err
+		return snapshot.auditEntries
 	}
 
 	entries := make([]audit.AuditLogEntry, 0)
-	for _, entry := range result.Entries {
-		if auditEntrySessionID(entry) != sessionID {
-			continue
+	for _, entry := range snapshot.auditEntries {
+		if auditEntrySessionID(entry) == sessionID {
+			entries = append(entries, entry)
 		}
-		entries = append(entries, entry)
 	}
-	return entries, nil
+	return entries
 }
 
 func buildWorkflowSummary(snapshot *projectSnapshot) WorkflowSummary {
@@ -694,22 +776,6 @@ func flattenTrace(trace *agent.CallTrace, sessionID string, agentNames map[strin
 	}
 }
 
-func collectSessionIDs(proj *project.Project, plans []planner.Plan, tasks []planner.Task, auditEntries []audit.AuditLogEntry) []string {
-	sessions := make([]string, 0)
-	sessions = appendMetadataSessionIDs(sessions, proj.Metadata)
-	for _, plan := range plans {
-		sessions = appendMetadataSessionIDs(sessions, plan.Metadata)
-	}
-	for _, task := range tasks {
-		sessions = appendMetadataSessionIDs(sessions, task.Metadata)
-	}
-	for _, entry := range auditEntries {
-		sessions = appendUnique(sessions, auditEntrySessionID(entry))
-	}
-	sort.Strings(sessions)
-	return sessions
-}
-
 func appendMetadataSessionIDs(values []string, metadata map[string]interface{}) []string {
 	if metadata == nil {
 		return values
@@ -757,12 +823,17 @@ func describeAuditEntry(entry audit.AuditLogEntry) string {
 	return strings.TrimSpace(fmt.Sprintf("%s %s %s", entry.Action, resourceLabel, entry.Outcome))
 }
 
-func isRelevantAuditEntry(entry audit.AuditLogEntry, ids map[string]struct{}) bool {
+func isRelevantAuditEntry(entry audit.AuditLogEntry, ids map[string]struct{}, sessionIDs map[string]struct{}) bool {
 	if _, ok := ids[entry.Resource.ID]; ok {
 		return true
 	}
 	for _, value := range []string{auditProjectID(entry), auditPlanID(entry), auditTaskID(entry)} {
 		if _, ok := ids[value]; ok {
+			return true
+		}
+	}
+	if sessionID := auditEntrySessionID(entry); sessionID != "" {
+		if _, ok := sessionIDs[sessionID]; ok {
 			return true
 		}
 	}

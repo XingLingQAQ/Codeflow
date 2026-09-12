@@ -2,7 +2,7 @@
  * 原子快照管理器实现
  * 三位一体快照：Git + Conversation + Vector/Graph
  */
-import { AtomicSnapshot, SnapshotTrigger, RollbackOptions, RollbackResult, SnapshotValidation, IAtomicSnapshotManager, ISnapshotStorage } from './AtomicSnapshotTypes.js';
+import { AtomicSnapshot, SnapshotTrigger, RollbackOptions, RollbackResult, SnapshotValidation, IAtomicSnapshotManager, ISnapshotStorage, CreateAtomicSnapshotOptions } from './AtomicSnapshotTypes.js';
 import { IGitManager } from './types.js';
 import { Message } from '../hooks/types.js';
 import { IVectorStore } from '../memory/types.js';
@@ -28,7 +28,7 @@ export declare class AtomicSnapshotManager implements IAtomicSnapshotManager {
         sessionId: string;
         messages: Message[];
     }): void;
-    createSnapshot(description?: string, trigger?: SnapshotTrigger): Promise<AtomicSnapshot>;
+    createSnapshot(description?: string, trigger?: SnapshotTrigger, options?: CreateAtomicSnapshotOptions): Promise<AtomicSnapshot>;
     getSnapshot(id: string): Promise<AtomicSnapshot | null>;
     listSnapshots(limit?: number): Promise<AtomicSnapshot[]>;
     findSnapshotByGitHash(gitHash: string): Promise<AtomicSnapshot | null>;

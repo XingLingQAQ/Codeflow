@@ -1,0 +1,468 @@
+<title>首页重设计 · 彩色丰富版</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #ececea; color: #1c1c1a;
+    font-family: "Public Sans", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", sans-serif;
+ -webkit-font-smoothing: antialiased; line-height: 1.6;
+  }
+  .page { max-width: 1280px; margin: 0 auto; padding: 52px 24px 120px; }
+  .page > header h1 { font-size: 28px; font-weight: 750; letter-spacing: -.02em; }
+  .page > header p { color: #6f6f6a; margin-top: 6px; font-size: 14px; max-width: 58em; }
+  .pick {
+ display: inline-block; margin-top: 14px; font-size: 13px; background: #fff;
+    border-radius: 12px; padding: 8px 16px; color: #44443f; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .pick b { font-weight: 700; }
+
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ============ 框架 ============ */
+  .frame {
+    height: 1010px; margin-top: 32px; border-radius: 24px; overflow: hidden;
+    display: grid; grid-template-columns: 212px 1fr;
+    background: #f1f0ec; color: #26251f;
+    box-shadow: 0 2px 6px rgba(20,20,15,.06), 0 24px 64px rgba(20,20,15,.10);
+    font-size: 13px; user-select: none;
+  }
+  .side {
+    display: flex; flex-direction: column; padding: 18px 12px;
+    border-right: 1px solid #e2e1db; background: #f1f0ec;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 4px 10px 16px; }
+  .brand .mk {
+    width: 24px; height: 24px; border-radius: 8px; flex: none; position: relative;
+ background: linear-gradient(135deg, #2b59d8, #16a8bf); color: #fff;
+  }
+  .brand .mk::after {
+    content: ""; position: absolute; inset: 0; border-radius: 8px;
+    background:
+      radial-gradient(circle at 30% 68%, currentColor 2.2px, transparent 2.6px),
+      radial-gradient(circle at 70% 32%, currentColor 2.2px, transparent 2.6px);
+  }
+  .brand .nm { font-weight: 700; font-size: 14px; letter-spacing: -.01em; }
+  .sep { height: 1px; background: #e2e1db; margin: 6px 10px 12px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nv { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; font-size: 13px; color: #75746c; }
+  .nv svg { flex: none; opacity: .75; }
+  .nv:hover { background: rgba(38,37,31,.05); }
+  .nv.on { background: #fff; color: #26251f; font-weight: 600; box-shadow: 0 1px 3px rgba(38,37,31,.08); }
+  .side .foot {
+    margin-top: auto; padding: 12px 12px 2px; font-size: 11.5px; color: #92918a;
+    display: flex; align-items: center; gap: 7px; border-top: 1px solid #e2e1db;
+  }
+  .side .foot .cd { width: 7px; height: 7px; border-radius: 999px; background: #2f9e5f; flex: none; }
+
+  .main { min-width: 0; overflow-y: auto; padding: 28px 30px 30px 26px; }
+  /* 问候头通栏在上；双栏内容从同一水平线开始 */
+  .cols { display: grid; grid-template-columns: 1fr 296px; gap: 22px; align-items: start; margin-top: 20px; }
+  .colL { min-width: 0; }
+
+  /* ---------- 问候（通栏） ---------- */
+  .m-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .m-head h1 { font-size: 26px; font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
+  .m-head .sub { font-size: 13px; margin-top: 6px; color: #92918a; }
+  .facts-inline { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 13px; font-size: 12.5px; color: #75746c; }
+  .facts-inline .fi { display: inline-flex; align-items: center; gap: 7px; }
+  .facts-inline .fi i { width: 7px; height: 7px; border-radius: 999px; flex: none; }
+  .facts-inline b { color: #26251f; font-weight: 650; }
+  .newbtn {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600;
+    padding: 9px 18px; border-radius: 14px; white-space: nowrap;
+    background: #26251f; color: #f6f5f1;
+  }
+  .newbtn::before { content: "+"; font-weight: 500; font-size: 15px; line-height: 1; }
+
+  /* ---------- Gate 收件箱 ---------- */
+  .inbox {
+    border-radius: 20px; padding: 17px 20px 10px;
+    background: linear-gradient(180deg, #fdf8ec, #fff 58%);
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); border: 1px solid #f0e4c4;
+  }
+  .inbox .hd { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 4px; }
+  .inbox .hd .t { font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; color: #7a5410; }
+  .inbox .hd span { font-size: 11.5px; color: #b09a63; }
+  .inbox .it {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 10px; border-radius: 12px;
+  }
+  .inbox .it:hover { background: rgba(201,161,61,.07); }
+  .inbox .it .l b { font-size: 13px; font-weight: 650; display: block; color: #26251f; }
+.inbox .it .l span { font-size: 11.5px; color: #92918a; }
+  .inbox .it .go {
+    font-size: 11.5px; font-weight: 650; color: #fff; background: #c9911d;
+    border-radius: 999px; padding: 5px 14px; white-space: nowrap;
+  }
+
+/* ---------- 命令四块 ---------- */
+  .cmds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 14px; }
+  .cmd {
+    background: #fff; border-radius: 18px; padding: 15px 17px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); display: flex; flex-direction: column; gap: 12px;
+  }
+  .cmd:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+  .cmd .row { display: flex; align-items: flex-start; }
+  .cmd .ic { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; }
+  .ic.green, .av.green { background: #e3f1e7; color: #2f7d4c; }
+  .ic.blue, .av.blue { background: #e5ecfa; color: #2b59d8; }
+  .ic.teal, .av.teal { background: #ddf1f3; color: #0e7f91; }
+  .ic.ink { background: #f0efeb; color: #55544c; }
+  .av.rose { background: #fdeaf1; color: #b12f63; }
+  .av.coral { background: #fbe9e4; color: #b0492c; }
+  .cmd .tt { font-size: 13px; font-weight: 650; }
+  .cmd .dd { font-size: 11.5px; color: #92918a; margin-top: 2px; line-height: 1.5; }
+  .cmd .kbd { margin-left: auto; font-size: 10px; color: #92918a; border: 1px solid #e6e5df; border-radius: 6px; padding: 1px 6px; }
+
+  /* ---------- 分区标题 ---------- */
+  .sec { display: flex; align-items: baseline; justify-content: space-between; margin: 26px 4px 12px; }
+  .sec h2 { font-size: 14.5px; font-weight: 700; letter-spacing: -.01em; }
+  .sec a { font-size: 12px; color: #92918a; text-decoration: none; }
+  .sec a:hover { color: #26251f; }
+
+  /* ---------- 阶段胶囊 ---------- */
+  .stage { font-size: 10.5px; border-radius: 999px; padding: 3px 11px; white-space: nowrap; flex: none; font-weight: 650; }
+  .stage.idea { background: #fbe9e4; color: #b0492c; }
+  .stage.design { background: #fdeeda; color: #a55f14; }
+  .stage.planning { background: #e5ecfa; color: #2b59d8; }
+  .stage.research { background: #ddf1f3; color: #0e7f91; }
+  .stage.coding { background: #e3f1e7; color: #2f7d4c; }
+  .stage.review { background: #fdeaf1; color: #b12f63; }
+  .stage.submit { background: #f0efeb; color: #55544c; }
+
+  /* ---------- 最近项目 ---------- */
+  .pgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pc {
+    background: #fff; border-radius: 18px; padding: 16px 18px 13px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); display: flex; flex-direction: column;
+  }
+  .pc:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+  .pc .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .pc h3 { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+  .pc h3 i { width: 6px; height: 6px; border-radius: 999px; flex: none; }
+  .pc .ds { color: #75746c; font-size: 12px; margin-top: 6px; line-height: 1.6; flex: 1; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+  .tag { font-size: 10px; color: #75746c; background: #f4f3ef; border-radius: 999px; padding: 2px 8px; }
+  .pc .meta {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 11px; padding-top: 10px; border-top: 1px solid #f0efe9;
+    font-size: 11px; color: #92918a;
+  }
+
+  /* ---------- 工作流行 ---------- */
+  .flows { background: #fff; border-radius: 18px; box-shadow: 0 1px 2px rgba(38,37,31,.04); overflow: hidden; }
+  .fr { display: flex; align-items: center; gap: 14px; padding: 14px 20px; }
+  .fr:hover { background: #fafaf7; }
+  .fr + .fr { border-top: 1px solid #f0efe9; }
+  .fr .nm { font-size: 13.5px; font-weight: 650; min-width: 0; }
+  .fr .tpl { font-size: 11px; color: #a5a49c; }
+  .fr .sp { flex: 1; }
+  .fr .warnpill {
+    font-size: 11px; font-weight: 650; color: #7a5410; background: #f8ecca;
+    border-radius: 999px; padding: 4px 12px;
+  }
+  .fr .arrow { color: #b4b3ab; font-size: 14px; }
+
+  /* ---------- Agent：通栏五卡，尺寸放大 ---------- */
+  .agents { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .ag {
+    background: #fff; border-radius: 18px; padding: 18px 18px 15px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04); display: flex; flex-direction: column; gap: 10px;
+  }
+  .ag:hover { box-shadow: 0 6px 24px rgba(38,37,31,.09); }
+  .ag .av { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; flex: none; }
+  .ag b { font-size: 13.5px; font-weight: 700; }
+  .ag .home { font-size: 10.5px; color: #a5a49c; margin-top: 1px; }
+  .ag p { font-size: 11.5px; color: #92918a; line-height: 1.6; flex: 1; }
+  .ag .go {
+    font-size: 11.5px; font-weight: 650; color: #55544c;
+    background: #f4f3ef; border-radius: 999px; padding: 5px 13px; align-self: flex-start;
+  }
+  .ag:hover .go { background: #26251f; color: #f6f5f1; }
+
+  /* ---------- 右栏 ---------- */
+  .colR { display: flex; flex-direction: column; gap: 14px; }
+  .panel {
+    background: #fff; border-radius: 20px; padding: 17px 19px 15px;
+    box-shadow: 0 1px 2px rgba(38,37,31,.04);
+  }
+  .panel .ph { font-size: 13px; font-weight: 700; display: flex; align-items: baseline; justify-content: space-between; }
+  .panel .ph span { font-size: 11px; color: #a5a49c; font-weight: 400; }
+  .tl { margin-top: 12px; display: flex; flex-direction: column; }
+  .ev { display: grid; grid-template-columns: 14px 1fr; gap: 10px; position: relative; padding-bottom: 15px; }
+  .ev:last-child { padding-bottom: 2px; }
+  .ev::before {
+    content: ""; position: absolute; left: 6.5px; top: 14px; bottom: 2px;
+    width: 1px; background: #eceae4;
+  }
+  .ev:last-child::before { display: none; }
+  .ev i { width: 13px; height: 13px; border-radius: 999px; border: 3px solid #fff; margin-top: 2px; box-shadow: 0 0 0 1px #eceae4; }
+  .ev i.green { background: #2f9e5f; }
+  .ev i.blue { background: #2b59d8; }
+  .ev i.amber { background: #c9911d; }
+  .ev i.teal { background: #0e7f91; }
+  .ev i.rose { background: #b12f63; }
+  .ev .et { font-size: 12px; line-height: 1.5; color: #55544c; }
+  .ev .et b { color: #26251f; font-weight: 650; }
+  .ev .tm { font-size: 10.5px; color: #a5a49c; margin-top: 2px; }
+
+  .snap { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .sn { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 12px; background: #f8f7f4; }
+  .sn .sic { width: 26px; height: 26px; border-radius: 9px; background: #e5ecfa; color: #2b59d8; display: grid; place-items: center; flex: none; }
+  .sn .si b { font-size: 11.5px; font-weight: 650; display: block; }
+  .sn .si span { font-size: 10.5px; color: #92918a; }
+  .sn .restore { margin-left: auto; font-size: 10.5px; font-weight: 600; color: #75746c; white-space: nowrap; }
+  .sn:hover .restore { color: #26251f; }
+
+  @media (max-width: 1080px) {
+    .cols { grid-template-columns: 1fr; }
+    .frame { height: auto; }
+ .cmds { grid-template-columns: 1fr 1fr; }
+    .agents { grid-template-columns: 1fr 1fr; }
+    .pgrid { grid-template-columns: 1fr; }
+  }
+
+  .closing {
+    margin-top: 40px; background: #fff; border-radius: 20px; padding: 22px 26px;
+    font-size: 14px; color: #44443f; box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .closing b { color: #1c1c1a; }
+  .closing ul { margin: 8px 0 0 18px; }
+  .closing li { margin-top: 4px; font-size: 13.5px; }
+</style>
+
+<div class="page">
+  <header>
+    <h1>首页（总览）· 彩色丰富版 · 修订 2</h1>
+    <p>本轮修正：① 问候头改为通栏，右栏（今日动态/最近快照）随内容区下移，不再与标题齐平；② 「开始一次对话」移出窄左栏，改为底部通栏五卡，卡片放大——36px 头像、职责说明、主场阶段、胶囊按钮。</p>
+    <span class="pick">审核方式：回复「通过」或提意见</span>
+  </header>
+
+  <div class="frame">
+    <aside class="side">
+      <div class="brand"><span class="mk"></span><span class="nm">CodeFlow</span></div>
+  <div class="sep"></div>
+      <nav class="nav">
+        <span class="nv on"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l9-9 9 9M5 10v10h14V10"/></svg>总览</span>
+      <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>项目</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h6m2-5l-4 4m4 6l-4-4"/></svg>工作流</span>
+    <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 7V3M8 13h.01M16 13h.01"/></svg>Agent</span>
+  <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v6m0 0a3 3 0 103 3h6M12 9a3 3 0 013 3"/></svg>插件</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h10M18 8h2M4 16h2M10 16h10M14 5v6M8 13v6"/></svg>配置</span>
+        <span class="nv"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10l2 2M19 5l-2 2M7 17l-2 2"/></svg>设置</span>
+      </nav>
+      <div class="foot"><span class="cd"></span>已连接 · 本地后端</div>
+    </aside>
+
+    <main class="main">
+      <!-- 问候头：通栏 -->
+      <div class="m-head">
+        <div>
+     <h1>下午好</h1>
+          <p class="sub">8 月 17 日 星期一 · 欢迎回到 CodeFlow</p>
+          <div class="facts-inline">
+    <span class="fi"><i style="background:#2b59d8"></i>项目 <b class="num">4</b></span>
+     <span class="fi"><i style="background:#2f9e5f"></i>进行中 <b class="num">2</b></span>
+         <span class="fi"><i style="background:#0e7f91"></i>快照 <b class="num">17</b></span>
+     <span class="fi"><i style="background:#c9911d"></i>今日事件 <b class="num">23</b></span>
+          </div>
+     </div>
+  <span class="newbtn">新建项目</span>
+      </div>
+
+      <div class="cols">
+        <!-- ============ 左栏 ============ -->
+        <div class="colL">
+          <div class="inbox">
+    <div class="hd">
+    <span class="t">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M12 8v4m0 4h.01"/></svg>
+            1 个 Gate 等待你的决定
+        </span>
+     <span>审批后流程才会继续</span>
+     </div>
+      <div class="it">
+       <div class="l">
+             <b>Nebula Console</b>
+   <span>阶段「编码」请求推进 · 守卫 3 项通过 · 快照 <span class="mono">SNAP-0047</span> 已就绪</span>
+    </div>
+    <span class="go">去审批 →</span>
+            </div>
+          </div>
+
+  <div class="cmds">
+   <div class="cmd">
+  <div class="row"><span class="ic green"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></span></div>
+    <div><div class="tt">新建项目</div><div class="dd">从想法开始一条完整流程</div></div>
+       </div>
+            <div class="cmd">
+  <div class="row"><span class="ic blue"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 12h6m2-5l-4 4m4 6l-4-4"/></svg></span></div>
+  <div><div class="tt">新建工作流</div><div class="dd">在项目中发起七阶段流程</div></div>
+         </div>
+        <div class="cmd">
+          <div class="row"><span class="ic teal"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg></span></div>
+              <div><div class="tt">回到工作台</div><div class="dd">Nebula Console · 编码</div></div>
+            </div>
+       <div class="cmd">
+     <div class="row">
+         <span class="ic ink"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span>
+         <span class="kbd">⌘ K</span>
+     </div>
+        <div><div class="tt">命令面板</div><div class="dd">全部入口与跳转，一搜即达</div></div>
+            </div>
+          </div>
+
+          <div class="sec"><h2>最近项目</h2><a href="#">查看全部 →</a></div>
+          <div class="pgrid">
+            <div class="pc">
+              <div class="head"><h3><i style="background:#2f9e5f"></i>Nebula Console</h3><span class="stage coding">编码 · 第 5 站</span></div>
+              <p class="ds">下一代星云管理控制台，支持实时监控与自动扩缩容。</p>
+              <div class="tags"><span class="tag">frontend</span><span class="tag">react</span><span class="tag">typescript</span></div>
+            <div class="meta"><span class="mono">feat/nebula-ui</span><span class="num">1 小时前</span></div>
+            </div>
+   <div class="pc">
+    <div class="head"><h3><i style="background:#2f9e5f"></i>数据管线重构</h3><span class="stage planning">规划 · 第 3 站</span></div>
+       <p class="ds">将批量 ETL 管线迁移至流式处理架构，提升实时性与容错能力。</p>
+           <div class="tags"><span class="tag">backend</span><span class="tag">go</span><span class="tag">streaming</span></div>
+       <div class="meta"><span class="mono">refactor/pipeline</span><span class="num">2 小时前</span></div>
+        </div>
+            <div class="pc">
+     <div class="head"><h3><i style="background:#c9911d"></i>移动端伴侣</h3><span class="stage idea">待启程 · 意图</span></div>
+          <p class="ds">远程审批与 Agent 对话的手机伴侣端，支持配对与推送通知。</p>
+              <div class="tags"><span class="tag">mobile</span><span class="tag">react-native</span></div>
+     <div class="meta"><span>尚未建立分支</span><span class="num">2 天前</span></div>
+            </div>
+            <div class="pc">
+     <div class="head"><h3><i style="background:#b4b3ab"></i>旧系统归档</h3><span class="stage submit">已提交 · 走完</span></div>
+    <p class="ds">遗留 PHP 系统迁移完成后的代码归档与文档沉淀。</p>
+              <div class="tags"><span class="tag">legacy</span><span class="tag">php</span></div>
+              <div class="meta"><span class="mono">legacy</span><span class="num">30 天前</span></div>
+            </div>
+    </div>
+
+          <div class="sec"><h2>进行中的工作流</h2><a href="#">查看全部 →</a></div>
+          <div class="flows">
+        <div class="fr">
+   <div>
+                <div class="nm">Nebula Console</div>
+       <div class="tpl mono">seven-stage-default</div>
+      </div>
+       <span class="sp"></span>
+      <span class="warnpill">编码 · Gate 待审</span>
+              <span class="arrow">→</span>
+   </div>
+ <div class="fr">
+  <div>
+        <div class="nm">数据管线重构</div>
+     <div class="tpl mono">seven-stage-default</div>
+     </div>
+           <span class="sp"></span>
+     <span class="stage planning">规划</span>
+              <span class="arrow">→</span>
+            </div>
+       </div>
+</div>
+
+    <!-- ============ 右栏 ============ -->
+        <div class="colR">
+          <div class="panel">
+      <div class="ph">今日动态 <span class="num">23 条</span></div>
+            <div class="tl">
+         <div class="ev">
+       <i class="amber"></i>
+          <div><div class="et"><b>Nebula Console</b> 编码阶段触发 Gate，等待人工审批</div><div class="tm num">14:32</div></div>
+    </div>
+        <div class="ev">
+       <i class="blue"></i>
+<div><div class="et">快照 <b class="mono">SNAP-0047</b> 已创建（代码 + 对话 + 向量）</div><div class="tm num">14:31</div></div>
+</div>
+     <div class="ev">
+      <i class="green"></i>
+     <div><div class="et"><b>代码工匠</b> 完成 flow.ts 重试逻辑，暂存 3 个文件</div><div class="tm num">14:18</div></div>
+      </div>
+              <div class="ev">
+   <i class="rose"></i>
+              <div><div class="et"><b>红队评审</b> 在辩论中驳回一项守卫豁免请求</div><div class="tm num">11:47</div></div>
+   </div>
+          <div class="ev">
+             <i class="teal"></i>
+          <div><div class="et"><b>数据管线重构</b> 进入规划阶段，系统提示词已切换</div><div class="tm num">10:05</div></div>
+              </div>
+     <div class="ev">
+    <i class="green"></i>
+                <div><div class="et">守卫全部通过，<b>数据管线重构</b> 设计产物已归档</div><div class="tm num">09:52</div></div>
+              </div>
+       </div>
+          </div>
+
+          <div class="panel">
+            <div class="ph">最近快照 <span>可回滚</span></div>
+  <div class="snap">
+ <div class="sn">
+       <span class="sic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+      <span class="si"><b class="mono">SNAP-0047</b><span>Nebula Console · 编码 · 14:31</span></span>
+      <span class="restore">回滚 ↺</span>
+      </div>
+        <div class="sn">
+         <span class="sic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+  <span class="si"><b class="mono">SNAP-0046</b><span>Nebula Console · 编码 · 13:02</span></span>
+          <span class="restore">回滚 ↺</span>
+         </div>
+   <div class="sn">
+      <span class="sic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span>
+         <span class="si"><b class="mono">SNAP-0031</b><span>数据管线重构 · 规划 · 10:05</span></span>
+       <span class="restore">回滚 ↺</span>
+       </div>
+  </div>
+   </div>
+        </div>
+      </div>
+
+      <!-- ============ Agent：底部通栏，卡片放大 ============ -->
+      <div class="sec"><h2>开始一次对话</h2><a href="#">Agent 广场 →</a></div>
+      <div class="agents">
+        <div class="ag">
+     <span class="av blue"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M15 9l-2 5-4 1 2-5z"/></svg></span>
+ <div><b>流程指挥官</b><div class="home">主场 · 规划</div></div>
+  <p>流程编排者：拆解任务、排定优先级、驱动阶段推进。</p>
+          <span class="go">开始对话 →</span>
+   </div>
+        <div class="ag">
+          <span class="av green"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M12 7V3M8 13h.01M16 13h.01"/></svg></span>
+          <div><b>代码工匠</b><div class="home">主场 · 编码</div></div>
+          <p>编码阶段主力：实现功能、重构代码、修复守卫报警。</p>
+  <span class="go">开始对话 →</span>
+   </div>
+        <div class="ag">
+          <span class="av teal"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></span>
+          <div><b>侦察兵</b><div class="home">主场 · 研究</div></div>
+     <p>快速侦察：扫描代码库结构、检索外部资料与先例。</p>
+          <span class="go">开始对话 →</span>
+     </div>
+        <div class="ag">
+     <span class="av rose"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg></span>
+          <div><b>红队评审</b><div class="home">主场 · 审查</div></div>
+          <p>对抗式评审：专挑设计与实现的毛病，参与多方辩论。</p>
+   <span class="go">开始对话 →</span>
+        </div>
+        <div class="ag">
+       <span class="av coral"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V5a2 2 0 012-2h13v14H6a2 2 0 00-2 2zm0 0a2 2 0 002 2h13"/></svg></span>
+          <div><b>深度研究员</b><div class="home">主场 · 研究</div></div>
+  <p>长程调研：深入文献与方案对比，产出结构化报告。</p>
+          <span class="go">开始对话 →</span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="closing">
+    <b>修订 2 改动：</b>
+    <ul>
+      <li>问候头（下午好 + 事实行 + 新建项目按钮）改为通栏，横跨整个内容区；「今日动态」「最近快照」右栏从收件箱同一水平线开始，不再与大标题齐平。</li>
+    <li>「开始一次对话」移出左栏，改为页面底部通栏五卡：头像 36px、加主场阶段标注（主场 · 编码）、职责描述完整一句、胶囊式「开始对话」按钮（悬停变实色）。</li>
+      <li>其余结构、颜色策略与上一版一致。</li>
+    </ul>
+  </div>
+</div>

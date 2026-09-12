@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/codeflow/backend/internal/dbx"
 )
 
 // SQLiteRawArchive SQLite 实现的 Raw Archive。
@@ -54,7 +55,10 @@ func (a *SQLiteRawArchive) InitializeContext(ctx context.Context) error {
 		return fmt.Errorf("create raw archive db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", a.dbPath)
+	db, err := dbx.Open(a.dbPath,
+		dbx.WithWAL(true),
+		dbx.WithForeignKeys(false),
+	)
 	if err != nil {
 		return fmt.Errorf("open raw archive db: %w", err)
 	}
@@ -311,10 +315,18 @@ func GetRawArchive() (IRawArchive, error) {
 		return defaultRawArchive, nil
 	}
 
-	archive := NewSQLiteRawArchive("")
-	if err := archive.Initialize(); err != nil {
-		return nil, err
-	}
+	return nil, errors.New("raw archive is not initialized")
+}
+
+// SetRawArchive injects the explicit runtime archive implementation.
+func SetRawArchive(archive IRawArchive) {
+	rawArchiveMu.Lock()
+	defer rawArchiveMu.Unlock()
 	defaultRawArchive = archive
-	return defaultRawArchive, nil
+}
+
+func HasRawArchive() bool {
+	rawArchiveMu.Lock()
+	defer rawArchiveMu.Unlock()
+	return defaultRawArchive != nil
 }

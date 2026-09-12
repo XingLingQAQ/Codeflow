@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/codeflow/backend/internal/dbx"
 	"github.com/codeflow/backend/internal/planner"
 )
 
@@ -31,42 +31,74 @@ const (
 	StatusArchived  ProjectStatus = "archived"
 )
 
+// BindingState describes the lifecycle of a project's authoritative bindings.
+// A project is never considered workspace-runnable until it is bound.
+type BindingState string
+
+const (
+	BindingStateUnbound  BindingState = "unbound"
+	BindingStateBound    BindingState = "bound"
+	BindingStateDeleting BindingState = "deleting"
+	BindingStateArchived BindingState = "archived"
+)
+
 // Project 项目
 type Project struct {
-	ID           string                 `json:"id"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description,omitempty"`
-	Status       ProjectStatus          `json:"status"`
-	Progress     int                    `json:"progress"`
-	Tags         []string               `json:"tags,omitempty"`
-	GitBranch    string                 `json:"git_branch,omitempty"`
-	CreatedAt    int64                  `json:"created_at"`
-	UpdatedAt    int64                  `json:"updated_at"`
-	LastActive   int64                  `json:"last_active"`
-	PlanIDs      []string               `json:"plan_ids,omitempty"`
-	PlanDocument *PlanDocument          `json:"plan_document,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	ID               string                 `json:"id"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description,omitempty"`
+	Status           ProjectStatus          `json:"status"`
+	Progress         int                    `json:"progress"`
+	Tags             []string               `json:"tags,omitempty"`
+	GitBranch        string                 `json:"git_branch,omitempty"`
+	CreatedAt        int64                  `json:"created_at"`
+	UpdatedAt        int64                  `json:"updated_at"`
+	LastActive       int64                  `json:"last_active"`
+	PlanIDs          []string               `json:"plan_ids,omitempty"`
+	PlanDocument     *PlanDocument          `json:"plan_document,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceRoot    string                 `json:"workspace_root,omitempty"`
+	DefaultFlowID    string                 `json:"default_flow_id,omitempty"`
+	DefaultSessionID string                 `json:"default_session_id,omitempty"`
+	BindingState     BindingState           `json:"binding_state"`
 }
 
 // ProjectCreateRequest 创建项目请求
 type ProjectCreateRequest struct {
-	Title       string                 `json:"title" binding:"required"`
-	Description string                 `json:"description,omitempty"`
-	Status      ProjectStatus          `json:"status,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	GitBranch   string                 `json:"git_branch,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	// ID is assigned by project creation coordinators that need to provision
+	// related resources before the project is persisted. It is never accepted
+	// from the HTTP payload.
+	ID               string                 `json:"-"`
+	Title            string                 `json:"title" binding:"required"`
+	Description      string                 `json:"description,omitempty"`
+	Status           ProjectStatus          `json:"status,omitempty"`
+	Tags             []string               `json:"tags,omitempty"`
+	GitBranch        string                 `json:"git_branch,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceRoot    string                 `json:"workspace_root,omitempty"`
+	DefaultFlowID    string                 `json:"-"`
+	DefaultSessionID string                 `json:"-"`
 }
+
+var ErrInvalidProjectCreate = errors.New("invalid project create request")
+
+const (
+	MaxProjectTitleLength       = 200
+	MaxProjectDescriptionLength = 10_000
+	MaxProjectTags              = 20
+	MaxProjectTagLength         = 64
+)
 
 // ProjectUpdateRequest 更新项目请求
 type ProjectUpdateRequest struct {
-	Title       *string                `json:"title,omitempty"`
-	Description *string                `json:"description,omitempty"`
-	Status      *ProjectStatus         `json:"status,omitempty"`
-	Tags        []string               `json:"tags,omitempty"`
-	GitBranch   *string                `json:"git_branch,omitempty"`
-	Progress    *int                   `json:"progress,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Title         *string                `json:"title,omitempty"`
+	Description   *string                `json:"description,omitempty"`
+	Status        *ProjectStatus         `json:"status,omitempty"`
+	Tags          []string               `json:"tags,omitempty"`
+	GitBranch     *string                `json:"git_branch,omitempty"`
+	Progress      *int                   `json:"progress,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceRoot *string                `json:"workspace_root,omitempty"`
 }
 
 // ProjectListRequest 项目列表请求
@@ -247,6 +279,9 @@ type IProjectService interface {
 	ListProjects(ctx context.Context, req *ProjectListRequest) (*ProjectListResponse, error)
 	UpdateProject(ctx context.Context, id string, req *ProjectUpdateRequest) (*Project, error)
 	DeleteProject(ctx context.Context, id string) error
+	RestoreProject(ctx context.Context, id string) (*Project, error)
+	UpdateRuntimeBindings(ctx context.Context, id, flowID, sessionID string) (*Project, error)
+	BindWorkspaceRoot(ctx context.Context, id, root string) (*Project, error)
 	AddPlanToProject(ctx context.Context, projectID, planID string) error
 	RemovePlanFromProject(ctx context.Context, projectID, planID string) error
 	GetProjectPlans(ctx context.Context, projectID string) ([]planner.Plan, error)
@@ -257,11 +292,19 @@ type IProjectService interface {
 	RecalculateProgress(ctx context.Context, projectID string) error
 }
 
+// projectDeletionMarker is intentionally optional so existing lightweight
+// project service implementations remain source-compatible.
+type projectDeletionMarker interface {
+	MarkProjectDeleting(ctx context.Context, id string) (*Project, error)
+}
+
 // InMemoryProjectService 内存实现的项目管理器
 type InMemoryProjectService struct {
-	mu                sync.RWMutex
-	projects          map[string]*Project
-	planningGenerator PlanningGenerator
+	mu                     sync.RWMutex
+	projects               map[string]*Project
+	planningGenerator      PlanningGenerator
+	allowedRoots           []string
+	allowUnrestrictedRoots bool
 }
 
 // NewInMemoryProjectService 创建内存项目管理器
@@ -269,6 +312,33 @@ func NewInMemoryProjectService() *InMemoryProjectService {
 	return &InMemoryProjectService{
 		projects: make(map[string]*Project),
 	}
+}
+
+// SetAllowedWorkspaceRoots configures the canonical root policy used by new
+// projects and directory bindings. An empty list rejects new bindings unless
+// the explicit migration compatibility switch is enabled.
+func (s *InMemoryProjectService) SetAllowedWorkspaceRoots(roots []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowedRoots = append([]string(nil), roots...)
+}
+
+// SetAllowUnrestrictedWorkspaceRoots enables the temporary desktop migration
+// mode in which any existing directory may be bound after canonicalization.
+func (s *InMemoryProjectService) SetAllowUnrestrictedWorkspaceRoots(allow bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowUnrestrictedRoots = allow
+}
+
+// CanonicalizeWorkspaceRoot applies the service-owned root policy without
+// mutating project state.
+func (s *InMemoryProjectService) CanonicalizeWorkspaceRoot(root string) (string, error) {
+	s.mu.RLock()
+	roots := append([]string(nil), s.allowedRoots...)
+	allowUnrestricted := s.allowUnrestrictedRoots
+	s.mu.RUnlock()
+	return canonicalizeWorkspaceRoot(root, roots, allowUnrestricted)
 }
 
 // validStatus 校验状态枚举
@@ -280,33 +350,104 @@ func validStatus(s ProjectStatus) bool {
 	return false
 }
 
+func normalizeProjectCreateRequest(req *ProjectCreateRequest) (*ProjectCreateRequest, error) {
+	if req == nil {
+		return nil, fmt.Errorf("%w: request is required", ErrInvalidProjectCreate)
+	}
+
+	normalized := *req
+	normalized.Title = strings.TrimSpace(req.Title)
+	normalized.Description = strings.TrimSpace(req.Description)
+	normalized.GitBranch = strings.TrimSpace(req.GitBranch)
+	if normalized.Title == "" {
+		return nil, fmt.Errorf("%w: title is required", ErrInvalidProjectCreate)
+	}
+	if len([]rune(normalized.Title)) > MaxProjectTitleLength {
+		return nil, fmt.Errorf("%w: title must be at most %d characters", ErrInvalidProjectCreate, MaxProjectTitleLength)
+	}
+	if len([]rune(normalized.Description)) > MaxProjectDescriptionLength {
+		return nil, fmt.Errorf("%w: description must be at most %d characters", ErrInvalidProjectCreate, MaxProjectDescriptionLength)
+	}
+	if normalized.Status == "" {
+		normalized.Status = StatusPlanning
+	}
+	if !validStatus(normalized.Status) {
+		return nil, fmt.Errorf("%w: invalid status %q", ErrInvalidProjectCreate, normalized.Status)
+	}
+
+	tags := make([]string, 0, len(req.Tags))
+	seen := make(map[string]struct{}, len(req.Tags))
+	for _, raw := range req.Tags {
+		tag := strings.TrimSpace(raw)
+		if tag == "" {
+			continue
+		}
+		if len([]rune(tag)) > MaxProjectTagLength {
+			return nil, fmt.Errorf("%w: each tag must be at most %d characters", ErrInvalidProjectCreate, MaxProjectTagLength)
+		}
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	if len(tags) > MaxProjectTags {
+		return nil, fmt.Errorf("%w: at most %d tags are allowed", ErrInvalidProjectCreate, MaxProjectTags)
+	}
+	normalized.Tags = tags
+	if normalized.WorkspaceRoot != "" {
+		// Root policy is applied by the owning service after normalization.
+		normalized.WorkspaceRoot = strings.TrimSpace(normalized.WorkspaceRoot)
+	}
+	return &normalized, nil
+}
+
 // CreateProject 创建项目
 func (s *InMemoryProjectService) CreateProject(ctx context.Context, req *ProjectCreateRequest) (*Project, error) {
+	normalized, err := normalizeProjectCreateRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	status := req.Status
-	if status == "" {
-		status = StatusPlanning
+	if normalized.WorkspaceRoot != "" {
+		canonical, err := canonicalizeWorkspaceRoot(normalized.WorkspaceRoot, s.allowedRoots, s.allowUnrestrictedRoots)
+		if err != nil {
+			return nil, fmt.Errorf("%w: workspace root: %v", ErrInvalidProjectCreate, err)
+		}
+		normalized.WorkspaceRoot = canonical
 	}
-	if !validStatus(status) {
-		return nil, errors.New("invalid status: " + string(status))
+
+	id := normalized.ID
+	if id == "" {
+		id = uuid.New().String()
+	}
+	if _, exists := s.projects[id]; exists {
+		return nil, fmt.Errorf("project already exists: %s", id)
 	}
 
 	now := time.Now().Unix()
 	p := &Project{
-		ID:          uuid.New().String(),
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      status,
-		Progress:    0,
-		Tags:        req.Tags,
-		GitBranch:   req.GitBranch,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		LastActive:  now,
-		PlanIDs:     []string{},
-		Metadata:    req.Metadata,
+		ID:               id,
+		Title:            normalized.Title,
+		Description:      normalized.Description,
+		Status:           normalized.Status,
+		Progress:         0,
+		Tags:             normalized.Tags,
+		GitBranch:        normalized.GitBranch,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		LastActive:       now,
+		PlanIDs:          []string{},
+		Metadata:         normalized.Metadata,
+		BindingState:     BindingStateUnbound,
+		DefaultFlowID:    normalized.DefaultFlowID,
+		DefaultSessionID: normalized.DefaultSessionID,
+		WorkspaceRoot:    normalized.WorkspaceRoot,
+	}
+	if p.WorkspaceRoot != "" {
+		p.BindingState = BindingStateBound
 	}
 
 	s.projects[p.ID] = p
@@ -439,6 +580,14 @@ func (s *InMemoryProjectService) UpdateProject(ctx context.Context, id string, r
 	if req.Metadata != nil {
 		p.Metadata = req.Metadata
 	}
+	if req.WorkspaceRoot != nil {
+		canonical, err := canonicalizeWorkspaceRoot(*req.WorkspaceRoot, s.allowedRoots, s.allowUnrestrictedRoots)
+		if err != nil {
+			return nil, err
+		}
+		p.WorkspaceRoot = canonical
+		p.BindingState = BindingStateBound
+	}
 
 	p.UpdatedAt = now
 	p.LastActive = now
@@ -451,12 +600,72 @@ func (s *InMemoryProjectService) DeleteProject(ctx context.Context, id string) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.projects[id]; !ok {
+	p, ok := s.projects[id]
+	if !ok {
 		return errors.New("project not found")
 	}
-
-	delete(s.projects, id)
+	p.Status = StatusArchived
+	p.BindingState = BindingStateArchived
+	p.UpdatedAt = time.Now().Unix()
+	p.LastActive = p.UpdatedAt
 	return nil
+}
+
+func (s *InMemoryProjectService) MarkProjectDeleting(ctx context.Context, id string) (*Project, error) {
+	_ = ctx
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.projects[id]
+	if !ok {
+		return nil, errors.New("project not found")
+	}
+	p.BindingState = BindingStateDeleting
+	p.UpdatedAt = time.Now().Unix()
+	p.LastActive = p.UpdatedAt
+	return cloneProject(p), nil
+}
+
+// RestoreProject returns an archived project to its previous runnable state.
+func (s *InMemoryProjectService) RestoreProject(ctx context.Context, id string) (*Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.projects[id]
+	if !ok {
+		return nil, errors.New("project not found")
+	}
+	if p.Status != StatusArchived {
+		return cloneProject(p), nil
+	}
+	p.Status = StatusPlanning
+	if p.WorkspaceRoot != "" {
+		p.BindingState = BindingStateBound
+	} else {
+		p.BindingState = BindingStateUnbound
+	}
+	p.UpdatedAt = time.Now().Unix()
+	p.LastActive = p.UpdatedAt
+	return cloneProject(p), nil
+}
+
+// UpdateRuntimeBindings changes only the durable default Flow/Session IDs. It
+// is used by restore recovery after a previously aborted default Flow is
+// replaced with a fresh runnable Flow.
+func (s *InMemoryProjectService) UpdateRuntimeBindings(ctx context.Context, id, flowID, sessionID string) (*Project, error) {
+	_ = ctx
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.projects[id]
+	if !ok {
+		return nil, errors.New("project not found")
+	}
+	if strings.TrimSpace(flowID) == "" || strings.TrimSpace(sessionID) == "" {
+		return nil, errors.New("flow_id and session_id are required")
+	}
+	p.DefaultFlowID = flowID
+	p.DefaultSessionID = sessionID
+	p.UpdatedAt = time.Now().Unix()
+	p.LastActive = p.UpdatedAt
+	return cloneProject(p), nil
 }
 
 // AddPlanToProject 关联 Plan 到项目
@@ -741,7 +950,11 @@ CREATE TABLE IF NOT EXISTS projects (
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL,
 	last_active INTEGER NOT NULL,
-	metadata_json TEXT
+	metadata_json TEXT,
+	workspace_root TEXT,
+	default_flow_id TEXT,
+	default_session_id TEXT,
+	binding_state TEXT NOT NULL DEFAULT 'unbound'
 );
 
 CREATE TABLE IF NOT EXISTS project_plans (
@@ -754,6 +967,20 @@ CREATE TABLE IF NOT EXISTS project_plans (
 
 CREATE INDEX IF NOT EXISTS idx_projects_last_active ON projects(last_active DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_project_plans_project_position ON project_plans(project_id, position ASC, plan_id ASC);
+
+CREATE TABLE IF NOT EXISTS project_operations (
+	idempotency_key TEXT PRIMARY KEY,
+	project_id TEXT NOT NULL,
+	flow_id TEXT,
+	session_id TEXT,
+	title TEXT NOT NULL DEFAULT '',
+	workspace_root TEXT,
+	normalized_request_hash TEXT,
+	operation TEXT NOT NULL,
+	state TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 `
 
 type projectStateSnapshot struct {
@@ -761,12 +988,11 @@ type projectStateSnapshot struct {
 }
 
 func NewSQLiteProjectService(dbPath string) (*SQLiteProjectService, error) {
-	connStr, err := buildProjectSQLiteConnString(dbPath)
-	if err != nil {
+	if err := prepareProjectDBDir(dbPath); err != nil {
 		return nil, err
 	}
 
-	db, err := sql.Open("sqlite3", connStr)
+	db, err := dbx.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open project database: %w", err)
 	}
@@ -784,19 +1010,17 @@ func NewSQLiteProjectService(dbPath string) (*SQLiteProjectService, error) {
 	return svc, nil
 }
 
-func buildProjectSQLiteConnString(dbPath string) (string, error) {
+func prepareProjectDBDir(dbPath string) error {
 	if dbPath == "" || dbPath == ":memory:" {
-		return "file::memory:?cache=shared&_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+		return nil
 	}
-
 	dir := filepath.Dir(dbPath)
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return "", fmt.Errorf("create project db dir: %w", err)
+			return fmt.Errorf("create project db dir: %w", err)
 		}
 	}
-
-	return dbPath + "?_foreign_keys=on&_journal_mode=WAL&_busy_timeout=5000", nil
+	return nil
 }
 
 func (s *SQLiteProjectService) initialize() error {
@@ -806,6 +1030,21 @@ func (s *SQLiteProjectService) initialize() error {
 	if _, err := s.db.Exec(createProjectTablesSQL); err != nil {
 		return fmt.Errorf("create project tables: %w", err)
 	}
+	// Existing databases predate the binding columns. SQLite has no IF NOT
+	// EXISTS form for ALTER COLUMN, so probe each column and add it when needed.
+	for _, stmt := range []string{
+		`ALTER TABLE projects ADD COLUMN workspace_root TEXT`,
+		`ALTER TABLE projects ADD COLUMN default_flow_id TEXT`,
+		`ALTER TABLE projects ADD COLUMN default_session_id TEXT`,
+		`ALTER TABLE projects ADD COLUMN binding_state TEXT NOT NULL DEFAULT 'unbound'`,
+		`ALTER TABLE project_operations ADD COLUMN title TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE project_operations ADD COLUMN workspace_root TEXT`,
+		`ALTER TABLE project_operations ADD COLUMN normalized_request_hash TEXT`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			return fmt.Errorf("migrate project bindings: %w", err)
+		}
+	}
 
 	return s.loadFromDBLocked()
 }
@@ -814,7 +1053,7 @@ func (s *SQLiteProjectService) loadFromDBLocked() error {
 	projects := make(map[string]*Project)
 
 	rows, err := s.db.Query(`
-		SELECT id, title, description, status, progress, tags_json, git_branch, created_at, updated_at, last_active, metadata_json
+	SELECT id, title, description, status, progress, tags_json, git_branch, created_at, updated_at, last_active, metadata_json, workspace_root, default_flow_id, default_session_id, binding_state
 		FROM projects
 	`)
 	if err != nil {
@@ -870,6 +1109,191 @@ func (s *SQLiteProjectService) Close() error {
 	return nil
 }
 
+func (s *SQLiteProjectService) GetCreateOperation(ctx context.Context, key string) (*CreateOperationRecord, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, nil
+	}
+	s.dbMu.RLock()
+	defer s.dbMu.RUnlock()
+	var record CreateOperationRecord
+	var flowID, sessionID, workspaceRoot, requestHash sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT project_id, flow_id, session_id, state, title, workspace_root, normalized_request_hash FROM project_operations WHERE idempotency_key = ? AND operation = 'create_project'`, key).Scan(&record.ProjectID, &flowID, &sessionID, &record.State, &record.Title, &workspaceRoot, &requestHash)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get project operation: %w", err)
+	}
+	record.FlowID = flowID.String
+	record.SessionID = sessionID.String
+	record.WorkspaceRoot = workspaceRoot.String
+	record.NormalizedRequestHash = requestHash.String
+	record.IdempotencyKey = key
+	return &record, nil
+}
+
+func (s *SQLiteProjectService) ListIncompleteCreateOperations(ctx context.Context) ([]*CreateOperationRecord, error) {
+	s.dbMu.RLock()
+	defer s.dbMu.RUnlock()
+	// Resumable states are an explicit whitelist (see
+	// isResumableCreateOperationState): terminal states — completed and the
+	// reserved rolled_back — and any unknown state must never be resurrected
+	// by recovery, so this is not `state <> 'completed'`.
+	rows, err := s.db.QueryContext(ctx, `SELECT idempotency_key, project_id, flow_id, session_id, state, title, workspace_root, normalized_request_hash FROM project_operations WHERE operation = 'create_project' AND state IN (?, ?, ?) ORDER BY created_at, idempotency_key`, createOperationPending, createOperationSessionCreated, createOperationFlowCreated)
+	if err != nil {
+		return nil, fmt.Errorf("list incomplete project operations: %w", err)
+	}
+	defer rows.Close()
+	var records []*CreateOperationRecord
+	for rows.Next() {
+		var record CreateOperationRecord
+		var flowID, sessionID, workspaceRoot, requestHash sql.NullString
+		if err := rows.Scan(&record.IdempotencyKey, &record.ProjectID, &flowID, &sessionID, &record.State, &record.Title, &workspaceRoot, &requestHash); err != nil {
+			return nil, fmt.Errorf("scan incomplete project operation: %w", err)
+		}
+		record.FlowID = flowID.String
+		record.SessionID = sessionID.String
+		record.WorkspaceRoot = workspaceRoot.String
+		record.NormalizedRequestHash = requestHash.String
+		records = append(records, &record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate incomplete project operations: %w", err)
+	}
+	return records, nil
+}
+
+func (s *SQLiteProjectService) SaveCreateOperation(ctx context.Context, key string, record *CreateOperationRecord) error {
+	if strings.TrimSpace(key) == "" || record == nil {
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+	state := record.State
+	if state == "" {
+		state = createOperationCompleted
+	}
+	// normalized_request_hash is intentionally absent from the conflict
+	// update: it binds the first payload accepted under the key and must
+	// never be rewritten by a later payload. Legacy rows (NULL hash) keep
+	// their empty marker instead of being backfilled from a new payload.
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO project_operations (idempotency_key, project_id, flow_id, session_id, title, workspace_root, normalized_request_hash, operation, state, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'create_project', ?, ?, ?)
+		ON CONFLICT(idempotency_key) DO UPDATE SET
+			project_id = excluded.project_id,
+			flow_id = excluded.flow_id,
+			session_id = excluded.session_id,
+			title = excluded.title,
+			workspace_root = excluded.workspace_root,
+			state = excluded.state,
+			updated_at = excluded.updated_at
+	`, key, record.ProjectID, nullProjectString(record.FlowID), nullProjectString(record.SessionID), record.Title, nullProjectString(record.WorkspaceRoot), nullProjectString(record.NormalizedRequestHash), state, now, now)
+	if err != nil {
+		return fmt.Errorf("save project operation: %w", err)
+	}
+	return nil
+}
+
+func projectLifecycleOperationKey(operation, projectID string) string {
+	return "project-lifecycle:" + operation + ":" + projectID
+}
+
+func (s *SQLiteProjectService) GetLifecycleOperation(ctx context.Context, operation, projectID string) (*LifecycleOperationRecord, error) {
+	if strings.TrimSpace(operation) == "" || strings.TrimSpace(projectID) == "" {
+		return nil, nil
+	}
+	s.dbMu.RLock()
+	defer s.dbMu.RUnlock()
+	var record LifecycleOperationRecord
+	var flowID, sessionID, workspaceRoot sql.NullString
+	err := s.db.QueryRowContext(ctx, `
+		SELECT operation, project_id, flow_id, session_id, workspace_root, state
+		FROM project_operations
+		WHERE idempotency_key = ? AND operation = ?
+	`, projectLifecycleOperationKey(operation, projectID), operation).Scan(
+		&record.Operation,
+		&record.ProjectID,
+		&flowID,
+		&sessionID,
+		&workspaceRoot,
+		&record.State,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get project lifecycle operation: %w", err)
+	}
+	record.FlowID = flowID.String
+	record.SessionID = sessionID.String
+	record.WorkspaceRoot = workspaceRoot.String
+	return &record, nil
+}
+
+func (s *SQLiteProjectService) ListIncompleteLifecycleOperations(ctx context.Context) ([]*LifecycleOperationRecord, error) {
+	s.dbMu.RLock()
+	defer s.dbMu.RUnlock()
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT operation, project_id, flow_id, session_id, workspace_root, state
+		FROM project_operations
+		WHERE operation IN (?, ?) AND state <> ?
+		ORDER BY created_at, idempotency_key
+	`, projectOperationArchive, projectOperationRestore, lifecycleOperationCompleted)
+	if err != nil {
+		return nil, fmt.Errorf("list incomplete project lifecycle operations: %w", err)
+	}
+	defer rows.Close()
+	var records []*LifecycleOperationRecord
+	for rows.Next() {
+		var record LifecycleOperationRecord
+		var flowID, sessionID, workspaceRoot sql.NullString
+		if err := rows.Scan(&record.Operation, &record.ProjectID, &flowID, &sessionID, &workspaceRoot, &record.State); err != nil {
+			return nil, fmt.Errorf("scan project lifecycle operation: %w", err)
+		}
+		record.FlowID = flowID.String
+		record.SessionID = sessionID.String
+		record.WorkspaceRoot = workspaceRoot.String
+		records = append(records, &record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project lifecycle operations: %w", err)
+	}
+	return records, nil
+}
+
+func (s *SQLiteProjectService) SaveLifecycleOperation(ctx context.Context, record *LifecycleOperationRecord) error {
+	if record == nil || strings.TrimSpace(record.Operation) == "" || strings.TrimSpace(record.ProjectID) == "" {
+		return fmt.Errorf("project lifecycle operation, project id, and state are required")
+	}
+	if record.Operation != projectOperationArchive && record.Operation != projectOperationRestore {
+		return fmt.Errorf("unsupported project lifecycle operation %q", record.Operation)
+	}
+	if strings.TrimSpace(record.State) == "" {
+		return fmt.Errorf("project lifecycle operation state is required")
+	}
+	now := time.Now().UnixMilli()
+	s.dbMu.Lock()
+	defer s.dbMu.Unlock()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO project_operations (idempotency_key, project_id, flow_id, session_id, title, workspace_root, operation, state, created_at, updated_at)
+		VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?)
+		ON CONFLICT(idempotency_key) DO UPDATE SET
+			project_id = excluded.project_id,
+			flow_id = excluded.flow_id,
+			session_id = excluded.session_id,
+			workspace_root = excluded.workspace_root,
+			operation = excluded.operation,
+			state = excluded.state,
+			updated_at = excluded.updated_at
+	`, projectLifecycleOperationKey(record.Operation, record.ProjectID), record.ProjectID, nullProjectString(record.FlowID), nullProjectString(record.SessionID), nullProjectString(record.WorkspaceRoot), record.Operation, record.State, now, now)
+	if err != nil {
+		return fmt.Errorf("save project lifecycle operation: %w", err)
+	}
+	return nil
+}
+
 func (s *SQLiteProjectService) CreateProject(ctx context.Context, req *ProjectCreateRequest) (*Project, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -915,6 +1339,66 @@ func (s *SQLiteProjectService) DeleteProject(ctx context.Context, id string) err
 		return err
 	}
 	return nil
+}
+
+func (s *SQLiteProjectService) MarkProjectDeleting(ctx context.Context, id string) (*Project, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	before := s.snapshotState()
+	project, err := s.InMemoryProjectService.MarkProjectDeleting(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *SQLiteProjectService) RestoreProject(ctx context.Context, id string) (*Project, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	before := s.snapshotState()
+	project, err := s.InMemoryProjectService.RestoreProject(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *SQLiteProjectService) UpdateRuntimeBindings(ctx context.Context, id, flowID, sessionID string) (*Project, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	before := s.snapshotState()
+	project, err := s.InMemoryProjectService.UpdateRuntimeBindings(ctx, id, flowID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	return project, nil
+}
+
+func (s *SQLiteProjectService) BindWorkspaceRoot(ctx context.Context, id, root string) (*Project, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	before := s.snapshotState()
+	project, err := s.InMemoryProjectService.BindWorkspaceRoot(ctx, id, root)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	return project, nil
 }
 
 func (s *SQLiteProjectService) AddPlanToProject(ctx context.Context, projectID, planID string) error {
@@ -1043,9 +1527,9 @@ func (s *SQLiteProjectService) saveSnapshot(snapshot projectStateSnapshot) error
 		}
 
 		if _, err := tx.Exec(`
-			INSERT INTO projects (id, title, description, status, progress, tags_json, git_branch, created_at, updated_at, last_active, metadata_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, project.ID, project.Title, project.Description, string(project.Status), project.Progress, tagsJSON, nullProjectString(project.GitBranch), project.CreatedAt, project.UpdatedAt, project.LastActive, nullProjectString(metadataJSON)); err != nil {
+			INSERT INTO projects (id, title, description, status, progress, tags_json, git_branch, created_at, updated_at, last_active, metadata_json, workspace_root, default_flow_id, default_session_id, binding_state)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, project.ID, project.Title, project.Description, string(project.Status), project.Progress, tagsJSON, nullProjectString(project.GitBranch), project.CreatedAt, project.UpdatedAt, project.LastActive, nullProjectString(metadataJSON), nullProjectString(project.WorkspaceRoot), nullProjectString(project.DefaultFlowID), nullProjectString(project.DefaultSessionID), string(project.BindingState)); err != nil {
 			return fmt.Errorf("insert project %s: %w", project.ID, err)
 		}
 
@@ -1088,6 +1572,7 @@ func scanProject(scanner interface{ Scan(dest ...any) error }) (*Project, error)
 	var tagsJSON string
 	var gitBranch sql.NullString
 	var metadataJSON sql.NullString
+	var workspaceRoot, defaultFlowID, defaultSessionID, bindingState sql.NullString
 	var status string
 
 	if err := scanner.Scan(
@@ -1102,6 +1587,10 @@ func scanProject(scanner interface{ Scan(dest ...any) error }) (*Project, error)
 		&project.UpdatedAt,
 		&project.LastActive,
 		&metadataJSON,
+		&workspaceRoot,
+		&defaultFlowID,
+		&defaultSessionID,
+		&bindingState,
 	); err != nil {
 		return nil, fmt.Errorf("scan project: %w", err)
 	}
@@ -1120,6 +1609,13 @@ func scanProject(scanner interface{ Scan(dest ...any) error }) (*Project, error)
 	}
 	project.Tags = tags
 	project.Metadata = metadata
+	project.WorkspaceRoot = workspaceRoot.String
+	project.DefaultFlowID = defaultFlowID.String
+	project.DefaultSessionID = defaultSessionID.String
+	project.BindingState = BindingState(bindingState.String)
+	if project.BindingState == "" {
+		project.BindingState = BindingStateUnbound
+	}
 	project.PlanIDs = []string{}
 	return &project, nil
 }

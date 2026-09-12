@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -15,30 +16,43 @@ import (
 )
 
 type atomicMemoryServiceMock struct {
-	addFn            func(ctx context.Context, mem *memory.AtomicMemory) error
-	searchFn         func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
-	getBySessionFn   func(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
-	getByIDFn        func(ctx context.Context, id string) (*memory.AtomicMemory, error)
-	updateFn         func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
-	deleteFn         func(ctx context.Context, id string) error
-	applyHeatDecayFn func(ctx context.Context) (int, error)
-	recomputeTiersFn func(ctx context.Context) (int, error)
-	boostHeatFn      func(ctx context.Context, id string, boost float64) error
-	searchByTierFn   func(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error)
+	addFn               func(ctx context.Context, mem *memory.AtomicMemory) error
+	addWithReceiptFn    func(ctx context.Context, mem *memory.AtomicMemory) (memory.AtomicMutationReceipt, error)
+	searchFn            func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error)
+	searchWithReportFn  func(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, memory.AtomicSearchReport, error)
+	getBySessionFn      func(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error)
+	getByIDFn           func(ctx context.Context, id string) (*memory.AtomicMemory, error)
+	updateFn            func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error
+	updateWithReceiptFn func(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) (memory.AtomicMutationReceipt, error)
+	deleteFn            func(ctx context.Context, id string) error
+	deleteWithReceiptFn func(ctx context.Context, id string) (memory.AtomicMutationReceipt, error)
+	applyHeatDecayFn    func(ctx context.Context) (int, error)
+	recomputeTiersFn    func(ctx context.Context) (int, error)
+	boostHeatFn         func(ctx context.Context, id string, boost float64) error
+	searchByTierFn      func(ctx context.Context, tier memory.MemoryTier, limit int) ([]memory.AtomicMemory, error)
 }
 
-func (m *atomicMemoryServiceMock) Add(ctx context.Context, mem *memory.AtomicMemory) error {
+func (m *atomicMemoryServiceMock) AddWithReceipt(ctx context.Context, mem *memory.AtomicMemory) (memory.AtomicMutationReceipt, error) {
+	if m.addWithReceiptFn != nil {
+		return m.addWithReceiptFn(ctx, mem)
+	}
 	if m.addFn != nil {
-		return m.addFn(ctx, mem)
+		if err := m.addFn(ctx, mem); err != nil {
+			return memory.AtomicMutationReceipt{}, err
+		}
 	}
-	return nil
+	return memory.AtomicMutationReceipt{ID: mem.ID, Revision: 1, IndexSync: memory.AtomicIndexSyncSynced}, nil
 }
 
-func (m *atomicMemoryServiceMock) Search(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, error) {
-	if m.searchFn != nil {
-		return m.searchFn(ctx, query, opts)
+func (m *atomicMemoryServiceMock) SearchWithReport(ctx context.Context, query string, opts *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, memory.AtomicSearchReport, error) {
+	if m.searchWithReportFn != nil {
+		return m.searchWithReportFn(ctx, query, opts)
 	}
-	return nil, nil
+	if m.searchFn != nil {
+		items, err := m.searchFn(ctx, query, opts)
+		return items, memory.AtomicSearchReport{Exhausted: true}, err
+	}
+	return nil, memory.AtomicSearchReport{Exhausted: true}, nil
 }
 
 func (m *atomicMemoryServiceMock) GetBySession(ctx context.Context, sessionID string, limit, offset int) ([]memory.AtomicMemory, error) {
@@ -55,18 +69,28 @@ func (m *atomicMemoryServiceMock) GetByID(ctx context.Context, id string) (*memo
 	return nil, memory.ErrAtomicMemoryNotFound
 }
 
-func (m *atomicMemoryServiceMock) Update(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) error {
-	if m.updateFn != nil {
-		return m.updateFn(ctx, id, updates)
+func (m *atomicMemoryServiceMock) UpdateWithReceipt(ctx context.Context, id string, updates *memory.AtomicMemoryUpdate) (memory.AtomicMutationReceipt, error) {
+	if m.updateWithReceiptFn != nil {
+		return m.updateWithReceiptFn(ctx, id, updates)
 	}
-	return nil
+	if m.updateFn != nil {
+		if err := m.updateFn(ctx, id, updates); err != nil {
+			return memory.AtomicMutationReceipt{}, err
+		}
+	}
+	return memory.AtomicMutationReceipt{ID: id, Revision: 2, IndexSync: memory.AtomicIndexSyncSynced}, nil
 }
 
-func (m *atomicMemoryServiceMock) Delete(ctx context.Context, id string) error {
-	if m.deleteFn != nil {
-		return m.deleteFn(ctx, id)
+func (m *atomicMemoryServiceMock) DeleteWithReceipt(ctx context.Context, id string) (memory.AtomicMutationReceipt, error) {
+	if m.deleteWithReceiptFn != nil {
+		return m.deleteWithReceiptFn(ctx, id)
 	}
-	return nil
+	if m.deleteFn != nil {
+		if err := m.deleteFn(ctx, id); err != nil {
+			return memory.AtomicMutationReceipt{}, err
+		}
+	}
+	return memory.AtomicMutationReceipt{ID: id, Revision: 2, IndexSync: memory.AtomicIndexSyncSynced}, nil
 }
 
 func (m *atomicMemoryServiceMock) ApplyHeatDecay(ctx context.Context) (int, error) {
@@ -422,5 +446,261 @@ func TestCreateAtomicMemoryServiceInitFailure(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T13.02.c：mutation 响应 envelope 的索引同步语义
+// ---------------------------------------------------------------------------
+
+// decodeAtomicResponseData 解析统一 envelope 并返回 data 对象。
+func decodeAtomicResponseData(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var body struct {
+		Success bool           `json:"success"`
+		Data    map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response body failed: %v (body=%s)", err, w.Body.String())
+	}
+	if !body.Success {
+		t.Fatalf("expected success response, body=%s", w.Body.String())
+	}
+	return body.Data
+}
+
+// 创建：正文已接受 + 索引同步 pending（向量未就位）分开表达；既有字段不变。
+func TestCreateAtomicMemoryReportsIndexSyncPending(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		addWithReceiptFn: func(_ context.Context, mem *memory.AtomicMemory) (memory.AtomicMutationReceipt, error) {
+			return memory.AtomicMutationReceipt{
+				ID:         mem.ID,
+				Revision:   1,
+				IndexSync:  memory.AtomicIndexSyncPending,
+				IndexError: "injected vector store fault",
+			}, nil
+		},
+	})
+
+	body := map[string]any{
+		"content":    "待同步的正文",
+		"session_id": "session-1",
+		"source":     "user",
+		"importance": 0.5,
+	}
+	payload, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/memory/atomic", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusCreated, w.Code, w.Body.String())
+	}
+	data := decodeAtomicResponseData(t, w)
+	if data["index_sync"] != "pending" {
+		t.Fatalf("expected index_sync=pending, data=%v", data)
+	}
+	if data["index_error"] != "injected vector store fault" {
+		t.Fatalf("expected index_error carried, data=%v", data)
+	}
+	if data["revision"] != float64(1) {
+		t.Fatalf("expected revision=1, data=%v", data)
+	}
+	// 向后兼容：既有正文字段原样保留。
+	if data["content"] != "待同步的正文" || data["session_id"] != "session-1" {
+		t.Fatalf("existing fields must be preserved, data=%v", data)
+	}
+	if data["id"] == nil || data["id"] == "" {
+		t.Fatalf("expected generated id preserved, data=%v", data)
+	}
+}
+
+// 创建：索引同步完成时 index_sync=synced，且无 index_error 键。
+func TestCreateAtomicMemoryReportsIndexSynced(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		addWithReceiptFn: func(_ context.Context, mem *memory.AtomicMemory) (memory.AtomicMutationReceipt, error) {
+			return memory.AtomicMutationReceipt{ID: mem.ID, Revision: 1, IndexSync: memory.AtomicIndexSyncSynced}, nil
+		},
+	})
+
+	body := map[string]any{
+		"content":    "已同步的正文",
+		"session_id": "session-1",
+		"source":     "user",
+		"importance": 0.5,
+	}
+	payload, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/memory/atomic", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusCreated, w.Code, w.Body.String())
+	}
+	data := decodeAtomicResponseData(t, w)
+	if data["index_sync"] != "synced" {
+		t.Fatalf("expected index_sync=synced, data=%v", data)
+	}
+	if _, hasErr := data["index_error"]; hasErr {
+		t.Fatalf("synced receipt must omit index_error, data=%v", data)
+	}
+}
+
+// 更新：回执 revision/index_sync 原样透出，正文为更新后内容。
+func TestUpdateAtomicMemoryReportsIndexSync(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		updateWithReceiptFn: func(_ context.Context, id string, _ *memory.AtomicMemoryUpdate) (memory.AtomicMutationReceipt, error) {
+			return memory.AtomicMutationReceipt{ID: id, Revision: 2, IndexSync: memory.AtomicIndexSyncSynced}, nil
+		},
+		getByIDFn: func(_ context.Context, id string) (*memory.AtomicMemory, error) {
+			return &memory.AtomicMemory{
+				ID:         id,
+				Timestamp:  100,
+				Content:    "新内容",
+				SessionID:  "session-1",
+				Source:     memory.AtomicMemorySourceAssistant,
+				Importance: 0.6,
+			}, nil
+		},
+	})
+
+	body := map[string]any{"content": "新内容"}
+	payload, _ := json.Marshal(body)
+	req, _ := http.NewRequest(http.MethodPut, "/api/v1/memory/atomic/m1", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, w.Code, w.Body.String())
+	}
+	data := decodeAtomicResponseData(t, w)
+	if data["index_sync"] != "synced" || data["revision"] != float64(2) {
+		t.Fatalf("expected index_sync=synced revision=2, data=%v", data)
+	}
+	if data["content"] != "新内容" {
+		t.Fatalf("expected updated content, data=%v", data)
+	}
+}
+
+// 删除：保留既有 deleted/id 字段，新增 revision/index_sync。
+func TestDeleteAtomicMemoryReportsIndexSync(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		deleteWithReceiptFn: func(_ context.Context, id string) (memory.AtomicMutationReceipt, error) {
+			return memory.AtomicMutationReceipt{ID: id, Revision: 2, IndexSync: memory.AtomicIndexSyncPending, IndexError: "injected vector store fault"}, nil
+		},
+	})
+
+	req, _ := http.NewRequest(http.MethodDelete, "/api/v1/memory/atomic/m1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, w.Code, w.Body.String())
+	}
+	data := decodeAtomicResponseData(t, w)
+	if data["deleted"] != true || data["id"] != "m1" {
+		t.Fatalf("existing deleted/id fields must be preserved, data=%v", data)
+	}
+	if data["index_sync"] != "pending" || data["revision"] != float64(2) {
+		t.Fatalf("expected index_sync=pending revision=2, data=%v", data)
+	}
+	if data["index_error"] != "injected vector store fault" {
+		t.Fatalf("expected index_error carried, data=%v", data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T13.02.c：Search 不完整原因（负向核心：向量未同步时不得返回"完整空结果"）
+// ---------------------------------------------------------------------------
+
+// 向量未同步（pending/failed job）时：响应含 incomplete_reason 与
+// search_report 明细，空 memories 不再伪装成完整空结果。
+func TestSearchAtomicMemoryReportsIncompleteReason(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		searchWithReportFn: func(_ context.Context, _ string, _ *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, memory.AtomicSearchReport, error) {
+			return []memory.AtomicMemory{}, memory.AtomicSearchReport{
+				CandidatesScanned: 0,
+				Batches:           1,
+				Exhausted:         true,
+				IndexPendingJobs:  2,
+				IndexFailedJobs:   1,
+			}, nil
+		},
+	})
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/memory/atomic/search?query=%E5%81%8F%E5%A5%BD", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, w.Code, w.Body.String())
+	}
+	data := decodeAtomicResponseData(t, w)
+	reason, _ := data["incomplete_reason"].(string)
+	if reason == "" {
+		t.Fatalf("expected non-empty incomplete_reason, data=%v", data)
+	}
+	if !strings.Contains(reason, "index_sync_pending=2") || !strings.Contains(reason, "index_sync_failed=1") {
+		t.Fatalf("incomplete_reason must carry pending/failed counts, got %q", reason)
+	}
+	if data["count"] != float64(0) {
+		t.Fatalf("expected count=0, data=%v", data)
+	}
+	report, ok := data["search_report"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected search_report object, data=%v", data)
+	}
+	if report["index_pending_jobs"] != float64(2) || report["index_failed_jobs"] != float64(1) || report["exhausted"] != true {
+		t.Fatalf("unexpected search_report: %v", report)
+	}
+}
+
+// 完整结果：索引已同步且候选耗尽时，不含 incomplete_reason 键。
+func TestSearchAtomicMemoryCompleteHasNoIncompleteReason(t *testing.T) {
+	router := setupAtomicMemoryHandlerTest(t)
+	defer setAtomicMemoryServiceForTest(nil)
+
+	setAtomicMemoryServiceForTest(&atomicMemoryServiceMock{
+		searchWithReportFn: func(_ context.Context, _ string, _ *memory.AtomicMemorySearchOptions) ([]memory.AtomicMemory, memory.AtomicSearchReport, error) {
+			return []memory.AtomicMemory{{ID: "m1", Content: "偏好中文", SessionID: "s1", Source: memory.AtomicMemorySourceUser, Importance: 0.7, Timestamp: 1}},
+				memory.AtomicSearchReport{CandidatesScanned: 1, Batches: 1, Exhausted: true}, nil
+		},
+	})
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/memory/atomic/search?query=%E5%81%8F%E5%A5%BD", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d, body=%s", http.StatusOK, w.Code, w.Body.String())
+	}
+	data := decodeAtomicResponseData(t, w)
+	if _, hasReason := data["incomplete_reason"]; hasReason {
+		t.Fatalf("complete result must omit incomplete_reason, data=%v", data)
+	}
+	if data["count"] != float64(1) {
+		t.Fatalf("expected count=1, data=%v", data)
+	}
+	report, ok := data["search_report"].(map[string]any)
+	if !ok || report["exhausted"] != true || report["index_pending_jobs"] != float64(0) {
+		t.Fatalf("unexpected search_report: %v", report)
 	}
 }

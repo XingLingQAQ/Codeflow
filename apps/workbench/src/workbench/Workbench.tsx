@@ -136,6 +136,7 @@ export default function Workbench() {
 
   const validStage = stage as StageType;
   const stageMeta = STAGE_BY_TYPE[validStage];
+  const currentStage = flow?.stages.find((flowStage) => flowStage.type === validStage);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -172,7 +173,12 @@ export default function Workbench() {
                     onDoubleClick={toggleCompanion}
                   />
                   <div style={{ width: rightWidth }} className="shrink-0 overflow-hidden">
-                    <AgentCompanion projectId={projectId} stage={validStage} stageName={stageMeta?.label} />
+                    <AgentCompanion
+                      projectId={projectId}
+                      stage={validStage}
+                      stageName={stageMeta?.label}
+                      assignedAgentId={currentStage?.agent_id}
+                    />
                   </div>
                 </motion.div>
               )}
@@ -208,7 +214,7 @@ export default function Workbench() {
         projectId={projectId}
         stage={stageMeta?.label}
         stageSlug={validStage}
-        currentStage={flow?.stages.find((s) => s.type === validStage)}
+        currentStage={currentStage}
         connected={wsConnected}
       />
     </div>

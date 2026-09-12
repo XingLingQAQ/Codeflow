@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -17,14 +18,32 @@ type ConfigManager struct {
 	sessionConfigs  map[string]*SessionConfig
 	roleConfigs     map[RoleType]*RoleConfig
 	changeCallbacks []ConfigChangeCallback
+	secretStore     SecretStore
 	mu              sync.RWMutex
 }
 
 // NewConfigManager 创建配置管理器
 func NewConfigManager(initial *GlobalConfig) *ConfigManager {
-	cfg := DefaultGlobalConfig
+	return NewConfigManagerWithSecretStore(initial, NewMemorySecretStore())
+}
+
+func NewConfigManagerWithSecretStore(initial *GlobalConfig, secretStore SecretStore) *ConfigManager {
+	if secretStore == nil {
+		secretStore = NewMemorySecretStore()
+	}
+	cfg := cloneGlobalConfig(&DefaultGlobalConfig)
 	if initial != nil {
-		cfg = *initial
+		cfg = cloneGlobalConfig(initial)
+	}
+	for i := range cfg.APIPool {
+		cfg.APIPool[i].APIKey = ""
+		cfg.APIPool[i].DeleteSecret = false
+		if cfg.APIPool[i].SecretRef == "" {
+			cfg.APIPool[i].SecretStatus = SecretStatusMissing
+			cfg.APIPool[i].MaskedValue = ""
+			cfg.APIPool[i].SecretVersion = 0
+			cfg.APIPool[i].SecretUpdatedAt = 0
+		}
 	}
 
 	return &ConfigManager{
@@ -32,6 +51,7 @@ func NewConfigManager(initial *GlobalConfig) *ConfigManager {
 		sessionConfigs:  make(map[string]*SessionConfig),
 		roleConfigs:     make(map[RoleType]*RoleConfig),
 		changeCallbacks: make([]ConfigChangeCallback, 0),
+		secretStore:     secretStore,
 	}
 }
 
@@ -40,7 +60,7 @@ func (m *ConfigManager) LoadGlobalConfig() *GlobalConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	cfg := m.globalConfig
+	cfg := cloneGlobalConfig(&m.globalConfig)
 	return &cfg
 }
 
@@ -50,7 +70,7 @@ func (m *ConfigManager) LoadSessionConfig(sessionID string) *SessionConfig {
 	defer m.mu.RUnlock()
 
 	if cfg, ok := m.sessionConfigs[sessionID]; ok {
-		copy := *cfg
+		copy := cloneSessionConfig(cfg)
 		return &copy
 	}
 	return nil
@@ -62,13 +82,13 @@ func (m *ConfigManager) LoadRoleConfig(role RoleType) *RoleConfig {
 	defer m.mu.RUnlock()
 
 	if cfg, ok := m.roleConfigs[role]; ok {
-		copy := *cfg
+		copy := cloneRoleConfig(cfg)
 		return &copy
 	}
 
 	// 返回默认配置
 	if defaultCfg, ok := DefaultRoleConfigs[role]; ok {
-		copy := *defaultCfg
+		copy := cloneRoleConfig(defaultCfg)
 		return &copy
 	}
 	return nil
@@ -79,13 +99,22 @@ func (m *ConfigManager) SaveGlobalConfig(config *GlobalConfig) error {
 	if config == nil {
 		return fmt.Errorf("config cannot be nil")
 	}
-
+	current := m.LoadGlobalConfig()
+	ctx := context.Background()
+	if _, err := m.reconcileSecrets(ctx, current); err != nil {
+		return err
+	}
+	sanitized, _, err := m.prepareGlobalConfig(ctx, config, current)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
-	m.globalConfig = *config
+	m.globalConfig = cloneGlobalConfig(sanitized)
 	m.mu.Unlock()
 
 	m.notifyChange()
-	return nil
+	_, err = m.reconcileSecrets(ctx, sanitized)
+	return err
 }
 
 // SaveSessionConfig 保存会话配置
@@ -140,7 +169,8 @@ func (m *ConfigManager) SaveRoleConfig(role RoleType, config *RoleConfig) error 
 	}
 
 	m.mu.Lock()
-	m.roleConfigs[role] = config
+	copy := cloneRoleConfig(config)
+	m.roleConfigs[role] = &copy
 	m.mu.Unlock()
 
 	m.notifyChange()
@@ -176,7 +206,8 @@ func (m *ConfigManager) ResolveConfig(sessionID string, role RoleType) *Resolved
 				temperature = *sessionCfg.Temperature
 			}
 			if sessionCfg.MaxTokens != nil {
-				maxTokens = sessionCfg.MaxTokens
+				value := *sessionCfg.MaxTokens
+				maxTokens = &value
 			}
 		}
 	}
@@ -190,7 +221,12 @@ func (m *ConfigManager) ResolveConfig(sessionID string, role RoleType) *Resolved
 		if roleCfg != nil {
 			model = roleCfg.Model
 			temperature = roleCfg.Temperature
-			topP = roleCfg.TopP
+			if roleCfg.TopP != nil {
+				value := *roleCfg.TopP
+				topP = &value
+			} else {
+				topP = nil
+			}
 			apiChannelID = roleCfg.APIChannel
 			mcpTools = append(mcpTools, roleCfg.MCPTools...)
 			systemPrompt = roleCfg.SystemPrompt
@@ -224,6 +260,7 @@ func (m *ConfigManager) ResolveConfig(sessionID string, role RoleType) *Resolved
 		AllowedHooks:  allowedHooks,
 		Timeout:       m.globalConfig.Timeout,
 		MaxRetries:    m.globalConfig.MaxRetries,
+		secretStore:   m.secretStore,
 	}
 }
 
@@ -252,37 +289,34 @@ func (m *ConfigManager) AddAPIChannel(channel *APIChannel) error {
 		return fmt.Errorf("channel ID cannot be empty")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// 查找是否存在
-	for i, ch := range m.globalConfig.APIPool {
-		if ch.ID == channel.ID {
-			m.globalConfig.APIPool[i] = *channel
-			m.notifyChangeLocked()
-			return nil
+	current := m.LoadGlobalConfig()
+	found := false
+	for i := range current.APIPool {
+		if current.APIPool[i].ID == channel.ID {
+			current.APIPool[i] = *channel
+			found = true
+			break
 		}
 	}
-
-	// 添加新通道
-	m.globalConfig.APIPool = append(m.globalConfig.APIPool, *channel)
-	m.notifyChangeLocked()
-	return nil
+	if !found {
+		current.APIPool = append(current.APIPool, *channel)
+	}
+	return m.SaveGlobalConfig(current)
 }
 
 // RemoveAPIChannel 移除API通道
-func (m *ConfigManager) RemoveAPIChannel(channelID string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for i, ch := range m.globalConfig.APIPool {
+func (m *ConfigManager) RemoveAPIChannel(channelID string) error {
+	if strings.TrimSpace(channelID) == "" {
+		return fmt.Errorf("channel ID cannot be empty")
+	}
+	current := m.LoadGlobalConfig()
+	for i, ch := range current.APIPool {
 		if ch.ID == channelID {
-			m.globalConfig.APIPool = append(m.globalConfig.APIPool[:i], m.globalConfig.APIPool[i+1:]...)
-			m.notifyChangeLocked()
-			return true
+			current.APIPool = append(current.APIPool[:i], current.APIPool[i+1:]...)
+			return m.SaveGlobalConfig(current)
 		}
 	}
-	return false
+	return fmt.Errorf("%w: %s", ErrAPIChannelNotFound, channelID)
 }
 
 // DetectConflicts 检测配置冲突
@@ -342,6 +376,9 @@ func (m *ConfigManager) LoadFromFile(path string) error {
 	// 环境变量替换
 	content := expandEnvVars(string(data))
 	data = []byte(content)
+	if err := rejectPlaintextSecretFields(data); err != nil {
+		return err
+	}
 
 	var hierarchy ConfigHierarchy
 	ext := strings.ToLower(filepath.Ext(path))
@@ -359,22 +396,23 @@ func (m *ConfigManager) LoadFromFile(path string) error {
 		return fmt.Errorf("unsupported file format: %s", ext)
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.globalConfig = hierarchy.Global
+	if err := m.SaveGlobalConfig(&hierarchy.Global); err != nil {
+		return fmt.Errorf("save global config: %w", err)
+	}
 	if hierarchy.Session != nil {
-		m.sessionConfigs[hierarchy.Session.SessionID] = hierarchy.Session
+		if err := m.SaveSessionConfig(hierarchy.Session); err != nil {
+			return fmt.Errorf("save session config: %w", err)
+		}
 	}
 	if hierarchy.Role != nil {
 		for role, cfg := range hierarchy.Role {
 			if cfg != nil {
-				m.roleConfigs[role] = cfg
+				if err := m.SaveRoleConfig(role, cfg); err != nil {
+					return fmt.Errorf("save role config %q: %w", role, err)
+				}
 			}
 		}
 	}
-
-	m.notifyChangeLocked()
 	return nil
 }
 
@@ -482,12 +520,12 @@ func (m *ConfigManager) notifyChangeLocked() {
 func (m *ConfigManager) getConfigHierarchy() ConfigHierarchy {
 	roleConfigs := make(map[RoleType]*RoleConfig)
 	for role, cfg := range m.roleConfigs {
-		copy := *cfg
+		copy := cloneRoleConfig(cfg)
 		roleConfigs[role] = &copy
 	}
 
 	hierarchy := ConfigHierarchy{
-		Global: m.globalConfig,
+		Global: cloneGlobalConfig(&m.globalConfig),
 	}
 
 	if len(roleConfigs) > 0 {
@@ -511,4 +549,77 @@ func uniqueStrings(slice []string) []string {
 
 func expandEnvVars(content string) string {
 	return os.ExpandEnv(content)
+}
+
+func cloneGlobalConfig(config *GlobalConfig) GlobalConfig {
+	if config == nil {
+		return GlobalConfig{}
+	}
+	cloned := *config
+	cloned.APIPool = append([]APIChannel(nil), config.APIPool...)
+	cloned.PublicMCP = append([]string(nil), config.PublicMCP...)
+	return cloned
+}
+
+func cloneSessionConfig(config *SessionConfig) SessionConfig {
+	if config == nil {
+		return SessionConfig{}
+	}
+	cloned := *config
+	if config.Temperature != nil {
+		value := *config.Temperature
+		cloned.Temperature = &value
+	}
+	if config.MaxTokens != nil {
+		value := *config.MaxTokens
+		cloned.MaxTokens = &value
+	}
+	return cloned
+}
+
+func cloneRoleConfig(config *RoleConfig) RoleConfig {
+	if config == nil {
+		return RoleConfig{}
+	}
+	cloned := *config
+	if config.TopP != nil {
+		value := *config.TopP
+		cloned.TopP = &value
+	}
+	cloned.MCPTools = append([]string(nil), config.MCPTools...)
+	cloned.Capabilities = append([]string(nil), config.Capabilities...)
+	cloned.AllowedSkills = append([]string(nil), config.AllowedSkills...)
+	cloned.AllowedHooks = append([]string(nil), config.AllowedHooks...)
+	return cloned
+}
+
+func rejectPlaintextSecretFields(data []byte) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("inspect config fields: %w", err)
+	}
+	var visit func(*yaml.Node) bool
+	visit = func(node *yaml.Node) bool {
+		if node.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(node.Content); i += 2 {
+				if node.Content[i].Value == "api_key" {
+					return true
+				}
+				if visit(node.Content[i+1]) {
+					return true
+				}
+			}
+			return false
+		}
+		for _, child := range node.Content {
+			if visit(child) {
+				return true
+			}
+		}
+		return false
+	}
+	if visit(&root) {
+		return fmt.Errorf("config files cannot contain api_key; use the credential API")
+	}
+	return nil
 }

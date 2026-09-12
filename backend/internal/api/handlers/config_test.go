@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -66,6 +67,66 @@ func TestGetGlobalConfigAPI(t *testing.T) {
 	_ = decodeConfigResponseData[config.GlobalConfig](t, w.Body.Bytes())
 }
 
+func TestGlobalConfigAPIKeyIsWriteOnly(t *testing.T) {
+	router := setupConfigRouter()
+	svc := config.NewConfigManagerWithSecretStore(nil, config.NewMemorySecretStore())
+	config.SetConfigService(svc)
+	t.Cleanup(func() { config.SetConfigService(nil) })
+
+	const secret = "sk-response-must-never-contain-this"
+	body := []byte(`{"api_pool":[{"id":"primary","name":"Primary","provider":"openai","api_key":"` + secret + `","enabled":true}]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/config/global", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, w.Body.String(), secret)
+	assert.NotContains(t, w.Body.String(), `"api_key"`)
+	assert.Contains(t, w.Body.String(), `"secret_status":"configured"`)
+	assert.Contains(t, w.Body.String(), `"masked_value":"****this"`)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/config/global", nil)
+	getW := httptest.NewRecorder()
+	router.ServeHTTP(getW, getReq)
+	assert.Equal(t, http.StatusOK, getW.Code)
+	assert.NotContains(t, getW.Body.String(), secret)
+	assert.NotContains(t, getW.Body.String(), `"api_key"`)
+
+	resolvedReq := httptest.NewRequest(http.MethodGet, "/api/v1/config/resolve", nil)
+	resolvedW := httptest.NewRecorder()
+	router.ServeHTTP(resolvedW, resolvedReq)
+	assert.Equal(t, http.StatusOK, resolvedW.Code)
+	assert.NotContains(t, resolvedW.Body.String(), secret)
+	assert.NotContains(t, resolvedW.Body.String(), `"api_key"`)
+}
+
+func TestGlobalConfigAPIPreservesAndExplicitlyDeletesSecret(t *testing.T) {
+	router := setupConfigRouter()
+	store := config.NewMemorySecretStore()
+	svc := config.NewConfigManagerWithSecretStore(nil, store)
+	config.SetConfigService(svc)
+	t.Cleanup(func() { config.SetConfigService(nil) })
+
+	put := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/config/global", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+	assert.Equal(t, http.StatusOK, put(`{"api_pool":[{"id":"primary","provider":"openai","api_key":"sk-preserved","enabled":true}]}`).Code)
+	firstRef := svc.LoadGlobalConfig().APIPool[0].SecretRef
+	assert.NotEmpty(t, firstRef)
+	assert.Equal(t, http.StatusOK, put(`{"api_pool":[{"id":"primary","name":"renamed","provider":"openai","enabled":true}]}`).Code)
+	assert.Equal(t, firstRef, svc.LoadGlobalConfig().APIPool[0].SecretRef)
+	assert.Equal(t, http.StatusOK, put(`{"api_pool":[{"id":"primary","provider":"openai","delete_secret":true,"enabled":true}]}`).Code)
+	channel := svc.LoadGlobalConfig().APIPool[0]
+	assert.Empty(t, channel.SecretRef)
+	assert.Equal(t, config.SecretStatusMissing, channel.SecretStatus)
+	_, err := store.Get(context.Background(), firstRef)
+	assert.ErrorIs(t, err, config.ErrSecretNotFound)
+}
+
 func TestUpdateGlobalConfigAPI(t *testing.T) {
 	router := setupConfigRouter()
 	config.SetConfigService(config.NewConfigManager(nil))
@@ -125,7 +186,6 @@ func TestUpdateGlobalConfigAllowsExplicitZeroValues(t *testing.T) {
 		assert.Equal(t, 0, stored.Timeout)
 	}
 }
-
 
 func TestGetSessionConfigAPI(t *testing.T) {
 	router := setupConfigRouter()

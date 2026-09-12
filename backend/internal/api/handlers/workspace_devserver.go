@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
@@ -33,9 +34,19 @@ func ShutdownWorkspaceDevServers() {
 	}
 }
 
+// StopWorkspaceDevServersForRoot stops process-local servers owned by a
+// Project workspace during recoverable archive.
+func StopWorkspaceDevServersForRoot(root string) int {
+	if devServerMgr == nil || strings.TrimSpace(root) == "" {
+		return 0
+	}
+	return devServerMgr.StopRoot(root)
+}
+
 type startDevServerBody struct {
-	Root   string `json:"root"`
-	Script string `json:"script" binding:"required"`
+	Root      string `json:"root"`
+	ProjectID string `json:"project_id"`
+	Script    string `json:"script" binding:"required"`
 }
 
 // DetectWorkspaceScripts handles GET /api/v1/workspace/scripts
@@ -75,13 +86,25 @@ func StartWorkspaceDevServer(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
+	if body.ProjectID != "" && c.GetHeader("X-Codeflow-Project-ID") == "" {
+		c.Request.Header.Set("X-Codeflow-Project-ID", body.ProjectID)
+	}
 	root := workspaceRootFromRequest(c, body.Root)
 	if root == "" {
 		respondError(c, http.StatusBadRequest, "root is required")
 		return
 	}
 	mgr := getDevServerMgr()
-	handle, err := mgr.Start(root, body.Script)
+	ctx := c.Request.Context()
+	if body.ProjectID != "" {
+		trace := audit.TraceFromContext(ctx)
+		if trace == nil {
+			trace = &audit.AuditTrace{}
+		}
+		trace.ProjectID = body.ProjectID
+		ctx = audit.ContextWithTrace(ctx, trace)
+	}
+	handle, err := mgr.StartContext(ctx, root, body.Script)
 	if err != nil {
 		if strings.Contains(err.Error(), "limit reached") {
 			respondError(c, http.StatusConflict, err.Error())

@@ -1,6 +1,16 @@
 package config
 
-import "github.com/codeflow/backend/internal/adapters"
+import (
+	"context"
+	"errors"
+
+	"github.com/codeflow/backend/internal/adapters"
+)
+
+// ErrAPIChannelNotFound is returned when a caller tries to remove a channel
+// that is not present. Removal is intentionally explicit so callers can
+// distinguish an idempotent secret delete from a configuration mismatch.
+var ErrAPIChannelNotFound = errors.New("api channel not found")
 
 // Provider API提供商类型
 type Provider string
@@ -45,9 +55,29 @@ type APIChannel struct {
 	ID       string   `json:"id" yaml:"id"`
 	Name     string   `json:"name" yaml:"name"`
 	Provider Provider `json:"provider" yaml:"provider"`
-	APIKey   string   `json:"api_key,omitempty" yaml:"api_key,omitempty"`
-	BaseURL  string   `json:"base_url,omitempty" yaml:"base_url,omitempty"`
-	Enabled  bool     `json:"enabled" yaml:"enabled"`
+	// APIKey is write-only transient input. It is never serialized or retained
+	// in ConfigManager state after a successful save.
+	APIKey          string       `json:"-" yaml:"-"`
+	DeleteSecret    bool         `json:"-" yaml:"-"`
+	SecretRef       string       `json:"secret_ref,omitempty" yaml:"secret_ref,omitempty"`
+	SecretStatus    SecretStatus `json:"secret_status" yaml:"secret_status"`
+	MaskedValue     string       `json:"masked_value,omitempty" yaml:"masked_value,omitempty"`
+	SecretVersion   int          `json:"secret_version,omitempty" yaml:"secret_version,omitempty"`
+	SecretUpdatedAt int64        `json:"secret_updated_at,omitempty" yaml:"secret_updated_at,omitempty"`
+	BaseURL         string       `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	Enabled         bool         `json:"enabled" yaml:"enabled"`
+}
+
+// APIChannelWrite is the credential-aware HTTP/configuration write model.
+// APIKey is accepted only for a write and is never part of a read model.
+type APIChannelWrite struct {
+	ID           string   `json:"id" yaml:"id"`
+	Name         string   `json:"name,omitempty" yaml:"name,omitempty"`
+	Provider     Provider `json:"provider" yaml:"provider"`
+	APIKey       *string  `json:"api_key,omitempty" yaml:"-"`
+	DeleteSecret bool     `json:"delete_secret,omitempty" yaml:"-"`
+	BaseURL      string   `json:"base_url,omitempty" yaml:"base_url,omitempty"`
+	Enabled      bool     `json:"enabled" yaml:"enabled"`
 }
 
 // GlobalConfig 全局配置
@@ -105,6 +135,126 @@ type ResolvedConfig struct {
 	AllowedHooks  []string    `json:"allowed_hooks,omitempty"`
 	Timeout       int         `json:"timeout,omitempty"`
 	MaxRetries    int         `json:"max_retries,omitempty"`
+	secretStore   SecretStore
+}
+
+// PublicAPIChannel is the read model returned by config APIs. It contains only
+// credential state and a masked hint, never the secret value.
+type PublicAPIChannel struct {
+	ID              string       `json:"id"`
+	Name            string       `json:"name"`
+	Provider        Provider     `json:"provider"`
+	BaseURL         string       `json:"base_url,omitempty"`
+	Enabled         bool         `json:"enabled"`
+	SecretRef       string       `json:"secret_ref,omitempty"`
+	SecretStatus    SecretStatus `json:"secret_status"`
+	MaskedValue     string       `json:"masked_value,omitempty"`
+	SecretVersion   int          `json:"secret_version,omitempty"`
+	SecretUpdatedAt int64        `json:"secret_updated_at,omitempty"`
+}
+
+type PublicGlobalConfig struct {
+	DefaultModel     string             `json:"default_model"`
+	APIPool          []PublicAPIChannel `json:"api_pool"`
+	PublicMCP        []string           `json:"public_mcp"`
+	SummaryThreshold int                `json:"summary_threshold,omitempty"`
+	MaxRetries       int                `json:"max_retries,omitempty"`
+	Timeout          int                `json:"timeout,omitempty"`
+}
+
+type PublicResolvedConfig struct {
+	Model         string            `json:"model"`
+	Temperature   float64           `json:"temperature"`
+	TopP          *float64          `json:"top_p,omitempty"`
+	MaxTokens     *int              `json:"max_tokens,omitempty"`
+	APIChannel    *PublicAPIChannel `json:"api_channel,omitempty"`
+	MCPTools      []string          `json:"mcp_tools"`
+	SystemPrompt  string            `json:"system_prompt,omitempty"`
+	AnswerStyle   string            `json:"answer_style,omitempty"`
+	Capabilities  []string          `json:"capabilities,omitempty"`
+	AllowedSkills []string          `json:"allowed_skills,omitempty"`
+	AllowedHooks  []string          `json:"allowed_hooks,omitempty"`
+	Timeout       int               `json:"timeout,omitempty"`
+	MaxRetries    int               `json:"max_retries,omitempty"`
+}
+
+func NewPublicAPIChannel(channel APIChannel) PublicAPIChannel {
+	return PublicAPIChannel{
+		ID:              channel.ID,
+		Name:            channel.Name,
+		Provider:        channel.Provider,
+		BaseURL:         channel.BaseURL,
+		Enabled:         channel.Enabled,
+		SecretRef:       channel.SecretRef,
+		SecretStatus:    channel.SecretStatus,
+		MaskedValue:     channel.MaskedValue,
+		SecretVersion:   channel.SecretVersion,
+		SecretUpdatedAt: channel.SecretUpdatedAt,
+	}
+}
+
+func NewPublicGlobalConfig(cfg *GlobalConfig) PublicGlobalConfig {
+	if cfg == nil {
+		return PublicGlobalConfig{}
+	}
+	public := PublicGlobalConfig{
+		DefaultModel:     cfg.DefaultModel,
+		APIPool:          make([]PublicAPIChannel, len(cfg.APIPool)),
+		PublicMCP:        append([]string(nil), cfg.PublicMCP...),
+		SummaryThreshold: cfg.SummaryThreshold,
+		MaxRetries:       cfg.MaxRetries,
+		Timeout:          cfg.Timeout,
+	}
+	for i, channel := range cfg.APIPool {
+		public.APIPool[i] = NewPublicAPIChannel(channel)
+	}
+	return public
+}
+
+func NewPublicResolvedConfig(cfg *ResolvedConfig) PublicResolvedConfig {
+	if cfg == nil {
+		return PublicResolvedConfig{}
+	}
+	public := PublicResolvedConfig{
+		Model:         cfg.Model,
+		Temperature:   cfg.Temperature,
+		MCPTools:      append([]string(nil), cfg.MCPTools...),
+		SystemPrompt:  cfg.SystemPrompt,
+		AnswerStyle:   cfg.AnswerStyle,
+		Capabilities:  append([]string(nil), cfg.Capabilities...),
+		AllowedSkills: append([]string(nil), cfg.AllowedSkills...),
+		AllowedHooks:  append([]string(nil), cfg.AllowedHooks...),
+		Timeout:       cfg.Timeout,
+		MaxRetries:    cfg.MaxRetries,
+	}
+	if cfg.TopP != nil {
+		value := *cfg.TopP
+		public.TopP = &value
+	}
+	if cfg.MaxTokens != nil {
+		value := *cfg.MaxTokens
+		public.MaxTokens = &value
+	}
+	if cfg.APIChannel != nil {
+		channel := NewPublicAPIChannel(*cfg.APIChannel)
+		public.APIChannel = &channel
+	}
+	return public
+}
+
+// ResolveAPIKey is the sole runtime credential lookup used by adapter
+// construction. The resolved config itself remains safe to serialize.
+func (c *ResolvedConfig) ResolveAPIKey(ctx context.Context) (string, error) {
+	if c == nil || c.APIChannel == nil || c.APIChannel.SecretRef == "" {
+		return "", errors.New("resolved config has no configured secret")
+	}
+	if c.secretStore == nil {
+		return "", errors.New("resolved config secret store is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return c.secretStore.Get(ctx, c.APIChannel.SecretRef)
 }
 
 // ConfigChangeCallback 配置变更回调
@@ -130,7 +280,7 @@ type IConfigManager interface {
 
 	// API Channel管理
 	AddAPIChannel(channel *APIChannel) error
-	RemoveAPIChannel(channelID string) bool
+	RemoveAPIChannel(channelID string) error
 
 	// 冲突检测
 	DetectConflicts() []string

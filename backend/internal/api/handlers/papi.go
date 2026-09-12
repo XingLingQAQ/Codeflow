@@ -2,7 +2,9 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -49,6 +51,10 @@ func CreatePAPIVariable(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
+	if strings.TrimSpace(req.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "variable name is required"})
+		return
+	}
 
 	sqliteSvc, ok := getSQLiteConfigService(c)
 	if !ok {
@@ -56,7 +62,7 @@ func CreatePAPIVariable(c *gin.Context) {
 	}
 
 	if err := sqliteSvc.DefinePAPIVariable(&req); err != nil {
-		respondInternalError(c, "create PAPI variable", err)
+		respondPAPIMutationError(c, "create PAPI variable", err)
 		return
 	}
 
@@ -92,7 +98,7 @@ func UpdatePAPIVariable(c *gin.Context) {
 	}
 
 	if err := sqliteSvc.DefinePAPIVariable(&req); err != nil {
-		respondInternalError(c, "update PAPI variable", err)
+		respondPAPIMutationError(c, "update PAPI variable", err)
 		return
 	}
 
@@ -113,7 +119,7 @@ func DeletePAPIVariable(c *gin.Context) {
 	}
 
 	if err := sqliteSvc.DeletePAPIVariable(name); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "variable not found"})
+		respondPAPIMutationError(c, "delete PAPI variable", err)
 		return
 	}
 
@@ -138,6 +144,15 @@ func ResolvePAPIByCategory(c *gin.Context) {
 
 	variable, err := sqliteSvc.GetPAPIManager().ResolveByCategory(req.Category)
 	if err != nil {
+		var conflict *config.CategoryConflictError
+		if errors.As(err, &conflict) {
+			respondPAPIConflict(c, conflict)
+			return
+		}
+		if strings.Contains(err.Error(), "cannot be empty") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "variable not found"})
 		return
 	}
@@ -163,7 +178,7 @@ func HotSwapPAPI(c *gin.Context) {
 	}
 
 	if err := sqliteSvc.HotSwapPAPI(req.VariableName, &req.NewVariable); err != nil {
-		respondInternalError(c, "hot swap PAPI variable", err)
+		respondPAPIMutationError(c, "hot swap PAPI variable", err)
 		return
 	}
 
@@ -172,7 +187,10 @@ func HotSwapPAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, updated)
 }
 
-// DetectPAPIConflicts detects conflicts in PAPI variable categories.
+// DetectPAPIConflicts detects conflicts in PAPI variable categories. The
+// response also carries the load-time diagnostics recorded by the service
+// (PAPIDiagnostics), so legacy persisted conflicts are visible through this
+// endpoint exactly as they were loaded (E-10).
 func DetectPAPIConflicts(c *gin.Context) {
 	sqliteSvc, ok := getSQLiteConfigService(c)
 	if !ok {
@@ -180,7 +198,40 @@ func DetectPAPIConflicts(c *gin.Context) {
 	}
 
 	conflicts := sqliteSvc.GetPAPIManager().DetectConflicts()
-	c.JSON(http.StatusOK, gin.H{"conflicts": conflicts})
+	c.JSON(http.StatusOK, gin.H{
+		"conflicts":   conflicts,
+		"diagnostics": sqliteSvc.PAPIDiagnostics(),
+	})
+}
+
+// respondPAPIConflict answers a typed PAPI category conflict with 409: the
+// envelope keeps its standard shape and names the normalized category plus
+// every claimant variable.
+func respondPAPIConflict(c *gin.Context, conflict *config.CategoryConflictError) {
+	c.JSON(http.StatusConflict, Response{
+		Success: false,
+		Error:   conflict.Error(),
+		Data: gin.H{
+			"category":  conflict.Category,
+			"variables": conflict.Variables,
+		},
+	})
+}
+
+// respondPAPIMutationError maps a failed PAPI write: a typed category
+// conflict is a 409, a missing variable is a 404, and anything else is a
+// persistence/transaction failure (5xx), never a client error.
+func respondPAPIMutationError(c *gin.Context, context string, err error) {
+	var conflict *config.CategoryConflictError
+	if errors.As(err, &conflict) {
+		respondPAPIConflict(c, conflict)
+		return
+	}
+	if strings.Contains(err.Error(), "not found") {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	respondInternalError(c, context, err)
 }
 
 func getSQLiteConfigService(c *gin.Context) (*config.SQLiteConfigService, bool) {

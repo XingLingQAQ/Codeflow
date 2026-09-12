@@ -67,3 +67,57 @@ func TestSQLiteMemoryMode(t *testing.T) {
 		t.Fatalf("get=%+v err=%v", got, err)
 	}
 }
+
+func TestSQLiteCustomTemplatePersistsAgentBinding(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "floweng.db")
+	id := uniqTemplateID("persisted_agent_")
+	previous := GetEngine()
+	t.Cleanup(func() {
+		SetEngine(previous)
+		_ = UnregisterTemplate(id)
+	})
+
+	eng, err := NewSQLiteEngine(dbPath, nil)
+	if err != nil {
+		t.Skipf("sqlite unavailable: %v", err)
+	}
+	SetEngine(eng)
+	def := CustomTemplate{
+		ID: id, Name: "Agent flow", Description: "durable template",
+		Stages: []CustomStage{
+			{
+				Type: StageTypePlanning, Name: "规划", Canvas: "planning_board",
+				AgentID: "custom-planner",
+				Gates:   []CustomGate{{Phase: GatePhaseExit, Kind: GateKindHumanApproval}},
+			},
+			{Type: StageTypeCoding, Name: "编码", Canvas: "coding", AgentID: "custom-coder"},
+		},
+	}
+	if err := SaveTemplate(def); err != nil {
+		t.Fatalf("save template: %v", err)
+	}
+	if err := eng.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	eng2, err := NewSQLiteEngine(dbPath, nil)
+	if err != nil {
+		t.Fatalf("reopen engine: %v", err)
+	}
+	defer eng2.Close()
+	SetEngine(eng2)
+	info, ok := DescribeTemplate(id)
+	if !ok || info.Name != "Agent flow" || len(info.Stages) != 2 {
+		t.Fatalf("persisted template mismatch: %#v", info)
+	}
+	if info.Stages[0].AgentID != "custom-planner" || len(info.Stages[0].Gates) != 1 {
+		t.Fatalf("stage contract not persisted: %#v", info.Stages[0])
+	}
+	flow, err := eng2.Create(context.Background(), &CreateFlowRequest{ProjectID: "p", TemplateID: id})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.Stages[0].AgentID != "custom-planner" {
+		t.Fatalf("flow stage agent=%q", flow.Stages[0].AgentID)
+	}
+}
