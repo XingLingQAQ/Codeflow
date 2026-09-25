@@ -222,7 +222,12 @@ export function main({ openapiPath, outputPath, check = false, log = console.log
   }
 
   if (check) {
-    const current = fs.existsSync(resolvedOutput) ? fs.readFileSync(resolvedOutput, 'utf8') : '';
+    // The generator always emits LF. A Windows checkout with core.autocrlf=true
+    // materialises the committed LF blob as CRLF, so compare line-ending-agnostic
+    // content: only a real content difference counts as stale.
+    const current = fs.existsSync(resolvedOutput)
+      ? fs.readFileSync(resolvedOutput, 'utf8').replace(/\r\n/g, '\n')
+      : '';
     if (current !== generated) {
       error(`Generated OpenAPI types are out of date: ${path.relative(repoRoot, resolvedOutput)}`);
       error('Run: pnpm generate:api-types');

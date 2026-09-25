@@ -170,6 +170,23 @@ test('--check exits 1 when stale, 0 after regeneration', () => {
   assert.equal(main({ openapiPath, outputPath, check: true, log: quiet, error: quiet }), 0);
 });
 
+test('--check accepts a CRLF checkout of identical content but still catches drift', () => {
+  const dir = makeTempDir();
+  const openapiPath = path.join(dir, 'openapi.yaml');
+  const outputPath = path.join(dir, 'openapi-types.ts');
+  fs.writeFileSync(openapiPath, MINI_SPEC);
+  const quiet = () => {};
+
+  assert.equal(main({ openapiPath, outputPath, log: quiet, error: quiet }), 0);
+  // A fresh Windows clone with core.autocrlf=true checks the LF blob out as CRLF.
+  const lf = fs.readFileSync(outputPath, 'utf8');
+  fs.writeFileSync(outputPath, lf.replace(/\n/g, '\r\n'));
+  assert.equal(main({ openapiPath, outputPath, check: true, log: quiet, error: quiet }), 0);
+  // Only line endings are normalized: a real edit is still reported as stale.
+  fs.appendFileSync(outputPath, '// tampered\r\n');
+  assert.equal(main({ openapiPath, outputPath, check: true, log: quiet, error: quiet }), 1);
+});
+
 test('real openapi.yaml: every Record is a property-less object site', () => {
   const source = fs.readFileSync(path.join(repoRoot, 'backend', 'docs', 'openapi.yaml'), 'utf8');
   const { text, stats, warnings } = generateTypes(source);
