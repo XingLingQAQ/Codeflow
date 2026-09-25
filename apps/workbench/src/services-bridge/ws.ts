@@ -6,7 +6,18 @@
 // socket carries every topic subscription; the subscription table is replayed
 // after each reconnect (exponential backoff 1s → 16s). In DEV+mock mode no
 // socket is opened and the connection state reads as online.
+//
+// Auth (T0.08.b): the browser cannot set an Authorization header on the
+// WebSocket handshake, so credentials ride as subprotocols — the client
+// offers [`codeflow.v1`, `codeflow.token.<token>`] (token only when the origin
+// gate allows; legacy/browser mode offers just `codeflow.v1`), and the backend
+// echoes back only the stable protocol. A dropped credentialed socket may be a
+// 401 (stale token): the connection model re-pairs once per drop
+// (single-flight) so the next attempt uses fresh credentials. A latched 403
+// stops the reconnect loop entirely until the pairing identity changes.
 import { getWsBase } from '../../api';
+import { refreshBackendConnection } from './connection';
+import { getAuthFailure, getTokenForUrl, onAuthFailureChange } from './authProvider';
 import { useShellStore } from '../stores/shell';
 import { isDevMockActive } from '../lib/devMock';
 
@@ -24,6 +35,10 @@ export type WsStatusHandler = (connected: boolean) => void;
 
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 16000;
+/** Stable subprotocol, mirrored from backend middleware.WebSocketProtocolV1. */
+const WS_PROTOCOL_V1 = 'codeflow.v1';
+/** Token-bearing subprotocol tag, mirrored from backend middleware. */
+const WS_TOKEN_PROTOCOL_TAG = 'codeflow.token.';
 
 const handlers = new Map<string, Set<WsHandler>>();
 const statusHandlers = new Set<WsStatusHandler>();
@@ -33,6 +48,7 @@ let socket: WebSocket | null = null;
 let connected = false;
 let backoff = BACKOFF_MIN_MS;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let rebindInFlight: Promise<void> | null = null;
 
 /**
  * The hub broadcasts the same frame on every matching topic without a topic
@@ -67,6 +83,7 @@ function sendFrame(frame: Record<string, unknown>): void {
 
 function scheduleReconnect(): void {
   if (reconnectTimer != null || handlers.size === 0) return;
+  if (getAuthFailure() === 'forbidden') return; // permission lock: no storm
   const wait = backoff;
   backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
   reconnectTimer = setTimeout(() => {
@@ -75,13 +92,40 @@ function scheduleReconnect(): void {
   }, wait);
 }
 
+/**
+ * A dropped credentialed socket may be an auth rejection (the browser cannot
+ * see the handshake status): re-pair once so a rotated sidecar token is picked
+ * up before the next attempt. Single-flight; no-op outside Tauri mode.
+ */
+function rebindAfterDrop(): void {
+  if (rebindInFlight) return;
+  rebindInFlight = Promise.resolve(refreshBackendConnection())
+    .then(
+      () => undefined,
+      () => undefined,
+    )
+    .finally(() => {
+      rebindInFlight = null;
+    });
+}
+
+/** The subprotocol offer for one connection attempt: stable + token when gated in. */
+function wsProtocols(url: string): string[] {
+  const token = getTokenForUrl(url);
+  return token ? [WS_PROTOCOL_V1, `${WS_TOKEN_PROTOCOL_TAG}${token}`] : [WS_PROTOCOL_V1];
+}
+
 function connect(): void {
+  if (getAuthFailure() === 'forbidden') return; // permission lock: stay down
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     return;
   }
   let ws: WebSocket;
+  let offeredToken: boolean;
   try {
-    ws = new WebSocket(`${getWsBase()}/api/v1/conversations/${clientId}/stream`);
+    const url = `${getWsBase()}/api/v1/conversations/${clientId}/stream`;
+    offeredToken = getTokenForUrl(url) !== null;
+    ws = new WebSocket(url, wsProtocols(url));
   } catch {
     scheduleReconnect();
     return;
@@ -119,13 +163,39 @@ function connect(): void {
   ws.onclose = () => {
     if (socket === ws) socket = null;
     setConnected(false);
+    if (getAuthFailure() === 'forbidden') return; // permission lock: stay down
     scheduleReconnect();
+    if (offeredToken) rebindAfterDrop();
   };
 
   ws.onerror = () => {
     ws.close();
   };
 }
+
+// Permission lock (403 latched anywhere on the pairing origin): drop the
+// socket, cancel any pending retry, and stop reconnecting. When the latch
+// clears (the pairing identity changed), resume if topics are still watched.
+onAuthFailureChange((failure) => {
+  if (failure === 'forbidden') {
+    backoff = BACKOFF_MIN_MS;
+    if (reconnectTimer != null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    const current = socket;
+    socket = null;
+    if (current) {
+      current.onclose = null; // its close is intentional, not a drop
+      if (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING) {
+        current.close();
+      }
+    }
+    setConnected(false);
+    return;
+  }
+  if (!isDevMockActive() && handlers.size > 0 && !socket) connect();
+});
 
 /**
  * Subscribe a handler to a hub topic; returns the matching unsubscribe

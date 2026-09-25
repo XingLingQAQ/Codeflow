@@ -9,6 +9,8 @@ import (
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/memory"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/samg"
 )
 
@@ -73,6 +75,7 @@ func seedAllProviders(t *testing.T, ctx context.Context, agentSvc *agent.InMemor
 // any mutation. All four providers (git, conversation, vector, graph) must
 // report Match=true and the overall report must be Consistent=true.
 func TestConsistencyImmediateAfterCaptureAllMatch(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ctx := context.Background()
 	agentSvc, memSvc, graphSvc := isolateGlobals(t)
 	sessionID := "snap-consistency-immediate"
@@ -158,6 +161,7 @@ func TestConsistencyAllMatchWithDeterministicProvider(t *testing.T) {
 // TestConsistencyDetectsDrift mutates one provider's state after restore to
 // verify that the inconsistency is detected with differing digests.
 func TestConsistencyDetectsDrift(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ctx := context.Background()
 	_, memSvc, _ := isolateGlobals(t)
 	sessionID := "snap-consistency-drift"

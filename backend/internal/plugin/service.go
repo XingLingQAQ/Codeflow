@@ -161,7 +161,7 @@ func (s *Service) Get(ctx context.Context, pluginID string) (*PluginDetailRespon
 
 // Install clones a governed marketplace entry into a governed plugin entry.
 func (s *Service) Install(ctx context.Context, pluginID string, actor audit.AuditActor) (*PluginDetailResponse, error) {
-	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID, ActorID: actor.ID}); !decision.Allowed {
+	if decision := policy.EnforceBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID, ActorID: actor.ID}); !decision.Allowed {
 		return nil, policy.DenialError(decision)
 	}
 	if existing, err := s.findInstalledByPluginID(ctx, pluginID); err == nil {
@@ -207,7 +207,7 @@ func (s *Service) Install(ctx context.Context, pluginID string, actor audit.Audi
 
 // Toggle updates enabled state through the shared hook manager.
 func (s *Service) Toggle(ctx context.Context, pluginID string, req ToggleRequest) (*PluginDetailResponse, error) {
-	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: policy.OperationPluginToggle, Resource: pluginID, PluginID: pluginID, ActorID: req.Actor.ID}); !decision.Allowed {
+	if decision := policy.EnforceBoundary(ctx, policy.Request{Operation: policy.OperationPluginToggle, Resource: pluginID, PluginID: pluginID, ActorID: req.Actor.ID}); !decision.Allowed {
 		return nil, policy.DenialError(decision)
 	}
 	item, err := s.findInstalledByPluginID(ctx, pluginID)

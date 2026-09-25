@@ -14,6 +14,8 @@ import (
 	backendgit "github.com/codeflow/backend/internal/git"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/memory"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/samg"
 )
 
@@ -776,6 +778,7 @@ func TestSnapshotLegacyDigestNotRestorable(t *testing.T) {
 }
 
 func TestSnapshotEmptyRecoverableRestoreSucceeds(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ctx := context.Background()
 	// Fresh isolated services so empty capture is truly empty.
 	agent.SetAgentService(agent.NewInMemoryAgentService())
@@ -950,6 +953,7 @@ func TestSnapshotTrueRestoreVector(t *testing.T) {
 }
 
 func TestSnapshotTrueRestoreMultiKindE2E(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ctx := context.Background()
 
 	prevAgent := agent.GetAgentService()

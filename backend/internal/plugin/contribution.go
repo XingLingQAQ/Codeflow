@@ -88,7 +88,7 @@ func (r *ContributionRegistry) RegisterContributionsContext(ctx context.Context,
 	if strings.TrimSpace(pluginID) == "" {
 		return fmt.Errorf("plugin id required")
 	}
-	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID}); !decision.Allowed {
+	if decision := policy.EnforceBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID}); !decision.Allowed {
 		return policy.DenialError(decision)
 	}
 	r.mu.Lock()
@@ -171,7 +171,7 @@ func (r *ContributionRegistry) UnregisterContributions(pluginID string) error {
 }
 
 func (r *ContributionRegistry) UnregisterContributionsContext(ctx context.Context, pluginID string) error {
-	if decision := policy.EvaluateBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID}); !decision.Allowed {
+	if decision := policy.EnforceBoundary(ctx, policy.Request{Operation: policy.OperationPluginRegister, Resource: pluginID, PluginID: pluginID}); !decision.Allowed {
 		return policy.DenialError(decision)
 	}
 	r.mu.Lock()

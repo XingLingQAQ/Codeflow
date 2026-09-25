@@ -8,6 +8,8 @@ import (
 
 	"github.com/codeflow/backend/internal/adapters"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestTokenCounter_Count(t *testing.T) {
@@ -90,6 +92,7 @@ func TestCompressor_ExtractEntitySkeleton(t *testing.T) {
 }
 
 func TestCompressorTriggersBeforeCompressHook(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)

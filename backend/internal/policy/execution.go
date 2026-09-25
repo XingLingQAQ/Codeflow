@@ -73,6 +73,49 @@ func (p *ExecutionPolicy) Version() string {
 	return RuleVersion
 }
 
+// EvaluateInSession binds req to an established PolicySession before
+// evaluation. Every non-empty session identity field must equal the
+// normalized request value; a disagreement denies before the evaluator runs,
+// so a session captured under one project or identity can never authorize an
+// operation arriving under another (I-49). Empty session fields are unbound
+// and skipped: Session() snapshots legitimately anonymous requests, and those
+// fields carry no identity to contradict. A zero-value or nil policy still
+// denies through Evaluate when the session matches.
+func (p *ExecutionPolicy) EvaluateInSession(ctx context.Context, session PolicySession, req Request) Decision {
+	req = normalizeRequest(ctx, req)
+	if field := sessionMismatch(session, req); field != "" {
+		return recordDecision(ctx, req, Decision{Allowed: false, Reason: "policy session context mismatch: " + field, RuleVersion: p.Version(),
+			Operation: req.Operation, Resource: req.Resource, ProjectID: req.ProjectID, AgentID: req.AgentID, PluginID: req.PluginID})
+	}
+	return p.Evaluate(ctx, req)
+}
+
+// sessionMismatch names the first bound identity field the normalized request
+// contradicts, or "" when every bound field matches.
+func sessionMismatch(session PolicySession, req Request) string {
+	switch {
+	case session.ProjectID != "" && session.ProjectID != strings.TrimSpace(req.ProjectID):
+		return "project_id"
+	case session.AgentID != "" && session.AgentID != strings.TrimSpace(req.AgentID):
+		return "agent_id"
+	case session.ActorID != "" && session.ActorID != strings.TrimSpace(req.ActorID):
+		return "actor_id"
+	default:
+		return ""
+	}
+}
+
+// EnforceBoundary is the execution-host boundary guard (I-49). Unlike
+// EvaluateBoundary it never uses the in-memory compatibility mode: with no
+// evaluator installed the request is denied, so an execution host running
+// without bootstrap cannot obtain an allow. Execution entries (workspace
+// writes, process starts, hook/plugin execution, adapter traffic) use this
+// guard; EvaluateBoundary remains only for legacy packages still on the
+// compatibility contract.
+func EnforceBoundary(ctx context.Context, req Request) Decision {
+	return Evaluate(ctx, req)
+}
+
 // Evaluate runs req through the injected evaluator only. Unlike
 // EvaluateBoundary it never falls back to the in-memory compatibility mode,
 // so a zero-value or nil ExecutionPolicy denies instead of allowing.

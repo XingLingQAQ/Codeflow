@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/audit"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -101,6 +103,7 @@ func TestHookManager_EnableDisable(t *testing.T) {
 }
 
 func TestHookManager_Trigger(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	callCount := 0
@@ -127,6 +130,7 @@ func TestHookManager_Trigger(t *testing.T) {
 }
 
 func TestHookManager_TriggerMultipleHooks(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	var executionOrder []string
@@ -158,6 +162,7 @@ func TestHookManager_TriggerMultipleHooks(t *testing.T) {
 }
 
 func TestHookManager_TriggerHookByName(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	var executionOrder []string
@@ -205,6 +210,7 @@ func TestHookManager_TriggerDisabledHook(t *testing.T) {
 }
 
 func TestHookManager_TriggerWithError(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
@@ -227,6 +233,7 @@ func TestHookManager_TriggerWithError(t *testing.T) {
 }
 
 func TestHookManager_TriggerWithTimeout(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
@@ -255,6 +262,7 @@ func TestHookManager_TriggerWithTimeout(t *testing.T) {
 }
 
 func TestHookManager_TriggerWithRetry(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	attemptCount := 0
@@ -316,6 +324,7 @@ func TestHookManager_ListHooksByType(t *testing.T) {
 }
 
 func TestHookManager_GetEvents(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
@@ -340,6 +349,7 @@ func TestHookManager_GetEvents(t *testing.T) {
 }
 
 func TestHookManager_GetEventsByHook(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
@@ -358,6 +368,7 @@ func TestHookManager_GetEventsByHook(t *testing.T) {
 }
 
 func TestHookManager_ClearEvents(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	handler := func(ctx context.Context, payload interface{}) (interface{}, error) {
@@ -417,6 +428,7 @@ func TestHookManager_UpdateConfig(t *testing.T) {
 }
 
 func TestHookManager_TriggerAsync(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	var callCount int32
@@ -478,6 +490,7 @@ func assertHookAuditTrace(t *testing.T, entry *audit.AuditLogEntry) {
 }
 
 func TestHookManager_Trigger_AuditSuccess(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	storage := audit.NewMemoryStorage()
 	audit.SetAuditService(audit.NewAuditService(storage))
 	t.Cleanup(func() {
@@ -521,6 +534,7 @@ func TestHookManager_Trigger_AuditSuccess(t *testing.T) {
 }
 
 func TestHookManager_Trigger_AuditFailure(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	storage := audit.NewMemoryStorage()
 	audit.SetAuditService(audit.NewAuditService(storage))
 	t.Cleanup(func() {
@@ -579,6 +593,7 @@ func TestHookManager_ControlsDisableAllHooks(t *testing.T) {
 }
 
 func TestHookManager_ControlsAllowedHooks(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	beforeSendCalled := false
@@ -609,6 +624,7 @@ func TestHookManager_ControlsAllowedHooks(t *testing.T) {
 }
 
 func TestHookManager_GlobalHookEntries(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := NewHookManager()
 
 	called := make([]HookType, 0)

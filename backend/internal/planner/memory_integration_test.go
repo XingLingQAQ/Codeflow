@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestNewMemoryIntegration(t *testing.T) {
@@ -43,6 +45,7 @@ func TestMemoryIntegration_EmitUnknownEvent(t *testing.T) {
 }
 
 func TestMemoryIntegration_EmitTriggersGlobalHookManager(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)

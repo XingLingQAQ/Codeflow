@@ -9,7 +9,12 @@ export interface WebSocketServiceOptions {
 }
 
 /**
- * WebSocket service with auto-reconnect, heartbeat, and event dispatch.
+ * @deprecated Legacy WebSocket service targeting /ws, which no longer exists
+ * in the backend router, and it has no consumers left in the workbench. The
+ * live client is src/services-bridge/ws.ts (hub stream with T0.08.b token
+ * subprotocols + 401/403 semantics). This class is intentionally NOT wired for
+ * token auth: dead code must not grow a credential path. Remove together with
+ * WS_ENDPOINTS.events once the freeze on legacy services lifts.
  */
 export class WebSocketService {
   private ws: WebSocket | null = null;

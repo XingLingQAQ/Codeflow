@@ -8,6 +8,8 @@ import (
 	"time"
 
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestSQLitePlannerPersistenceAndOrdering(t *testing.T) {
@@ -155,6 +157,7 @@ func TestSQLitePlannerListPlansStableOrder(t *testing.T) {
 }
 
 func TestInMemoryPlannerUpdateTaskTriggersLifecycleHooks(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)
@@ -256,6 +259,7 @@ func TestInMemoryPlannerUpdateTaskLifecycleHookCanReadPlanner(t *testing.T) {
 }
 
 func TestInMemoryPlannerUpdateTaskTriggersFailureHook(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)

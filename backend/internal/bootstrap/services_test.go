@@ -31,21 +31,7 @@ func TestServicesValidateReportsMissingDependencies(t *testing.T) {
 }
 
 func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
-	services := Services{
-		Config:    cfgsvc.NewConfigManager(nil),
-		Agent:     agent.NewInMemoryAgentService(),
-		Planner:   planner.NewInMemoryPlanner(),
-		Project:   project.NewInMemoryProjectService(),
-		Context:   ctxsvc.NewInMemoryContextService(),
-		Snapshot:  snapshot.NewInMemorySnapshotService(),
-		Debate:    debate.NewInMemoryDebateManager(),
-		Summarize: summarize.NewSummarizerService(),
-		Floweng:   floweng.NewInMemoryEngine(nil),
-		Workspace: workspace.NewFSService(nil),
-		Guard:     guard.NewEngine(nil, nil),
-		Skill:         skill.NewInMemoryRegistry(),
-		AgentRegistry: agent.NewInMemoryAgentRegistry(),
-	}
+	services := newFullTestServices()
 	services.Reset()
 	t.Cleanup(services.Reset)
 
@@ -132,5 +118,25 @@ func TestServicesApplyAndResetCompatibilityLayer(t *testing.T) {
 	}
 	if agent.GetAgentRegistry() == services.AgentRegistry {
 		t.Fatalf("agent registry was not reset (still previous instance)")
+	}
+}
+
+// newFullTestServices returns a Services value that passes Validate using
+// in-memory implementations, without the durable B5 dependencies.
+func newFullTestServices() Services {
+	return Services{
+		Config:        cfgsvc.NewConfigManager(nil),
+		Agent:         agent.NewInMemoryAgentService(),
+		Planner:       planner.NewInMemoryPlanner(),
+		Project:       project.NewInMemoryProjectService(),
+		Context:       ctxsvc.NewInMemoryContextService(),
+		Snapshot:      snapshot.NewInMemorySnapshotService(),
+		Debate:        debate.NewInMemoryDebateManager(),
+		Summarize:     summarize.NewSummarizerService(),
+		Floweng:       floweng.NewInMemoryEngine(nil),
+		Workspace:     workspace.NewFSService(nil),
+		Guard:         guard.NewEngine(nil, nil),
+		Skill:         skill.NewInMemoryRegistry(),
+		AgentRegistry: agent.NewInMemoryAgentRegistry(),
 	}
 }

@@ -92,6 +92,37 @@ func TestWebSocketBrowserSubprotocolAndScopedTopics(t *testing.T) {
 	}
 }
 
+// TestWebSocketEchoesOnlyStableProtocol pins the handshake response: the
+// server selects codeflow.v1 and never echoes the token-bearing protocol, so
+// the token does not appear in the response headers a proxy/log might capture.
+func TestWebSocketEchoesOnlyStableProtocol(t *testing.T) {
+	server, _ := newScopedWSTestServer(t, "session-1")
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/stream"
+	dialer := *gorillaws.DefaultDialer
+	dialer.Subprotocols = []string{middleware.WebSocketProtocolV1, "codeflow.token." + wsTestToken}
+
+	conn, response, err := dialer.Dial(wsURL, http.Header{"Origin": []string{wsTestOrigin}})
+	if err != nil {
+		t.Fatalf("subprotocol websocket rejected: status=%v err=%v", statusCode(response), err)
+	}
+	defer conn.Close()
+
+	if got := conn.Subprotocol(); got != middleware.WebSocketProtocolV1 {
+		t.Fatalf("selected protocol=%q want=%q", got, middleware.WebSocketProtocolV1)
+	}
+	offered := response.Header.Values("Sec-WebSocket-Protocol")
+	if len(offered) != 1 || strings.TrimSpace(offered[0]) != middleware.WebSocketProtocolV1 {
+		t.Fatalf("handshake echoed %q want exactly %q", offered, middleware.WebSocketProtocolV1)
+	}
+	for key, values := range response.Header {
+		for _, value := range values {
+			if strings.Contains(value, wsTestToken) {
+				t.Fatalf("handshake header %s leaked the token", key)
+			}
+		}
+	}
+}
+
 func newScopedWSTestServer(t *testing.T, scopeID string, topics ...string) (*httptest.Server, *Hub) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

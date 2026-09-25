@@ -1,4 +1,6 @@
 import { getApiBase } from '../../api';
+import { refreshBackendConnection } from './connection';
+import { authHeadersFor, handleAuthHttpStatus } from './authProvider';
 
 export interface ReadinessComponent {
   ready: boolean;
@@ -42,7 +44,19 @@ export async function fetchReadiness(signal?: AbortSignal): Promise<Readiness> {
     }
   }
   try {
-    const resp = await fetch(`${getApiBase()}/ready`, { method: 'GET', signal });
+    const url = `${getApiBase()}/ready`;
+    const resp = await fetch(url, { method: 'GET', signal, headers: authHeadersFor(url) });
+    if (resp.status === 401 || resp.status === 403) {
+      // 401: token stale — rebind runs inside the handler; report unreachable
+      // this round so the next poll uses the fresh pairing. 403: reachable
+      // but denied — not_ready, and the permission latch drives the UI state.
+      await handleAuthHttpStatus(url, resp.status);
+      return {
+        reachable: resp.status === 403,
+        status: resp.status === 403 ? 'not_ready' : 'unreachable',
+        components: {},
+      };
+    }
     const body = (await resp.json().catch(() => null)) as
       | { data?: Record<string, unknown>; status?: string; components?: unknown }
       | null;
@@ -66,6 +80,10 @@ export async function fetchReadiness(signal?: AbortSignal): Promise<Readiness> {
       components,
     };
   } catch {
+    // The base URL stopped answering: re-check the sidecar pairing once so an
+    // exited sidecar flips the connection model to unavailable (and a
+    // restarted one re-pairs) instead of this page holding a stale base.
+    await refreshBackendConnection();
     return { reachable: false, status: 'unreachable', components: {} };
   }
 }

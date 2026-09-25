@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -43,19 +44,36 @@ func AuditMutations() gin.HandlerFunc {
 		trace.Route = route
 		trace.StatusCode = status
 		if !audit.HasAuditService() { return }
+		actor, actorResolution := resolveMutationActor(c.Request.Context())
+		details := map[string]interface{}{"status_code":status, "route":route}
+		if actorResolution != "" { details["actor_resolution"] = actorResolution }
 		if _, err := audit.Record(c.Request.Context(), &audit.AuditLogEntry{
 			EventType: eventType,
 			Severity: severity,
-			Actor: audit.AuditActor{ID:"sidecar-user", Type:"user"},
+			Actor: actor.AuditActor(),
 			Resource: audit.AuditResource{Type:resourceType, ID:resourceID},
 			Action: fmt.Sprintf("api.%s %s", strings.ToLower(c.Request.Method), route),
 			Outcome: outcome,
 			Trace: trace,
-			Details: map[string]interface{}{"status_code":status, "route":route},
+			Details: details,
 		}); err != nil {
 			log.Printf("[audit] mutation record failed: method=%s route=%s err=%v", c.Request.Method, route, err)
 		}
 	}
+}
+
+// resolveMutationActor 解析基线条目的操作者身份（T0.10.c）：
+//  1. 认证中间件注入的合法身份：如实采用（sidecar token → user/sidecar-user）；
+//  2. 注入但形状非法：绝不采用，降级 DefaultSystemActor 并留痕
+//     actor_resolution=invalid_context_actor（与 policy.resolveDecisionActor 同口径）；
+//  3. 未注入（未挂认证的路由或测试直连）：降级 DefaultSystemActor(auto-default)，
+//     不伪造用户身份。
+func resolveMutationActor(ctx context.Context) (audit.Actor, string) {
+	actor, err := audit.ResolveActor(ctx, audit.MissingActorDefaultSystem)
+	if err != nil {
+		return audit.DefaultSystemActor(), "invalid_context_actor"
+	}
+	return actor, ""
 }
 
 func mutationResource(c *gin.Context) (string, string) {

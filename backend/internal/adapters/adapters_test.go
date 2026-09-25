@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestNewAdapterFactoryClaude(t *testing.T) {
@@ -329,6 +331,7 @@ func TestNewBaseAdapterAllowsForcedZeroValues(t *testing.T) {
 }
 
 func TestClaudeAdapterSend(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	// 创建模拟服务器
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 验证请求
@@ -410,6 +413,7 @@ func TestClaudeAdapterSend(t *testing.T) {
 }
 
 func TestClaudeAdapterSendToolTurnForwardsSystemAndTools(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req claudeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -479,6 +483,7 @@ func TestClaudeAdapterSendToolTurnForwardsSystemAndTools(t *testing.T) {
 }
 
 func TestClaudeAdapterSendUsesSharedSystemControls(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req claudeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -534,6 +539,7 @@ func TestClaudeAdapterSendUsesSharedSystemControls(t *testing.T) {
 }
 
 func TestClaudeAdapterSendToolTurnComposesSemanticControls(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	toolsEnabled := true
 	skillsEnabled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -588,6 +594,7 @@ func TestClaudeAdapterSendToolTurnComposesSemanticControls(t *testing.T) {
 }
 
 func TestClaudeAdapterStreamUsesSharedSystemControls(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req claudeRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -644,6 +651,7 @@ func TestClaudeAdapterStreamUsesSharedSystemControls(t *testing.T) {
 }
 
 func TestClaudeAdapterRetry(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -794,6 +802,7 @@ func TestApplyHookPayloadIgnoresEmptyMessageOverride(t *testing.T) {
 }
 
 func TestOpenAIAdapterSendUsesHooksAndProviderMapping(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive, policy.OperationHookExecute)
 	previous := hooks.GetHookManager()
 	hooks.SetHookManager(nil)
 	defer hooks.SetHookManager(previous)

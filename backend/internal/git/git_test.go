@@ -6,9 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestGitManagerInit(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -34,6 +38,7 @@ func TestGitManagerInit(t *testing.T) {
 }
 
 func TestGitManagerCommit(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -94,6 +99,7 @@ func TestGitManagerCommit(t *testing.T) {
 }
 
 func TestGitManagerLog(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -133,6 +139,7 @@ func TestGitManagerLog(t *testing.T) {
 }
 
 func TestGitManagerSnapshot(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -181,6 +188,7 @@ func TestGitManagerSnapshot(t *testing.T) {
 }
 
 func TestGitManagerReset(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -262,6 +270,7 @@ func TestGitManagerMapping(t *testing.T) {
 }
 
 func TestGitManagerBranch(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -311,6 +320,7 @@ func TestGitManagerBranch(t *testing.T) {
 }
 
 func TestGitManagerDiffBetween(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	tmpDir, err := os.MkdirTemp("", "git_test")
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
@@ -375,6 +385,7 @@ func TestGitManagerDiffBetween(t *testing.T) {
 // 空格/中文路径完整、staged rename File 指向新路径且 OldPath 保留来源；
 // 非 rename 条目不携带 old_path/score。
 func TestGitStatusFirstUnstagedFilenameIntact(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	manager, dir, ctx := initTestRepo(t)
 	writeTestFile(t, dir, "old name.txt", "hello\n")
 	writeTestFile(t, dir, "sub/普通文件.txt", "world\n")
@@ -431,6 +442,7 @@ func TestGitStatusFirstUnstagedFilenameIntact(t *testing.T) {
 // DiffBetween 生产路径已接 `diff --name-status -z -M` + NUL 解析器（E-13/E-14）：
 // 纯 rename 得 R100 双路径与分数、空格/中文路径精确；File 指向新路径，OldPath 保留来源。
 func TestGitDiffRenameScoreAndBothPaths(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	manager, dir, ctx := initTestRepo(t)
 	writeTestFile(t, dir, "old name.txt", "line1\nline2\nline3\n")
 	if _, err := manager.Commit(ctx, "init"); err != nil {
@@ -500,6 +512,7 @@ func TestGitDiffRenameScoreAndBothPaths(t *testing.T) {
 //     此处用纯 parser 字节 fixture 证明 -z 下 \n 字节级保真（含 rename 双路径），
 //     平台限制以此注释注明。
 func TestGitFilenameSpacesAndUnicode(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	t.Run("real repo space and unicode paths byte exact", func(t *testing.T) {
 		manager, dir, ctx := initTestRepo(t)
 

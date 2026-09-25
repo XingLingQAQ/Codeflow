@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 // 本文件的 -z 字节 fixture 按 git 2.55.0.windows.4 实际输出逐字节核对：
@@ -258,6 +261,7 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 // TestExecGitRawUntrimmedStdoutSeparatedStderr 验证 raw helper：
 // stdout 保留原始字节（含尾部换行，不做 TrimSpace），stderr 与 stdout 分离。
 func TestExecGitRawUntrimmedStdoutSeparatedStderr(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	manager, dir, ctx := initTestRepo(t)
 	writeTestFile(t, dir, "test.txt", "hello")
 	if _, err := manager.Commit(ctx, "init"); err != nil {
@@ -298,6 +302,7 @@ func TestExecGitRawUntrimmedStdoutSeparatedStderr(t *testing.T) {
 // TestStatusPorcelainZEndToEnd 用 TempDir 真实仓库生成 status -z 输出做端到端对照：
 // 首个未暂存文件名完整（E-14 首字符回归）、空格/中文路径精确、staged rename 双路径。
 func TestStatusPorcelainZEndToEnd(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	manager, dir, ctx := initTestRepo(t)
 	writeTestFile(t, dir, "old name.txt", "hello\n")
 	writeTestFile(t, dir, "sub/普通文件.txt", "world\n")
@@ -357,6 +362,7 @@ func TestStatusPorcelainZEndToEnd(t *testing.T) {
 // TestNameStatusZEndToEnd 用 TempDir 真实仓库验证 diff -z：
 // 纯 rename 得 R100、rename+edit 得部分相似度分数，双路径精确。
 func TestNameStatusZEndToEnd(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	manager, dir, ctx := initTestRepo(t)
 	writeTestFile(t, dir, "alpha.txt", "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n")
 	if _, err := manager.Commit(ctx, "init"); err != nil {

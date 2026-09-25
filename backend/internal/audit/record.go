@@ -82,26 +82,27 @@ func ResolveActor(ctx context.Context, policy MissingActorPolicy) (Actor, error)
 }
 
 // EnrichActorFromContext merges trace context into the provided actor.
+//
+// 身份来源优先级（T0.10.c）：actor.ID 为空时只采信上下文里经注入方负责可信性的
+// Actor（WithActor，如认证中间件在 token 校验后注入）；绝不再从 trace 头
+// （X-Agent-ID/X-Session-ID/X-Request-ID，客户端可控）推导身份——旧行为会把
+// 自报的 agent 头升级成 actor type=agent，构成冒充通道。注入身份形状非法
+// （Validate 失败）时同样不采信，落到 anonymous/service 兜底。trace 仅用于
+// SessionID 关联（非身份字段）。
 func EnrichActorFromContext(ctx context.Context, actor AuditActor) AuditActor {
 	trace := TraceFromContext(ctx)
-	if trace != nil {
-		if actor.SessionID == "" {
-			actor.SessionID = trace.SessionID
-		}
-		if actor.ID == "" {
-			switch {
-			case trace.AgentID != "":
-				actor.ID = trace.AgentID
-				if actor.Type == "" {
-					actor.Type = "agent"
-				}
-			case trace.SessionID != "":
-				actor.ID = trace.SessionID
-				if actor.Type == "" {
-					actor.Type = "user"
-				}
-			case trace.RequestID != "":
-				actor.ID = trace.RequestID
+	if trace != nil && actor.SessionID == "" {
+		actor.SessionID = trace.SessionID
+	}
+
+	if actor.ID == "" {
+		if trusted, ok := ActorFromContext(ctx); ok && trusted.Validate() == nil {
+			actor.ID = trusted.ID
+			if actor.Type == "" {
+				actor.Type = string(trusted.Type)
+			}
+			if actor.Source == "" {
+				actor.Source = trusted.Source
 			}
 		}
 	}

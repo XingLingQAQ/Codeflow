@@ -13,6 +13,8 @@ import (
 	"github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/integration"
 	pluginsvc "github.com/codeflow/backend/internal/plugin"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -133,6 +135,7 @@ func decodePluginEnvelope[T any](t *testing.T, body []byte) T {
 }
 
 func TestPluginListDetailMarketplaceAndToggleAPI(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister, policy.OperationIntegrationInvoke, policy.OperationPluginToggle)
 	router := setupPluginRouter()
 	setupPluginDependencies(t)
 
@@ -183,6 +186,7 @@ func TestPluginListDetailMarketplaceAndToggleAPI(t *testing.T) {
 }
 
 func TestInstallPluginAPIRegistersMarketplaceEntryAsInstalledPlugin(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister, policy.OperationIntegrationInvoke)
 	router := setupPluginRouter()
 	setupPluginDependencies(t)
 

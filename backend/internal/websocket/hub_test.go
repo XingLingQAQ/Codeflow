@@ -5,9 +5,12 @@ import (
 	"testing"
 
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestClientHandleMessageTriggersMessageCompleteHook(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)
@@ -74,6 +77,7 @@ func TestTopicSubscribeAndBroadcast(t *testing.T) {
 }
 
 func TestClientHandleMessageTriggersUserInputSubmittedHook(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)

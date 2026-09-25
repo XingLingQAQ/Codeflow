@@ -11,6 +11,8 @@ import (
 	"github.com/codeflow/backend/internal/audit"
 	"github.com/codeflow/backend/internal/hooks"
 	"github.com/codeflow/backend/internal/integration"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func setupPluginServiceDependencies(t *testing.T) {
@@ -105,6 +107,7 @@ func TestStoreListByTypeUsesGovernedIntegrationRegistry(t *testing.T) {
 }
 
 func TestServiceTogglePreservesDisabledFlagInResponse(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister, policy.OperationPluginToggle, policy.OperationIntegrationInvoke)
 	setupPluginServiceDependencies(t)
 
 	service := NewService()

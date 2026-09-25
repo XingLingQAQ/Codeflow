@@ -6,12 +6,22 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/codeflow/backend/internal/audit"
 	"github.com/gin-gonic/gin"
 )
 
 // ContextAuthenticated is set on requests which passed the sidecar bearer
 // token check. It is intentionally a boolean marker, not the token itself.
 const ContextAuthenticated = "codeflow.authenticated"
+
+// SidecarUserActorID 与 ActorSourceSidecarToken 标记 sidecar token 认证确立的
+// 操作者身份（T0.10.c）：持有进程级 token 的调用方是本地桌面操作者，归因
+// type=user。agent/integration 身份只能由服务端可信来源（执行上下文、
+// webhook 验签）注入，绝不取自客户端请求头。
+const (
+	SidecarUserActorID      = "sidecar-user"
+	ActorSourceSidecarToken = "sidecar-token"
+)
 
 const (
 	WebSocketProtocolV1       = "codeflow.v1"
@@ -88,6 +98,13 @@ func RequireAccessToken(expected string) gin.HandlerFunc {
 			return
 		}
 		c.Set(ContextAuthenticated, true)
+		// 认证通过即注入可信操作者身份（T0.10.c）：下游审计/策略记录从这里取
+		// actor，客户端经 X-Agent-ID 等请求头自报的身份不会被采信为 actor。
+		c.Request = c.Request.WithContext(audit.WithActor(c.Request.Context(), audit.Actor{
+			Type:   audit.ActorTypeUser,
+			ID:     SidecarUserActorID,
+			Source: ActorSourceSidecarToken,
+		}))
 		c.Next()
 	}
 }

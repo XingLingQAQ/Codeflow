@@ -10,12 +10,15 @@ import (
 	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/guard"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
 // Smoke: flow + debate FK + guarded workspace write + skill match (no HTTP).
 func TestBackendCoreSmoke(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	ctx := context.Background()
 	root := t.TempDir()
 

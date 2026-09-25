@@ -198,7 +198,7 @@ func (m *DevServerManager) StartContext(ctx context.Context, root, script string
 	if trace != nil {
 		policyReq.ProjectID, policyReq.AgentID = trace.ProjectID, trace.AgentID
 	}
-	decision := policy.EvaluateBoundary(ctx, policyReq)
+	decision := policy.EnforceBoundary(ctx, policyReq)
 	if err := policy.DenialError(decision); err != nil {
 		return nil, err
 	}

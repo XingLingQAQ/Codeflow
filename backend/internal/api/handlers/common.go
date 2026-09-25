@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/codeflow/backend/internal/agent"
 	"github.com/codeflow/backend/internal/api/middleware"
@@ -32,6 +33,20 @@ const backendVersion = "0.1.0"
 type readinessComponent struct {
 	Ready    bool `json:"ready"`
 	Required bool `json:"required"`
+	// Probe-backed components additionally report the dependency state, the
+	// probe's read-only declaration, the machine-readable code of the most
+	// recent failure, and the last probe wall time. All probe fields are
+	// omitted from legacy Has* entries, so the previous response shape is
+	// unchanged when no probes are registered (I-54, T0.12.a).
+	Status    string `json:"status,omitempty"`
+	Readonly  bool   `json:"readonly,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+	LatencyMS *int64 `json:"latency_ms,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+	// CheckedAt is the RFC3339 UTC wall time of the probe run (or of the
+	// moment the run was judged timed out) and is only set on
+	// probe-backed components.
+	CheckedAt string `json:"checked_at,omitempty"`
 }
 
 // Response represents a standard API response.
@@ -69,12 +84,44 @@ func ReadinessCheck(c *gin.Context) {
 		"skill":     readinessComponent{Ready: skill.HasRegistry(), Required: false},
 	}
 
+	// Probe-backed dependency checks (I-54, T0.12.a): run registered probes
+	// concurrently under per-probe deadlines and merge them into components.
+	// A probe entry overrides a same-named legacy Has* entry with the richer
+	// payload while keeping the ready/required fields consumers already read.
+	probed := runReadinessProbes(c.Request.Context())
+	for name, pc := range probed {
+		latencyMS := pc.latency.Milliseconds()
+		component := readinessComponent{
+			Ready:     pc.result.State == ProbeStateReady,
+			Required:  pc.spec.Required,
+			Status:    string(pc.result.State),
+			Readonly:  pc.spec.readonly,
+			ErrorCode: pc.result.ErrCode,
+			LatencyMS: &latencyMS,
+			Detail:    pc.result.Detail,
+		}
+		if !pc.checkedAt.IsZero() {
+			component.CheckedAt = pc.checkedAt.UTC().Format(time.RFC3339)
+		}
+		components[name] = component
+	}
+
 	ready := true
 	for _, name := range []string{"planner", "project", "context", "audit", "agent", "memory", "samg"} {
 		component := components[name].(readinessComponent)
 		if component.Required && !component.Ready {
 			ready = false
 			break
+		}
+	}
+	// Required probes gate the overall verdict the same way required Has*
+	// services do: a required probe not in state ready makes /ready 503.
+	if ready {
+		for _, pc := range probed {
+			if pc.spec.Required && pc.result.State != ProbeStateReady {
+				ready = false
+				break
+			}
 		}
 	}
 

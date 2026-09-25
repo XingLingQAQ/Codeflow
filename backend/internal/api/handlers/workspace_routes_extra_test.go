@@ -13,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/workspace"
 )
@@ -33,6 +35,7 @@ func rexWorkspaceRouter(t *testing.T) (*gin.Engine, string) {
 }
 
 func TestWorkspaceStagedReadThenPromoteRoutesExtra(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	r, root := rexWorkspaceRouter(t)
 	hdr := map[string]string{"X-Codeflow-Workspace-Root": root}
 	const rel = "src/app.go"
@@ -101,6 +104,7 @@ func TestWorkspaceStagedReadThenPromoteRoutesExtra(t *testing.T) {
 }
 
 func TestWorkspaceReadResolvesAuthoritativeProjectRoot(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	r, root := rexWorkspaceRouter(t)
 	projectSvc := project.NewInMemoryProjectService()
 	projectSvc.SetAllowedWorkspaceRoots([]string{root})

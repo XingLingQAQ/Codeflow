@@ -22,6 +22,8 @@ import (
 	"github.com/codeflow/backend/internal/agent"
 	backendgit "github.com/codeflow/backend/internal/git"
 	"github.com/codeflow/backend/internal/memory"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/samg"
 )
 
@@ -224,6 +226,7 @@ func TestServiceRestoreContinuesAfterEarlyProviderFailures(t *testing.T) {
 // best-effort restore contract: when a later provider fails (here, graph via
 // digest-tampered token), earlier providers' side effects persist — no rollback.
 func TestServiceRestorePartialFailureIsNonAtomic(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ctx := context.Background()
 
 	prevAgent := agent.GetAgentService()

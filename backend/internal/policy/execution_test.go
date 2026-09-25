@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/codeflow/backend/internal/audit"
 )
 
 // clearGlobals puts the process-wide policy state into the pre-bootstrap
@@ -160,6 +162,109 @@ func TestExecutionPolicyIgnoresProcessGlobals(t *testing.T) {
 	if d := failClosed.Evaluate(ctx, req); d.Allowed {
 		t.Fatalf("global local evaluator overrode injected fail-closed evaluator: %+v", d)
 	}
+}
+
+// spyEvaluator records every Evaluate call so a test can prove a denial
+// happened before the evaluator ran.
+type spyEvaluator struct {
+	calls    int
+	decision Decision
+}
+
+func (e *spyEvaluator) Evaluate(_ context.Context, req Request) Decision {
+	e.calls++
+	d := e.decision
+	d.Operation = req.Operation
+	return d
+}
+
+// TestPolicyContextMismatch covers EvaluateInSession: every bound session
+// identity field (project/agent/actor) must equal the normalized request
+// value, and a disagreement denies before the evaluator runs. Empty session
+// fields are unbound and skipped; a nil or zero-value policy still denies.
+func TestPolicyContextMismatch(t *testing.T) {
+	clearGlobals(t)
+	ctx := context.Background()
+	spy := &spyEvaluator{decision: Decision{Allowed: true, Reason: "spy allow", RuleVersion: RuleVersion}}
+	entry, err := NewExecutionPolicy(spy)
+	if err != nil {
+		t.Fatalf("NewExecutionPolicy(spy): %v", err)
+	}
+
+	req := Request{Operation: OperationWorkspaceWrite, Resource: "note.txt", ProjectID: "p1", AgentID: "a1", ActorID: "u1"}
+	bound := PolicySession{ProjectID: "p1", AgentID: "a1", ActorID: "u1", PolicyVersion: RuleVersion}
+
+	cases := []struct {
+		name       string
+		entry      *ExecutionPolicy
+		session    PolicySession
+		req        Request
+		wantAllow  bool
+		wantReason string
+		wantCalls  int
+	}{
+		{name: "bound identity matches evaluates", entry: entry, session: bound, req: req,
+			wantAllow: true, wantReason: "spy allow", wantCalls: 1},
+		{name: "project mismatch denies before evaluation", entry: entry, session: bound,
+			req:        Request{Operation: req.Operation, Resource: req.Resource, ProjectID: "p2", AgentID: "a1", ActorID: "u1"},
+			wantReason: "policy session context mismatch: project_id"},
+		{name: "agent mismatch denies before evaluation", entry: entry, session: bound,
+			req:        Request{Operation: req.Operation, Resource: req.Resource, ProjectID: "p1", AgentID: "a2", ActorID: "u1"},
+			wantReason: "policy session context mismatch: agent_id"},
+		{name: "actor mismatch denies before evaluation", entry: entry, session: bound,
+			req:        Request{Operation: req.Operation, Resource: req.Resource, ProjectID: "p1", AgentID: "a1", ActorID: "u2"},
+			wantReason: "policy session context mismatch: actor_id"},
+		{name: "empty session fields are unbound", entry: entry,
+			session: PolicySession{ProjectID: "p1"}, req: req,
+			wantAllow: true, wantReason: "spy allow", wantCalls: 1},
+		{name: "zero session evaluates", entry: entry, session: PolicySession{}, req: req,
+			wantAllow: true, wantReason: "spy allow", wantCalls: 1},
+		{name: "request identity trimmed before compare", entry: entry, session: bound,
+			req:       Request{Operation: req.Operation, Resource: req.Resource, ProjectID: " p1 ", AgentID: " a1 ", ActorID: " u1 "},
+			wantAllow: true, wantReason: "spy allow", wantCalls: 1},
+		{name: "nil policy with matching session still denies", entry: nil, session: bound, req: req,
+			wantReason: "policy evaluator is not configured"},
+		{name: "zero value with matching session still denies", entry: &ExecutionPolicy{}, session: bound, req: req,
+			wantReason: "policy evaluator is not configured"},
+		{name: "mismatch denial precedes missing evaluator", entry: &ExecutionPolicy{}, session: bound,
+			req:        Request{Operation: req.Operation, Resource: req.Resource, ProjectID: "p9"},
+			wantReason: "policy session context mismatch: project_id"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spy.calls = 0
+			d := tc.entry.EvaluateInSession(ctx, tc.session, tc.req)
+			if d.Allowed != tc.wantAllow || d.Reason != tc.wantReason {
+				t.Fatalf("decision = %+v, want allowed=%v reason %q", d, tc.wantAllow, tc.wantReason)
+			}
+			if spy.calls != tc.wantCalls {
+				t.Fatalf("evaluator ran %d times, want %d", spy.calls, tc.wantCalls)
+			}
+			if d.RuleVersion != RuleVersion {
+				t.Fatalf("rule version = %q, want %q", d.RuleVersion, RuleVersion)
+			}
+			if d.Operation != tc.req.Operation {
+				t.Fatalf("decision operation = %q, want %q", d.Operation, tc.req.Operation)
+			}
+		})
+	}
+
+	t.Run("trace-filled identity participates in binding", func(t *testing.T) {
+		spy.calls = 0
+		traced := audit.ContextWithTrace(ctx, &audit.AuditTrace{ProjectID: "t1", AgentID: "ta"})
+		anon := Request{Operation: OperationWorkspaceWrite, Resource: "note.txt"}
+
+		d := entry.EvaluateInSession(traced, PolicySession{ProjectID: "t1", AgentID: "ta"}, anon)
+		if !d.Allowed || spy.calls != 1 {
+			t.Fatalf("trace-filled identity should match: %+v (calls %d)", d, spy.calls)
+		}
+
+		spy.calls = 0
+		d = entry.EvaluateInSession(traced, PolicySession{ProjectID: "t9"}, anon)
+		if d.Allowed || d.Reason != "policy session context mismatch: project_id" || spy.calls != 0 {
+			t.Fatalf("trace-filled mismatch should deny before evaluation: %+v (calls %d)", d, spy.calls)
+		}
+	})
 }
 
 func TestExecutionPolicySession(t *testing.T) {

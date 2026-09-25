@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getApiBase } from '../api';
+import {
+  authHeadersFor,
+  getAuthFailure,
+  handleAuthHttpStatus,
+  onAuthFailureChange,
+} from '../src/services-bridge/authProvider';
 
 export interface ConnectionStatusProps {
   /** Polling interval in ms (default: 15000) */
@@ -8,14 +14,25 @@ export interface ConnectionStatusProps {
 
 export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ interval = 15000 }) => {
   const [online, setOnline] = useState<boolean | null>(null);
+  const [authFailure, setAuthFailure] = useState(getAuthFailure());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => onAuthFailureChange(setAuthFailure), []);
 
   useEffect(() => {
     let mounted = true;
 
     const check = async () => {
       try {
-        const res = await fetch(`${getApiBase()}/health`, { method: 'GET', signal: AbortSignal.timeout(5000) });
+        const url = `${getApiBase()}/health`;
+        const res = await fetch(url, {
+          method: 'GET',
+          signal: AbortSignal.timeout(5000),
+          headers: authHeadersFor(url),
+        });
+        if (res.status === 401 || res.status === 403) {
+          await handleAuthHttpStatus(url, res.status);
+        }
         if (mounted) setOnline(res.ok);
       } catch {
         if (mounted) setOnline(false);
@@ -30,6 +47,19 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ interval = 1
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [interval]);
+
+  // A latched 403 outranks liveness: the backend answers but this pairing is
+  // not authorized. The lock clears when the pairing identity changes.
+  if (authFailure === 'forbidden') {
+    return (
+      <div className="bg-white/80 backdrop-blur-sm px-4 py-1.5 rounded-full shadow-lg shadow-red-500/5 border border-red-100 flex items-center gap-2.5">
+        <span className="relative flex h-2 w-2">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+        </span>
+        <span className="text-xs font-semibold text-amber-600 tracking-wide">PERMISSION DENIED</span>
+      </div>
+    );
+  }
 
   if (online === null) {
     return (

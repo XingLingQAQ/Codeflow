@@ -12,6 +12,7 @@ import (
 	"github.com/codeflow/backend/internal/guard"
 	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
+	"github.com/codeflow/backend/internal/policy"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/skill"
@@ -42,6 +43,13 @@ type Services struct {
 	Guard      guard.Service
 	Skill          skill.Registry
 	AgentRegistry  agent.AgentRegistry
+	// PolicyEvaluator, when set, is installed by Apply as the process-wide
+	// policy evaluator with enforcement required. When nil, Apply installs the
+	// production evaluator (see NewProductionEvaluator), so every bootstrapped
+	// chain carries a non-nil evaluator instead of relying on
+	// cmd/codeflow-server/main.go to install one (I-49). Call ExecutionPolicy
+	// to obtain the fail-closed handle reserved for future Run interfaces.
+	PolicyEvaluator policy.Evaluator
 	// B5 durable boundaries. These are optional for focused unit-test
 	// containers, but production bootstrap must provide all of them.
 	Session        storage.ISessionStorage
@@ -129,6 +137,11 @@ func (s Services) Apply() error {
 	guard.SetService(s.Guard)
 	skill.SetRegistry(s.Skill)
 	agent.SetAgentRegistry(s.AgentRegistry)
+	// Install the single production evaluator with enforcement required so no
+	// execution boundary in a bootstrapped process sees the pre-bootstrap
+	// "policy not installed" compatibility branch (I-49).
+	policy.RequireEnforcement(true)
+	policy.SetEvaluator(s.policyEvaluator())
 	if s.Session != nil { project.SetSessionStorage(s.Session) }
 	memory.SetMemoryService(s.Memory)
 	memory.SetRawArchive(s.RawArchive)
@@ -169,4 +182,6 @@ func (s Services) Reset() {
 	memory.SetMemoryAgent(nil)
 	samg.SetSAMGService(nil)
 	memory.SetPreflightService(nil)
+	policy.SetEvaluator(nil)
+	policy.RequireEnforcement(false)
 }

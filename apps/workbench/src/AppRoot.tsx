@@ -11,12 +11,25 @@ import {
   applyThemeClass,
   applyMotionClass,
 } from './stores/shell';
+import {
+  registerIdentityScopedCache,
+  resetQueryClientForNewPairing,
+} from './services-bridge/identityCaches';
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { retry: 0, refetchOnWindowFocus: false },
   },
 });
+
+// React Query holds server-derived data (projects, flows, audit, ...) for the
+// current pairing only; a sidecar re-pair must not leak it across identities.
+// The reset goes through resetQueryClientForNewPairing because a bare
+// queryClient.clear() empties the store without telling mounted observers —
+// they would keep rendering the previous backend's data. User-local state
+// (drafts/layout/editor/chat in zustand persist, theme) is untouched — it
+// never lives in the query cache.
+registerIdentityScopedCache('react-query', () => resetQueryClientForNewPairing(queryClient));
 
 function useThemeSync() {
   const mode = useShellStore((s) => s.themeMode);

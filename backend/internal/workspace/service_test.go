@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 func TestResolveRejectsEscape(t *testing.T) {
@@ -24,6 +27,7 @@ func TestResolveRejectsEscape(t *testing.T) {
 }
 
 func TestListReadWrite(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()
@@ -83,6 +87,7 @@ func TestListReadWrite(t *testing.T) {
 }
 
 func TestWriteGuardBlocks(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	blocked := errors.New("nope")
 	svc := NewFSService(guardFunc(func(ctx context.Context, abs string, content []byte) error {
@@ -103,6 +108,7 @@ func TestWriteGuardBlocks(t *testing.T) {
 }
 
 func TestWriteGuardAllows(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	called := false
 	svc := NewFSService(guardFunc(func(ctx context.Context, abs string, content []byte) error {
@@ -123,6 +129,7 @@ func TestWriteGuardAllows(t *testing.T) {
 }
 
 func TestStageAndPromote(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()
@@ -193,6 +200,7 @@ func indexOf(s, sub string) int {
 }
 
 func TestDiscardStaged(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()
@@ -213,6 +221,7 @@ func TestDiscardStaged(t *testing.T) {
 }
 
 func TestPromoteAll(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()
@@ -235,6 +244,7 @@ func TestPromoteAll(t *testing.T) {
 }
 
 func TestDiscardAllStaged(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()
@@ -251,6 +261,7 @@ func TestDiscardAllStaged(t *testing.T) {
 }
 
 func TestAllowedRootsRejectOutside(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	allowed := t.TempDir()
 	outside := t.TempDir()
 	svc := NewFSService(nil)

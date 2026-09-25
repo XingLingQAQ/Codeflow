@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 // 本文件是 T13.04.b 的发送侧接线测试（§28 T13.04.b、§31.2 E-04/E-05）。
@@ -218,6 +220,7 @@ func assertNoAssistantHistory(t *testing.T, adapter ICliAdapter) {
 // TestAdapterStreamCompletedTerminal E-04 正向：协议合法完成才有唯一 completed 终结帧，
 // finish_reason/usage 为 provider 原值，assistant 内容追加为成功历史。
 func TestAdapterStreamCompletedTerminal(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
@@ -264,6 +267,7 @@ func TestAdapterStreamCompletedTerminal(t *testing.T) {
 // 产出 error 终结（含结构化 code），不产生成功终结与成功 assistant 历史；已投递的
 // 部分 delta 保留供错误展示，但不冒充完整回答。
 func TestAdapterStreamProviderErrorNotSuccessfulHistory(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
@@ -299,6 +303,7 @@ func TestAdapterStreamProviderErrorNotSuccessfulHistory(t *testing.T) {
 // 已消费的失败请求不重发。语义与 TestAdapterStreamProviderErrorNotSuccessfulHistory 一致，
 // 本测试钉住 §28 点名入口。
 func TestAdapterProviderErrorNotSuccessfulHistory(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
@@ -330,6 +335,7 @@ func TestAdapterProviderErrorNotSuccessfulHistory(t *testing.T) {
 
 // TestAdapterUnexpectedEOFTerminatesWithError E-04 负向：无完成标记的 EOF 不是成功。
 func TestAdapterUnexpectedEOFTerminatesWithError(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := serveSSE(t, tc.eofBody, nil)
@@ -355,6 +361,7 @@ func TestAdapterUnexpectedEOFTerminatesWithError(t *testing.T) {
 // TestAdapterStreamOversizedFrameTerminatesWithError E-04 负向：超过 scanner 上限的单帧
 // 记为扫描失败，不再被静默吞掉后伪报完成。
 func TestAdapterStreamOversizedFrameTerminatesWithError(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := serveSSE(t, tc.oversizedBody, nil)
@@ -376,6 +383,7 @@ func TestAdapterStreamOversizedFrameTerminatesWithError(t *testing.T) {
 
 // TestAdapterStreamMalformedFrameTerminatesWithError E-04 负向：关键帧损坏记为 error 终结。
 func TestAdapterStreamMalformedFrameTerminatesWithError(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := serveSSE(t, tc.malformedBody, nil)
@@ -400,6 +408,7 @@ func TestAdapterStreamMalformedFrameTerminatesWithError(t *testing.T) {
 // channel 在 deadline 内关闭（close 晚于 resp.Body.Close 的 defer 序，故关闭即 body 已关闭），
 // 不为发送取消终结帧等待不存在的消费者，也不产生成功历史。
 func TestAdapterCancelledFullChannelClosesBody(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			var body strings.Builder
@@ -443,6 +452,7 @@ func TestAdapterCancelledFullChannelClosesBody(t *testing.T) {
 // 阻塞在读）取消，ctx 使传输层读取失败，channel/body 在 deadline 内关闭。
 // 服务端经 request context 观测到客户端断开，证明响应体确已关闭。
 func TestAdapterCancelledDuringBodyReadClosesChannel(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			disconnected := make(chan struct{})
@@ -503,6 +513,7 @@ func TestAdapterCancelledDuringBodyReadClosesChannel(t *testing.T) {
 // TestAdapterStreamPostResponseUsesProviderFinishReason E-04：成功流的 PostResponse hook
 // 收到 provider 上报的 finish_reason 与 usage 原值（不伪报 stop）；失败流不触发 PostResponse。
 func TestAdapterStreamPostResponseUsesProviderFinishReason(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive, policy.OperationHookExecute)
 	previous := hooks.GetHookManager()
 	hooks.SetHookManager(nil)
 	t.Cleanup(func() { hooks.SetHookManager(previous) })
@@ -569,6 +580,7 @@ func TestAdapterStreamPostResponseUsesProviderFinishReason(t *testing.T) {
 // Stream 退化成一次性返回。本测试让 provider 在发完第一帧后阻塞，只有逐帧
 // 投递才能在阻塞期间收到它。
 func TestAdapterStreamDeliversFramesIncrementally(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationOutboundRequest, policy.OperationResponseReceive)
 	for _, tc := range streamProviderCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			release := make(chan struct{})

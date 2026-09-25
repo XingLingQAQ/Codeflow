@@ -22,6 +22,8 @@ import (
 	"github.com/codeflow/backend/internal/debate"
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/guard"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/workspace"
 )
@@ -335,6 +337,7 @@ func TestE2EFeatures_DebateSolutionsRoundTrip(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestE2EFeatures_GuardExemption(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	ts := setupE2EServer(t)
 	defer ts.Close()
 

@@ -285,7 +285,7 @@ func (s *FSService) Write(ctx context.Context, req *WriteRequest) (*Entry, error
 			policyReq.AgentID = trace.AgentID
 		}
 	}
-	if decision := policy.EvaluateBoundary(ctx, policyReq); !decision.Allowed {
+	if decision := policy.EnforceBoundary(ctx, policyReq); !decision.Allowed {
 		return nil, policy.DenialError(decision)
 	}
 	if mode == WriteModeStage {

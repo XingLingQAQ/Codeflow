@@ -4,6 +4,8 @@
 // probes POST /api/v1/agents/chat once and reports the service unavailable
 // (experimental) when the endpoint is missing.
 import { getApiBase } from '../../api';
+import { authHeadersFor, handleAuthHttpStatus } from './authProvider';
+import { registerIdentityScopedCache } from './identityCaches';
 import type { AgentInfo } from './agents';
 
 export interface ChatTurn {
@@ -32,6 +34,17 @@ export class ChatUnavailableError extends Error {
 type Availability = 'unknown' | 'available' | 'unavailable';
 let availability: Availability = 'unknown';
 
+// The probe result belongs to one backend pairing (a different sidecar may
+// serve a different endpoint surface), so it is identity-scoped: a re-pair
+// resets it to 'unknown' and the next call probes again.
+registerIdentityScopedCache('services-bridge/chat.availability', () => {
+  availability = 'unknown';
+});
+
+function chatEndpoint(): string {
+  return `${getApiBase()}/api/v1/agents/chat`;
+}
+
 /**
  * Lazily probe the experimental chat endpoint once. 404/503 marks it
  * unavailable for the session; network errors stay unknown so a later backend
@@ -44,12 +57,19 @@ export async function probeChatEndpoint(signal?: AbortSignal): Promise<boolean> 
   }
   if (availability !== 'unknown') return availability === 'available';
   try {
-    const resp = await fetch(`${getApiBase()}/api/v1/agents/chat`, {
+    const url = chatEndpoint();
+    const resp = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeadersFor(url) },
       body: JSON.stringify({ probe: true }),
       signal,
     });
+    if (resp.status === 401 || resp.status === 403) {
+      // Auth failure: rebind (401) / latch (403) and stay 'unknown' so the
+      // next attempt after re-pair probes again instead of caching a denial.
+      await handleAuthHttpStatus(url, resp.status);
+      return false;
+    }
     if (resp.status === 404 || resp.status === 503) {
       availability = 'unavailable';
       return false;
@@ -174,9 +194,10 @@ export async function streamChat(
 
   // Experimental endpoint present: no streaming contract is defined yet, so
   // degrade to a single-shot exchange and emit the reply as one delta.
-  const resp = await fetch(`${getApiBase()}/api/v1/agents/chat`, {
+  const url = chatEndpoint();
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeadersFor(url) },
     body: JSON.stringify({
       agent_id: req.agent.id,
       message: req.message,
@@ -185,6 +206,9 @@ export async function streamChat(
     }),
     signal,
   });
+  if (resp.status === 401 || resp.status === 403) {
+    await handleAuthHttpStatus(url, resp.status);
+  }
   const body = (await resp.json().catch(() => null)) as
     | { success?: boolean; data?: { content?: string; message?: string }; error?: string }
     | null;

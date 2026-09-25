@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 // --- guard stubs (distinct from service_test.go's guardFunc) ---
@@ -136,6 +138,7 @@ func TestResolveRejectsJunctionEscape(t *testing.T) {
 // 2. Promote re-runs guard: staging succeeds, then the guard denies the promote
 // (a direct write); the real file is not created and the staged copy remains.
 func TestPromoteRerunsGuard(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := &toggleGuard{}
 	svc := NewFSService(g)
@@ -161,6 +164,7 @@ func TestPromoteRerunsGuard(t *testing.T) {
 // 3. PromoteAll partial failure: the guard denies one of two staged files; the
 // other promotes, the error names the failure, and the failed file stays staged.
 func TestPromoteAllPartialGuardFailure(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := &pathDenyGuard{}
 	svc := NewFSService(g)
@@ -198,6 +202,7 @@ func TestPromoteAllPartialGuardFailure(t *testing.T) {
 // 4. Concurrent direct writes to the same path: no data race (run with -race)
 // and the final content is exactly one of the payloads.
 func TestConcurrentWriteSamePath(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()
@@ -241,6 +246,7 @@ func TestConcurrentWriteSamePath(t *testing.T) {
 // 4b. Concurrent writes through a WriteReserver guard: every direct write
 // reserves once and, since all succeed, none roll back (reservation is kept).
 func TestConcurrentWriteReservationBalance(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := &countingReserver{}
 	svc := NewFSService(g)
@@ -272,6 +278,7 @@ func TestConcurrentWriteReservationBalance(t *testing.T) {
 
 // 5. Before-write hook: content transformation lands on disk.
 func TestBeforeWriteHookTransformsContent(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite, policy.OperationHookExecute)
 	restoreHookManager(t)
 	mgr := backendhooks.NewHookManager()
 	backendhooks.SetHookManager(mgr)
@@ -326,6 +333,7 @@ func TestBeforeWriteHookFailsClosed(t *testing.T) {
 // ?staged=true (Read with Root pointed at .codeflow/staging). Non-staged read of
 // the real tree is absent until promote.
 func TestStagedReadViaService(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	svc := NewFSService(nil)
 	ctx := context.Background()

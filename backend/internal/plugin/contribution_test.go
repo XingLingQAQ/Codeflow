@@ -7,6 +7,8 @@ import (
 
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/guard"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/skill"
 )
 
@@ -40,6 +42,7 @@ func setupContribDeps(t *testing.T) {
 }
 
 func TestContributionRoundTrip(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister)
 	setupContribDeps(t)
 	reg := NewContributionRegistry()
 	m := ContributionManifest{
@@ -95,6 +98,7 @@ func TestContributionRoundTrip(t *testing.T) {
 }
 
 func TestContributionUnregisterRemovesAll(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister)
 	setupContribDeps(t)
 	reg := NewContributionRegistry()
 	m := ContributionManifest{
@@ -156,6 +160,7 @@ func TestContributionInvalidTemplateRollsBackSkill(t *testing.T) {
 }
 
 func TestContributionDoubleRegisterRejected(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister)
 	setupContribDeps(t)
 	reg := NewContributionRegistry()
 	m := ContributionManifest{
@@ -188,6 +193,7 @@ func TestContributionEmptyPluginIDRejected(t *testing.T) {
 }
 
 func TestContributionEmptyManifestAllowed(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister)
 	setupContribDeps(t)
 	reg := NewContributionRegistry()
 	if err := reg.RegisterContributions("com.test.empty", ContributionManifest{}); err != nil {

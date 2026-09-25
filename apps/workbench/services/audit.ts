@@ -1,4 +1,5 @@
 import { API_ENDPOINTS } from '../api';
+import { authHeadersFor, handleAuthHttpStatus } from '../src/services-bridge/authProvider';
 import type { AuditLogListResponse } from '../types';
 
 const getBase = () => API_ENDPOINTS.audit;
@@ -32,11 +33,16 @@ export async function listAuditLogs(
   },
   signal?: AbortSignal,
 ): Promise<AuditLogListResponse> {
-  const response = await fetch(buildUrl(params), {
+  const url = buildUrl(params);
+  const response = await fetch(url, {
     method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeadersFor(url) },
     signal,
   });
+
+  if (response.status === 401 || response.status === 403) {
+    await handleAuthHttpStatus(url, response.status);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to fetch audit logs: HTTP ${response.status}`);

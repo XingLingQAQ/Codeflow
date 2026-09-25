@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
@@ -58,6 +60,7 @@ func TestNormalWriteAllowed(t *testing.T) {
 }
 
 func TestImplementsWriteGuardAndBlocksWorkspace(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	var _ workspace.WriteGuard = (*Engine)(nil)
 	root := t.TempDir()
 	g := NewEngine(nil, nil)

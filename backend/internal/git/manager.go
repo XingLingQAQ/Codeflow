@@ -36,7 +36,7 @@ func NewGitManager(workDir string) *GitManager {
 
 // execGit 执行git命令
 func (m *GitManager) execGit(ctx context.Context, args ...string) (string, error) {
-	decision := policy.EvaluateBoundary(ctx, policy.Request{
+	decision := policy.EnforceBoundary(ctx, policy.Request{
 		Operation: policy.OperationProcessStart,
 		Resource:  "git " + strings.Join(args, " "),
 	})
@@ -57,7 +57,7 @@ func (m *GitManager) execGit(ctx context.Context, args ...string) (string, error
 // TrimSpace/Fields 破坏（见 E-14）。既有文本格式方法（hash/branch/log）继续
 // 使用 execGit 的文本裁剪，不经过本 helper。
 func (m *GitManager) execGitRaw(ctx context.Context, args ...string) (stdout []byte, stderr []byte, err error) {
-	decision := policy.EvaluateBoundary(ctx, policy.Request{
+	decision := policy.EnforceBoundary(ctx, policy.Request{
 		Operation: policy.OperationProcessStart,
 		Resource:  "git " + strings.Join(args, " "),
 	})

@@ -19,6 +19,8 @@ import (
 	"github.com/codeflow/backend/internal/isolation"
 	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/privacy"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/samg"
@@ -132,6 +134,7 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 
 // TestE2E_SnapshotWorkflow tests the complete snapshot workflow
 func TestE2E_SnapshotWorkflow(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ts := setupE2EServer(t)
 	defer ts.Close()
 
@@ -307,6 +310,7 @@ func TestE2E_PAPIWorkflow(t *testing.T) {
 
 // TestE2E_HooksWorkflow tests the complete hooks workflow
 func TestE2E_HooksWorkflow(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	ts := setupE2EServer(t)
 	defer ts.Close()
 
@@ -418,6 +422,7 @@ func TestE2E_HooksWorkflow(t *testing.T) {
 
 // TestE2E_IntegrationWorkflowCoversGovernedOpenSurfaces validates plugin/vcs/marketplace registration and audit chain reuse.
 func TestE2E_IntegrationWorkflowCoversGovernedOpenSurfaces(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationPluginRegister, policy.OperationIntegrationInvoke, policy.OperationPluginInvoke, policy.OperationProcessStart, policy.OperationHookExecute)
 	ts := setupE2EServer(t)
 	defer ts.Close()
 
@@ -548,6 +553,7 @@ func TestE2E_IntegrationWorkflowRejectsUnknownGovernedType(t *testing.T) {
 
 // TestE2E_IntegrationWorkflow tests the governed integration workflow.
 func TestE2E_IntegrationWorkflow(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationIntegrationInvoke, policy.OperationProcessStart, policy.OperationHookExecute)
 	ts := setupE2EServer(t)
 	defer ts.Close()
 
@@ -1096,6 +1102,7 @@ func TestE2E_SAMGWorkflow(t *testing.T) {
 
 // TestE2E_CrossModuleIntegration tests cross-module integration
 func TestE2E_CrossModuleIntegration(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	ts := setupE2EServer(t)
 	defer ts.Close()
 

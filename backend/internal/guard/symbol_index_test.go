@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 	"github.com/codeflow/backend/internal/workspace"
 )
 
@@ -52,6 +54,7 @@ func TestSameFileRewriteAllowed(t *testing.T) {
 }
 
 func TestDuplicateBlocksWorkspaceWrite(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := NewEngine(nil, nil)
 	svc := workspace.NewFSService(g)

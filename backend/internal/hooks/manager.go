@@ -179,7 +179,7 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload Ho
 		if !hook.Config.Enabled {
 			continue
 		}
-		if decision := policy.EvaluateBoundary(ctx, hookPolicyRequest(hook, hook.Config.Name)); !decision.Allowed {
+		if decision := policy.EnforceBoundary(ctx, hookPolicyRequest(hook, hook.Config.Name)); !decision.Allowed {
 			return result, policy.DenialError(decision)
 		}
 
@@ -237,7 +237,7 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload Hook
 		return payload, nil
 	}
 	m.mu.RUnlock()
-	if decision := policy.EvaluateBoundary(ctx, hookPolicyRequest(hook, name)); !decision.Allowed {
+	if decision := policy.EnforceBoundary(ctx, hookPolicyRequest(hook, name)); !decision.Allowed {
 		return payload, policy.DenialError(decision)
 	}
 

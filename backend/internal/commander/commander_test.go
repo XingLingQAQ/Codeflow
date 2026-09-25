@@ -10,6 +10,8 @@ import (
 	"github.com/codeflow/backend/internal/adapters"
 	"github.com/codeflow/backend/internal/config"
 	backendhooks "github.com/codeflow/backend/internal/hooks"
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 // MockAdapter 测试用模拟适配器
@@ -345,6 +347,7 @@ func TestCommander_ConsultSubExpertPassesAdapterSendOptions(t *testing.T) {
 }
 
 func TestCommander_CallCoderAgentTriggersAfterExecHook(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationHookExecute)
 	mgr := backendhooks.NewHookManager()
 	previous := backendhooks.GetHookManager()
 	backendhooks.SetHookManager(mgr)

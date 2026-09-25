@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/codeflow/backend/internal/policy"
+	"github.com/codeflow/backend/internal/policy/policytesting"
 )
 
 // --- DetectScripts ---
@@ -191,6 +194,7 @@ func newManagerWithRoot(t *testing.T, scripts map[string]string) (*DevServerMana
 }
 
 func TestDevServer_StartEcho_ExitsWithLogs(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	mgr, dir := newManagerWithRoot(t, map[string]string{
 		"echo": echoScript(),
 	})
@@ -245,6 +249,7 @@ func TestDevServer_StartScriptNotFound(t *testing.T) {
 }
 
 func TestDevServer_StopKillsLongRunning(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	mgr, dir := newManagerWithRoot(t, map[string]string{
 		"serve": longScript(),
 	})
@@ -273,6 +278,7 @@ func TestDevServer_StopUnknownID(t *testing.T) {
 }
 
 func TestDevServer_Idempotent(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	mgr, dir := newManagerWithRoot(t, map[string]string{
 		"serve": longScript(),
 	})
@@ -293,6 +299,7 @@ func TestDevServer_Idempotent(t *testing.T) {
 }
 
 func TestDevServer_Cap(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	dir := t.TempDir()
 	scripts := map[string]string{}
 	for i := 0; i < MaxDevServers+2; i++ {
@@ -324,6 +331,7 @@ func TestDevServer_Cap(t *testing.T) {
 }
 
 func TestDevServer_ShutdownStopsAll(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	mgr, dir := newManagerWithRoot(t, map[string]string{
 		"a": longScript(),
 		"b": longScript(),
@@ -344,6 +352,7 @@ func TestDevServer_ShutdownStopsAll(t *testing.T) {
 }
 
 func TestDevServer_RingBufferTruncation(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
 	dir := t.TempDir()
 	cap := 5
 	numLines := cap + 3

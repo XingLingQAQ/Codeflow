@@ -212,7 +212,7 @@ func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, bod
 	if trace != nil {
 		reqPolicy.ProjectID, reqPolicy.AgentID = trace.ProjectID, trace.AgentID
 	}
-	decision := policy.EvaluateBoundary(ctx, reqPolicy)
+	decision := policy.EnforceBoundary(ctx, reqPolicy)
 	if err := policy.DenialError(decision); err != nil {
 		return nil, err
 	}
@@ -241,7 +241,7 @@ func (a *BaseAdapter) doRequestOnce(ctx context.Context, method, url string, bod
 		}
 		return nil, NewAPIError(err.Error(), 0, "", true)
 	}
-	responseDecision := policy.EvaluateBoundary(ctx, policy.Request{
+	responseDecision := policy.EnforceBoundary(ctx, policy.Request{
 		Operation: policy.OperationResponseReceive,
 		Resource:  url,
 		ProjectID: reqPolicy.ProjectID,
