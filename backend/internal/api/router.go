@@ -21,6 +21,7 @@ import (
 
 	"github.com/codeflow/backend/internal/api/handlers"
 	"github.com/codeflow/backend/internal/api/middleware"
+	"github.com/codeflow/backend/internal/readiness"
 	"github.com/codeflow/backend/internal/web"
 	"github.com/codeflow/backend/internal/websocket"
 )
@@ -616,7 +617,10 @@ func (s *Server) RunContext(ctx context.Context) error {
 	// Extract actual port and emit for Tauri sidecar protocol
 	actualPort := listener.Addr().(*net.TCPAddr).Port
 	handshake := map[string]interface{}{
-		"protocol_version": "1",
+		// Single source of truth: the readiness frontend_protocol probe reports
+		// the same constant, so a bump cannot make the handshake and /ready
+		// disagree (T0.12.b).
+		"protocol_version": readiness.FrontendProtocolVersion,
 		"host":             s.config.Host,
 		"port":             actualPort,
 		"token":            s.config.AuthToken,

@@ -199,8 +199,13 @@ func TestReadinessNoProbesKeepsLegacyResponse(t *testing.T) {
 		assert.True(t, legacy[name].Required)
 	}
 
-	// Re-encoding the legacy payload must reproduce the body exactly: same field
+	// capabilities (T0.12.b part 2) is the one field added on top of the legacy
+	// data payload; here it carries no probe-derived state, because no probe is
+	// registered. Everything else must still re-encode byte for byte: same field
 	// names, same field order, same omission rules.
+	rawCapabilities, ok := parsed.Data["capabilities"]
+	assert.True(t, ok, "capabilities missing from /ready data: %#v", parsed.Data)
+	delete(parsed.Data, "capabilities")
 	expected, err := json.Marshal(struct {
 		Success bool           `json:"success"`
 		Data    map[string]any `json:"data"`
@@ -213,7 +218,20 @@ func TestReadinessNoProbesKeepsLegacyResponse(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	assert.Equal(t, string(expected), recorder.Body.String())
+	observed, err := json.Marshal(struct {
+		Success bool           `json:"success"`
+		Data    map[string]any `json:"data"`
+	}{Success: parsed.Success, Data: parsed.Data})
+	require.NoError(t, err)
+	assert.Equal(t, string(expected), string(observed))
+
+	// The capability object itself must be exactly the documented shape.
+	capabilities, ok := rawCapabilities.(map[string]any)
+	require.True(t, ok, "capabilities must be an object: %#v", rawCapabilities)
+	assert.Equal(t, []string{"execution", "merge", "read_only"}, sortedJSONKeys(capabilities))
+	execution, ok := capabilities["execution"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []string{"backends", "blocking", "state"}, sortedJSONKeys(execution))
 
 	// No probe-only field may appear inside any component object. The exact key
 	// set assertion above already guarantees this, so re-encode the observed
@@ -498,4 +516,371 @@ func TestReadinessProbeConcurrentReadyAndRegistration(t *testing.T) {
 	for worker, status := range statuses {
 		assert.Equal(t, int32(0), status, "worker %d saw an unexpected response", worker)
 	}
+}
+
+// --- T0.12.b part 2: capability sets on GET /ready -------------------------
+
+// capabilityPayload is the decoded capabilities object of a /ready response.
+type capabilityPayload struct {
+	ReadOnly  capabilityEntry            `json:"read_only"`
+	Execution capabilityEntryWithBackend `json:"execution"`
+	Merge     capabilityEntry            `json:"merge"`
+}
+
+type capabilityEntry struct {
+	State    string              `json:"state"`
+	Blocking []capabilityBlocker `json:"blocking"`
+}
+
+type capabilityEntryWithBackend struct {
+	capabilityEntry
+	Backends map[string]capabilityEntry `json:"backends"`
+}
+
+type capabilityBlocker struct {
+	Component   string `json:"component"`
+	State       string `json:"state"`
+	ErrCode     string `json:"error_code"`
+	Remediation string `json:"remediation"`
+}
+
+// readinessCapabilities decodes the capabilities object of a /ready response.
+func readinessCapabilities(t *testing.T, data map[string]any) capabilityPayload {
+	t.Helper()
+	raw, ok := data["capabilities"]
+	require.True(t, ok, "capabilities missing from /ready data: %#v", data)
+	encoded, err := json.Marshal(raw)
+	require.NoError(t, err)
+	var parsed capabilityPayload
+	require.NoError(t, json.Unmarshal(encoded, &parsed), "capabilities: %s", encoded)
+	return parsed
+}
+
+func blockerNames(blocking []capabilityBlocker) []string {
+	names := make([]string, 0, len(blocking))
+	for _, blocker := range blocking {
+		names = append(names, blocker.Component)
+	}
+	return names
+}
+
+// registerProductionShapedProbes registers the probe set Apply installs in
+// production: frontend_protocol, policy and workspace ready, every
+// not-yet-wired dependency not_configured, all non-required.
+func registerProductionShapedProbes(t *testing.T) {
+	t.Helper()
+	healthy := func(context.Context) readiness.Result { return readiness.Result{State: readiness.StateReady} }
+	specs := []readiness.Spec{
+		{Probe: readiness.NewProbeFunc(readiness.ComponentFrontendProtocol, func(context.Context) readiness.Result {
+			return readiness.Result{State: readiness.StateReady, Detail: "protocol_version=" + readiness.FrontendProtocolVersion}
+		})},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentPolicy, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentWorkspace, healthy)},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ComponentDatabase, "wired by T1.01")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ComponentMigrations, "wired by T1.01")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ComponentEventStore, "wired by T1.05")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ComponentOutboxDispatcher, "wired by T1.05")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ComponentVault, "wired by T2.04")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ExecBackendPrefix+"claude_code", "wired by T1.13")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ExecBackendPrefix+"codex", "wired by T4.01")},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ExecBackendPrefix+"gemini", "wired by T4.02")},
+	}
+	require.NoError(t, readiness.Register(specs...))
+}
+
+// TestReadinessProductionProbesKeepReadyWithCapabilities covers the production
+// picture: the legacy services are wired, every unwired runtime dependency is
+// not_configured, /ready still answers 200/ready (the HTTP verdict is about the
+// read-only surface), and the capability sets explain what is actually blocked.
+func TestReadinessProductionProbesKeepReadyWithCapabilities(t *testing.T) {
+	stubRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+	registerProductionShapedProbes(t)
+
+	router := readinessProbeTestRouter()
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	code := recorder.Code
+	var parsed readinessTestResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &parsed), "body: %s", recorder.Body.String())
+	require.NotNil(t, parsed.Data)
+	// Evidence for the receipt: the exact production-shaped body.
+	t.Logf("production-shaped /ready (status %d): %s", code, recorder.Body.String())
+
+	require.Equal(t, http.StatusOK, code, "unwired dependencies must not 503 /ready: %#v", parsed.Data)
+	assert.True(t, parsed.Success)
+	assert.Equal(t, "ready", parsed.Data["status"])
+
+	components := readinessProbeComponents(t, parsed.Data)
+	for _, name := range append(append([]string{}, legacyReadinessComponentNames...),
+		readiness.ComponentFrontendProtocol, readiness.ComponentVault, readiness.ComponentEventStore,
+		readiness.ComponentOutboxDispatcher, readiness.ComponentDatabase, readiness.ComponentMigrations,
+		readiness.ExecBackendPrefix+"claude_code", readiness.ExecBackendPrefix+"codex", readiness.ExecBackendPrefix+"gemini") {
+		component, ok := components[name]
+		require.True(t, ok, "probe component %q missing", name)
+		if _, isProbe := component["status"]; isProbe {
+			assert.Equal(t, false, component["required"], "production probe %q must be optional", name)
+		}
+	}
+
+	capabilities := readinessCapabilities(t, parsed.Data)
+	assert.Equal(t, string(readiness.CapabilityReady), capabilities.ReadOnly.State,
+		"the read-only surface is usable: legacy services plus frontend_protocol are ready")
+	assert.Empty(t, capabilities.ReadOnly.Blocking)
+
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Execution.State)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Merge.State)
+	executionBlockers := blockerNames(capabilities.Execution.Blocking)
+	for _, name := range []string{
+		readiness.ComponentVault, readiness.ComponentEventStore, readiness.ComponentOutboxDispatcher,
+		readiness.ComponentMigrations,
+	} {
+		assert.Contains(t, executionBlockers, name, "execution must name %s as blocking", name)
+	}
+	assert.NotContains(t, executionBlockers, readiness.ComponentDatabase,
+		"database is not an execution gate before T1.01/T1.04 wire the run store")
+	// The remediation codes are the plan's contract; the shell switches on them.
+	byName := make(map[string]capabilityBlocker, len(capabilities.Execution.Blocking))
+	for _, blocker := range capabilities.Execution.Blocking {
+		byName[blocker.Component] = blocker
+	}
+	assert.Equal(t, readiness.RemediationVaultLocked, byName[readiness.ComponentVault].Remediation)
+	assert.Equal(t, readiness.RemediationEventStoreUnavailable, byName[readiness.ComponentEventStore].Remediation)
+	assert.Equal(t, readiness.RemediationOutboxUnavailable, byName[readiness.ComponentOutboxDispatcher].Remediation)
+	assert.Equal(t, readiness.RemediationMigrationsPending, byName[readiness.ComponentMigrations].Remediation)
+	assert.Equal(t, "not_configured", byName[readiness.ComponentVault].State)
+
+	// Every registered backend is separately unusable and says so.
+	require.Len(t, capabilities.Execution.Backends, 3)
+	for _, backend := range []string{"claude_code", "codex", "gemini"} {
+		entry := capabilities.Execution.Backends[backend]
+		assert.Equal(t, string(readiness.CapabilityUnavailable), entry.State, "backend %s", backend)
+		assert.Contains(t, blockerNames(entry.Blocking), readiness.ExecBackendPrefix+backend)
+		found := false
+		for _, blocker := range entry.Blocking {
+			if blocker.Component == readiness.ExecBackendPrefix+backend {
+				assert.Equal(t, readiness.RemediationBackendNotInstalled, blocker.Remediation)
+				found = true
+			}
+		}
+		assert.True(t, found, "backend %s must explain its own unavailability", backend)
+	}
+}
+
+// TestReadinessExecutionReadyWhenDependenciesRecover covers the acceptance
+// assertion "repair the dependency and the next check reflects it": nothing in
+// the response is cached between polls, so flipping a probe from not_configured
+// to ready makes execution executable with no restart.
+func TestReadinessExecutionReadyWhenDependenciesRecover(t *testing.T) {
+	stubRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+
+	healthy := func(context.Context) readiness.Result { return readiness.Result{State: readiness.StateReady} }
+	specs := []readiness.Spec{
+		{Probe: readiness.NewProbeFunc(readiness.ComponentFrontendProtocol, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentPolicy, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentWorkspace, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentMigrations, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentEventStore, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentOutboxDispatcher, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentVault, healthy)},
+		{Probe: readiness.NewNotConfiguredProbe(readiness.ExecBackendPrefix+"codex", "wired by T4.01")},
+	}
+	require.NoError(t, readiness.Register(specs...))
+
+	_, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	before := readinessCapabilities(t, parsed.Data)
+	require.Equal(t, string(readiness.CapabilityUnavailable), before.Execution.State)
+	// The global verdict names both the class marker and the single backend that
+	// is registered: the class marker says no backend can execute, the suffixed
+	// entry says which one is missing.
+	require.Equal(t, []string{readiness.ComponentExecBackend, readiness.ExecBackendPrefix + "codex"},
+		blockerNames(before.Execution.Blocking))
+
+	// The backend gets installed while the process keeps running.
+	specs[len(specs)-1] = readiness.Spec{Probe: readiness.NewProbeFunc(readiness.ExecBackendPrefix+"codex", healthy)}
+	require.NoError(t, readiness.Register(specs...))
+
+	_, parsed = callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	after := readinessCapabilities(t, parsed.Data)
+	assert.Equal(t, string(readiness.CapabilityReady), after.Execution.State,
+		"the second poll must see the repaired backend, not a cached verdict")
+	assert.Empty(t, after.Execution.Blocking)
+	assert.Equal(t, string(readiness.CapabilityReady), after.Merge.State)
+	assert.Equal(t, string(readiness.CapabilityReady), after.Execution.Backends["codex"].State)
+}
+
+// TestReadinessCapabilitiesBlockLegacyGap covers a missing required legacy
+// service: /ready is 503 and read_only is unavailable with the missing service
+// named.
+func TestReadinessCapabilitiesBlockLegacyGap(t *testing.T) {
+	nilRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+
+	code, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	require.Equal(t, http.StatusServiceUnavailable, code)
+	require.Equal(t, "not_ready", parsed.Data["status"])
+
+	capabilities := readinessCapabilities(t, parsed.Data)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.ReadOnly.State)
+	names := blockerNames(capabilities.ReadOnly.Blocking)
+	for _, name := range requiredLegacyReadinessNames {
+		assert.Contains(t, names, name, "read_only must name the missing service %s", name)
+	}
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Execution.State)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Merge.State)
+
+	// Every legacy blocker carries the documented fallback remediation; the
+	// frontend_protocol entry keeps its own code.
+	for _, blocker := range capabilities.ReadOnly.Blocking {
+		expected := readiness.RemediationDependencyNotReady
+		if blocker.Component == readiness.ComponentFrontendProtocol {
+			expected = readiness.RemediationProtocolMismatch
+		}
+		assert.Equal(t, expected, blocker.Remediation, "%+v", blocker)
+	}
+}
+
+// TestReadinessCapabilitiesAgreeWithComponents checks that the capability
+// payload is derived from the same snapshot the components describe: a
+// dependency the response reports as ready is never listed as blocking, and the
+// blocking lists are sorted and duplicate-free.
+func TestReadinessCapabilitiesAgreeWithComponents(t *testing.T) {
+	stubRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+	registerProductionShapedProbes(t)
+
+	_, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	components := readinessProbeComponents(t, parsed.Data)
+	capabilities := readinessCapabilities(t, parsed.Data)
+
+	seen := map[string]bool{}
+	for _, grouping := range []struct {
+		label    string
+		blocking []capabilityBlocker
+	}{
+		{"read_only", capabilities.ReadOnly.Blocking},
+		{"execution", capabilities.Execution.Blocking},
+		{"merge", capabilities.Merge.Blocking},
+	} {
+		for _, blocker := range grouping.blocking {
+			seen[blocker.Component] = true
+			component, ok := components[blocker.Component]
+			if !ok {
+				continue // legacy service names are not probe components
+			}
+			assert.NotEqual(t, true, component["ready"],
+				"%s lists %s as blocking but the component says ready", grouping.label, blocker.Component)
+		}
+	}
+	assert.True(t, seen[readiness.ComponentVault])
+
+	for label, blocking := range map[string][]capabilityBlocker{
+		"read_only": capabilities.ReadOnly.Blocking,
+		"execution": capabilities.Execution.Blocking,
+		"merge":     capabilities.Merge.Blocking,
+	} {
+		names := blockerNames(blocking)
+		sorted := append([]string{}, names...)
+		sort.Strings(sorted)
+		assert.Equal(t, sorted, names, "%s blocking must be sorted", label)
+		assert.Equal(t, len(sorted), len(uniqueStrings(names)), "%s blocking has duplicates", label)
+	}
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+// TestReadinessNoProbesKeepsComponentShape re-checks the legacy promise from the
+// capabilities side: adding the new field must not change any component object.
+func TestReadinessNoProbesKeepsComponentShape(t *testing.T) {
+	clearReadinessProbesForTest(t)
+	stubRequiredReadinessServices(t)
+
+	_, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	components := readinessProbeComponents(t, parsed.Data)
+	require.Len(t, components, len(legacyReadinessComponentNames))
+	for _, name := range legacyReadinessComponentNames {
+		assert.Equal(t, []string{"ready", "required"}, sortedJSONKeys(components[name]),
+			"component %q must keep the legacy field set", name)
+	}
+	capabilities := readinessCapabilities(t, parsed.Data)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.ReadOnly.State,
+		"the legacy services are stubbed ready, but no frontend_protocol probe proves the protocol")
+	names := blockerNames(capabilities.ReadOnly.Blocking)
+	require.Len(t, names, 1, "read_only must name exactly the missing frontend_protocol: %v", names)
+	assert.Equal(t, readiness.ComponentFrontendProtocol, names[0])
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Execution.State,
+		"without the frontend_protocol probe nothing proves the execution surface")
+	assert.Empty(t, capabilities.Execution.Backends)
+
+	// The rest of the data payload is untouched: status, version, components.
+	for _, field := range []string{"status", "version", "components"} {
+		assert.Contains(t, parsed.Data, field)
+	}
+	raw, ok := parsed.Data["capabilities"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []string{"execution", "merge", "read_only"}, sortedJSONKeys(raw))
+	execution, ok := raw["execution"].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, execution, "backends")
+}
+
+// TestReadinessCapabilitiesJSONHasNoGoFieldNames keeps the payload free of Go
+// field names, so the generated OpenAPI types and the payload agree.
+func TestReadinessCapabilitiesJSONHasNoGoFieldNames(t *testing.T) {
+	stubRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+	registerProductionShapedProbes(t)
+
+	_, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	encoded, err := json.Marshal(parsed.Data["capabilities"])
+	require.NoError(t, err)
+	for _, leaked := range []string{"ReadOnly", "Blocking", "ErrCode", "Remediation", "Backends", "CapabilityState"} {
+		assert.False(t, strings.Contains(string(encoded), leaked), "%q leaked into %s", leaked, encoded)
+	}
+	assert.True(t, strings.Contains(string(encoded), `"error_code"`), "expected snake_case keys in %s", encoded)
+}
+
+// TestReadinessCapabilitiesReflectProbeFailures covers a failed (not merely
+// unwired) dependency: its state and error code travel into the blocker.
+func TestReadinessCapabilitiesReflectProbeFailures(t *testing.T) {
+	stubRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+
+	require.NoError(t, readiness.Register(
+		readiness.Spec{Probe: readiness.NewProbeFunc(readiness.ComponentFrontendProtocol,
+			func(context.Context) readiness.Result { return readiness.Result{State: readiness.StateReady} })},
+		readiness.Spec{Probe: readiness.NewProbeFunc(readiness.ComponentVault,
+			func(context.Context) readiness.Result {
+				return readiness.Result{State: readiness.StateFailed, ErrCode: readiness.RemediationVaultLocked, Detail: "sealed"}
+			})},
+	))
+
+	code, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	require.Equal(t, http.StatusOK, code, "an optional probe failure must not 503 /ready")
+	capabilities := readinessCapabilities(t, parsed.Data)
+	require.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Execution.State)
+	found := false
+	for _, blocker := range capabilities.Execution.Blocking {
+		if blocker.Component != readiness.ComponentVault {
+			continue
+		}
+		found = true
+		assert.Equal(t, "failed", blocker.State)
+		assert.Equal(t, readiness.RemediationVaultLocked, blocker.ErrCode)
+		assert.Equal(t, readiness.RemediationVaultLocked, blocker.Remediation)
+	}
+	assert.True(t, found, "vault blocker missing: %+v", capabilities.Execution.Blocking)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Merge.State)
 }

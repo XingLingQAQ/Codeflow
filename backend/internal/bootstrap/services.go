@@ -14,6 +14,7 @@ import (
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/policy"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/readiness"
 	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
@@ -157,6 +158,13 @@ func (s Services) Apply() error {
 			fs.SetGuard(s.Guard)
 		}
 	}
+	// Install the production readiness probes last, so every probe observes the
+	// services this Apply just wired (policy evaluator, workspace roots). The
+	// batch is registered all-or-nothing and re-registering replaces the
+	// previous specs, so repeated Apply calls are idempotent (T0.12.b).
+	if err := readiness.Register(s.readinessSpecs()...); err != nil {
+		return fmt.Errorf("register readiness probes: %w", err)
+	}
 	return nil
 }
 
@@ -184,4 +192,7 @@ func (s Services) Reset() {
 	memory.SetPreflightService(nil)
 	policy.SetEvaluator(nil)
 	policy.RequireEnforcement(false)
+	// Symmetric with Apply: drop the production probes so a torn-down container
+	// leaves no probe reading globals it no longer owns.
+	readiness.Clear()
 }

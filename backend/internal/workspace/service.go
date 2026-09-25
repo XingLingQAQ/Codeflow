@@ -55,6 +55,16 @@ func (s *FSService) SetAllowedRoots(roots []string) {
 	}
 }
 
+// AllowedRoots returns a copy of the configured allowed roots (absolute,
+// cleaned, symlinks resolved). An empty slice means unrestricted: the caller
+// must treat it as "nothing was configured", not as "every path is allowed"
+// (readiness probes and startup diagnostics need that distinction).
+func (s *FSService) AllowedRoots() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]string(nil), s.allowedRoots...)
+}
+
 func (s *FSService) ensureRootAllowed(root string) error {
 	s.mu.RLock()
 	allowed := append([]string(nil), s.allowedRoots...)

@@ -31,6 +31,11 @@ import (
 
 const backendVersion = "0.1.0"
 
+// requiredLegacyComponents are the Has* services that gate the overall /ready
+// verdict and the read_only capability. They are listed once so the HTTP verdict
+// and the capability evaluation cannot disagree about which services matter.
+var requiredLegacyComponents = []string{"planner", "project", "context", "audit", "agent", "memory", "samg"}
+
 type readinessComponent struct {
 	Ready    bool `json:"ready"`
 	Required bool `json:"required"`
@@ -107,14 +112,15 @@ func ReadinessCheck(c *gin.Context) {
 		components[name] = component
 	}
 
-	ready := true
-	for _, name := range []string{"planner", "project", "context", "audit", "agent", "memory", "samg"} {
+	legacyBlocking := make([]string, 0, len(requiredLegacyComponents))
+	for _, name := range requiredLegacyComponents {
 		component := components[name].(readinessComponent)
 		if component.Required && !component.Ready {
-			ready = false
-			break
+			legacyBlocking = append(legacyBlocking, name)
 		}
 	}
+	legacyReadOnlyReady := len(legacyBlocking) == 0
+	ready := legacyReadOnlyReady
 	// Required probes gate the overall verdict the same way required Has*
 	// services do: a required probe not in state ready makes /ready 503.
 	if ready {
@@ -133,12 +139,19 @@ func ReadinessCheck(c *gin.Context) {
 		state = "not_ready"
 	}
 
+	// Capability sets (I-54, T0.12.b): read_only/execution/merge answer what the
+	// shell and the run API may actually do, which is a different question from
+	// the HTTP verdict above. A not_configured vault or run store must not make
+	// /ready 503, and a ready /ready must not imply "can create a Run".
+	capabilities := readiness.EvaluateCapabilities(probed, legacyReadOnlyReady, legacyBlocking)
+
 	c.JSON(status, Response{
 		Success: ready,
 		Data: gin.H{
-			"status":     state,
-			"version":    backendVersion,
-			"components": components,
+			"status":       state,
+			"version":      backendVersion,
+			"components":   components,
+			"capabilities": capabilities,
 		},
 	})
 }

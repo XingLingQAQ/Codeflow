@@ -96,12 +96,31 @@ paths:
   /ready:
     get:
       tags: [Health]
-      summary: Readiness check (reports component wiring)
+      summary: Readiness check (reports component wiring and capability sets)
+      description: |
+        Reports the read-only dependency probes and the derived capability sets (plan §15 T0.12).
+        The HTTP status answers only whether the required legacy services and required probes are
+        wired: 200 ready, 503 not_ready. Dependencies that are planned but not wired yet (the
+        runtime database/migrations, event store, outbox dispatcher, vault, execution backends)
+        report status not_configured with their remediation code and never gate the status, so the
+        shell can start and offer the read-only surface. Whether a Run may be created is answered by
+        data.capabilities.execution (per backend) and whether work may be merged by
+        data.capabilities.merge; every non-ready capability lists its blocking dependencies with a
+        stable remediation code. Probes are read-only and bounded; repairing a dependency is visible
+        on the next poll without restarting the frontend.
       responses:
         '200':
-          description: Server is ready
+          description: Required services and required probes are ready (individual optional dependencies may still be not_configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessEnvelope'
         '503':
           description: One or more required components are not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessEnvelope'
 
   /metrics:
     get:
@@ -5256,6 +5275,117 @@ components:
               type: string
             version:
               type: string
+
+    ReadinessEnvelope:
+      type: object
+      description: Envelope of GET /ready (plan §15 T0.12).
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required: [status, components, capabilities]
+          properties:
+            status:
+              type: string
+              enum: [ready, not_ready]
+            version:
+              type: string
+            components:
+              type: object
+              description: One entry per legacy Has* service and per registered probe, keyed by component name.
+              additionalProperties:
+                $ref: '#/components/schemas/ReadinessComponent'
+            capabilities:
+              $ref: '#/components/schemas/ReadinessCapabilities'
+
+    ReadinessComponent:
+      type: object
+      description: |
+        One dependency entry. Legacy Has* services publish ready/required only; probe-backed entries
+        add status/readonly/error_code/latency_ms/detail/checked_at (plan §15 T0.12 step 2).
+      required: [ready, required]
+      properties:
+        ready:
+          type: boolean
+        required:
+          type: boolean
+          description: A required entry that is not ready makes /ready answer 503.
+        status:
+          type: string
+          enum: [ready, degraded, failed, not_configured]
+          description: Machine-readable dependency state; present only on probe-backed entries.
+        readonly:
+          type: boolean
+          description: The probe declares itself read-only (no writes, no network).
+        error_code:
+          type: string
+          description: Stable reason of the most recent non-ready state (for example vault_locked, workspace_root_missing, probe_timeout).
+        latency_ms:
+          type: integer
+          description: Wall time of the probe run this response observed.
+        detail:
+          type: string
+        checked_at:
+          type: string
+          description: RFC3339 UTC timestamp of the probe run.
+
+    ReadinessCapabilities:
+      type: object
+      description: |
+        Capability sets derived from the same snapshot as components (plan §15 T0.12 step 3): read_only
+        is global, execution is per backend, merge adds the merge-specific dependencies.
+      required: [read_only, execution, merge]
+      properties:
+        read_only:
+          $ref: '#/components/schemas/ReadinessCapability'
+        execution:
+          allOf:
+            - $ref: '#/components/schemas/ReadinessCapability'
+            - type: object
+              properties:
+                backends:
+                  type: object
+                  description: Per-backend execution capability, keyed by backend name without the exec_backend prefix.
+                  additionalProperties:
+                    $ref: '#/components/schemas/ReadinessCapability'
+        merge:
+          $ref: '#/components/schemas/ReadinessCapability'
+
+    ReadinessCapability:
+      type: object
+      description: One capability verdict; a not-ready capability lists what blocks it.
+      required: [state, blocking]
+      properties:
+        state:
+          type: string
+          enum: [ready, unavailable]
+        blocking:
+          type: array
+          description: Blocking dependencies, sorted by component then error code. Empty when state is ready.
+          items:
+            $ref: '#/components/schemas/ReadinessBlocker'
+
+    ReadinessBlocker:
+      type: object
+      description: One dependency that keeps a capability from being ready.
+      required: [component, state, error_code, remediation]
+      properties:
+        component:
+          type: string
+          description: Component name; exec_backend prefixed names carry the backend suffix.
+        state:
+          type: string
+          enum: [ready, degraded, failed, not_configured]
+        error_code:
+          type: string
+        remediation:
+          type: string
+          description: |
+            Machine-readable action that would unblock the dependency: backend_not_installed,
+            migrations_pending, vault_locked, outbox_unavailable, event_store_unavailable,
+            workspace_roots_unconfigured, workspace_root_missing, policy_not_installed,
+            protocol_mismatch, or dependency_not_ready.
 
     MemoryItem:
       type: object

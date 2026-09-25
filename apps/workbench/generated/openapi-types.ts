@@ -273,6 +273,40 @@ export interface HealthResponse {
   data?: { status?: string; version?: string; };
 }
 
+export interface ReadinessEnvelope {
+  success?: boolean;
+  data?: { status: 'ready' | 'not_ready'; version?: string; components: Record<string, unknown>; capabilities: ReadinessCapabilities; };
+}
+
+export interface ReadinessComponent {
+  ready: boolean;
+  required: boolean;
+  status?: 'ready' | 'degraded' | 'failed' | 'not_configured';
+  readonly?: boolean;
+  error_code?: string;
+  latency_ms?: number;
+  detail?: string;
+  checked_at?: string;
+}
+
+export interface ReadinessCapabilities {
+  read_only: ReadinessCapability;
+  execution: ReadinessCapability & { backends?: Record<string, unknown>; };
+  merge: ReadinessCapability;
+}
+
+export interface ReadinessCapability {
+  state: 'ready' | 'unavailable';
+  blocking: ReadinessBlocker[];
+}
+
+export interface ReadinessBlocker {
+  component: string;
+  state: 'ready' | 'degraded' | 'failed' | 'not_configured';
+  error_code: string;
+  remediation: string;
+}
+
 export interface MemoryItem {
   id?: string;
   content?: string;
@@ -2210,6 +2244,11 @@ export interface StreamSubscribeFrame {
 export interface OpenApiSchemas {
   Response: Response;
   HealthResponse: HealthResponse;
+  ReadinessEnvelope: ReadinessEnvelope;
+  ReadinessComponent: ReadinessComponent;
+  ReadinessCapabilities: ReadinessCapabilities;
+  ReadinessCapability: ReadinessCapability;
+  ReadinessBlocker: ReadinessBlocker;
   MemoryItem: MemoryItem;
   MemoryListResponse: MemoryListResponse;
   MemoryCreateRequest: MemoryCreateRequest;
