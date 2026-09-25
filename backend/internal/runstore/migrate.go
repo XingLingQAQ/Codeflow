@@ -93,13 +93,20 @@ func Migrate(ctx context.Context, db *sql.DB) (MigrationResult, error) {
 
 // Open opens (or creates) the runtime database at path with the dbx baseline
 // and migrates it to the embedded schema version. It is the single entry point
-// callers should use for codeflow.db.
+// for callers that only need the raw handle.
+//
+// Transactions opened on the returned handle take the write lock at BEGIN
+// (dbx.WithTxLock("immediate") is appended after the caller's options, so a
+// caller cannot weaken it). Every write in this package reads a revision before
+// it writes one, and under WAL a deferred read-then-write transaction can be
+// refused with SQLITE_BUSY_SNAPSHOT — a failure the busy handler cannot rescue.
+// See dbx.WithTxLock and TestTxLockImmediateAvoidsSnapshotUpgradeFailure.
 //
 // The returned *sql.DB is owned by the caller, who must Close it. On error the
 // handle is already closed and nil is returned, so a failed migration cannot
 // leak a half-initialised pool.
 func Open(ctx context.Context, path string, opts ...dbx.Option) (*sql.DB, MigrationResult, error) {
-	db, err := dbx.Open(path, opts...)
+	db, err := dbx.Open(path, append(opts, dbx.WithTxLock("immediate"))...)
 	if err != nil {
 		return nil, MigrationResult{}, err
 	}

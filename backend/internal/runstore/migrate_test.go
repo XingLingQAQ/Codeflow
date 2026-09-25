@@ -76,19 +76,22 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.FromVersion != 0 {
 		t.Errorf("FromVersion = %d, want 0", res.FromVersion)
 	}
-	if res.ToVersion != 1 {
-		t.Errorf("ToVersion = %d, want 1", res.ToVersion)
+	if res.ToVersion != 2 {
+		t.Errorf("ToVersion = %d, want 2", res.ToVersion)
 	}
-	if len(res.Applied) != 1 {
-		t.Fatalf("Applied = %v, want exactly one migration", res.Applied)
+	if len(res.Applied) != 2 {
+		t.Fatalf("Applied = %v, want both migrations", res.Applied)
 	}
 	if res.Applied[0].Version != 1 || res.Applied[0].Name != "runtime" {
 		t.Errorf("Applied[0] = %+v, want version 1 named runtime", res.Applied[0])
 	}
+	if res.Applied[1].Version != 2 || res.Applied[1].Name != "input_snapshots" {
+		t.Errorf("Applied[1] = %+v, want version 2 named input_snapshots", res.Applied[1])
+	}
 
 	for _, table := range []string{
 		"project_refs", "legacy_resource_refs", "tasks", "runs", "attempts",
-		"runstore_migrations",
+		"input_snapshots", "runstore_migrations",
 	} {
 		if !tableExists(t, db, table) {
 			t.Errorf("table %q does not exist after migration", table)
@@ -111,7 +114,7 @@ func TestMigrateFromEmpty(t *testing.T) {
 		applied  int64
 	)
 	if err := db.QueryRow(
-		`SELECT version, name, checksum, applied_at FROM runstore_migrations`,
+		`SELECT version, name, checksum, applied_at FROM runstore_migrations WHERE version = 1`,
 	).Scan(&version, &name, &checksum, &applied); err != nil {
 		t.Fatalf("read runstore_migrations: %v", err)
 	}
@@ -139,9 +142,13 @@ func TestMigrateFromEmpty(t *testing.T) {
 	}
 }
 
-// seedRuntimeFixture inserts one project_ref/task/run triple. Tests that compare
-// data across a re-migration use it so they compare real rows, not an empty
-// database.
+// seedRuntimeFixture inserts one project_ref/task/snapshot/run set. Tests that
+// compare data across a re-migration use it so they compare real rows, not an
+// empty database.
+//
+// The input_snapshots row is required by migration 002: the run below pins
+// snap-1/sha256:snap, and trg_runs_input_snapshot_must_match refuses a run whose
+// snapshot id/hash do not name a real snapshot of the same project.
 func seedRuntimeFixture(t *testing.T, db *sql.DB) {
 	t.Helper()
 	stmts := []string{
@@ -151,6 +158,8 @@ func seedRuntimeFixture(t *testing.T, db *sql.DB) {
 		                    input_json, input_hash, lease_owner, lease_until, lease_epoch, revision, created_at, updated_at)
 		 VALUES ('t-1', 'p-1', NULL, NULL, 'add tests', 'code', 'ready', 3,
 		         '{"prompt":"add tests"}', 'sha256:in', 'worker-1', 1700000009000, 2, 1, 1700000000002, 1700000000003)`,
+		`INSERT INTO input_snapshots (id, project_id, content_json, content_hash, created_at)
+		 VALUES ('snap-1', 'p-1', '{"prompt":"add tests"}', 'sha256:snap', 1700000000006)`,
 		`INSERT INTO runs (id, task_id, project_id, command_id, binding_id, binding_revision,
 		                   base_manifest_hash, base_commit, agent_revision_id, input_snapshot_id,
 		                   input_snapshot_hash, budget_json, status, revision, retry_of_run_id,
@@ -208,8 +217,8 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if first.ToVersion != 1 {
-		t.Fatalf("first Migrate ToVersion = %d, want 1", first.ToVersion)
+	if first.ToVersion != 2 {
+		t.Fatalf("first Migrate ToVersion = %d, want 2", first.ToVersion)
 	}
 
 	seedRuntimeFixture(t, db)
@@ -220,13 +229,13 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
-	if second.FromVersion != 1 || second.ToVersion != 1 {
-		t.Errorf("second Migrate versions = %d -> %d, want 1 -> 1", second.FromVersion, second.ToVersion)
+	if second.FromVersion != 2 || second.ToVersion != 2 {
+		t.Errorf("second Migrate versions = %d -> %d, want 2 -> 2", second.FromVersion, second.ToVersion)
 	}
 	if len(second.Applied) != 0 {
 		t.Errorf("second Migrate applied %v, want nothing", second.Applied)
 	}
-	assertMigrationRowCount(t, db, 1)
+	assertMigrationRowCount(t, db, 2)
 	assertRunUnchanged(t, db, "r-1", before)
 
 	// Close and reopen the file: the recorded version must make the third call
@@ -244,10 +253,10 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate after reopen: %v", err)
 	}
-	if third.FromVersion != 1 || third.ToVersion != 1 || len(third.Applied) != 0 {
-		t.Errorf("reopen Migrate = %+v, want 1 -> 1 with nothing applied", third)
+	if third.FromVersion != 2 || third.ToVersion != 2 || len(third.Applied) != 0 {
+		t.Errorf("reopen Migrate = %+v, want 2 -> 2 with nothing applied", third)
 	}
-	assertMigrationRowCount(t, reopened, 1)
+	assertMigrationRowCount(t, reopened, 2)
 	assertRunUnchanged(t, reopened, "r-1", before)
 }
 
@@ -361,7 +370,7 @@ func TestMigrateChecksumMismatchFailsClosed(t *testing.T) {
 	if checksum != "sha256:0000" {
 		t.Errorf("checksum = %s, want the tampered value to be left alone", checksum)
 	}
-	assertMigrationRowCount(t, db, 1)
+	assertMigrationRowCount(t, db, 2)
 
 	// A renamed file is the same class of mismatch and must also stop the run.
 	if _, err := db.Exec(`UPDATE runstore_migrations SET checksum=? WHERE version=1`,
@@ -404,7 +413,7 @@ func TestMigrateRejectsNewerSchema(t *testing.T) {
 		t.Fatalf("Migrate error = %v, want ErrSchemaTooNew", err)
 	}
 	// Nothing was applied and the future row is untouched.
-	assertMigrationRowCount(t, db, 2)
+	assertMigrationRowCount(t, db, 3)
 }
 
 // TestMigrateRejectsCorruptHistory covers a hole in the recorded version set.
@@ -417,12 +426,9 @@ func TestMigrateRejectsCorruptHistory(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM runstore_migrations WHERE version=1`); err != nil {
 		t.Fatalf("delete version 1: %v", err)
 	}
-	if _, err := db.Exec(
-		`INSERT INTO runstore_migrations (version, name, checksum, applied_at) VALUES (2, 'gap', 'sha256:x', 1)`,
-	); err != nil {
-		t.Fatalf("insert version 2: %v", err)
-	}
-
+	// Version 2 is already recorded by the successful migration above; the hole
+	// is what the runner must refuse. (Inserting a synthetic version 2 would
+	// collide with the real row.)
 	if _, err := Migrate(ctx, db); err == nil {
 		t.Fatal("Migrate with a version gap succeeded, want an error")
 	}
@@ -440,8 +446,8 @@ func TestOpenCreatesMigratedDatabase(t *testing.T) {
 	}
 	defer db.Close()
 
-	if res.FromVersion != 0 || res.ToVersion != 1 {
-		t.Errorf("Open migration result = %d -> %d, want 0 -> 1", res.FromVersion, res.ToVersion)
+	if res.FromVersion != 0 || res.ToVersion != 2 {
+		t.Errorf("Open migration result = %d -> %d, want 0 -> 2", res.FromVersion, res.ToVersion)
 	}
 	if !tableExists(t, db, "runs") {
 		t.Error("runs table is missing after Open")
@@ -455,8 +461,8 @@ func TestOpenCreatesMigratedDatabase(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer db2.Close()
-	if len(res2.Applied) != 0 || res2.ToVersion != 1 {
-		t.Errorf("second Open = %+v, want no applied migrations at version 1", res2)
+	if len(res2.Applied) != 0 || res2.ToVersion != 2 {
+		t.Errorf("second Open = %+v, want no applied migrations at version 2", res2)
 	}
 	_ = runRow(t, db2, "r-1")
 }
@@ -490,7 +496,7 @@ func TestOpenClosesHandleOnMigrationFailure(t *testing.T) {
 		t.Fatalf("reopen after failed Open: %v", err)
 	}
 	defer verify.Close()
-	assertMigrationRowCount(t, verify, 2)
+	assertMigrationRowCount(t, verify, 3)
 }
 
 // TestLoadMigrationsRejectsBadNames pins the file naming contract, because a

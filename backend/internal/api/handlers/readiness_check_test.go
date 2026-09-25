@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +22,7 @@ import (
 	"github.com/codeflow/backend/internal/memory"
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/readiness"
 	"github.com/codeflow/backend/internal/samg"
 )
 
@@ -85,11 +85,13 @@ func sortedJSONKeys(m map[string]any) []string {
 	return keys
 }
 
-// clearReadinessProbesForTest isolates the global probe registry per test.
+// clearReadinessProbesForTest isolates the global probe registry per test. The
+// probe framework itself lives in internal/readiness now; this file only pins
+// how GET /ready consumes it.
 func clearReadinessProbesForTest(t *testing.T) {
 	t.Helper()
-	ClearReadinessProbes()
-	t.Cleanup(ClearReadinessProbes)
+	readiness.Clear()
+	t.Cleanup(readiness.Clear)
 }
 
 // stubRequiredReadinessServices installs in-memory implementations of the seven
@@ -168,7 +170,7 @@ type legacyReadinessComponentShape struct {
 func TestReadinessNoProbesKeepsLegacyResponse(t *testing.T) {
 	clearReadinessProbesForTest(t)
 	nilRequiredReadinessServices(t)
-	assert.Empty(t, RegisteredReadinessProbes())
+	assert.Empty(t, readiness.Registered())
 
 	router := readinessProbeTestRouter()
 	recorder := httptest.NewRecorder()
@@ -231,10 +233,10 @@ func TestReadinessReadyProbeReportsProbeFields(t *testing.T) {
 	clearReadinessProbesForTest(t)
 
 	var calls atomic.Int64
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("event_store", func(context.Context) ProbeResult {
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("event_store", func(context.Context) readiness.Result {
 			calls.Add(1)
-			return ProbeResult{State: ProbeStateReady, Detail: "sqlite ok"}
+			return readiness.Result{State: readiness.StateReady, Detail: "sqlite ok"}
 		}),
 		Required: true,
 		Timeout:  200 * time.Millisecond,
@@ -273,9 +275,9 @@ func TestReadinessRequiredProbeFailureReturns503(t *testing.T) {
 	stubRequiredReadinessServices(t)
 	clearReadinessProbesForTest(t)
 
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("vault", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateFailed, ErrCode: "vault_locked", Detail: "sealed"}
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("vault", func(context.Context) readiness.Result {
+			return readiness.Result{State: readiness.StateFailed, ErrCode: "vault_locked", Detail: "sealed"}
 		}),
 		Required: true,
 	}))
@@ -301,9 +303,9 @@ func TestReadinessOptionalProbeFailureKeepsReady(t *testing.T) {
 	stubRequiredReadinessServices(t)
 	clearReadinessProbesForTest(t)
 
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("event_store", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateFailed, ErrCode: "event_store_unavailable", Detail: "no wal"}
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("event_store", func(context.Context) readiness.Result {
+			return readiness.Result{State: readiness.StateFailed, ErrCode: "event_store_unavailable", Detail: "no wal"}
 		}),
 		Required: false,
 	}))
@@ -322,16 +324,17 @@ func TestReadinessOptionalProbeFailureKeepsReady(t *testing.T) {
 }
 
 // TestReadinessProbeTimeoutDoesNotHangReady covers a probe that ignores its
-// context: /ready must answer within the probe budget and report probe_timeout.
+// context: /ready must answer within the probe budget and report probe_timeout,
+// and a later poll must report the stuck run without waiting on it again.
 func TestReadinessProbeTimeoutDoesNotHangReady(t *testing.T) {
 	stubRequiredReadinessServices(t)
 	clearReadinessProbesForTest(t)
 
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("exec_backend", func(context.Context) ProbeResult {
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("exec_backend", func(context.Context) readiness.Result {
 			// Deliberately ignores ctx: the deadline is the runner's contract.
 			time.Sleep(5 * time.Second)
-			return ProbeResult{State: ProbeStateReady}
+			return readiness.Result{State: readiness.StateReady}
 		}),
 		Required: true,
 		Timeout:  50 * time.Millisecond,
@@ -341,8 +344,8 @@ func TestReadinessProbeTimeoutDoesNotHangReady(t *testing.T) {
 	start := time.Now()
 	code, parsed := callReadinessProbeEndpoint(t, router)
 	elapsed := time.Since(start)
-	t.Logf("first /ready with a hung probe returned in %s (probe budget %s)",
-		elapsed, 50*time.Millisecond+probeBudgetGrace)
+	t.Logf("first /ready with a hung probe returned in %s (probe timeout 50ms plus the runner's grace)",
+		elapsed)
 
 	require.Less(t, elapsed, time.Second, "a hung probe must not block /ready")
 	assert.Equal(t, http.StatusServiceUnavailable, code)
@@ -352,31 +355,34 @@ func TestReadinessProbeTimeoutDoesNotHangReady(t *testing.T) {
 	require.NotNil(t, component)
 	assert.Equal(t, false, component["ready"])
 	assert.Equal(t, "failed", component["status"])
-	assert.Equal(t, ProbeErrTimeout, component["error_code"])
+	assert.Equal(t, readiness.CodeTimeout, component["error_code"])
 	detail, _ := component["detail"].(string)
 	require.Contains(t, detail, "still running since")
 	stamp := strings.TrimSpace(strings.TrimPrefix(detail, "still running since "))
 	_, err := time.Parse(time.RFC3339, stamp)
 	assert.NoError(t, err, "detail must carry an RFC3339 stamp, got %q", detail)
 
-	// The run is still in flight; a second poll answers immediately.
+	// The run has by now blown its own deadline (the first poll already waited
+	// out the whole budget), so the next poll reports the stuck slot at once.
+	time.Sleep(100 * time.Millisecond)
 	second := time.Now()
 	secondCode, secondParsed := callReadinessProbeEndpoint(t, router)
 	secondElapsed := time.Since(second)
-	t.Logf("second /ready with the run still in flight returned in %s", secondElapsed)
-	assert.Less(t, secondElapsed, 200*time.Millisecond, "an in-flight run must be reported, not waited on")
+	t.Logf("second /ready with the run past its deadline returned in %s", secondElapsed)
+	assert.Less(t, secondElapsed, 200*time.Millisecond, "a run past its deadline must be reported, not waited on")
 	assert.Equal(t, http.StatusServiceUnavailable, secondCode)
 	secondComponent := readinessProbeComponents(t, secondParsed.Data)["exec_backend"]
-	assert.Equal(t, ProbeErrTimeout, secondComponent["error_code"])
+	assert.Equal(t, readiness.CodeTimeout, secondComponent["error_code"])
 }
 
-// TestReadinessProbePanicIsReported covers a panicking probe.
+// TestReadinessProbePanicIsReported covers a panicking probe: the runner
+// recovers, reports probe_panic, and an optional probe does not gate /ready.
 func TestReadinessProbePanicIsReported(t *testing.T) {
 	stubRequiredReadinessServices(t)
 	clearReadinessProbesForTest(t)
 
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("migrations", func(context.Context) ProbeResult {
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("migrations", func(context.Context) readiness.Result {
 			panic("probe exploded")
 		}),
 		Required: false,
@@ -390,283 +396,10 @@ func TestReadinessProbePanicIsReported(t *testing.T) {
 	require.NotNil(t, component)
 	assert.Equal(t, false, component["ready"])
 	assert.Equal(t, "failed", component["status"])
-	assert.Equal(t, ProbeErrPanic, component["error_code"])
+	assert.Equal(t, readiness.CodePanic, component["error_code"])
 	detail, _ := component["detail"].(string)
 	assert.Contains(t, detail, "probe exploded")
 	assert.Contains(t, component, "checked_at")
-}
-
-// TestReadinessProbeSingleFlightBoundsGoroutines covers the single-flight rule:
-// a permanently stuck probe is invoked once no matter how often /ready polls,
-// and probing resumes after the stuck run returns.
-func TestReadinessProbeSingleFlightBoundsGoroutines(t *testing.T) {
-	stubRequiredReadinessServices(t)
-	clearReadinessProbesForTest(t)
-
-	release := make(chan struct{})
-	finished := make(chan struct{})
-	var calls atomic.Int64
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("exec_backend", func(context.Context) ProbeResult {
-			if calls.Add(1) == 1 {
-				<-release
-				close(finished)
-			}
-			return ProbeResult{State: ProbeStateReady}
-		}),
-		Required: true,
-		Timeout:  50 * time.Millisecond,
-	}))
-
-	router := readinessProbeTestRouter()
-
-	// Warm up: the first poll starts the run, which then blocks forever.
-	code, parsed := callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusServiceUnavailable, code)
-	require.Equal(t, ProbeErrTimeout,
-		readinessProbeComponents(t, parsed.Data)["exec_backend"]["error_code"])
-
-	before := runtime.NumGoroutine()
-	for i := 0; i < 20; i++ {
-		pollCode, pollParsed := callReadinessProbeEndpoint(t, router)
-		assert.Equal(t, http.StatusServiceUnavailable, pollCode)
-		component := readinessProbeComponents(t, pollParsed.Data)["exec_backend"]
-		assert.Equal(t, ProbeErrTimeout, component["error_code"])
-		assert.Equal(t, false, component["ready"])
-	}
-	after := runtime.NumGoroutine()
-	t.Logf("goroutines before=%d after=%d; probe invocations=%d", before, after, calls.Load())
-
-	assert.Equal(t, int64(1), calls.Load(), "a stuck probe must be invoked exactly once while it is in flight")
-	assert.LessOrEqual(t, after-before, 4, "20 polls of a stuck probe must not grow goroutines without bound")
-
-	close(release)
-	<-finished
-
-	// The stuck run has returned; the next poll probes again and reports ready.
-	deadline := time.Now().Add(3 * time.Second)
-	var last readinessTestResponse
-	var lastCode int
-	for time.Now().Before(deadline) {
-		lastCode, last = callReadinessProbeEndpoint(t, router)
-		if lastCode == http.StatusOK {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	require.Equal(t, http.StatusOK, lastCode, "probing must resume once the stuck run returned")
-	assert.Equal(t, "ready", last.Data["status"])
-	component := readinessProbeComponents(t, last.Data)["exec_backend"]
-	assert.Equal(t, true, component["ready"])
-	assert.Equal(t, "ready", component["status"])
-	assert.Equal(t, int64(2), calls.Load(), "the resumed poll must run the probe again")
-
-	t.Logf("after release: probe invocations=%d, goroutines=%d", calls.Load(), runtime.NumGoroutine())
-}
-
-// notReadonlyProbe is a probe that declares itself not read-only.
-type notReadonlyProbe struct{ name string }
-
-func (p notReadonlyProbe) Name() string   { return p.name }
-func (p notReadonlyProbe) Readonly() bool { return false }
-func (p notReadonlyProbe) Probe(context.Context) ProbeResult {
-	return ProbeResult{State: ProbeStateReady}
-}
-
-// TestReadinessProbeRegistrationValidation covers the batch validation rules:
-// bad specs are rejected, a rejected batch installs nothing, and re-registering
-// a name replaces it.
-func TestReadinessProbeRegistrationValidation(t *testing.T) {
-	clearReadinessProbesForTest(t)
-
-	healthy := func(context.Context) ProbeResult { return ProbeResult{State: ProbeStateReady} }
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("alpha", healthy), Required: true,
-	}))
-	require.Equal(t, []string{"alpha"}, RegisteredReadinessProbes())
-
-	t.Run("nil probe", func(t *testing.T) {
-		err := RegisterReadinessProbes(ReadinessProbeSpec{Required: true})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "nil probe")
-		assert.Equal(t, []string{"alpha"}, RegisteredReadinessProbes())
-	})
-
-	t.Run("empty name", func(t *testing.T) {
-		err := RegisterReadinessProbes(ReadinessProbeSpec{Probe: NewProbeFunc("   ", healthy)})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "empty name")
-		assert.Equal(t, []string{"alpha"}, RegisteredReadinessProbes())
-	})
-
-	t.Run("not read-only", func(t *testing.T) {
-		err := RegisterReadinessProbes(ReadinessProbeSpec{Probe: notReadonlyProbe{name: "beta"}})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read-only")
-		assert.Equal(t, []string{"alpha"}, RegisteredReadinessProbes())
-	})
-
-	t.Run("negative timeout", func(t *testing.T) {
-		err := RegisterReadinessProbes(ReadinessProbeSpec{
-			Probe: NewProbeFunc("beta", healthy), Timeout: -time.Second,
-		})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "negative timeout")
-		assert.Equal(t, []string{"alpha"}, RegisteredReadinessProbes())
-	})
-
-	t.Run("duplicate in batch", func(t *testing.T) {
-		err := RegisterReadinessProbes(
-			ReadinessProbeSpec{Probe: NewProbeFunc("beta", healthy)},
-			ReadinessProbeSpec{Probe: NewProbeFunc("beta", healthy)},
-		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "duplicate")
-		assert.Equal(t, []string{"alpha"}, RegisteredReadinessProbes())
-	})
-
-	t.Run("rejected batch installs nothing", func(t *testing.T) {
-		err := RegisterReadinessProbes(
-			ReadinessProbeSpec{Probe: NewProbeFunc("beta", healthy), Required: true},
-			ReadinessProbeSpec{Probe: NewProbeFunc("gamma", healthy), Timeout: -time.Millisecond},
-		)
-		require.Error(t, err)
-		assert.Equal(t, []string{"alpha"}, RegisteredReadinessProbes(),
-			"a single invalid spec must reject the whole batch")
-	})
-
-	t.Run("re-registration replaces", func(t *testing.T) {
-		require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-			Probe: NewProbeFunc("beta", healthy), Required: true,
-		}))
-		require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-			Probe: NewProbeFunc("beta", healthy), Required: false,
-		}))
-		assert.Equal(t, []string{"alpha", "beta"}, RegisteredReadinessProbes())
-
-		stubRequiredReadinessServices(t)
-		_, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
-		component := readinessProbeComponents(t, parsed.Data)["beta"]
-		require.NotNil(t, component)
-		assert.Equal(t, false, component["required"], "the replacement spec must win")
-	})
-
-	t.Run("timeout defaults when unset", func(t *testing.T) {
-		ClearReadinessProbes()
-		require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-			Probe: NewProbeFunc("alpha", healthy),
-		}))
-		specs := snapshotReadinessProbes()
-		require.Len(t, specs, 1)
-		assert.Equal(t, DefaultProbeTimeout, specs[0].Timeout)
-		assert.Equal(t, "alpha", specs[0].name)
-		assert.True(t, specs[0].readonly)
-	})
-}
-
-// TestReadinessProbeReplacementDiscardsInFlightResult covers the hand-off rule:
-// a run that was still in flight when its spec was replaced must never be
-// written into the replacement.
-func TestReadinessProbeReplacementDiscardsInFlightResult(t *testing.T) {
-	stubRequiredReadinessServices(t)
-	clearReadinessProbesForTest(t)
-
-	release := make(chan struct{})
-	var stalledCalls atomic.Int64
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("event_store", func(context.Context) ProbeResult {
-			stalledCalls.Add(1)
-			<-release
-			return ProbeResult{State: ProbeStateFailed, ErrCode: "stale_run", Detail: "old spec"}
-		}),
-		Required: true,
-		Timeout:  50 * time.Millisecond,
-	}))
-
-	router := readinessProbeTestRouter()
-	code, parsed := callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusServiceUnavailable, code)
-	require.Equal(t, ProbeErrTimeout,
-		readinessProbeComponents(t, parsed.Data)["event_store"]["error_code"])
-
-	// Replace the spec while the old run is still stuck.
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("event_store", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateReady, Detail: "new spec"}
-		}),
-		Required: true,
-		Timeout:  50 * time.Millisecond,
-	}))
-
-	code, parsed = callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusOK, code, "the replacement probe must be probed, not the old run")
-	component := readinessProbeComponents(t, parsed.Data)["event_store"]
-	assert.Equal(t, true, component["ready"])
-	assert.Equal(t, "ready", component["status"])
-	assert.Equal(t, "new spec", component["detail"])
-	assert.NotContains(t, component, "error_code")
-	assert.Equal(t, int64(1), stalledCalls.Load(), "the replaced probe must not be run again")
-
-	// Letting the replaced run finish must not change the replacement's state.
-	close(release)
-	time.Sleep(50 * time.Millisecond)
-	code, parsed = callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusOK, code)
-	component = readinessProbeComponents(t, parsed.Data)["event_store"]
-	assert.Equal(t, true, component["ready"])
-	assert.NotContains(t, component, "error_code")
-}
-
-// TestReadinessProbeStateCodesAreStable covers the state-to-code contract for
-// every non-ready state, including probes that return no code and probes that
-// return a state outside the enumeration.
-func TestReadinessProbeStateCodesAreStable(t *testing.T) {
-	stubRequiredReadinessServices(t)
-	clearReadinessProbesForTest(t)
-
-	require.NoError(t, RegisterReadinessProbes(
-		ReadinessProbeSpec{Probe: NewProbeFunc("degraded_dep", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateDegraded}
-		})},
-		ReadinessProbeSpec{Probe: NewProbeFunc("failed_dep", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateFailed}
-		})},
-		ReadinessProbeSpec{Probe: NewNotConfiguredProbe("vault", "no vault configured")},
-		ReadinessProbeSpec{Probe: NewProbeFunc("bogus_dep", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeState("melted")}
-		})},
-		ReadinessProbeSpec{Probe: NewProbeFunc("ready_with_stale_code", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateReady, ErrCode: "leftover_code"}
-		})},
-	))
-
-	code, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
-	require.Equal(t, http.StatusOK, code)
-	components := readinessProbeComponents(t, parsed.Data)
-
-	expected := map[string]string{
-		"degraded_dep":          ProbeErrDegraded,
-		"failed_dep":            ProbeErrFailed,
-		"vault":                 ProbeErrNotConfigured,
-		"bogus_dep":             ProbeErrFailed,
-		"ready_with_stale_code": "",
-	}
-	for name, expectedCode := range expected {
-		component, ok := components[name]
-		require.True(t, ok, "component %q missing", name)
-		if expectedCode == "" {
-			assert.NotContains(t, component, "error_code", "a ready probe must not publish a code")
-			continue
-		}
-		assert.Equal(t, expectedCode, component["error_code"], "component %q", name)
-		assert.Equal(t, false, component["ready"], "component %q", name)
-	}
-
-	assert.Equal(t, "failed", components["bogus_dep"]["status"],
-		"an unrecognized state must be reported as failed")
-	assert.Equal(t, "not_configured", components["vault"]["status"])
-	assert.Equal(t, "no vault configured", components["vault"]["detail"])
-	assert.Equal(t, "degraded", components["degraded_dep"]["status"])
 }
 
 // TestReadinessProbeOverridesLegacyComponent covers a probe whose name collides
@@ -676,9 +409,9 @@ func TestReadinessProbeOverridesLegacyComponent(t *testing.T) {
 	stubRequiredReadinessServices(t)
 	clearReadinessProbesForTest(t)
 
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("memory", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateFailed, ErrCode: "memory_store_down"}
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("memory", func(context.Context) readiness.Result {
+			return readiness.Result{State: readiness.StateFailed, ErrCode: "memory_store_down"}
 		}),
 		Required: true,
 	}))
@@ -698,9 +431,9 @@ func TestReadinessProbeOverridesLegacyComponent(t *testing.T) {
 	assert.Equal(t, "memory_store_down", component["error_code"])
 
 	// A probe that takes over a legacy name as optional removes its gating.
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("memory", func(context.Context) ProbeResult {
-			return ProbeResult{State: ProbeStateFailed, ErrCode: "memory_store_down"}
+	require.NoError(t, readiness.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc("memory", func(context.Context) readiness.Result {
+			return readiness.Result{State: readiness.StateFailed, ErrCode: "memory_store_down"}
 		}),
 		Required: false,
 	}))
@@ -716,10 +449,10 @@ func TestReadinessProbeConcurrentReadyAndRegistration(t *testing.T) {
 	clearReadinessProbesForTest(t)
 
 	router := readinessProbeTestRouter()
-	healthy := func(context.Context) ProbeResult { return ProbeResult{State: ProbeStateReady} }
-	require.NoError(t, RegisterReadinessProbes(
-		ReadinessProbeSpec{Probe: NewProbeFunc("alpha", healthy), Required: true},
-		ReadinessProbeSpec{Probe: NewProbeFunc("beta", healthy)},
+	healthy := func(context.Context) readiness.Result { return readiness.Result{State: readiness.StateReady} }
+	require.NoError(t, readiness.Register(
+		readiness.Spec{Probe: readiness.NewProbeFunc("alpha", healthy), Required: true},
+		readiness.Spec{Probe: readiness.NewProbeFunc("beta", healthy)},
 	))
 
 	var waitGroup sync.WaitGroup
@@ -753,11 +486,11 @@ func TestReadinessProbeConcurrentReadyAndRegistration(t *testing.T) {
 	}
 
 	for round := 0; round < 30; round++ {
-		require.NoError(t, RegisterReadinessProbes(
-			ReadinessProbeSpec{Probe: NewProbeFunc("alpha", healthy), Required: true},
-			ReadinessProbeSpec{Probe: NewProbeFunc("beta", healthy)},
+		require.NoError(t, readiness.Register(
+			readiness.Spec{Probe: readiness.NewProbeFunc("alpha", healthy), Required: true},
+			readiness.Spec{Probe: readiness.NewProbeFunc("beta", healthy)},
 		))
-		ClearReadinessProbes()
+		readiness.Clear()
 	}
 	close(stop)
 	waitGroup.Wait()
@@ -765,43 +498,4 @@ func TestReadinessProbeConcurrentReadyAndRegistration(t *testing.T) {
 	for worker, status := range statuses {
 		assert.Equal(t, int32(0), status, "worker %d saw an unexpected response", worker)
 	}
-}
-
-// TestReadinessProbeClearDropsInFlightProbe covers ClearReadinessProbes while a
-// run is still in flight: the cleared probe disappears from the response, its
-// late result is never published, and the slot is not reused.
-func TestReadinessProbeClearDropsInFlightProbe(t *testing.T) {
-	stubRequiredReadinessServices(t)
-	clearReadinessProbesForTest(t)
-
-	release := make(chan struct{})
-	var calls atomic.Int64
-	require.NoError(t, RegisterReadinessProbes(ReadinessProbeSpec{
-		Probe: NewProbeFunc("event_store", func(context.Context) ProbeResult {
-			calls.Add(1)
-			<-release
-			return ProbeResult{State: ProbeStateReady}
-		}),
-		Required: true,
-		Timeout:  50 * time.Millisecond,
-	}))
-
-	router := readinessProbeTestRouter()
-	code, parsed := callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusServiceUnavailable, code)
-	require.Contains(t, readinessProbeComponents(t, parsed.Data), "event_store")
-
-	ClearReadinessProbes()
-	code, parsed = callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusOK, code, "the cleared probe must not gate the verdict")
-	assert.NotContains(t, readinessProbeComponents(t, parsed.Data), "event_store")
-
-	// The abandoned run finishes late; nothing may resurface.
-	close(release)
-	time.Sleep(50 * time.Millisecond)
-	code, parsed = callReadinessProbeEndpoint(t, router)
-	require.Equal(t, http.StatusOK, code)
-	assert.NotContains(t, readinessProbeComponents(t, parsed.Data), "event_store",
-		"a late result from a cleared probe must not be published")
-	assert.Equal(t, int64(1), calls.Load(), "a cleared probe must not be run again")
 }

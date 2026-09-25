@@ -544,3 +544,244 @@ func TestOpenRejectsUnusableTarget(t *testing.T) {
 		t.Fatal("a path containing '?' must be rejected")
 	}
 }
+
+// sqliteExtendedCode extracts the full extended SQLite result code, or -1 if
+// err is not a *sqlite.Error. The primary-code helper above masks this down to
+// the low byte; the BUSY family is the one place the extended code carries the
+// meaning (SQLITE_BUSY_SNAPSHOT vs plain SQLITE_BUSY), so it is asserted whole.
+func sqliteExtendedCode(err error) int {
+	var serr *sqlite.Error
+	if errors.As(err, &serr) {
+		return serr.Code()
+	}
+	return -1
+}
+
+const (
+	sqliteBusySnapshot = 517 // SQLITE_BUSY_SNAPSHOT
+)
+
+// seedTxLockFixture creates a WAL file database with one row and returns its
+// path, so each TxLock subtest starts from an identical file. A file database
+// is required: WAL and cross-handle locking are the whole point.
+func seedTxLockFixture(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "txlock.db")
+	db, err := dbx.Open(path)
+	if err != nil {
+		t.Fatalf("seed open: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE counter (id INTEGER PRIMARY KEY, v INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO counter VALUES (1, 0)`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	return path
+}
+
+// TestTxLockImmediateAvoidsSnapshotUpgradeFailure is the §26.17 P1 regression
+// guard. Under WAL a deferred transaction that reads and then writes can be
+// refused with SQLITE_BUSY_SNAPSHOT (517) when another connection commits in
+// between; SQLite does not call the busy handler for that upgrade failure, so
+// busy_timeout cannot rescue it. The first subtest reproduces exactly that.
+// The second proves WithTxLock("immediate") removes it: the transaction holds
+// the write lock from BEGIN, so the competing writer waits (up to its busy
+// budget) instead of invalidating the reader's snapshot.
+func TestTxLockImmediateAvoidsSnapshotUpgradeFailure(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("deferred_read_then_write_fails_with_busy_snapshot", func(t *testing.T) {
+		path := seedTxLockFixture(t)
+		dbA, err := dbx.Open(path) // default: deferred
+		if err != nil {
+			t.Fatalf("open A: %v", err)
+		}
+		defer dbA.Close()
+		dbB, err := dbx.Open(path)
+		if err != nil {
+			t.Fatalf("open B: %v", err)
+		}
+		defer dbB.Close()
+
+		tx, err := dbA.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("A begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		// Step 1: A reads, taking a read snapshot.
+		var v int
+		if err := tx.QueryRowContext(ctx, `SELECT v FROM counter WHERE id = 1`).Scan(&v); err != nil {
+			t.Fatalf("A read: %v", err)
+		}
+
+		// Step 2: B writes and commits, advancing the database past A's snapshot.
+		if _, err := dbB.ExecContext(ctx, `UPDATE counter SET v = v + 10 WHERE id = 1`); err != nil {
+			t.Fatalf("B write: %v", err)
+		}
+
+		// Step 3: A tries to upgrade its read transaction to a write one. This
+		// is the step the busy handler cannot save: it must fail immediately
+		// with the snapshot-conflict extended code, not wait for the 5s budget.
+		start := time.Now()
+		_, err = tx.ExecContext(ctx, `UPDATE counter SET v = v + 1 WHERE id = 1`)
+		waited := time.Since(start)
+		if err == nil {
+			t.Fatal("deferred read-then-write succeeded after a concurrent commit; " +
+				"the snapshot-upgrade failure this card guards against did not reproduce")
+		}
+		if code := sqliteExtendedCode(err); code != sqliteBusySnapshot {
+			t.Fatalf("error code = %d, want %d (SQLITE_BUSY_SNAPSHOT); err: %v", code, sqliteBusySnapshot, err)
+		}
+		if waited > 2*time.Second {
+			t.Fatalf("upgrade failure took %s; SQLite must not invoke the busy handler for a snapshot conflict", waited)
+		}
+		t.Logf("deferred upgrade failed immediately (%s) with the documented code: %v", waited, err)
+	})
+
+	t.Run("immediate_holds_the_write_lock_from_begin", func(t *testing.T) {
+		path := seedTxLockFixture(t)
+		dbA, err := dbx.Open(path, dbx.WithTxLock("immediate"))
+		if err != nil {
+			t.Fatalf("open A: %v", err)
+		}
+		defer dbA.Close()
+		dbB, err := dbx.Open(path) // default 5s busy budget
+		if err != nil {
+			t.Fatalf("open B: %v", err)
+		}
+		defer dbB.Close()
+
+		tx, err := dbA.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("A begin: %v", err)
+		}
+		var v int
+		if err := tx.QueryRowContext(ctx, `SELECT v FROM counter WHERE id = 1`).Scan(&v); err != nil {
+			t.Fatalf("A read: %v", err)
+		}
+
+		// B's write must now block on A's write lock instead of succeeding.
+		// B is released by A's commit below.
+		const hold = 400 * time.Millisecond
+		type writeResult struct {
+			err    error
+			waited time.Duration
+		}
+		done := make(chan writeResult, 1)
+		go func() {
+			start := time.Now()
+			_, err := dbB.ExecContext(ctx, `UPDATE counter SET v = v + 10 WHERE id = 1`)
+			done <- writeResult{err: err, waited: time.Since(start)}
+		}()
+
+		// A writes inside its transaction, then commits after `hold`; the read
+		// followed by the write is exactly the pattern that failed above.
+		time.Sleep(hold)
+		if _, err := tx.ExecContext(ctx, `UPDATE counter SET v = v + 1 WHERE id = 1`); err != nil {
+			t.Fatalf("A write under immediate must succeed: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("A commit: %v", err)
+		}
+
+		res := <-done
+		if res.err != nil {
+			t.Fatalf("B write failed (%v); with immediate it must wait for A instead", res.err)
+		}
+		if res.waited < hold/2 {
+			t.Fatalf("B returned after %s, expected it to block for ~%s on A's write lock", res.waited, hold)
+		}
+		t.Logf("B waited %s for A's immediate transaction and then succeeded", res.waited)
+
+		// Both increments landed: no lost update and no failed statement.
+		if err := dbA.QueryRowContext(ctx, `SELECT v FROM counter WHERE id = 1`).Scan(&v); err != nil {
+			t.Fatalf("final read: %v", err)
+		}
+		if v != 11 {
+			t.Errorf("final counter = %d, want 11 (both increments applied exactly once)", v)
+		}
+	})
+}
+
+// TestTxLockRejectsInvalidMode pins the validation contract: an unknown mode
+// fails at Open with an error naming the option, before any handle exists, and
+// the valid modes are accepted case-insensitively.
+func TestTxLockRejectsInvalidMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mode.db")
+
+	for _, mode := range []string{"bogus", "IMMEDIATEX", "defer", "immediate ", ""} {
+		if mode == "" {
+			continue // "" means "unset", covered by TestTxLockAbsentByDefault
+		}
+		if _, err := dbx.Open(path, dbx.WithTxLock(mode)); err == nil {
+			t.Errorf("WithTxLock(%q) was accepted, want an error", mode)
+		} else {
+			t.Logf("WithTxLock(%q) rejected: %v", mode, err)
+		}
+	}
+
+	for _, mode := range []string{"deferred", "immediate", "exclusive", "IMMEDIATE", "Deferred", "EXCLUSIVE"} {
+		db, err := dbx.Open(path, dbx.WithTxLock(mode))
+		if err != nil {
+			t.Fatalf("WithTxLock(%q) rejected: %v", mode, err)
+		}
+		// The mode must survive to a real transaction, not just the DSN.
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatalf("begin with mode %q: %v", mode, err)
+		}
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("rollback with mode %q: %v", mode, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("close with mode %q: %v", mode, err)
+		}
+	}
+}
+
+// TestTxLockAbsentByDefault proves the default handle still issues a plain
+// BEGIN: a transaction that has only read must NOT be holding the write lock,
+// so another connection can commit while it is open. This is the behavioural
+// form of "no _txlock parameter is emitted by default" — if the factory ever
+// applied immediate unconditionally, the second writer would be blocked here
+// and this test would fail instead of the production read-then-write paths
+// silently changing their locking behaviour.
+func TestTxLockAbsentByDefault(t *testing.T) {
+	ctx := context.Background()
+	path := seedTxLockFixture(t)
+
+	dbA, err := dbx.Open(path) // no options: must stay deferred
+	if err != nil {
+		t.Fatalf("open A: %v", err)
+	}
+	defer dbA.Close()
+	// A short budget turns "is A holding the write lock?" into a fast,
+	// unambiguous answer: blocked -> SQLITE_BUSY within 100ms.
+	dbB, err := dbx.Open(path, dbx.WithBusyTimeout(100*time.Millisecond))
+	if err != nil {
+		t.Fatalf("open B: %v", err)
+	}
+	defer dbB.Close()
+
+	tx, err := dbA.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("A begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var v int
+	if err := tx.QueryRowContext(ctx, `SELECT v FROM counter WHERE id = 1`).Scan(&v); err != nil {
+		t.Fatalf("A read: %v", err)
+	}
+
+	// A has only read. If the factory had pinned immediate, A would already
+	// hold the write lock and this statement would time out.
+	if _, err := dbB.ExecContext(ctx, `UPDATE counter SET v = v + 10 WHERE id = 1`); err != nil {
+		t.Fatalf("B write while A holds only a read transaction failed: %v; "+
+			"the default handle must issue a plain (deferred) BEGIN", err)
+	}
+	t.Log("a default handle does not take the write lock at BEGIN: no _txlock is applied by default")
+}

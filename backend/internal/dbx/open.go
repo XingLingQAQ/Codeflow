@@ -13,6 +13,10 @@
 //   - journal_mode = WAL (file databases only; meaningless for in-memory)
 //   - busy_timeout = 5000 ms
 //
+// WithTxLock additionally pins the BEGIN mode of every transaction
+// (deferred/immediate/exclusive); see its doc comment for why a
+// read-then-write transaction needs "immediate" under WAL.
+//
 // Path contract: pass a plain filesystem path for a file database (the
 // parent directory must already exist), or ""/":memory:" for a private
 // in-memory database. "file:" URIs are rejected: shared-cache memory URIs
@@ -47,10 +51,30 @@ type config struct {
 	synchronous   string
 	maxOpenConns  int
 	pragmas       []string
+	txLock        string
 }
 
 // Option configures Open.
 type Option func(*config)
+
+// WithTxLock sets the SQLite transaction mode every Begin/BeginTx on the
+// returned handle uses: "deferred" (SQLite's own default), "immediate" or
+// "exclusive". The value is case-insensitive; any other value makes Open
+// return an error.
+//
+// Why this option exists: under WAL, a deferred transaction that reads first
+// and writes second can be refused with SQLITE_BUSY_SNAPSHOT (extended code
+// 517) when another connection commits between the two steps. SQLite does not
+// invoke the busy handler for that upgrade failure, so busy_timeout cannot
+// help and the transaction fails immediately. A read-then-write transaction
+// (an expected_revision CAS is the canonical case) must therefore take the
+// write lock at BEGIN, which is what "immediate" does.
+//
+// Not passing this option leaves the DSN byte-for-byte unchanged (no _txlock
+// parameter is emitted), so existing callers keep SQLite's deferred default.
+func WithTxLock(mode string) Option {
+	return func(c *config) { c.txLock = mode }
+}
 
 // WithBusyTimeout sets the per-connection busy timeout. d <= 0 means no
 // waiting: lock conflicts fail immediately with SQLITE_BUSY.
@@ -101,6 +125,8 @@ func WithPragma(stmt string) Option {
 
 // Open opens a SQLite database at path and verifies the connection by
 // pinging it, so DSN/pragma errors surface here rather than at first use.
+// WithTxLock, when passed, must name a valid transaction mode or Open
+// returns an error before any handle is created.
 //
 // The returned *sql.DB is owned by the caller, who must Close it. If Open
 // fails it has already closed the half-open handle. For an in-memory
@@ -115,6 +141,18 @@ func Open(path string, opts ...Option) (*sql.DB, error) {
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
+		}
+	}
+
+	// Validate the transaction mode here rather than leaving it to the driver,
+	// so the error names the option the caller passed.
+	if cfg.txLock != "" {
+		lower := strings.ToLower(cfg.txLock)
+		switch lower {
+		case "deferred", "immediate", "exclusive":
+			cfg.txLock = lower
+		default:
+			return nil, fmt.Errorf("dbx: unknown transaction mode %q: want deferred, immediate or exclusive", cfg.txLock)
 		}
 	}
 
@@ -160,6 +198,11 @@ func (c *config) query(file bool) url.Values {
 	}
 	if c.synchronous != "" {
 		q.Set("_synchronous", c.synchronous)
+	}
+	// Only emitted when the caller asked for it: without WithTxLock the DSN
+	// must stay byte-for-byte what it was before the option existed.
+	if c.txLock != "" {
+		q.Set("_txlock", c.txLock)
 	}
 	for _, p := range c.pragmas {
 		q.Add("_pragma", p)

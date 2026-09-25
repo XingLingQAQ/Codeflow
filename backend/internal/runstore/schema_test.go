@@ -66,14 +66,22 @@ func TestSQLiteVersionMatchesPinnedCodes(t *testing.T) {
 	}
 }
 
-// schemaDB returns a migrated file database with one project and one task, so
-// each case only has to add what it is actually testing.
+// schemaDB returns a migrated file database with one project, one task and the
+// input snapshot every runInsert fixture pins, so each case only has to add
+// what it is actually testing.
+//
+// The snapshot row is not optional decoration: migration 002's
+// trg_runs_input_snapshot_must_match refuses a run whose input_snapshot_id /
+// input_snapshot_hash do not name a real input_snapshots row of the same
+// project, so every run fixture needs one. See runInsert for why the constants
+// below must stay in step.
 func schemaDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, _ := migrateTemp(t)
 	exec(t, db, `INSERT INTO project_refs (project_id, source_revision, snapshot_hash, state, captured_at, verified_at)
 	             VALUES ('p-1', NULL, 'sha256:proj', 'active', 1, 2)`)
 	exec(t, db, taskInsert, "t-1", "p-1", "ready")
+	exec(t, db, snapshotInsert, runSnapshotID, "p-1")
 	return db
 }
 
@@ -81,12 +89,33 @@ const taskInsert = `INSERT INTO tasks (id, project_id, title, kind, status, prio
     input_json, input_hash, lease_epoch, revision, created_at, updated_at)
     VALUES (?, ?, 'title', 'code', ?, 0, '{"p":1}', 'sha256:in', 0, 1, 1, 2)`
 
+// The snapshot identity every runInsert/runInsertWith fixture pins, and the
+// row that makes it valid (002). They are one constant pair on purpose: the two
+// lists cannot drift apart without a fixture failing loudly.
+const (
+	runSnapshotID   = "snap-1"
+	runSnapshotHash = "sha256:s"
+)
+
+const snapshotInsert = `INSERT INTO input_snapshots (id, project_id, content_json, content_hash, created_at)
+    VALUES (?, ?, '{"frozen":true}', 'sha256:s', 1)`
+
 // runInsert inserts a run with every required column; optional columns are
 // passed explicitly by the cases that care about them.
 const runInsert = `INSERT INTO runs (id, task_id, project_id, command_id, binding_id, binding_revision,
     base_manifest_hash, base_commit, agent_revision_id, input_snapshot_id, input_snapshot_hash,
     budget_json, status, revision, retry_of_run_id, created_at, updated_at, finished_at)
     VALUES (?, ?, ?, ?, 'b-1', 1, 'sha256:m', NULL, 'ar-1', 'snap-1', 'sha256:s', '{}', ?, 1, NULL, 10, 11, NULL)`
+
+// runInsertSnapshot is runInsert with the pinned input snapshot id explicit, for
+// cases that need a run under a project other than p-1: 002's
+// trg_runs_input_snapshot_must_match requires the snapshot to belong to the
+// run's own project, so a p-2 run cannot reuse p-1's snap-1.
+// Args: id, task_id, project_id, command_id, input_snapshot_id, status.
+const runInsertSnapshot = `INSERT INTO runs (id, task_id, project_id, command_id, binding_id, binding_revision,
+    base_manifest_hash, base_commit, agent_revision_id, input_snapshot_id, input_snapshot_hash,
+    budget_json, status, revision, retry_of_run_id, created_at, updated_at, finished_at)
+    VALUES (?, ?, ?, ?, 'b-1', 1, 'sha256:m', NULL, 'ar-1', ?, 'sha256:s', '{}', ?, 1, NULL, 10, 11, NULL)`
 
 // runInsertWith is runInsert with the three nullable frozen columns explicit, so
 // a test can seed command_id/base_commit/retry_of_run_id at insert time (they
@@ -177,7 +206,15 @@ func TestSchemaForeignKeys(t *testing.T) {
 		             VALUES ('p-2', NULL, 'sha256:proj2', 'active', 1, 2)`)
 		// t-1 belongs to p-1; claiming p-2 must fail on the composite foreign
 		// key even though both projects exist.
-		wantErr(t, db, runInsert, []any{"r-x", "t-1", "p-2", nil, "queued"},
+		//
+		// p-2 needs a snapshot of its own so that the only thing wrong with the
+		// statement below is the project mismatch: a run pinned to p-1's
+		// snapshot under p-2 would also trip 002's
+		// trg_runs_input_snapshot_must_match, and that trigger is evaluated
+		// before the foreign keys, so it would mask the composite key this case
+		// is about.
+		exec(t, db, snapshotInsert, "snap-p2", "p-2")
+		wantErr(t, db, runInsertSnapshot, []any{"r-x", "t-1", "p-2", nil, "snap-p2", "queued"},
 			sqliteConstraintForeignKey, "FOREIGN KEY")
 
 		// The matching pair is accepted, so the failure above is the composite

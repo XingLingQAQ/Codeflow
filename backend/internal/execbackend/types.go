@@ -95,8 +95,10 @@ type Session interface {
 	// capability_unavailable；未知 ApprovalID 返回 invalid_request；重复投递同一
 	// 裁决必须幂等（不产生第二次副作用）。会话已关闭返回 session_closed。
 	Approve(ctx context.Context, d ApprovalDecision) error
-	// Cancel 请求取消，幂等。mode 不合法返回 invalid_request；不支持取消能力的
-	// 后端返回 capability_unavailable。会话已关闭返回 session_closed。
+	// Cancel 请求取消，幂等。mode 不合法返回 invalid_request；只有 CancelGraceful
+	// 受 cancel_graceful 能力约束——未声明时返回 capability_unavailable，调用方应升级
+	// 为 CancelForce。CancelForce 永远可用、不受任何能力闸控：Run 必须始终能被停下
+	// （§27.2 第 6 条）。会话已关闭返回 session_closed。
 	Cancel(ctx context.Context, mode CancelMode) error
 	// Wait 等待会话终结并返回最终结果，可重复调用且结果一致。
 	// 实现内部错误（如协议损坏）以 error 返回，同时仍应有终结观察与最终结果；

@@ -21,6 +21,7 @@ import (
 	"github.com/codeflow/backend/internal/planner"
 	"github.com/codeflow/backend/internal/privacy"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/readiness"
 	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/workspace"
@@ -84,24 +85,24 @@ func ReadinessCheck(c *gin.Context) {
 		"skill":     readinessComponent{Ready: skill.HasRegistry(), Required: false},
 	}
 
-	// Probe-backed dependency checks (I-54, T0.12.a): run registered probes
+	// Probe-backed dependency checks (I-54, T0.12): run registered probes
 	// concurrently under per-probe deadlines and merge them into components.
 	// A probe entry overrides a same-named legacy Has* entry with the richer
 	// payload while keeping the ready/required fields consumers already read.
-	probed := runReadinessProbes(c.Request.Context())
-	for name, pc := range probed {
-		latencyMS := pc.latency.Milliseconds()
+	probed := readiness.Run(c.Request.Context())
+	for name, probe := range probed {
+		latencyMS := probe.Latency.Milliseconds()
 		component := readinessComponent{
-			Ready:     pc.result.State == ProbeStateReady,
-			Required:  pc.spec.Required,
-			Status:    string(pc.result.State),
-			Readonly:  pc.spec.readonly,
-			ErrorCode: pc.result.ErrCode,
+			Ready:     probe.Result.State == readiness.StateReady,
+			Required:  probe.Required,
+			Status:    string(probe.Result.State),
+			Readonly:  probe.Readonly,
+			ErrorCode: probe.Result.ErrCode,
 			LatencyMS: &latencyMS,
-			Detail:    pc.result.Detail,
+			Detail:    probe.Result.Detail,
 		}
-		if !pc.checkedAt.IsZero() {
-			component.CheckedAt = pc.checkedAt.UTC().Format(time.RFC3339)
+		if !probe.CheckedAt.IsZero() {
+			component.CheckedAt = probe.CheckedAt.UTC().Format(time.RFC3339)
 		}
 		components[name] = component
 	}
@@ -117,8 +118,8 @@ func ReadinessCheck(c *gin.Context) {
 	// Required probes gate the overall verdict the same way required Has*
 	// services do: a required probe not in state ready makes /ready 503.
 	if ready {
-		for _, pc := range probed {
-			if pc.spec.Required && pc.result.State != ProbeStateReady {
+		for _, probe := range probed {
+			if probe.Required && probe.Result.State != readiness.StateReady {
 				ready = false
 				break
 			}
