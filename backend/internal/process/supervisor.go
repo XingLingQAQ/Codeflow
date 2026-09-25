@@ -1,11 +1,12 @@
 // Package process 定义外部进程的所有权、身份、取消、等待与输出模型，并提供不依赖
 // 业务包的“进程身份”原语（§15 T1.08、§27.5 第 6 条）。
 //
-// 本包只依赖标准库与 golang.org/x/sys。策略闸控（policy.OperationProcessStart）、
-// Windows Job Object / Unix 进程组绑定、软/强取消、管道持续排空与有界 spool 属于
-// T1.08.b，在本包内由 Supervisor/Handle/Spool 接口与其注释固定契约，此处不实现。
+// 本包只依赖标准库、golang.org/x/sys 与 policy（策略闸控）。T1.08.b 已实现
+// Supervisor/Handle/Spool：Start 的闸控顺序、Windows Job Object 与 Unix 进程组绑定、
+// 软/强取消与升级、管道持续排空到有界 spool、退出终态与 marker（见 start.go、
+// spool.go、tree_*.go）。实时按行/按帧输出流与 spool 脱敏属于后续步骤，不在此列。
 //
-// 硬性约定（b 步实现时不得削弱）：
+// 硬性约定：
 //   - Start 必须先过策略闸控（OperationProcessStart），闸控失败不得创建进程。
 //   - 进程树必须绑定到 OS 原语（Windows Job Object / Unix 进程组），不能只 kill
 //     直接子进程——否则脱离的子孙会变成孤儿。
@@ -113,6 +114,11 @@ type Spec struct {
 	// MaxSpoolBytes 是输出 spool 保留的字节上限；0 表示 DefaultMaxSpoolBytes。
 	// 超出部分被丢弃但计入 Exit.SpoolTruncatedBytes，不能静默截断。
 	MaxSpoolBytes int64
+	// MarkerPath 是可选的进程身份落盘位置（绝对路径）。非空时 supervisor 在启动后
+	// 原子写入 identity/owner/path/参数个数/started_at，退出时原子更新
+	// reason/code/forced/finished_at——后端崩溃后，marker 是“这个 PID 属于谁”的
+	// 现场凭证。绝不写入 Env 的值或参数内容（可能含凭据）。
+	MarkerPath string
 }
 
 // Validate 校验 Spec 的可用性。它不做文件系统访问（路径存在性、是否可执行、是否
@@ -140,6 +146,11 @@ func (s Spec) Validate() error {
 	}
 	if s.MaxSpoolBytes < 0 {
 		return fmt.Errorf("process: spec max spool bytes %d is negative", s.MaxSpoolBytes)
+	}
+	if s.MarkerPath != "" {
+		if err := validateAbsCleanPath("marker path", s.MarkerPath); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -236,8 +247,13 @@ type Exit struct {
 	Code *int `json:"code,omitempty"`
 	// Reason 说明为什么结束。
 	Reason ExitReason `json:"reason"`
-	// SpoolTruncatedBytes 是因超过 MaxSpoolBytes 而被丢弃的输出字节数。
+	// SpoolTruncatedBytes 是因超过 MaxSpoolBytes 而被丢弃的输出字节数，
+	// 口径是 stdout 与 stderr 两路截断之和（两路各自独立计上限）。
 	SpoolTruncatedBytes int64 `json:"spool_truncated_bytes"`
+	// Forced 报告这次结束是否用到了强制终止：CancelForce 直接强杀，或 soft 超过
+	// GracePeriod 后的升级。Reason 仍是 cancelled——调用方靠 Forced 区分“优雅退出”
+	// 与“被强杀”，两者对上层（是否要清理工作区、是否要重试）含义不同。
+	Forced bool `json:"forced"`
 }
 
 // Supervisor 创建并监督外部进程。
@@ -255,8 +271,11 @@ type Handle interface {
 	// Identity 返回启动时捕获的进程身份（PID+启动时间标记+owner）。只有它落库后，
 	// 进程才可能在崩溃恢复时被安全地重新认领或清理。
 	Identity() Identity
-	// Output 返回有界输出 spool 的只读视图。
+	// Output 返回 stdout 的有界输出 spool 的只读视图。
 	Output() Spool
+	// Stderr 返回 stderr 的有界输出 spool 的只读视图。两路分开保留、不混流：
+	// 诊断信息与程序输出混在一起会让上游无法区分，也会让脱敏与展示失去依据。
+	Stderr() Spool
 	// Cancel 请求终止整棵进程树，幂等。mode=CancelSoft 先发软终止，超过
 	// spec.GracePeriod 仍未退出则自动升级为强制的 CancelForce；mode=CancelForce
 	// 立即强制终止。执行归属未确认（Identity.OwnedBy/Verify 不通过）时不得 kill，

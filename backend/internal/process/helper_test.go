@@ -22,13 +22,14 @@ import (
 //
 // 环境变量：
 //
-//	CODEFLOW_PROCESS_HELPER  helper 模式：tree|flood|ignore-term|exit
+//	CODEFLOW_PROCESS_HELPER  helper 模式：tree|flood|ignore-term|exit|graceful-exit|spawn-and-exit
 //	CODEFLOW_HELPER_DEPTH    tree：本进程还要往下递归几层
 //	CODEFLOW_HELPER_FANOUT   tree：每层启动几个子进程
-//	CODEFLOW_HELPER_REPORT   tree：{pid,ppid,depth} JSON 行追加写入的报告文件
+//	CODEFLOW_HELPER_REPORT   tree|graceful-exit|spawn-and-exit：{pid,ppid,depth} JSON 行追加写入的报告文件
 //	CODEFLOW_HELPER_RELEASE  tree|ignore-term|exit：该文件出现后进程退出
 //	CODEFLOW_HELPER_BYTES    flood：向 stdout 写入的字节数
 //	CODEFLOW_HELPER_CODE     exit：退出码
+//	CODEFLOW_HELPER_TIMEOUT  spawn-and-exit：等后代写出报告行的上限（毫秒，0 表示默认）
 const (
 	helperModeEnv    = "CODEFLOW_PROCESS_HELPER"
 	helperDepthEnv   = "CODEFLOW_HELPER_DEPTH"
@@ -37,11 +38,15 @@ const (
 	helperReleaseEnv = "CODEFLOW_HELPER_RELEASE"
 	helperBytesEnv   = "CODEFLOW_HELPER_BYTES"
 	helperCodeEnv    = "CODEFLOW_HELPER_CODE"
+	helperTimeoutEnv = "CODEFLOW_HELPER_TIMEOUT"
 
-	helperModeTree       = "tree"
-	helperModeFlood      = "flood"
-	helperModeIgnoreTerm = "ignore-term"
-	helperModeExit       = "exit"
+	helperModeTree        = "tree"
+	helperModeFlood       = "flood"
+	helperModeIgnoreTerm  = "ignore-term"
+	helperModeResistsTerm = "resists-term"
+	helperModeExit        = "exit"
+	helperModeGraceful    = "graceful-exit"
+	helperModeSpawnAndOut = "spawn-and-exit"
 
 	// helperSigbreakNumber 是 Windows 的 SIGBREAK 信号号（os/signal 在 Windows 上
 	// 把它对应到 CTRL_BREAK_EVENT）。在 Unix 上 21 号信号是 SIGTTIN，忽略它对
@@ -70,6 +75,8 @@ func runHelper(mode string) int {
 		ignoreSoftTermination()
 		blockUntilReleased()
 		return 0
+	case helperModeResistsTerm:
+		return helperResistsTermination()
 	case helperModeExit:
 		// 未设置 CODEFLOW_HELPER_RELEASE 时立即退出；设置了就先等该文件出现，
 		// 这样测试能在进程存活期间捕获身份，再确定性地观察退出。
@@ -77,6 +84,10 @@ func runHelper(mode string) int {
 			blockUntilReleased()
 		}
 		return helperInt(helperCodeEnv, 0)
+	case helperModeGraceful:
+		return helperGracefulExit()
+	case helperModeSpawnAndOut:
+		return helperSpawnAndExit()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown helper mode %q\n", mode)
 		return 2
@@ -177,6 +188,135 @@ func helperFlood() int {
 		}
 	}
 	return 0
+}
+
+// helperResistsTermination 是“软终止无效”的对手：注册（而不是忽略）软终止处理器，
+// 收到后只记数不退出，然后继续阻塞。这正是升级路径要面对的场景——软终止确实投递到了，
+// 但进程不配合。
+//
+// 为什么不复用 ignore-term 的 signal.Ignore：在 Windows 上，signal.Ignore(SIGBREAK)
+// 会让 Go 运行时的控制台处理器返回 0（未处理），默认处理器随即结束进程——反而变成
+// “软终止立即生效”，测不出升级。注册处理器能让运行时把事件接住并交给我们的 channel。
+// Unix 上信号被处理器接住，同样不会终止进程。
+//
+// 装好处理器之后写一行报告：测试端据此确认软终止一定是在处理器就绪之后投递的。
+func helperResistsTermination() int {
+	signals := make(chan os.Signal, 4)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.Signal(helperSigbreakNumber))
+	defer signal.Stop(signals)
+	soft := 0
+	go func() {
+		for range signals {
+			soft++
+		}
+	}()
+	if err := appendHelperLine(0); err != nil {
+		fmt.Fprintf(os.Stderr, "helper report: %v\n", err)
+		return 6
+	}
+	blockUntilReleased()
+	_ = soft
+	return 0
+}
+
+// helperGracefulExit 是“协作式”对手：先装好软终止处理器并写一行报告（测试据此确认
+// 处理器已经就绪，避免在处理器装好之前投递信号导致默认动作直接终止进程），然后阻塞
+// 等待软终止；收到就退出 0。
+//
+// Windows 上软终止是 CTRL_BREAK（os/signal 的 SIGBREAK），Unix 上是 SIGTERM，
+// 两边都必须被这一个 helper 认出来。
+func helperGracefulExit() int {
+	ready := make(chan struct{}, 1)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.Signal(helperSigbreakNumber))
+	defer signal.Stop(signals)
+	go func() {
+		<-signals
+		ready <- struct{}{}
+	}()
+	if err := appendHelperLine(0); err != nil {
+		fmt.Fprintf(os.Stderr, "helper report: %v\n", err)
+		return 6
+	}
+	select {
+	case <-ready:
+		return 0
+	case <-time.After(helperDuration(helperTimeoutEnv, 10*time.Minute)):
+		// 兜底：软终止始终没来就自己退出，避免测试夹具变成永久孤儿。
+		return 0
+	}
+}
+
+// helperSpawnAndExit 派生一个后代后主进程立即退出，用来验证“父进程自然退出后残留
+// 后代仍被清理”。后代是 tree 模式的 helper（depth=0）：写一行报告后永久阻塞。
+//
+// 主进程先写自己的报告行，再等报告文件出现第二行才退出：必须确保测试已经知道后代的
+// PID，才能在后代被杀之后断言它确实死了。
+func helperSpawnAndExit() int {
+	if err := appendHelperLine(1); err != nil {
+		fmt.Fprintf(os.Stderr, "helper report: %v\n", err)
+		return 3
+	}
+	cmd := exec.Command(helperExecutable())
+	cmd.Env = helperChildEnv(0, 0)
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "helper spawn: %v\n", err)
+		return 4
+	}
+	// 不 Wait：后代必须活到主进程退出之后。
+	timeout := helperDuration(helperTimeoutEnv, 10*time.Second)
+	// 先等后代写出报告行（测试端据此拿到后代 PID）……
+	if !waitForReportDepth(os.Getenv(helperReportEnv), 0, timeout) {
+		fmt.Fprintln(os.Stderr, "helper: descendant did not report in time")
+		return 7
+	}
+	// ……再等测试端写出“已接管”哨兵（depth=99）：只有测试确认过后代身份，主进程才
+	// 退出。否则主进程可能抢在测试读报告之前退出，把后代一起带走，测试就无法先证明
+	// “后代活着”。
+	if !waitForReportDepth(os.Getenv(helperReportEnv), helperSentinelDepth, timeout) {
+		fmt.Fprintln(os.Stderr, "helper: test sentinel did not appear in time")
+		return 8
+	}
+	return 0
+}
+
+// helperSentinelDepth 是测试端写给 helper 的“已接管”哨兵行深度。
+const helperSentinelDepth = 99
+
+// waitForReportDepth 轮询报告文件直到出现指定 depth 的行。纯文件轮询，不依赖任何
+// 测试框架状态，可以在 helper 模式（非 test goroutine）里使用。
+func waitForReportDepth(path string, depth int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if data, err := os.ReadFile(path); err == nil {
+			for _, raw := range strings.Split(string(data), "\n") {
+				if strings.TrimSpace(raw) == "" {
+					continue
+				}
+				var line helperReportLine
+				if err := json.Unmarshal([]byte(raw), &line); err == nil && line.Depth == depth {
+					return true
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(helperReleasePoll)
+	}
+}
+
+// helperDuration 读取毫秒数的时长环境变量。
+func helperDuration(name string, def time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return time.Duration(n) * time.Millisecond
 }
 
 // ignoreSoftTermination 让 helper 对软终止免疫：Unix 忽略 SIGTERM，Windows 忽略
