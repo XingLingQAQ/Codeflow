@@ -47,6 +47,36 @@ const (
 	HookOnTaskComplete    HookType = "hook_on_task_complete"
 )
 
+// Reserved hook types (T1.07.a). They carry the tool and Run lifecycles the
+// 3.0 CLI backend needs and have no call site yet: trigger_points.go lists them
+// with Owner "T1.07.b", and TestReservedHookTypesHaveNoCallSite pins that they
+// are unused today.
+//
+// They are deliberately NOT in cmd/codeflow-server's runtime allowlist yet (that
+// is T1.07.b's BOOT wiring). Trigger/TriggerHook return (payload, nil) for a
+// hook type outside an explicit allowlist, so a reserved type that reached a
+// call site before the allowlist was extended would silently turn a reject
+// policy into a pass -- which is why the wiring and the call sites must land in
+// the same step.
+//
+// Payload contracts: ToolHookPayload (HookPreToolUse/HookPostToolUse) and
+// RunHookPayload (HookRunStart/HookRunFinish) in payload.go.
+const (
+	// HookPreToolUse fires before a backend tool request reaches the Guard; a
+	// rejection means the tool is not executed. Handler retries are allowed;
+	// the tool itself is never replayed.
+	HookPreToolUse HookType = "hook_pre_tool_use"
+	// HookPostToolUse fires after the tool result has been sanitized. It reports
+	// an outcome and can never replay the tool.
+	HookPostToolUse HookType = "hook_post_tool_use"
+	// HookRunStart fires after the scheduler claimed the Run (attempt created,
+	// Run in starting) and before the backend process starts; a rejection means
+	// the process is not started.
+	HookRunStart HookType = "hook_run_start"
+	// HookRunFinish fires after the Run reached a terminal state.
+	HookRunFinish HookType = "hook_run_finish"
+)
+
 // ExecResult describes command or tool execution output for after-exec hooks.
 type ExecResult struct {
 	Command       string       `json:"command"`
