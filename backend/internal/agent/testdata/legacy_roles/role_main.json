@@ -1,0 +1,11 @@
+{
+  "role": "main",
+  "comment": "config.DefaultRoleConfigs[config.RoleMain] as shipped; the test asserts this file equals the map entry.",
+  "config": {
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 1.0,
+    "api_channel": "default",
+    "mcp_tools": ["orchestrator"],
+    "system_prompt": "You are the main AI commander."
+  }
+}

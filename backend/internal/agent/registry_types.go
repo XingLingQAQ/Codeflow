@@ -73,22 +73,35 @@ type Stats struct {
 }
 
 // AgentAsset is a versioned, source-tagged agent definition in the registry.
+//
+// Purpose/Backend/ModelPolicy/Fit are configuration: they belong to the
+// immutable revision payload (T4.04.a), so changing any of them is a new
+// revision. Stats is the opposite - it is cumulative telemetry, not
+// configuration. The field stays on the struct because the legacy read model
+// exposes it, but it is never authoritative: the counters live in
+// agent_revision_stats keyed by (agent_id, revision) and the store projects
+// them onto the asset on read (see sqlite_registry.go). Nothing may edit Stats
+// as if it were a configuration field.
 type AgentAsset struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name"`
-	Avatar       string      `json:"avatar,omitempty"`
-	Description  string      `json:"description,omitempty"`
-	Version      string      `json:"version"`
-	Source       AgentSource `json:"source"`
-	RoleBase     RoleBase    `json:"role_base"`
-	SystemPrompt string      `json:"system_prompt,omitempty"`
-	Binding      Binding     `json:"binding"`
-	Mounts       Mounts      `json:"mounts"`
-	StageTags    []string    `json:"stage_tags,omitempty"`
-	Stats        Stats       `json:"stats"`
-	Enabled      bool        `json:"enabled"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
+	ID           string       `json:"id"`
+	Name         string       `json:"name"`
+	Avatar       string       `json:"avatar,omitempty"`
+	Description  string       `json:"description,omitempty"`
+	Version      string       `json:"version"`
+	Source       AgentSource  `json:"source"`
+	RoleBase     RoleBase     `json:"role_base"`
+	SystemPrompt string       `json:"system_prompt,omitempty"`
+	Binding      Binding      `json:"binding"`
+	Mounts       Mounts       `json:"mounts"`
+	StageTags    []string     `json:"stage_tags,omitempty"`
+	Purpose      string       `json:"purpose,omitempty"`
+	Backend      string       `json:"backend,omitempty"`
+	ModelPolicy  *ModelPolicy `json:"model_policy,omitempty"`
+	Fit          *Fit         `json:"fit,omitempty"`
+	Stats        Stats        `json:"stats"`
+	Enabled      bool         `json:"enabled"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
 // CreateAgentRequest creates an agent asset in the registry.
@@ -145,6 +158,19 @@ func cloneAgent(a *AgentAsset) *AgentAsset {
 	cp.StageTags = append([]string(nil), a.StageTags...)
 	cp.Mounts.MCPTools = append([]string(nil), a.Mounts.MCPTools...)
 	cp.Mounts.Skills = append([]string(nil), a.Mounts.Skills...)
+	if a.ModelPolicy != nil {
+		mp := *a.ModelPolicy
+		mp.AllowedModels = append([]string(nil), a.ModelPolicy.AllowedModels...)
+		mp.Temperature = copyFloat(a.ModelPolicy.Temperature)
+		mp.MaxTokens = copyInt(a.ModelPolicy.MaxTokens)
+		cp.ModelPolicy = &mp
+	}
+	if a.Fit != nil {
+		f := *a.Fit
+		f.Stages = append([]string(nil), a.Fit.Stages...)
+		f.TaskTypes = append([]string(nil), a.Fit.TaskTypes...)
+		cp.Fit = &f
+	}
 	if a.Binding.Temperature != nil {
 		t := *a.Binding.Temperature
 		cp.Binding.Temperature = &t

@@ -1,0 +1,11 @@
+{
+  "role": "coder",
+  "comment": "config.DefaultRoleConfigs[config.RoleCoder] as shipped; the test asserts this file equals the map entry.",
+  "config": {
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 0.7,
+    "api_channel": "default",
+    "mcp_tools": ["filesystem", "linter"],
+    "system_prompt": "You are a code implementation expert."
+  }
+}

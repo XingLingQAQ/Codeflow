@@ -1,0 +1,5 @@
+{
+  "role": "main",
+  "comment": "An empty legacy config: role and the non-optional temperature scalar (an explicit 0) still map, and no field carries a value that could be lost, so no diagnostic is expected.",
+  "config": {}
+}

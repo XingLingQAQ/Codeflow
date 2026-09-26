@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/codeflow/backend/internal/dbx"
 )
@@ -75,20 +76,35 @@ CREATE INDEX IF NOT EXISTS idx_agents_role ON agents(role_base);
 // the legacy agents table (columns, ids, row contents) is left untouched.
 //
 // agent_revisions holds the snapshots:
-//   agent_id      agents.id of the snapshotted asset. No FOREIGN KEY is
-//                 declared: T1.03.b delete removes the agents row and the
-//                 head pointer but retains revision rows as audit facts, and
-//                 a constraint here would preempt that retention.
-//   revision      1-based, monotonically increasing per agent.
-//   frozen_config JSON snapshot of the full AgentAsset, identical encoding to
-//                 agents.payload (id/name/avatar/description/version/source/
-//                 role_base/system_prompt/binding/mounts/stage_tags/stats/
-//                 enabled/created_at/updated_at).
-//   source        writer tag: revisionSourceMigrationV1 for the backfilled
-//                 first revision, revisionSourceSeed for the builtin seed
-//                 path, revisionSourceUpdate for registry writes (T1.03.b).
-//   created_at    unix millis; backfilled rows reuse agents.updated_at, the
-//                 last modification time of the snapshotted asset.
+//
+//	agent_id      agents.id of the snapshotted asset. No FOREIGN KEY is
+//	              declared: T1.03.b delete removes the agents row and the
+//	              head pointer but retains revision rows as audit facts, and
+//	              a constraint here would preempt that retention.
+//	revision      1-based, monotonically increasing per agent.
+//	frozen_config JSON snapshot of the full AgentAsset, identical encoding to
+//	              agents.payload (id/name/avatar/description/version/source/
+//	              role_base/system_prompt/binding/mounts/stage_tags/stats/
+//	              enabled/created_at/updated_at).
+//	source        writer tag: revisionSourceMigrationV1 for the backfilled
+//	              first revision, revisionSourceSeed for the builtin seed
+//	              path, revisionSourceUpdate for registry writes (T1.03.b).
+//	created_at    unix millis; backfilled rows reuse agents.updated_at, the
+//	              last modification time of the snapshotted asset.
+//
+// agent_revision_stats (T4.04.a) holds the cumulative telemetry of a revision:
+// usage_count, score, sample_size and updated_at, keyed by the same
+// (agent_id, revision) pair, with a FOREIGN KEY onto agent_revisions so a
+// counters row can never describe a revision that does not exist.
+//
+// Why the counters are not part of frozen_config: they are not configuration.
+// A usage bump must not append a revision (T1.03.c) and must not rewrite an
+// existing frozen_config either, or the "immutable revision" guarantee would be
+// false for the very documents runs pin. The frozen_config of a revision keeps
+// whatever stats values were in effect when it was appended as a historical
+// echo - T1.03.c's accepted test pins those bytes - and nothing reads them as
+// truth: sqliteAgentStore.loadAll projects Stats from this table (zero when the
+// row is missing) and revisionAsset stays a literal snapshot reader.
 //
 // agent_revision_head is the per-agent head pointer. It is a separate table
 // (not an agents column) because the legacy agents table structure must not
@@ -98,7 +114,7 @@ const (
 	revisionSourceMigrationV1 = "migration_v1"
 	revisionSourceSeed        = "seed"
 	revisionSourceUpdate      = "update"
-	agentSchemaVersion        = 1
+	agentSchemaVersion        = 2
 )
 
 // agentMigration is one PRAGMA user_version-gated schema step. All statements
@@ -133,6 +149,74 @@ var agentSchemaMigrations = []agentMigration{
 SELECT id, 1, payload, 'migration_v1', updated_at FROM agents;`,
 			`INSERT INTO agent_revision_head (agent_id, head_revision, updated_at)
 SELECT id, 1, updated_at FROM agents;`,
+		},
+	},
+	{
+		// T4.04.a: cumulative counters move out of the configuration documents
+		// into their own revision-keyed table.
+		//
+		// Backfill is one-time and idempotent. Two sources are migrated because
+		// pre-T4.04.a stored the counters in two different places:
+		//
+		//   (a) every revision whose frozen_config recorded non-zero Stats -
+		//       that is the historical snapshot value, kept per revision;
+		//   (b) the head revision's live counters from the agents payload.
+		//       Statistics writes only ever touched the payload (putStats), so
+		//       a head that was incremented after its revision was appended
+		//       holds the newer number in the payload; taking the maximum keeps
+		//       the newer value and never lowers an existing one.
+		//
+		// Re-running either statement is harmless: (a) skips existing rows and
+		// (b) only ever raises values with MAX, so repeated opens cannot
+		// double-count (the version gate already prevents a re-run).
+		version: 2,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS agent_revision_stats (
+  agent_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  usage_count INTEGER NOT NULL DEFAULT 0 CHECK(usage_count >= 0),
+  score REAL NOT NULL DEFAULT 0,
+  sample_size INTEGER NOT NULL DEFAULT 0 CHECK(sample_size >= 0),
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (agent_id, revision),
+  FOREIGN KEY (agent_id, revision) REFERENCES agent_revisions(agent_id, revision)
+);`,
+			`INSERT INTO agent_revision_stats (agent_id, revision, usage_count, score, sample_size, updated_at)
+SELECT r.agent_id, r.revision,
+       CAST(COALESCE(json_extract(r.frozen_config, '$.stats.usage_count'), 0) AS INTEGER),
+       CAST(COALESCE(json_extract(r.frozen_config, '$.stats.score'), 0) AS REAL),
+       0,
+       r.created_at
+FROM agent_revisions r
+WHERE json_valid(r.frozen_config)
+  AND (CAST(COALESCE(json_extract(r.frozen_config, '$.stats.usage_count'), 0) AS INTEGER) <> 0
+       OR CAST(COALESCE(json_extract(r.frozen_config, '$.stats.score'), 0) AS REAL) <> 0)
+ON CONFLICT(agent_id, revision) DO NOTHING;`,
+			`INSERT INTO agent_revision_stats (agent_id, revision, usage_count, score, sample_size, updated_at)
+SELECT h.agent_id, h.head_revision,
+       MAX(CAST(COALESCE(json_extract(a.payload, '$.stats.usage_count'), 0) AS INTEGER),
+           CASE WHEN json_valid(r.frozen_config)
+                THEN CAST(COALESCE(json_extract(r.frozen_config, '$.stats.usage_count'), 0) AS INTEGER)
+                ELSE 0 END),
+       MAX(CAST(COALESCE(json_extract(a.payload, '$.stats.score'), 0) AS REAL),
+           CASE WHEN json_valid(r.frozen_config)
+                THEN CAST(COALESCE(json_extract(r.frozen_config, '$.stats.score'), 0) AS REAL)
+                ELSE 0 END),
+       0,
+       MAX(h.updated_at, r.created_at)
+FROM agent_revision_head h
+JOIN agents a ON a.id = h.agent_id
+JOIN agent_revisions r ON r.agent_id = h.agent_id AND r.revision = h.head_revision
+WHERE json_valid(a.payload)
+  AND (CAST(COALESCE(json_extract(a.payload, '$.stats.usage_count'), 0) AS INTEGER) <> 0
+       OR CAST(COALESCE(json_extract(a.payload, '$.stats.score'), 0) AS REAL) <> 0
+       OR (json_valid(r.frozen_config)
+           AND (CAST(COALESCE(json_extract(r.frozen_config, '$.stats.usage_count'), 0) AS INTEGER) <> 0
+                OR CAST(COALESCE(json_extract(r.frozen_config, '$.stats.score'), 0) AS REAL) <> 0)))
+ON CONFLICT(agent_id, revision) DO UPDATE SET
+  usage_count=MAX(usage_count, excluded.usage_count),
+  score=MAX(score, excluded.score),
+  updated_at=MAX(updated_at, excluded.updated_at);`,
 		},
 	},
 }
@@ -174,6 +258,152 @@ func (s *sqliteAgentStore) migrateSchema() error {
 		current = m.version
 	}
 	return nil
+}
+
+// RevisionStats is the cumulative telemetry attached to one immutable agent
+// revision (T4.04.a). It lives in agent_revision_stats keyed by the
+// (agent_id, revision) pair it describes, so the counters never become part of
+// a frozen configuration document.
+//
+// UpdatedAt is the time the counters last changed, not the revision's own
+// created_at.
+type RevisionStats struct {
+	UsageCount int64
+	Score      float64
+	SampleSize int64
+	UpdatedAt  time.Time
+}
+
+// revisionStats reads the counters stored for one revision. ok=false means the
+// revision has no row, which the read paths treat as the zero value (T4.04.a:
+// "no row means zero", never a guess from the frozen document).
+func (s *sqliteAgentStore) revisionStats(agentID string, revision int) (RevisionStats, bool, error) {
+	var st RevisionStats
+	var updated int64
+	err := s.db.QueryRow(
+		`SELECT usage_count, score, sample_size, updated_at FROM agent_revision_stats
+WHERE agent_id = ? AND revision = ?`, agentID, revision,
+	).Scan(&st.UsageCount, &st.Score, &st.SampleSize, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RevisionStats{}, false, nil
+	}
+	if err != nil {
+		return RevisionStats{}, false, fmt.Errorf("read agent revision stats: %w", err)
+	}
+	st.UpdatedAt = time.UnixMilli(updated).UTC()
+	return st, true, nil
+}
+
+// statsAtHead projects the counters a live asset read must show: the stats row
+// of the agent's current head revision, the zero value when there is no head
+// and when the head has no row.
+func (s *sqliteAgentStore) statsAtHead(agentID string) (RevisionStats, error) {
+	head, err := s.headRevision(agentID)
+	if err != nil {
+		return RevisionStats{}, err
+	}
+	if head <= 0 {
+		return RevisionStats{}, nil
+	}
+	st, ok, err := s.revisionStats(agentID, head)
+	if err != nil {
+		return RevisionStats{}, err
+	}
+	if !ok {
+		return RevisionStats{}, nil
+	}
+	return st, nil
+}
+
+// writeRevisionStatsTx upserts st as the counters of (agentID, revision). It is
+// the only writer of agent_revision_stats; the foreign key rejects a row whose
+// revision does not exist.
+func (s *sqliteAgentStore) writeRevisionStatsTx(tx *sql.Tx, agentID string, revision int, st RevisionStats) error {
+	if tx == nil {
+		return fmt.Errorf("write agent revision stats: tx is nil")
+	}
+	if agentID == "" || revision < 1 {
+		return fmt.Errorf("write agent revision stats: agent id and revision required")
+	}
+	updated := st.UpdatedAt.UTC().UnixMilli()
+	if st.UpdatedAt.IsZero() {
+		updated = time.Now().UTC().UnixMilli()
+	}
+	_, err := tx.Exec(`
+INSERT INTO agent_revision_stats (agent_id, revision, usage_count, score, sample_size, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(agent_id, revision) DO UPDATE SET
+  usage_count=excluded.usage_count,
+  score=excluded.score,
+  sample_size=excluded.sample_size,
+  updated_at=excluded.updated_at`,
+		agentID, revision, st.UsageCount, st.Score, st.SampleSize, updated,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert agent revision stats: %w", err)
+	}
+	return nil
+}
+
+// carriedSampleSizeTx returns the sample size already stored for
+// (agentID, revision), or 0 when there is no row. A configuration edit carries
+// the sample size forward so the revision it appends keeps the same evidence
+// base as the counters it inherits.
+func (s *sqliteAgentStore) carriedSampleSizeTx(tx *sql.Tx, agentID string, revision int) (int64, error) {
+	if tx == nil || agentID == "" || revision < 1 {
+		return 0, nil
+	}
+	var sample int64
+	err := tx.QueryRow(
+		`SELECT sample_size FROM agent_revision_stats WHERE agent_id = ? AND revision = ?`,
+		agentID, revision,
+	).Scan(&sample)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read agent revision sample size: %w", err)
+	}
+	return sample, nil
+}
+
+// writeRevisionStatsAtHeadTx writes a's counters onto the stats row of its
+// current head revision. An agent without a head row (no revisions yet) is left
+// alone: there is no immutable revision for the counters to attach to.
+// sampleSize, when non-nil, replaces the stored sample size; nil preserves the
+// stored one (or writes 0 when no row exists).
+func (s *sqliteAgentStore) writeRevisionStatsAtHeadTx(tx *sql.Tx, a *AgentAsset, sampleSize *int64) error {
+	if tx == nil || a == nil || a.ID == "" {
+		return fmt.Errorf("write agent head stats: agent id required")
+	}
+	var head int
+	err := tx.QueryRow(
+		`SELECT head_revision FROM agent_revision_head WHERE agent_id = ?`, a.ID,
+	).Scan(&head)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read agent revision head: %w", err)
+	}
+	if head <= 0 {
+		return nil
+	}
+	var sample int64
+	if sampleSize != nil {
+		sample = *sampleSize
+	} else {
+		sample, err = s.carriedSampleSizeTx(tx, a.ID, head)
+		if err != nil {
+			return err
+		}
+	}
+	return s.writeRevisionStatsTx(tx, a.ID, head, RevisionStats{
+		UsageCount: a.Stats.UsageCount,
+		Score:      a.Stats.Score,
+		SampleSize: sample,
+		UpdatedAt:  a.UpdatedAt,
+	})
 }
 
 // headRevision returns the current head revision of agentID, or 0 when the
@@ -253,6 +483,22 @@ ON CONFLICT(agent_id) DO UPDATE SET
 	); err != nil {
 		return 0, fmt.Errorf("move agent revision head %d: %w", next, err)
 	}
+	// The counters are cumulative across revisions, so the new revision starts
+	// from the values in effect now (T4.04.a): a configuration edit must not
+	// reset the telemetry the live asset shows. The frozen_config keeps the
+	// same numbers as a historical echo - nothing reads them as truth.
+	sample, err := s.carriedSampleSizeTx(tx, a.ID, head)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.writeRevisionStatsTx(tx, a.ID, next, RevisionStats{
+		UsageCount: a.Stats.UsageCount,
+		Score:      a.Stats.Score,
+		SampleSize: sample,
+		UpdatedAt:  a.UpdatedAt,
+	}); err != nil {
+		return 0, err
+	}
 	return next, nil
 }
 
@@ -297,14 +543,23 @@ func (s *sqliteAgentStore) put(a *AgentAsset) error {
 	return s.putWithRevision(a, revisionSourceUpdate)
 }
 
-// putStats persists only the agents row of a, without appending a revision
-// (T1.03.c stats-path narrowing). A revision is the immutable lineage of the
-// asset configuration; Stats.UsageCount/Stats.Score are telemetry counters,
-// not configuration, so IncrementUsage/SetScore reach this path and the head
-// stays put. The row write is still transactional, so a non-nil error means
-// zero writes, and the frozen_config column keeps carrying whatever stats
-// values were in effect when each revision was appended.
-func (s *sqliteAgentStore) putStats(a *AgentAsset) error {
+// putStats persists the counters of a without appending a revision - the
+// T1.03.c stats-path narrowing, extended by T4.04.a.
+//
+// Two writes, one transaction:
+//
+//   - the agents row, so the payload keeps carrying the counters it always
+//     carried (the pre-T4.04.a read model and its accepted tests depend on
+//     that document), and
+//   - the agent_revision_stats row of the current head revision, which is where
+//     the counters are authoritative and what the read path projects.
+//
+// No revision is appended and no frozen_config is touched, so the revision
+// lineage and its bytes stay put however often the counters move.
+//
+// sampleSize, when non-nil, replaces the stored sample size (used by
+// SetRevisionStats for scoring evidence); nil preserves it.
+func (s *sqliteAgentStore) putStats(a *AgentAsset, sampleSize *int64) error {
 	if a == nil || a.ID == "" {
 		return fmt.Errorf("agent id required")
 	}
@@ -317,6 +572,9 @@ func (s *sqliteAgentStore) putStats(a *AgentAsset) error {
 	defer func() { _ = tx.Rollback() }()
 	if err := s.upsertAgentRowTx(tx, a); err != nil {
 		return fmt.Errorf("upsert agent row: %w", err)
+	}
+	if err := s.writeRevisionStatsAtHeadTx(tx, a, sampleSize); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit agent stats put tx: %w", err)
@@ -374,25 +632,50 @@ func (s *sqliteAgentStore) delete(id string) error {
 	return nil
 }
 
+// loadAll reads every agent document and then projects the counters from
+// agent_revision_stats onto it: Stats never comes from the document, and a
+// missing stats row means zero (T4.04.a). The payload field is a compatibility
+// echo.
+//
+// The two passes are separate on purpose: the pool has a single connection
+// (dbx.WithMaxOpenConns(1)), so a stats query issued while the agents cursor is
+// still open would wait for a connection that cannot be released until the
+// cursor closes.
 func (s *sqliteAgentStore) loadAll() ([]*AgentAsset, error) {
 	rows, err := s.db.Query(`SELECT payload FROM agents`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := make([]*AgentAsset, 0)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		var a AgentAsset
 		if err := json.Unmarshal([]byte(payload), &a); err != nil {
+			rows.Close()
 			return nil, err
 		}
 		out = append(out, cloneAgent(&a))
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	for _, a := range out {
+		st, err := s.statsAtHead(a.ID)
+		if err != nil {
+			return nil, err
+		}
+		a.Stats = Stats{UsageCount: st.UsageCount, Score: st.Score}
+	}
+	return out, nil
 }
 
 // NewSQLiteAgentRegistry opens a durable agent registry at dbPath.

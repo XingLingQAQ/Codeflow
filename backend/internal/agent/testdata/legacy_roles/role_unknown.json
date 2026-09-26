@@ -1,0 +1,11 @@
+{
+  "role": "critic",
+  "comment": "A role the legacy hierarchy does not define (config.RoleType has only main/coder/sub): mapping reports legacy_role_unmapped and leaves RoleBase empty instead of guessing a role base.",
+  "config": {
+    "model": "claude-3-5-haiku-20241022",
+    "temperature": 0.9,
+    "api_channel": "default",
+    "mcp_tools": [],
+    "system_prompt": "Adversarial reviewer."
+  }
+}

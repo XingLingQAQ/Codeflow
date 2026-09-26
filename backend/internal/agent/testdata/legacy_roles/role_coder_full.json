@@ -1,0 +1,16 @@
+{
+  "role": "coder",
+  "comment": "Every config.RoleConfig field populated: the six mapped fields and the four that have no asset landing spot (top_p, answer_style, capabilities, allowed_hooks), each of which must produce a diagnostic.",
+  "config": {
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 0.3,
+    "top_p": 0.95,
+    "api_channel": "team-channel",
+    "mcp_tools": ["filesystem", "linter", "shell"],
+    "system_prompt": "Full legacy coder prompt.",
+    "answer_style": "concise",
+    "capabilities": ["code_write", "test_run"],
+    "allowed_skills": ["review", "refactor"],
+    "allowed_hooks": ["pre_tool_use"]
+  }
+}

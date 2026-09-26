@@ -240,6 +240,10 @@ func (r *InMemoryAgentRegistry) Delete(ctx context.Context, id string) error {
 }
 
 // IncrementUsage atomically bumps the usage counter for an agent.
+//
+// The counter is telemetry, not configuration (T4.04.a): it is written to the
+// stats row of the agent's current head revision and never appends or rewrites
+// a revision.
 func (r *InMemoryAgentRegistry) IncrementUsage(ctx context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -250,7 +254,7 @@ func (r *InMemoryAgentRegistry) IncrementUsage(ctx context.Context, id string) e
 	a.Stats.UsageCount++
 	a.UpdatedAt = time.Now().UTC()
 	if r.store != nil {
-		if err := r.store.putStats(a); err != nil {
+		if err := r.store.putStats(a, nil); err != nil {
 			return err
 		}
 	}
@@ -258,6 +262,9 @@ func (r *InMemoryAgentRegistry) IncrementUsage(ctx context.Context, id string) e
 }
 
 // SetScore sets the quality score for an agent.
+//
+// Like IncrementUsage this is a telemetry write: the stats row of the head
+// revision moves, the revision lineage does not.
 func (r *InMemoryAgentRegistry) SetScore(ctx context.Context, id string, score float64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -268,7 +275,38 @@ func (r *InMemoryAgentRegistry) SetScore(ctx context.Context, id string, score f
 	a.Stats.Score = score
 	a.UpdatedAt = time.Now().UTC()
 	if r.store != nil {
-		if err := r.store.putStats(a); err != nil {
+		if err := r.store.putStats(a, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetRevisionStats records the full telemetry of the agent's current head
+// revision: usage count, score and sample size (T4.04.a). The scoring layer
+// (T8.01) needs the evidence base next to the score, and the sample size has no
+// home on the legacy Stats shape, so this method exists next to
+// IncrementUsage/SetScore.
+//
+// Like the other two it is a telemetry write: no revision is appended and no
+// frozen_config changes. st.UpdatedAt is used when set, otherwise the current
+// time.
+func (r *InMemoryAgentRegistry) SetRevisionStats(ctx context.Context, id string, st RevisionStats) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	a, ok := r.agents[id]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrAgentAssetNotFound, id)
+	}
+	if st.UpdatedAt.IsZero() {
+		st.UpdatedAt = time.Now().UTC()
+	}
+	a.Stats.UsageCount = st.UsageCount
+	a.Stats.Score = st.Score
+	a.UpdatedAt = st.UpdatedAt
+	if r.store != nil {
+		sample := st.SampleSize
+		if err := r.store.putStats(a, &sample); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,11 @@
+{
+  "role": "sub",
+  "comment": "config.DefaultRoleConfigs[config.RoleSub] as shipped; the test asserts this file equals the map entry.",
+  "config": {
+    "model": "claude-3-5-haiku-20241022",
+    "temperature": 0.8,
+    "api_channel": "default",
+    "mcp_tools": ["websearch"],
+    "system_prompt": "You are a research assistant."
+  }
+}
