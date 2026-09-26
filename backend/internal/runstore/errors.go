@@ -86,6 +86,32 @@ var ErrEventImmutable = errors.New("runstore: event is immutable")
 // are still deletable: retention (T12.02) needs a way to trim them.
 var ErrOutboxDeadLetterRetained = errors.New("runstore: dead-letter delivery is retained")
 
+// ErrInvalidCursor means a replay cursor is not a position this scope can have:
+// it is negative, or it is larger than the scope's high watermark (§27.4
+// "after > current_high_watermark 返回 422 invalid_cursor"). The caller is
+// asking about a sequence number that was never allocated, so there is nothing
+// to replay and no snapshot to fall back on; the API layer answers 422.
+var ErrInvalidCursor = errors.New("runstore: invalid cursor")
+
+// ErrCursorExpired means a replay cursor is older than the history this
+// database still holds: after < retention_floor-1, i.e. the events the caller
+// wants to resume from have been trimmed (§27.4 "after < retention_floor-1
+// 返回 410"). Retrying the same cursor cannot help - the front end must replace
+// its cache with a snapshot and resume from the returned one - so the API layer
+// answers 410 and carries snapshot_url. Note that after = retention_floor-1 is
+// legal: it is the position immediately before the oldest retained event, which
+// is exactly the position a client that has fully caught up on the retained
+// history holds.
+var ErrCursorExpired = errors.New("runstore: cursor expired")
+
+// ErrInvalidDispatcherConfig means NewDispatcher (or Dispatcher.Run) was handed
+// a configuration that cannot work: a blank owner, no destination to serve, a
+// nil deliverer, a negative lease/backoff/attempt bound, a non-positive run
+// interval. These are programmer errors and are reported before any row is
+// touched, so a misconfigured dispatcher never takes a lease it could not
+// release.
+var ErrInvalidDispatcherConfig = errors.New("runstore: invalid dispatcher config")
+
 // RevisionConflictError reports a Run CAS whose expected revision no longer
 // matches the stored one. It carries both sides so a caller can decide whether
 // to re-read and retry, and it wraps ErrRevisionConflict.
