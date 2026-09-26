@@ -50,7 +50,7 @@ const (
 //   - Prepare 无副作用：只校验与查能力，不启动进程、不写磁盘。
 //   - Start 成功后返回的 Session 由调用方拥有，调用方必须 Close。
 type Backend interface {
-	// Name 返回后端稳定标识（不透明字符串，如 "fake"、"claude-code"）。
+	// Name 返回后端稳定标识（不透明字符串，如 "fake"、"claude_code"）。
 	Name() string
 	// Capabilities 只读探测后端能力（§27.7）。
 	// 缺证据的能力必须为 false（Evidence 中无对应非空条目）；
