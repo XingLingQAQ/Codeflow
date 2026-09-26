@@ -1,6 +1,7 @@
 package runstore
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -107,6 +108,8 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read embedded migration: %v", err)
 	}
+	// Same rule as loadMigrations: the checksum is over LF-normalized text.
+	body = bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
 	sum := sha256.Sum256(body)
 	wantChecksum := "sha256:" + hex.EncodeToString(sum[:])
 
@@ -394,8 +397,68 @@ func mustEmbeddedChecksum(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("read embedded migration: %v", err)
 	}
+	// Same rule as loadMigrations: the checksum is over LF-normalized text.
+	body = bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
 	sum := sha256.Sum256(body)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// TestMigrationChecksumIgnoresLineEndings: go:embed takes the migration bytes as
+// checked out, and checkouts disagree about line endings (core.autocrlf on
+// Windows turns the committed LF into CRLF). A database migrated by a binary
+// built from one checkout must open cleanly with a binary built from another,
+// so the checksum is computed on LF-normalized content; a real content change
+// is still a mismatch.
+func TestMigrationChecksumIgnoresLineEndings(t *testing.T) {
+	ctx := context.Background()
+	const lf = "CREATE TABLE widgets (\n    id INTEGER PRIMARY KEY\n);\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	lfFS := fstest.MapFS{"migrations/001_widgets.sql": {Data: []byte(lf)}}
+	crlfFS := fstest.MapFS{"migrations/001_widgets.sql": {Data: []byte(crlf)}}
+
+	fromLF, err := loadMigrations(lfFS)
+	if err != nil {
+		t.Fatalf("loadMigrations(LF): %v", err)
+	}
+	fromCRLF, err := loadMigrations(crlfFS)
+	if err != nil {
+		t.Fatalf("loadMigrations(CRLF): %v", err)
+	}
+	sum := sha256.Sum256([]byte(lf))
+	if want := "sha256:" + hex.EncodeToString(sum[:]); fromLF[0].checksum != want || fromCRLF[0].checksum != want {
+		t.Fatalf("checksums LF=%s CRLF=%s, want both %s (the LF text)", fromLF[0].checksum, fromCRLF[0].checksum, want)
+	}
+
+	for _, tc := range []struct {
+		name          string
+		first, second fstest.MapFS
+	}{
+		{"built from LF, reopened from CRLF", lfFS, crlfFS},
+		{"built from CRLF, reopened from LF", crlfFS, lfFS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _ := openTemp(t)
+			if _, err := migrateFS(ctx, db, tc.first); err != nil {
+				t.Fatalf("first migrate: %v", err)
+			}
+			res, err := migrateFS(ctx, db, tc.second)
+			if err != nil {
+				t.Fatalf("reopen with the other line endings: %v", err)
+			}
+			if len(res.Applied) != 0 {
+				t.Fatalf("reopen applied %d migration(s), want none", len(res.Applied))
+			}
+		})
+	}
+
+	changed := fstest.MapFS{"migrations/001_widgets.sql": {Data: []byte(strings.Replace(lf, " id ", " uid ", 1))}}
+	db, _ := openTemp(t)
+	if _, err := migrateFS(ctx, db, lfFS); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if _, err := migrateFS(ctx, db, changed); !errors.Is(err, ErrMigrationChecksumMismatch) {
+		t.Fatalf("changed content: err = %v, want ErrMigrationChecksumMismatch", err)
+	}
 }
 
 // TestMigrateRejectsNewerSchema is the downgrade guard: an older binary must

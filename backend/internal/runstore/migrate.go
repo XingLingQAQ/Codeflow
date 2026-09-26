@@ -21,6 +21,7 @@
 package runstore
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -60,7 +61,8 @@ var ErrSchemaTooNew = errors.New("runstore: database schema is newer than this b
 type AppliedMigration struct {
 	Version int
 	Name    string
-	// Checksum is "sha256:" + lowercase hex of the migration file bytes.
+	// Checksum is "sha256:" + lowercase hex of the migration file bytes with
+	// CRLF normalized to LF (see loadMigrations).
 	Checksum string
 }
 
@@ -279,6 +281,13 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("runstore: read %s: %w", entry.Name(), err)
 		}
+		// go:embed takes the bytes as checked out, and checkouts disagree about
+		// line endings (core.autocrlf turns the committed LF into CRLF on
+		// Windows). The checksum identifies the migration's content, so it is
+		// computed - and the script run - on LF-normalized text; hashing the raw
+		// bytes would make a database created by a binary built from one
+		// checkout fail closed when opened by a binary built from another.
+		body = bytes.ReplaceAll(body, []byte("\r\n"), []byte("\n"))
 		sum := sha256.Sum256(body)
 		out = append(out, migration{
 			version:  version,
