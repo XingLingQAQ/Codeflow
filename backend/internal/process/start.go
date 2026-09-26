@@ -57,15 +57,26 @@ type SupervisorOptions struct {
 	// 实例（lease 过期后换了 worker、多实例共用一台机器），本实例既不该启动它，
 	// 也不该在之后按 PID 去杀它。
 	OwnerInstance string
+	// SpoolFilter 是写入 spool 之前的过滤钩子（nil = 原样写入），典型用途是日志
+	// 脱敏。它只作用于 spool（日志）内容，不作用于 Subscribe 投递的行——适配器
+	// 需要原始协议帧。真正的流式密钥脱敏器归 T2.04，这里只提供接口与接线。
+	// 契约与 panic 语义见 SpoolFilter 的文档。
+	SpoolFilter SpoolFilter
 }
 
 // NewSupervisor 创建受监督进程的启动器。OwnerInstance 为空时 Start 一律拒绝
 // （返回 ErrMissingOwnerInstance）——没有实例标识就无法证明进程归属。
 func NewSupervisor(opts SupervisorOptions) Supervisor {
-	return &supervisor{ownerInstance: strings.TrimSpace(opts.OwnerInstance)}
+	return &supervisor{
+		ownerInstance: strings.TrimSpace(opts.OwnerInstance),
+		spoolFilter:   opts.SpoolFilter,
+	}
 }
 
-type supervisor struct{ ownerInstance string }
+type supervisor struct {
+	ownerInstance string
+	spoolFilter   SpoolFilter
+}
 
 // Start 的顺序是固定的：Spec 校验 → 实例归属校验 → 策略闸控 → 平台启动 →
 // 捕获身份 → 写 marker → 起排空与等待 goroutine。
@@ -100,12 +111,12 @@ func (s *supervisor) Start(ctx context.Context, spec Spec) (Handle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return startSupervised(spec)
+	return startSupervised(spec, s.spoolFilter)
 }
 
 // startSupervised 完成闸控放行之后的全部步骤。任何一步失败都必须结束已经启动的
 // 进程并返回错误，不留孤儿。
-func startSupervised(spec Spec) (*procHandle, error) {
+func startSupervised(spec Spec, filter SpoolFilter) (*procHandle, error) {
 	h := &procHandle{
 		spec:       spec,
 		grace:      spec.GracePeriod,
@@ -122,6 +133,8 @@ func startSupervised(spec Spec) (*procHandle, error) {
 	}
 	h.stdout = newRingSpool(maxSpool)
 	h.stderr = newRingSpool(maxSpool)
+	h.stdoutStream = newStreamWriter(StreamStdout, h.stdout, filter)
+	h.stderrStream = newStreamWriter(StreamStderr, h.stderr, filter)
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
@@ -162,8 +175,8 @@ func startSupervised(spec Spec) (*procHandle, error) {
 	h.pid = cmd.Process.Pid
 
 	// 排空必须早于一切后续步骤：子进程可能立刻写满管道缓冲区，没人读就会死锁。
-	go h.drain(stdoutR, h.stdout, h.stdoutDone)
-	go h.drain(stderrR, h.stderr, h.stderrDone)
+	go h.drain(stdoutR, h.stdoutStream, h.stdoutDone)
+	go h.drain(stderrR, h.stderrStream, h.stderrDone)
 
 	id, err := CaptureIdentity(h.pid, spec.Owner)
 	if err != nil {
@@ -206,8 +219,9 @@ type procHandle struct {
 	id        Identity
 	startedAt time.Time
 
-	stdout, stderr         *ringSpool
-	stdoutDone, stderrDone chan struct{}
+	stdout, stderr             *ringSpool
+	stdoutStream, stderrStream *streamWriter
+	stdoutDone, stderrDone     chan struct{}
 
 	waitDone chan struct{}
 	escalate sync.Once
@@ -231,21 +245,59 @@ func (h *procHandle) Output() Spool { return h.stdout }
 
 func (h *procHandle) Stderr() Spool { return h.stderr }
 
-// drain 持续读一路输出直到 EOF，写入有界 spool。它绝不阻塞子进程：读多快就收多快，
-// 收不下的部分由 spool 丢弃并计数。
-func (h *procHandle) drain(r *os.File, sp *ringSpool, done chan struct{}) {
+// Subscribe 为一路输出（stdout 或 stderr，不混流）注册实时按行订阅。
+//
+// 保证与边界（详见 stream.go）：
+//   - 排空永不因订阅者而阻塞：订阅 channel 满即判定该订阅溢出并立即终止
+//     （channel 关闭、Err() 为 ErrSubscriberOverflow、DroppedSeq 给出丢失行序号），
+//     其他订阅者、spool 与子进程都不受影响。
+//   - 第一个订阅者不会丢行：Start 返回后进程可能已经写了若干行、甚至已经退出，这些
+//     行还没被任何订阅者认领，会原样交给第一个订阅者（有界预算 1 MiB / 1024 行），
+//     之后 channel 按流状态关闭。因此“Start 后立刻 Subscribe”不会错过进程最早的输出，
+//     与进程退出得多快无关。未认领行超出过预算时，第一个订阅者直接以
+//     ErrSubscriberOverflow 结束（DroppedSeq 为第一条丢失的行）。
+//   - 之后的订阅者只收订阅之后的新行；流结束后再订阅：channel 立即处于关闭状态、
+//     Err() 为 nil，不回放历史——需要历史请用 Output()/Stderr() 的 spool 快照。
+//   - 适配器（T1.13）的责任：收到 ErrSubscriberOverflow 说明协议帧可能已经丢失，
+//     必须终止执行并失败（调用 Cancel(CancelForce)），不能继续解析残缺的流。
+func (h *procHandle) Subscribe(stream Stream, opts SubscribeOptions) (*Subscription, error) {
+	if err := opts.Validate(); err != nil {
+		return nil, err
+	}
+	var w *streamWriter
+	switch stream {
+	case StreamStdout:
+		w = h.stdoutStream
+	case StreamStderr:
+		w = h.stderrStream
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrInvalidStream, string(stream))
+	}
+	if w == nil {
+		// 只可能出现在包内合成的句柄上（生产路径的 Start 一定装配了流）。
+		return nil, fmt.Errorf("%w: %q has no stream writer on this handle", ErrInvalidStream, string(stream))
+	}
+	return w.subscribe(opts.withDefaults()), nil
+}
+
+// drain 持续读一路输出直到 EOF，按行投递给订阅者并写入有界 spool。它绝不阻塞子进程：
+// 读多快就收多快，收不下的部分由 spool 丢弃并计数、订阅者溢出即被终止。
+func (h *procHandle) drain(r *os.File, w *streamWriter, done chan struct{}) {
 	defer close(done)
 	defer r.Close() //nolint:errcheck // 读端由排空 goroutine 独占
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := r.Read(buf)
 		if n > 0 {
-			sp.write(buf[:n])
+			w.feed(buf[:n])
 		}
 		if err != nil {
-			return
+			break
 		}
 	}
+	// EOF：投递最后一段不完整的行，然后结束本流（关闭订阅 channel）。
+	w.finishPending()
+	w.finalize()
 }
 
 // awaitDrains 等两路排空收尾，最多等 timeout（进程树已终止，正常是毫秒级）。
@@ -282,6 +334,14 @@ func (h *procHandle) run() {
 
 // finish 发布终态并原子更新 marker。只调用一次。
 func (h *procHandle) finish(code *int) {
+	// 兜底结束两路流：正常路径上排空 goroutine 已经在 EOF 处 finalize 过（幂等），
+	// 这里只覆盖“排空等待超时”的病态情况——否则订阅者会永远等不到 channel 关闭。
+	if h.stdoutStream != nil {
+		h.stdoutStream.finalize()
+	}
+	if h.stderrStream != nil {
+		h.stderrStream.finalize()
+	}
 	h.mu.Lock()
 	truncated := h.stdout.truncatedBytes() + h.stderr.truncatedBytes()
 	h.finished = true
@@ -432,6 +492,29 @@ func (h *procHandle) markLost() {
 	h.mu.Lock()
 	h.lost = true
 	h.mu.Unlock()
+}
+
+// spoolFilterPanics 返回过滤器 panic 被恢复的次数（每次都以占位说明代替原始单元写入 spool）。
+func (h *procHandle) spoolFilterPanics() int64 {
+	var n int64
+	for _, w := range []*streamWriter{h.stdoutStream, h.stderrStream} {
+		if w != nil {
+			n += w.filterPanics.Load()
+		}
+	}
+	return n
+}
+
+// unclaimedDropped 返回两路因超出“未认领行”预算而丢弃的行数之和。非 0 说明有订阅者
+// 在进程已经写出大量输出之后才订阅（诊断用；正常路径应尽早 Subscribe）。
+func (h *procHandle) unclaimedDropped() int64 {
+	var n int64
+	for _, w := range []*streamWriter{h.stdoutStream, h.stderrStream} {
+		if w != nil {
+			n += w.unclaimedDropped()
+		}
+	}
+	return n
 }
 
 // ---------------------------------------------------------------------------

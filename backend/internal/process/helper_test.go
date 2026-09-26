@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,23 +23,37 @@ import (
 //
 // 环境变量：
 //
-//	CODEFLOW_PROCESS_HELPER  helper 模式：tree|flood|ignore-term|exit|graceful-exit|spawn-and-exit
+//	CODEFLOW_PROCESS_HELPER  helper 模式：tree|flood|ignore-term|exit|graceful-exit|spawn-and-exit|lines
 //	CODEFLOW_HELPER_DEPTH    tree：本进程还要往下递归几层
 //	CODEFLOW_HELPER_FANOUT   tree：每层启动几个子进程
 //	CODEFLOW_HELPER_REPORT   tree|graceful-exit|spawn-and-exit：{pid,ppid,depth} JSON 行追加写入的报告文件
-//	CODEFLOW_HELPER_RELEASE  tree|ignore-term|exit：该文件出现后进程退出
+//	CODEFLOW_HELPER_RELEASE  tree|ignore-term|exit|lines：该文件出现后进程退出（lines：出现后才开始写行）
 //	CODEFLOW_HELPER_BYTES    flood：向 stdout 写入的字节数
 //	CODEFLOW_HELPER_CODE     exit：退出码
 //	CODEFLOW_HELPER_TIMEOUT  spawn-and-exit：等后代写出报告行的上限（毫秒，0 表示默认）
+//	CODEFLOW_HELPER_LINES    lines：向 stdout 写的行数（内容 line-000001 起）
+//	CODEFLOW_HELPER_LINE_BYTES    lines：每行目标字节数（0=短行；不足补 'x'，超出截断）
+//	CODEFLOW_HELPER_LINE_CRLF     lines：1 表示行尾用 \r\n
+//	CODEFLOW_HELPER_LINE_NO_EOL   lines：1 表示最后一行不带换行符（不完整行）
+//	CODEFLOW_HELPER_STDERR_LINES  lines：额外向 stderr 写的行数（内容 err-000001 起）
+//	CODEFLOW_HELPER_HOLD          lines：写完行后等该文件出现再退出（让进程活到测试订阅之后）
+//	CODEFLOW_HELPER_LINE_PREFIX   lines：每行前缀（可放 canary，供 spool 过滤测试用）
 const (
-	helperModeEnv    = "CODEFLOW_PROCESS_HELPER"
-	helperDepthEnv   = "CODEFLOW_HELPER_DEPTH"
-	helperFanoutEnv  = "CODEFLOW_HELPER_FANOUT"
-	helperReportEnv  = "CODEFLOW_HELPER_REPORT"
-	helperReleaseEnv = "CODEFLOW_HELPER_RELEASE"
-	helperBytesEnv   = "CODEFLOW_HELPER_BYTES"
-	helperCodeEnv    = "CODEFLOW_HELPER_CODE"
-	helperTimeoutEnv = "CODEFLOW_HELPER_TIMEOUT"
+	helperModeEnv       = "CODEFLOW_PROCESS_HELPER"
+	helperDepthEnv      = "CODEFLOW_HELPER_DEPTH"
+	helperFanoutEnv     = "CODEFLOW_HELPER_FANOUT"
+	helperReportEnv     = "CODEFLOW_HELPER_REPORT"
+	helperReleaseEnv    = "CODEFLOW_HELPER_RELEASE"
+	helperBytesEnv      = "CODEFLOW_HELPER_BYTES"
+	helperCodeEnv       = "CODEFLOW_HELPER_CODE"
+	helperTimeoutEnv    = "CODEFLOW_HELPER_TIMEOUT"
+	helperLinesEnv      = "CODEFLOW_HELPER_LINES"
+	helperLineBytesEnv  = "CODEFLOW_HELPER_LINE_BYTES"
+	helperLineCRLFEnv   = "CODEFLOW_HELPER_LINE_CRLF"
+	helperLineNoEOLEnv  = "CODEFLOW_HELPER_LINE_NO_EOL"
+	helperStderrEnv     = "CODEFLOW_HELPER_STDERR_LINES"
+	helperHoldEnv       = "CODEFLOW_HELPER_HOLD"
+	helperLinePrefixEnv = "CODEFLOW_HELPER_LINE_PREFIX"
 
 	helperModeTree        = "tree"
 	helperModeFlood       = "flood"
@@ -47,6 +62,7 @@ const (
 	helperModeExit        = "exit"
 	helperModeGraceful    = "graceful-exit"
 	helperModeSpawnAndOut = "spawn-and-exit"
+	helperModeLines       = "lines"
 
 	// helperSigbreakNumber 是 Windows 的 SIGBREAK 信号号（os/signal 在 Windows 上
 	// 把它对应到 CTRL_BREAK_EVENT）。在 Unix 上 21 号信号是 SIGTTIN，忽略它对
@@ -88,6 +104,8 @@ func runHelper(mode string) int {
 		return helperGracefulExit()
 	case helperModeSpawnAndOut:
 		return helperSpawnAndExit()
+	case helperModeLines:
+		return helperLines()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown helper mode %q\n", mode)
 		return 2
@@ -188,6 +206,90 @@ func helperFlood() int {
 		}
 	}
 	return 0
+}
+
+// helperLines 按参数向 stdout/stderr 写确定内容的行，供实时按行订阅的测试使用。
+//
+// 行内容是可预期的，测试端据此逐行校验：stdout 第 i 行是 line-%06d，stderr 第 i 行是
+// err-%06d。LINE_BYTES 非 0 时把每行补/裁到恰好该字节数（补 'x'）——超长行测试用它。
+// RELEASE 存在时先等 release 文件出现再写：测试可以先订阅、后放行，整个过程没有竞态。
+// HOLD 存在时写完行后继续等该文件出现：进程保持存活，测试可以观察“进程已经写了输出
+// 但还没退出”的窗口（订阅不得丢行）。
+func helperLines() int {
+	if os.Getenv(helperReleaseEnv) != "" {
+		blockUntilReleased()
+	}
+	count := helperInt(helperLinesEnv, 0)
+	lineBytes := helperInt(helperLineBytesEnv, 0)
+	crlf := helperInt(helperLineCRLFEnv, 0) != 0
+	noEOL := helperInt(helperLineNoEOLEnv, 0) != 0
+	stderrCount := helperInt(helperStderrEnv, 0)
+	eol := "\n"
+	if crlf {
+		eol = "\r\n"
+	}
+
+	stdout := bufio.NewWriterSize(os.Stdout, 64<<10)
+	stderr := bufio.NewWriterSize(os.Stderr, 16<<10)
+	for i := 1; i <= count; i++ {
+		if _, err := stdout.WriteString(helperLineContent(os.Getenv(helperLinePrefixEnv)+"line", i, lineBytes)); err != nil {
+			fmt.Fprintf(os.Stderr, "helper lines: %v\n", err)
+			return 5
+		}
+		if !(noEOL && i == count) {
+			if _, err := stdout.WriteString(eol); err != nil {
+				fmt.Fprintf(os.Stderr, "helper lines: %v\n", err)
+				return 5
+			}
+		}
+	}
+	for i := 1; i <= stderrCount; i++ {
+		if _, err := stderr.WriteString(helperLineContent("err", i, lineBytes)); err != nil {
+			fmt.Fprintf(os.Stderr, "helper lines: %v\n", err)
+			return 5
+		}
+		if _, err := stderr.WriteString("\n"); err != nil {
+			fmt.Fprintf(os.Stderr, "helper lines: %v\n", err)
+			return 5
+		}
+	}
+	if err := stdout.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "helper lines: %v\n", err)
+		return 5
+	}
+	if err := stderr.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "helper lines: %v\n", err)
+		return 5
+	}
+	if os.Getenv(helperHoldEnv) != "" {
+		blockUntilHold()
+	}
+	return 0
+}
+
+// helperLineContent 生成第 i 行的确定内容：前缀 + %06d，再按 lineBytes 补/裁。
+func helperLineContent(prefix string, i, lineBytes int) string {
+	base := fmt.Sprintf("%s-%06d", prefix, i)
+	if lineBytes <= 0 {
+		return base
+	}
+	if len(base) >= lineBytes {
+		return base[:lineBytes]
+	}
+	return base + strings.Repeat("x", lineBytes-len(base))
+}
+
+// blockUntilHold 等 CODEFLOW_HELPER_HOLD 指定的文件出现；未设置时立即返回。
+func blockUntilHold() {
+	path := os.Getenv(helperHoldEnv)
+	for {
+		if path != "" {
+			if _, err := os.Stat(path); err == nil {
+				return
+			}
+		}
+		time.Sleep(helperReleasePoll)
+	}
 }
 
 // helperResistsTermination 是“软终止无效”的对手：注册（而不是忽略）软终止处理器，

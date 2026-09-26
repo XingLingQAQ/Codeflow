@@ -4,7 +4,9 @@
 // 本包只依赖标准库、golang.org/x/sys 与 policy（策略闸控）。T1.08.b 已实现
 // Supervisor/Handle/Spool：Start 的闸控顺序、Windows Job Object 与 Unix 进程组绑定、
 // 软/强取消与升级、管道持续排空到有界 spool、退出终态与 marker（见 start.go、
-// spool.go、tree_*.go）。实时按行/按帧输出流与 spool 脱敏属于后续步骤，不在此列。
+// spool.go、tree_*.go）；以及给执行适配器的实时按行订阅与 spool 写入侧过滤钩子
+// （见 stream.go：非阻塞投递、溢出即终止该订阅、SpoolFilter 只作用于 spool）。
+// 真正的流式密钥脱敏器归 T2.04，本包只提供接口与接线。
 //
 // 硬性约定：
 //   - Start 必须先过策略闸控（OperationProcessStart），闸控失败不得创建进程。
@@ -276,6 +278,22 @@ type Handle interface {
 	// Stderr 返回 stderr 的有界输出 spool 的只读视图。两路分开保留、不混流：
 	// 诊断信息与程序输出混在一起会让上游无法区分，也会让脱敏与展示失去依据。
 	Stderr() Spool
+	// Subscribe 为一路输出（StreamStdout 或 StreamStderr，不混流）注册实时按行
+	// 订阅：执行适配器（T1.13 的 Claude Code JSON 流等）用它逐帧解析协议输出。
+	//
+	// 投递永不阻塞排空：订阅 channel 满即判定该订阅溢出并立即终止（channel 关闭、
+	// Err() 返回 ErrSubscriberOverflow、DroppedSeq 给出丢失行序号），其他订阅者、
+	// spool 与子进程都不受影响。适配器的责任：一旦 Err() 是 ErrSubscriberOverflow，
+	// 说明关键协议帧可能已经丢失——计划要求“关键协议帧无法持久化则终止执行并失败”，
+	// 因此适配器必须终止执行（Cancel(CancelForce)）并让本次执行失败，不能继续解析
+	// 残缺的流。
+	//
+	// 第一个订阅者不会丢行（含 Start 返回后立刻订阅：此时进程可能已经写了若干行、
+	// 甚至已经退出，它们还没被任何订阅者认领，会交给第一个订阅者；未认领行超出过
+	// 预算则该订阅以 ErrSubscriberOverflow 结束）。之后的订阅者只收新行，流结束后
+	// 再订阅返回一个已关闭、Err() 为 nil 的订阅，不回放历史（需要历史用
+	// Output()/Stderr() 的 spool 快照）。细节与边界见 stream.go。
+	Subscribe(stream Stream, opts SubscribeOptions) (*Subscription, error)
 	// Cancel 请求终止整棵进程树，幂等。mode=CancelSoft 先发软终止，超过
 	// spec.GracePeriod 仍未退出则自动升级为强制的 CancelForce；mode=CancelForce
 	// 立即强制终止。执行归属未确认（Identity.OwnedBy/Verify 不通过）时不得 kill，
