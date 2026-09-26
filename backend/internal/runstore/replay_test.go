@@ -411,6 +411,33 @@ func TestReplayExpiredCursorIsReported(t *testing.T) {
 	}
 }
 
+// TestReplayCursorErrorsCarryTheSnapshotBounds: a 410/422 answer must quote the
+// numbers that decided it, so the two cursor errors return the page's boundaries
+// (and no events) from the same statement instead of a zero page.
+func TestReplayCursorErrorsCarryTheSnapshotBounds(t *testing.T) {
+	ctx := context.Background()
+	f := newReplayFixture(t)
+	f.setProjectCounter(t, 4)
+	f.appendProject(t) // 5
+	f.appendProject(t) // 6
+
+	page, err := ReplayProject(ctx, f.store.DB(), eventProjectID, 9, 10)
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("after past the watermark: %v, want ErrInvalidCursor", err)
+	}
+	if page.HighWatermark != 6 || page.RetentionFloor != 5 || page.NextAfter != 9 || len(page.Events) != 0 {
+		t.Fatalf("invalid-cursor page = %+v, want watermark 6, floor 5, next_after 9, no events", page)
+	}
+
+	page, err = ReplayProject(ctx, f.store.DB(), eventProjectID, 1, 10)
+	if !errors.Is(err, ErrCursorExpired) {
+		t.Fatalf("after below the floor: %v, want ErrCursorExpired", err)
+	}
+	if page.HighWatermark != 6 || page.RetentionFloor != 5 || page.NextAfter != 1 || len(page.Events) != 0 {
+		t.Fatalf("expired-cursor page = %+v, want watermark 6, floor 5, next_after 1, no events", page)
+	}
+}
+
 // TestReplayFullyTrimmedScopeExpiresOldCursors covers a scope whose counter has
 // moved but which retains no event at all (retention trimmed the whole
 // history). The floor must be watermark+1, not the "never written" value 1:

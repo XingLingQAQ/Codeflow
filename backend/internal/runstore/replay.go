@@ -82,6 +82,11 @@ type ReplayPage struct {
 //     (the API layer answers 422 invalid_cursor);
 //   - after < retention_floor-1 → ErrCursorExpired (410: the events the cursor
 //     points at are no longer retained, and only a snapshot can recover).
+//
+// On the two cursor errors the returned page carries no events but does carry
+// HighWatermark, RetentionFloor and NextAfter=after, read by the same statement
+// that judged the cursor, so the caller can answer 410/422 with the numbers that
+// decided it instead of re-reading them in a second snapshot.
 func ReplayProject(ctx context.Context, q Querier, projectID string, after int64, limit int) (ReplayPage, error) {
 	return replayScope(ctx, q, "replay project events "+projectID,
 		projectScope(projectID), "project_id", "project_seq", projectID, after, limit)
@@ -173,18 +178,21 @@ func replayScope(ctx context.Context, q Querier, op, scope, scopeColumn, seqColu
 		return ReplayPage{}, fmt.Errorf("%s: no watermark row returned", op)
 	}
 
+	// The boundaries that judged a bad cursor are returned with the error (and
+	// no events), so a 410/422 answer quotes the same snapshot.
+	bounds := ReplayPage{NextAfter: after, HighWatermark: page.HighWatermark, RetentionFloor: page.RetentionFloor}
 	switch {
 	case after > page.HighWatermark:
 		// A sequence this scope never allocated. Not "no new events": the
 		// cursor is wrong, and answering with an empty page would make a
 		// client that mixed up two scopes believe it is up to date.
-		return ReplayPage{}, fmt.Errorf("%w: %s: after %d is past the high watermark %d",
+		return bounds, fmt.Errorf("%w: %s: after %d is past the high watermark %d",
 			ErrInvalidCursor, op, after, page.HighWatermark)
 	case after < page.RetentionFloor-1:
 		// The cursor points at history that is no longer here. after =
 		// retention_floor-1 is legal: it is the position just before the
 		// oldest retained event.
-		return ReplayPage{}, fmt.Errorf("%w: %s: after %d is below the retention floor %d",
+		return bounds, fmt.Errorf("%w: %s: after %d is below the retention floor %d",
 			ErrCursorExpired, op, after, page.RetentionFloor)
 	}
 
