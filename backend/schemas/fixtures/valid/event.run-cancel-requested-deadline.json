@@ -1,0 +1,12 @@
+{
+  "id": "evt_9101",
+  "scope": "run:run_88",
+  "project_id": "p_123",
+  "run_id": "run_88",
+  "sequence": 3,
+  "type": "run.cancel_requested",
+  "schema_version": 1,
+  "occurred_at": "2026-09-26T09:00:00Z",
+  "identity": {"project_id": "p_123", "run_id": "run_88", "attempt_id": null, "agent_revision_id": null, "actor": {"type": "system", "id": "deadline-watchdog"}},
+  "payload": {"expected_terminal": "expired", "reason": "hard_deadline"}
+}

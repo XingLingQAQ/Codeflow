@@ -361,12 +361,15 @@ func TestRunHookPayloadRejects(t *testing.T) {
 		{name: "start without attempt", hook: HookRunStart, base: start, field: "AttemptID", mutate: func(p *RunHookPayload) { p.Identity.AttemptID = nil }},
 		{name: "start without agent revision", hook: HookRunStart, base: start, field: "AgentRevisionID", mutate: func(p *RunHookPayload) { p.Identity.AgentRevisionID = nil }},
 		{name: "finish with a non-terminal status", hook: HookRunFinish, base: finish, field: "Status", mutate: func(p *RunHookPayload) { p.Status = run.RunStatusRunning }},
-		// completed/failed delegate to the terminal event's own requirement.
+		// Every terminal status delegates to its terminal event's own
+		// requirement (CA-1 gave cancelled and expired their own event types).
 		{name: "finish without run", hook: HookRunFinish, base: finish, field: "Identity.run_id", mutate: func(p *RunHookPayload) { p.Identity.RunID = nil }},
-		// cancelled/expired have no event type, so the hook applies the Run-level
-		// rule itself and names the field "RunID".
-		{name: "cancelled finish without run", hook: HookRunFinish, base: finish, field: "RunID", mutate: func(p *RunHookPayload) {
+		{name: "cancelled finish without run", hook: HookRunFinish, base: finish, field: "Identity.run_id", mutate: func(p *RunHookPayload) {
 			p.Status = run.RunStatusCancelled
+			p.Identity.RunID = nil
+		}},
+		{name: "expired finish without run", hook: HookRunFinish, base: finish, field: "Identity.run_id", mutate: func(p *RunHookPayload) {
+			p.Status = run.RunStatusExpired
 			p.Identity.RunID = nil
 		}},
 		{name: "finish without project", hook: HookRunFinish, base: finish, field: "Identity.project_id", mutate: func(p *RunHookPayload) { p.Identity.ProjectID = "" }},
@@ -430,6 +433,8 @@ func TestRunTerminalEventType(t *testing.T) {
 	cases := map[run.RunStatus]run.ExecutionEventType{
 		run.RunStatusCompleted: run.EventRunCompleted,
 		run.RunStatusFailed:    run.EventRunFailed,
+		run.RunStatusCancelled: run.EventRunCancelled,
+		run.RunStatusExpired:   run.EventRunExpired,
 	}
 	for status, want := range cases {
 		got, ok := RunTerminalEventType(status)
@@ -437,8 +442,23 @@ func TestRunTerminalEventType(t *testing.T) {
 			t.Errorf("RunTerminalEventType(%q) = %q/%v, want %q/true", status, got, ok, want)
 		}
 	}
-	// cancelled and expired have no dedicated event in the closed enum yet.
-	for _, status := range []run.RunStatus{run.RunStatusCancelled, run.RunStatusExpired, run.RunStatusRunning} {
+	// Every terminal status is covered, and the mapping agrees with the state
+	// event run.Decide names for a transition into that status (CA-1).
+	for _, status := range run.RunStatuses {
+		_, ok := RunTerminalEventType(status)
+		if ok != status.IsTerminal() {
+			t.Errorf("RunTerminalEventType(%q) ok = %v, want %v (terminal = %v)", status, ok, status.IsTerminal(), status.IsTerminal())
+		}
+	}
+	for _, rule := range run.Rules() {
+		if !rule.To.IsTerminal() || rule.StateEvent == "" {
+			continue
+		}
+		if want, _ := RunTerminalEventType(rule.To); rule.StateEvent != want {
+			t.Errorf("%s + %s writes %q, but RunTerminalEventType(%s) = %q", rule.From, rule.Trigger, rule.StateEvent, rule.To, want)
+		}
+	}
+	for _, status := range []run.RunStatus{run.RunStatusRunning, run.RunStatusCancelling, ""} {
 		if got, ok := RunTerminalEventType(status); ok {
 			t.Errorf("RunTerminalEventType(%q) = %q/true, want ok=false", status, got)
 		}

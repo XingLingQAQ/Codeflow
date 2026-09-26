@@ -25,6 +25,14 @@
 --      failed notification must never be able to delete the evidence that the
 --      run reached a terminal state (§15 T1.05).
 --
+-- Amended in place by contract amendment CA-1 (2026-09-26, plan section 26.31):
+-- the type CHECK gained the six run.* state events (run.cancel_requested,
+-- run.cancelled, run.expired, run.reattached, run.recovering, run.resumed).
+-- This was done in place rather than as a table rebuild because runstore was
+-- not yet wired into production start-up (T1.04): no database outside of tests
+-- was ever created from the earlier text. From T1.04 on, migrations are frozen
+-- and a change is a new, appended migration.
+--
 -- Time is Unix milliseconds (UTC) in INTEGER columns, as in 001 and 002.
 --
 -- Migration 001 already created project_refs, tasks, runs and attempts; the
@@ -86,7 +94,7 @@ CREATE TABLE events (
     -- attempt id it is given is non-empty and that the identity agrees about the
     -- run; it does not look the attempt up.
     attempt_id     TEXT    NULL,
-    -- Closed enum, exactly the 15 types of schemas/execution-event.schema.json.
+    -- Closed enum, exactly the types of schemas/execution-event.schema.json.
     -- A new event type extends that schema, this CHECK and runstore's
     -- eventTypes list in one change; the schema_version then decides whether
     -- consumers can still read the stream.
@@ -101,8 +109,14 @@ CREATE TABLE events (
         'process.exited',
         'process.started',
         'process.terminated',
+        'run.cancel_requested',
+        'run.cancelled',
         'run.completed',
+        'run.expired',
         'run.failed',
+        'run.reattached',
+        'run.recovering',
+        'run.resumed',
         'scheduler.claimed',
         'server.restart',
         'tool.requested'

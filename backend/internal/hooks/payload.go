@@ -282,25 +282,12 @@ func (p RunHookPayload) Validate(hook HookType) error {
 				Reason: fmt.Sprintf("must be a terminal Run status, got %q", string(p.Status)),
 			}
 		}
-		if eventType, ok := RunTerminalEventType(p.Status); ok {
-			if err := p.Identity.ValidateFor(string(eventType)); err != nil {
-				return identityError(hook, err)
-			}
-			break
-		}
-		// cancelled / expired 在封闭事件枚举里还没有对应的终态事件（§21.1 的
-		// run.cancel 是命令不是事件），所以直接套用 Run 级要求：形状合法且
-		// run_id 存在。与 run.completed / run.failed 的要求一致。
-		if err := p.Identity.Validate(); err != nil {
+		// Every terminal status has its own terminal event type (CA-1 added
+		// run.cancelled and run.expired), so the identity is checked against
+		// the event the hook fires for.
+		eventType, _ := RunTerminalEventType(p.Status)
+		if err := p.Identity.ValidateFor(string(eventType)); err != nil {
 			return identityError(hook, err)
-		}
-		if p.Identity.RunID == nil {
-			return &PayloadError{
-				Hook:    hook,
-				Field:   "RunID",
-				Missing: true,
-				Reason:  "a terminal Run fact must name its Run",
-			}
 		}
 	}
 	return nil
@@ -313,14 +300,18 @@ func (p RunHookPayload) DedupeKey(hook HookType) string {
 }
 
 // RunTerminalEventType maps a terminal Run status to the execution event type
-// that reports it. cancelled and expired have no dedicated event type in the
-// closed enum yet (a cancel is a command, §21.1), so ok is false for them.
+// that reports it (the state event run.Decide names for every transition into
+// that status). ok is false for a non-terminal status.
 func RunTerminalEventType(status run.RunStatus) (run.ExecutionEventType, bool) {
 	switch status {
 	case run.RunStatusCompleted:
 		return run.EventRunCompleted, true
 	case run.RunStatusFailed:
 		return run.EventRunFailed, true
+	case run.RunStatusCancelled:
+		return run.EventRunCancelled, true
+	case run.RunStatusExpired:
+		return run.EventRunExpired, true
 	default:
 		return "", false
 	}

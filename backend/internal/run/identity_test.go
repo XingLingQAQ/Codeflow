@@ -8,8 +8,46 @@ import (
 	"sort"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/codeflow/backend/internal/run"
 )
+
+// TestExecutionEventTypesMatchOpenAPI requires the ExecutionEvent.type enum of
+// backend/docs/openapi.yaml (the source of the generated frontend types) to
+// equal the Go set, in order. The OpenAPI copy of the enum had no parity check
+// before contract amendment CA-1 and would have drifted silently.
+func TestExecutionEventTypesMatchOpenAPI(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.yaml"))
+	if err != nil {
+		t.Fatalf("read openapi.yaml: %v", err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Enum []string `yaml:"enum"`
+				} `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse openapi.yaml: %v", err)
+	}
+	event, ok := doc.Components.Schemas["ExecutionEvent"]
+	if !ok {
+		t.Fatal("openapi.yaml has no components.schemas.ExecutionEvent")
+	}
+	got := event.Properties["type"].Enum
+	if len(got) != len(run.ExecutionEventTypes) {
+		t.Fatalf("OpenAPI ExecutionEvent.type has %d values, run.ExecutionEventTypes has %d: %v", len(got), len(run.ExecutionEventTypes), got)
+	}
+	for i, et := range run.ExecutionEventTypes {
+		if got[i] != string(et) {
+			t.Fatalf("OpenAPI ExecutionEvent.type[%d] = %q, want %q (same order as the schema)", i, got[i], et)
+		}
+	}
+}
 
 // schemaDir is where the frozen wire contracts live, relative to
 // backend/internal/run.
@@ -197,8 +235,14 @@ func TestRequiredIdentityTable(t *testing.T) {
 		"process.exited":          {Run: true, Attempt: true, AgentRevision: true},
 		"process.started":         {Run: true, Attempt: true, AgentRevision: true},
 		"process.terminated":      {Run: true, Attempt: true, AgentRevision: true},
+		"run.cancel_requested":    {Run: true},
+		"run.cancelled":           {Run: true},
 		"run.completed":           {Run: true},
+		"run.expired":             {Run: true},
 		"run.failed":              {Run: true},
+		"run.reattached":          {Run: true, Attempt: true, AgentRevision: true},
+		"run.recovering":          {Run: true},
+		"run.resumed":             {Run: true, Attempt: true, AgentRevision: true},
 		"scheduler.claimed":       {Run: true},
 		"server.restart":          {},
 		"tool.requested":          {Run: true, Attempt: true, AgentRevision: true},

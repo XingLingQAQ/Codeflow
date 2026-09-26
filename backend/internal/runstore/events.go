@@ -129,7 +129,7 @@ type EventInput struct {
 	RunID *string
 	// AttemptID is nil unless an attempt was live when the event happened.
 	AttemptID *string
-	// Type must be one of the 15 values of run.ExecutionEventTypes.
+	// Type must be one of the values of run.ExecutionEventTypes.
 	Type string
 	// OccurredAt is when the fact happened, not when it was appended. It must
 	// be non-zero; the store stores it as Unix milliseconds UTC.

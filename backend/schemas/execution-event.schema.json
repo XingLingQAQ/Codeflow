@@ -47,13 +47,19 @@
         "process.exited",
         "process.started",
         "process.terminated",
+        "run.cancel_requested",
+        "run.cancelled",
         "run.completed",
+        "run.expired",
         "run.failed",
+        "run.reattached",
+        "run.recovering",
+        "run.resumed",
         "scheduler.claimed",
         "server.restart",
         "tool.requested"
       ],
-      "description": "封闭枚举：计划文档已命名的事件类型（§20.2 tool.requested；§21.1 scheduler.claimed/process.started/approval.required/approval.approved/budget.soft_exceeded/checkpoint.acknowledged/process.exited/process.terminated/server.restart；§19.3 approval.decided/merge.completed；§15 T9.01 approval.required/run.failed/run.completed/budget.warning）。§21.1 的 run.cancel/run.resume 是命令不是事件，process_kill_failed 是失败 code，均不在此枚举。规则见外层 description。"
+      "description": "封闭枚举：计划文档已命名的事件类型（§20.2 tool.requested；§21.1 scheduler.claimed/process.started/approval.required/approval.approved/budget.soft_exceeded/checkpoint.acknowledged/process.exited/process.terminated/server.restart；§19.3 approval.decided/merge.completed；§15 T9.01 approval.required/run.failed/run.completed/budget.warning），以及契约修订 CA-1（计划 §26.31）为让每个 §21.1 迁移都有状态事件而增加的 run.cancel_requested（run.cancel/hard deadline → cancelling，payload 记期望终态）、run.resumed、run.recovering、run.reattached、run.cancelled、run.expired。§21.1 的 run.cancel/run.resume 是命令不是事件，process_kill_failed 是失败 code，均不在此枚举。新增枚举值是向后兼容的（消费端按外层规则推进游标），schema_version 不变。规则见外层 description。"
     },
     "schema_version": {
       "const": 1,

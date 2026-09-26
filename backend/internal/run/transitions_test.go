@@ -40,63 +40,79 @@ func conclusion(name string, terminal run.RunStatus) run.Trigger {
 	return run.ConclusionTrigger(name, terminal)
 }
 
-// planRow is one positive case transcribed from §21.1: the row's current state,
-// the row's command/event, and the row's target state.
-type planRow struct {
-	name    string
-	from    run.RunStatus
-	trigger run.Trigger
-	want    run.RunStatus
+// terminated builds the process.terminated trigger of the cancel path, which
+// carries the expected terminal recorded on entering cancelling (CA-1).
+func terminated(expected run.RunStatus) run.Trigger {
+	return run.Trigger{Kind: run.TriggerEvent, Name: "process.terminated", ExpectedTerminal: expected}
 }
 
-// planRows is §21.1 verbatim, one entry per table row (a row that lists several
-// states or two commands expands into one entry per combination).
+// planRow is one positive case transcribed from §21.1: the row's current state,
+// the row's command/event, the row's target state and the state event the
+// transition writes (CA-1; "" only for completed + merge).
+type planRow struct {
+	name       string
+	from       run.RunStatus
+	trigger    run.Trigger
+	want       run.RunStatus
+	stateEvent string
+}
+
+// planRows is §21.1 as amended by contract amendment CA-1 (plan §26.31), one
+// entry per table row (a row that lists several states or two commands expands
+// into one entry per combination). CA-1 changed three things: process.terminated
+// carries the expected terminal (a hard deadline ends expired, not cancelled),
+// a process that exits while its Run waits for approval fails the Run, and
+// every row names its state event.
 var planRows = []planRow{
-	{"queued + scheduler.claimed", stQueued, event("scheduler.claimed"), stStarting},
-	{"starting + process.started", stStarting, event("process.started"), stRunning},
-	{"running + approval.required", stRunning, event("approval.required"), stWaitingApproval},
-	{"waiting_approval + approval.approved", stWaitingApproval, event("approval.approved"), stRunning},
-	{"running + budget.soft_exceeded", stRunning, event("budget.soft_exceeded"), stRunning},
-	{"running + checkpoint.acknowledged", stRunning, event("checkpoint.acknowledged"), stPaused},
-	{"paused + run.resume", stPaused, command("run.resume"), stRunning},
-	{"running + process.exited(0)", stRunning, run.ProcessExitedTrigger(0), stCompleted},
-	{"running + process.exited(!=0)", stRunning, run.ProcessExitedTrigger(1), stFailed},
-	{"queued + run.cancel", stQueued, command("run.cancel"), stCancelling},
-	{"starting + run.cancel", stStarting, command("run.cancel"), stCancelling},
-	{"running + run.cancel", stRunning, command("run.cancel"), stCancelling},
-	{"waiting_approval + run.cancel", stWaitingApproval, command("run.cancel"), stCancelling},
-	{"paused + run.cancel", stPaused, command("run.cancel"), stCancelling},
-	{"queued + hard_deadline", stQueued, command("hard_deadline"), stCancelling},
-	{"starting + hard_deadline", stStarting, command("hard_deadline"), stCancelling},
-	{"running + hard_deadline", stRunning, command("hard_deadline"), stCancelling},
-	{"waiting_approval + hard_deadline", stWaitingApproval, command("hard_deadline"), stCancelling},
-	{"paused + hard_deadline", stPaused, command("hard_deadline"), stCancelling},
-	{"cancelling + process.terminated", stCancelling, event("process.terminated"), stCancelled},
-	{"cancelling + process_kill_failed", stCancelling, conclusion("process_kill_failed", ""), stRecovering},
-	{"starting + server.restart", stStarting, event("server.restart"), stRecovering},
-	{"running + server.restart", stRunning, event("server.restart"), stRecovering},
-	{"waiting_approval + server.restart", stWaitingApproval, event("server.restart"), stRecovering},
-	{"paused + server.restart", stPaused, event("server.restart"), stRecovering},
-	{"cancelling + server.restart", stCancelling, event("server.restart"), stRecovering},
-	{"recovering + process_verified", stRecovering, conclusion("process_verified", ""), stRunning},
-	{"recovering + cleaned(failed)", stRecovering, conclusion("cleaned", stFailed), stFailed},
-	{"recovering + cleaned(cancelled)", stRecovering, conclusion("cleaned", stCancelled), stCancelled},
-	{"recovering + cleaned(expired)", stRecovering, conclusion("cleaned", stExpired), stExpired},
+	{"queued + scheduler.claimed", stQueued, event("scheduler.claimed"), stStarting, "scheduler.claimed"},
+	{"starting + process.started", stStarting, event("process.started"), stRunning, "process.started"},
+	{"running + approval.required", stRunning, event("approval.required"), stWaitingApproval, "approval.required"},
+	{"waiting_approval + approval.approved", stWaitingApproval, event("approval.approved"), stRunning, "approval.approved"},
+	{"running + budget.soft_exceeded", stRunning, event("budget.soft_exceeded"), stRunning, "budget.warning"},
+	{"running + checkpoint.acknowledged", stRunning, event("checkpoint.acknowledged"), stPaused, "checkpoint.acknowledged"},
+	{"paused + run.resume", stPaused, command("run.resume"), stRunning, "run.resumed"},
+	{"running + process.exited(0)", stRunning, run.ProcessExitedTrigger(0), stCompleted, "run.completed"},
+	{"running + process.exited(!=0)", stRunning, run.ProcessExitedTrigger(1), stFailed, "run.failed"},
+	{"waiting_approval + process.exited(0)", stWaitingApproval, run.ProcessExitedTrigger(0), stFailed, "run.failed"},
+	{"waiting_approval + process.exited(!=0)", stWaitingApproval, run.ProcessExitedTrigger(1), stFailed, "run.failed"},
+	{"queued + run.cancel", stQueued, command("run.cancel"), stCancelling, "run.cancel_requested"},
+	{"starting + run.cancel", stStarting, command("run.cancel"), stCancelling, "run.cancel_requested"},
+	{"running + run.cancel", stRunning, command("run.cancel"), stCancelling, "run.cancel_requested"},
+	{"waiting_approval + run.cancel", stWaitingApproval, command("run.cancel"), stCancelling, "run.cancel_requested"},
+	{"paused + run.cancel", stPaused, command("run.cancel"), stCancelling, "run.cancel_requested"},
+	{"queued + hard_deadline", stQueued, command("hard_deadline"), stCancelling, "run.cancel_requested"},
+	{"starting + hard_deadline", stStarting, command("hard_deadline"), stCancelling, "run.cancel_requested"},
+	{"running + hard_deadline", stRunning, command("hard_deadline"), stCancelling, "run.cancel_requested"},
+	{"waiting_approval + hard_deadline", stWaitingApproval, command("hard_deadline"), stCancelling, "run.cancel_requested"},
+	{"paused + hard_deadline", stPaused, command("hard_deadline"), stCancelling, "run.cancel_requested"},
+	{"cancelling + process.terminated(cancelled)", stCancelling, terminated(stCancelled), stCancelled, "run.cancelled"},
+	{"cancelling + process.terminated(expired)", stCancelling, terminated(stExpired), stExpired, "run.expired"},
+	{"cancelling + process_kill_failed", stCancelling, conclusion("process_kill_failed", ""), stRecovering, "run.recovering"},
+	{"starting + server.restart", stStarting, event("server.restart"), stRecovering, "run.recovering"},
+	{"running + server.restart", stRunning, event("server.restart"), stRecovering, "run.recovering"},
+	{"waiting_approval + server.restart", stWaitingApproval, event("server.restart"), stRecovering, "run.recovering"},
+	{"paused + server.restart", stPaused, event("server.restart"), stRecovering, "run.recovering"},
+	{"cancelling + server.restart", stCancelling, event("server.restart"), stRecovering, "run.recovering"},
+	{"recovering + process_verified", stRecovering, conclusion("process_verified", ""), stRunning, "run.reattached"},
+	{"recovering + cleaned(failed)", stRecovering, conclusion("cleaned", stFailed), stFailed, "run.failed"},
+	{"recovering + cleaned(cancelled)", stRecovering, conclusion("cleaned", stCancelled), stCancelled, "run.cancelled"},
+	{"recovering + cleaned(expired)", stRecovering, conclusion("cleaned", stExpired), stExpired, "run.expired"},
 	// The queued-no-process path: a queued Run that is cancelled goes to
 	// cancelling like every other cancel, and leaves it through the same
 	// "cleaned" conclusion the recovery path uses, because no
 	// process.terminated can ever arrive for a Run that never started.
-	{"cancelling + cleaned(cancelled)", stCancelling, conclusion("cleaned", stCancelled), stCancelled},
-	{"cancelling + cleaned(expired)", stCancelling, conclusion("cleaned", stExpired), stExpired},
-	{"completed + merge", stCompleted, command("merge"), stCompleted},
+	{"cancelling + cleaned(cancelled)", stCancelling, conclusion("cleaned", stCancelled), stCancelled, "run.cancelled"},
+	{"cancelling + cleaned(expired)", stCancelling, conclusion("cleaned", stExpired), stExpired, "run.expired"},
+	{"completed + merge", stCompleted, command("merge"), stCompleted, ""},
 }
 
 // positiveExtras are further §21.1 rows exercised with a different exit code.
 // They are positive cases, not extra table rows: the table has one non-zero
 // exit row, and Rules()/AllowedTriggers must report one row per §21.1 row.
 var positiveExtras = []planRow{
-	{"running + process.exited(137)", stRunning, run.ProcessExitedTrigger(137), stFailed},
-	{"running + process.exited(-1)", stRunning, run.ProcessExitedTrigger(-1), stFailed},
+	{"running + process.exited(137)", stRunning, run.ProcessExitedTrigger(137), stFailed, "run.failed"},
+	{"running + process.exited(-1)", stRunning, run.ProcessExitedTrigger(-1), stFailed, "run.failed"},
+	{"waiting_approval + process.exited(137)", stWaitingApproval, run.ProcessExitedTrigger(137), stFailed, "run.failed"},
 }
 
 // legalPairs indexes planRows by state + trigger for the exhaustive sweeps.
@@ -114,7 +130,8 @@ func pairKey(from run.RunStatus, trg run.Trigger) string {
 	return fmt.Sprintf("%s|%s", from, trg)
 }
 
-// TestNextStatusPlanRows is the positive case of every §21.1 row.
+// TestNextStatusPlanRows is the positive case of every §21.1 row, including the
+// state event Decide reports for it.
 func TestNextStatusPlanRows(t *testing.T) {
 	for _, r := range append(append([]planRow{}, planRows...), positiveExtras...) {
 		t.Run(r.name, func(t *testing.T) {
@@ -125,7 +142,75 @@ func TestNextStatusPlanRows(t *testing.T) {
 			if got != r.want {
 				t.Fatalf("NextStatus(%s, %s) = %s, want %s", r.from, r.trigger, got, r.want)
 			}
+			tr, err := run.Decide(r.from, r.trigger)
+			if err != nil {
+				t.Fatalf("Decide(%s, %s) = error %v", r.from, r.trigger, err)
+			}
+			if tr.From != r.from || tr.To != r.want || string(tr.StateEvent) != r.stateEvent {
+				t.Fatalf("Decide(%s, %s) = %+v, want From=%s To=%s StateEvent=%q", r.from, r.trigger, tr, r.from, r.want, r.stateEvent)
+			}
 		})
+	}
+}
+
+// TestDecideStateEventsAreEventTypes pins the CA-1 rule that every allowed
+// transition except completed + merge writes a state event from the closed
+// enum, that a terminal status always has its own terminal event type, and that
+// a rejected request reports no state event.
+func TestDecideStateEventsAreEventTypes(t *testing.T) {
+	terminalEvent := map[run.RunStatus]string{
+		stCompleted: "run.completed", stFailed: "run.failed",
+		stCancelled: "run.cancelled", stExpired: "run.expired",
+	}
+	for _, r := range run.Rules() {
+		isMerge := r.From == stCompleted && r.Trigger.Kind == run.TriggerCommand && r.Trigger.Name == "merge"
+		if isMerge {
+			if r.StateEvent != "" {
+				t.Errorf("completed + merge declares state event %q, want none", r.StateEvent)
+			}
+			continue
+		}
+		if !r.StateEvent.Valid() {
+			t.Errorf("%s + %s declares state event %q, which is not an execution event type", r.From, r.Trigger, r.StateEvent)
+		}
+		if want, ok := terminalEvent[r.To]; ok && string(r.StateEvent) != want {
+			t.Errorf("%s + %s ends %s with state event %q, want %q", r.From, r.Trigger, r.To, r.StateEvent, want)
+		}
+		if _, err := run.RequiredIdentity(string(r.StateEvent)); err != nil {
+			t.Errorf("state event %q has no identity requirement: %v", r.StateEvent, err)
+		}
+	}
+	tr, err := run.Decide(stCompleted, command("run.cancel"))
+	if err == nil || tr.To != stCompleted || tr.StateEvent != "" {
+		t.Fatalf("rejected Decide = (%+v, %v), want To=completed, no state event and an error", tr, err)
+	}
+	if tr, err := run.Decide("done", event("scheduler.claimed")); err == nil || tr.To != "done" || tr.StateEvent != "" {
+		t.Fatalf("Decide from an invalid state = (%+v, %v), want the state unchanged, no state event and an error", tr, err)
+	}
+}
+
+// TestHardDeadlineEndsExpired is the CA-1 fix: the expected terminal recorded
+// on entering cancelling decides where process.terminated lands, so a hard
+// deadline that had to kill a live process ends expired, and a user cancel ends
+// cancelled; process.terminated without the expected terminal is malformed.
+func TestHardDeadlineEndsExpired(t *testing.T) {
+	if got, err := run.NextStatus(stRunning, command("hard_deadline")); err != nil || got != stCancelling {
+		t.Fatalf("running + hard_deadline = (%s, %v), want (cancelling, nil)", got, err)
+	}
+	if got, err := run.NextStatus(stCancelling, run.ProcessTerminatedTrigger(stExpired)); err != nil || got != stExpired {
+		t.Fatalf("cancelling + process.terminated(expired) = (%s, %v), want (expired, nil)", got, err)
+	}
+	if got, err := run.NextStatus(stCancelling, run.ProcessTerminatedTrigger(stCancelled)); err != nil || got != stCancelled {
+		t.Fatalf("cancelling + process.terminated(cancelled) = (%s, %v), want (cancelled, nil)", got, err)
+	}
+	for _, bad := range []run.Trigger{event("process.terminated"), terminated(stFailed), terminated(stRunning)} {
+		got, err := run.NextStatus(stCancelling, bad)
+		if err == nil || got != stCancelling {
+			t.Fatalf("cancelling + %s = (%s, %v), want the Run unchanged and an error", bad, got, err)
+		}
+		if code := errorCode(t, err); code != run.CodeInvalidTransition {
+			t.Fatalf("cancelling + %s code = %q, want %q", bad, code, run.CodeInvalidTransition)
+		}
 	}
 }
 
@@ -245,6 +330,10 @@ func TestNextStatusMalformedTriggersRejected(t *testing.T) {
 		{"process_verified with a terminal", run.ConclusionTrigger("process_verified", stFailed)},
 		{"process.exited without a code", run.EventTrigger("process.exited")},
 		{"process.exited as a conclusion", run.ConclusionTrigger("process.exited", "")},
+		{"process.terminated without a terminal", run.EventTrigger("process.terminated")},
+		{"process.terminated(failed)", terminated(stFailed)},
+		{"process.terminated with a non-terminal", terminated(stRunning)},
+		{"expected terminal on another event", run.Trigger{Kind: run.TriggerEvent, Name: "server.restart", ExpectedTerminal: stCancelled}},
 	}
 	combos, rejected := 0, 0
 	for _, from := range run.RunStatuses {
@@ -373,7 +462,9 @@ func TestNextStatusFailureCodes(t *testing.T) {
 		{"checkpoint from paused", stPaused, event("checkpoint.acknowledged"), run.CodeCapabilityUnavailable},
 		{"exit(0) from starting", stStarting, run.ProcessExitedTrigger(0), run.CodeOutputPersistFailed},
 		{"exit(1) from paused", stPaused, run.ProcessExitedTrigger(1), run.CodeInvalidTransition},
-		{"process.terminated from running", stRunning, event("process.terminated"), run.CodeProcessKillFailed},
+		{"process.terminated from running", stRunning, terminated(stCancelled), run.CodeProcessKillFailed},
+		{"process.terminated(expired) from recovering", stRecovering, terminated(stExpired), run.CodeProcessKillFailed},
+		{"exit(1) from cancelling", stCancelling, run.ProcessExitedTrigger(1), run.CodeInvalidTransition},
 		{"kill-failed from running", stRunning, conclusion("process_kill_failed", ""), run.CodeProcessKillFailed},
 		{"server.restart from completed", stCompleted, event("server.restart"), run.CodeRecoveryRequired},
 		{"merge from running", stRunning, command("merge"), run.CodeInvalidTransition},
@@ -441,6 +532,9 @@ func TestRulesExposeThePlanTable(t *testing.T) {
 		got, err := run.NextStatus(r.From, r.Trigger)
 		if err != nil || got != r.To {
 			t.Errorf("NextStatus(%s, %s) = (%s, %v), but Rules() declares %s", r.From, r.Trigger, got, err, r.To)
+		}
+		if tr, err := run.Decide(r.From, r.Trigger); err != nil || tr.StateEvent != r.StateEvent {
+			t.Errorf("Decide(%s, %s) state event = (%q, %v), but Rules() declares %q", r.From, r.Trigger, tr.StateEvent, err, r.StateEvent)
 		}
 	}
 	// The map used by FailureCodeFor must not drift from the table's codes: a
@@ -559,6 +653,7 @@ func TestTriggerString(t *testing.T) {
 		{run.ProcessExitedTrigger(0), "event:process.exited(exit=0)"},
 		{run.CommandTrigger("run.cancel"), "command:run.cancel"},
 		{run.ConclusionTrigger("cleaned", stExpired), "conclusion:cleaned(expired)"},
+		{run.ProcessTerminatedTrigger(stExpired), "event:process.terminated(expired)"},
 		{run.Trigger{}, ":"},
 	}
 	for _, c := range cases {

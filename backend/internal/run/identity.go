@@ -28,7 +28,10 @@ import (
 // §27.4).
 type ExecutionEventType string
 
-// The 15 event types of the closed enum, in the schema's declaration order.
+// The event types of the closed enum, in the schema's declaration order: the 15
+// types T0.03 named from the plan, plus the six run.* state events contract
+// amendment CA-1 (plan §26.31) added so that every §21.1 transition has an event
+// type to write in its CAS transaction (§19.3 item 1).
 const (
 	// EventApprovalApproved: a waiting_approval Run is approved (§21.1).
 	EventApprovalApproved ExecutionEventType = "approval.approved"
@@ -55,10 +58,27 @@ const (
 	// EventProcessTerminated: the process tree was terminated and confirmed
 	// (§21.1).
 	EventProcessTerminated ExecutionEventType = "process.terminated"
+	// EventRunCancelRequested: a run.cancel command or the hard deadline moved
+	// the Run to cancelling; the payload records the expected terminal state
+	// (cancelled or expired) and the reason (CA-1).
+	EventRunCancelRequested ExecutionEventType = "run.cancel_requested"
+	// EventRunCancelled: a Run reached cancelled (CA-1).
+	EventRunCancelled ExecutionEventType = "run.cancelled"
 	// EventRunCompleted: a Run reached completed (§15 T9.01).
 	EventRunCompleted ExecutionEventType = "run.completed"
+	// EventRunExpired: a Run reached expired, the terminal state of a hard
+	// deadline (CA-1).
+	EventRunExpired ExecutionEventType = "run.expired"
 	// EventRunFailed: a Run reached failed (§15 T9.01).
 	EventRunFailed ExecutionEventType = "run.failed"
+	// EventRunReattached: the recoverer verified that the attempt's process is
+	// still its own and the Run returned to running (CA-1).
+	EventRunReattached ExecutionEventType = "run.reattached"
+	// EventRunRecovering: the Run moved to recovering, after a server restart
+	// or a process tree that could not be confirmed gone (CA-1).
+	EventRunRecovering ExecutionEventType = "run.recovering"
+	// EventRunResumed: a paused Run resumed from its checkpoint (CA-1).
+	EventRunResumed ExecutionEventType = "run.resumed"
 	// EventSchedulerClaimed: the scheduler claimed a queued Run (§21.1).
 	EventSchedulerClaimed ExecutionEventType = "scheduler.claimed"
 	// EventServerRestart: the server restarted and must recover what it owned
@@ -73,18 +93,22 @@ var ExecutionEventTypes = []ExecutionEventType{
 	EventApprovalApproved, EventApprovalDecided, EventApprovalRequired,
 	EventBudgetSoftExceeded, EventBudgetWarning, EventCheckpointAcknowledged,
 	EventMergeCompleted, EventProcessExited, EventProcessStarted,
-	EventProcessTerminated, EventRunCompleted, EventRunFailed,
-	EventSchedulerClaimed, EventServerRestart, EventToolRequested,
+	EventProcessTerminated, EventRunCancelRequested, EventRunCancelled,
+	EventRunCompleted, EventRunExpired, EventRunFailed, EventRunReattached,
+	EventRunRecovering, EventRunResumed, EventSchedulerClaimed,
+	EventServerRestart, EventToolRequested,
 }
 
-// Valid reports whether t is one of the 15 enum values.
+// Valid reports whether t is one of the enum values.
 func (t ExecutionEventType) Valid() bool {
 	switch t {
 	case EventApprovalApproved, EventApprovalDecided, EventApprovalRequired,
 		EventBudgetSoftExceeded, EventBudgetWarning, EventCheckpointAcknowledged,
 		EventMergeCompleted, EventProcessExited, EventProcessStarted,
-		EventProcessTerminated, EventRunCompleted, EventRunFailed,
-		EventSchedulerClaimed, EventServerRestart, EventToolRequested:
+		EventProcessTerminated, EventRunCancelRequested, EventRunCancelled,
+		EventRunCompleted, EventRunExpired, EventRunFailed, EventRunReattached,
+		EventRunRecovering, EventRunResumed, EventSchedulerClaimed,
+		EventServerRestart, EventToolRequested:
 		return true
 	default:
 		return false
@@ -308,16 +332,52 @@ var identityRules = []EventIdentityRule{
 			" (grace/force records are attempt-scoped)",
 	},
 	{
+		Event:       EventRunCancelRequested,
+		Requirement: IdentityRequirement{Run: true},
+		Reason: "CA-1：run.cancel/hard deadline → cancelling 的状态事件；queued 的 Run 还没有 attempt，" +
+			"故 attempt 可缺省 (cancel of a queued Run happens before any attempt exists)",
+	},
+	{
+		Event:       EventRunCancelled,
+		Requirement: IdentityRequirement{Run: true},
+		Reason: "CA-1 终态事件：指明 Run；可能来自 queued 取消（从无 attempt）或进程已终止，attempt 可缺省" +
+			" (terminal fact names the Run; there may never have been an attempt)",
+	},
+	{
 		Event:       EventRunCompleted,
 		Requirement: IdentityRequirement{Run: true},
 		Reason: "§15 T9.01 终态通知：指明 Run；进程此时已退出，attempt 可缺省" +
 			" (terminal notification names the Run; the attempt may be gone)",
 	},
 	{
+		Event:       EventRunExpired,
+		Requirement: IdentityRequirement{Run: true},
+		Reason: "CA-1 终态事件（hard deadline）：与 run.cancelled 相同，attempt 可缺省" +
+			" (same as run.cancelled: a queued Run can expire without an attempt)",
+	},
+	{
 		Event:       EventRunFailed,
 		Requirement: IdentityRequirement{Run: true},
 		Reason: "§15 T9.01 终态通知：指明 Run；进程此时已退出，attempt 可缺省" +
 			" (terminal notification names the Run; the attempt may be gone)",
+	},
+	{
+		Event:       EventRunReattached,
+		Requirement: IdentityRequirement{Run: true, Attempt: true, AgentRevision: true},
+		Reason: "CA-1：recovering → running 只在 verified attach 时发生，验证的对象就是该 attempt 的进程" +
+			" (a verified attach is about one specific attempt's process)",
+	},
+	{
+		Event:       EventRunRecovering,
+		Requirement: IdentityRequirement{Run: true},
+		Reason: "CA-1：server.restart / process_kill_failed → recovering 的状态事件；恢复器是系统，" +
+			"attempt 身份此刻可能正无法确认，故可缺省 (the attempt identity may be what recovery must verify)",
+	},
+	{
+		Event:       EventRunResumed,
+		Requirement: IdentityRequirement{Run: true, Attempt: true, AgentRevision: true},
+		Reason: "CA-1：paused → running 从该 attempt 的 checkpoint 恢复（S1 一 Run 一 Attempt）" +
+			" (resume continues the attempt that produced the checkpoint)",
 	},
 	{
 		Event:       EventSchedulerClaimed,

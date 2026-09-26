@@ -9184,7 +9184,7 @@ components:
     ExecutionEvent:
       type: object
       required: [id, scope, project_id, sequence, type, schema_version, occurred_at, identity, payload]
-      description: Unified run-domain event (backend/schemas/execution-event.schema.json). sequence is assigned by the server inside one database transaction per scope (§27.4) and is never client-supplied; project-scope and run-scope sequences are independent projections. type is the closed 15-value enum of plan-named event types; payload is event-family data whose per-family minimum structure is fixed by later cards.
+      description: Unified run-domain event (backend/schemas/execution-event.schema.json). sequence is assigned by the server inside one database transaction per scope (§27.4) and is never client-supplied; project-scope and run-scope sequences are independent projections. type is the closed enum of plan-named event types (the 15 named by T0.03 plus the six run.* state events of contract amendment CA-1, plan section 26.31; it must equal backend/schemas/execution-event.schema.json); payload is event-family data whose per-family minimum structure is fixed by later cards.
       properties:
         id:
           type: string
@@ -9208,7 +9208,7 @@ components:
           minimum: 1
         type:
           type: string
-          enum: [approval.approved, approval.decided, approval.required, budget.soft_exceeded, budget.warning, checkpoint.acknowledged, merge.completed, process.exited, process.started, process.terminated, run.completed, run.failed, scheduler.claimed, server.restart, tool.requested]
+          enum: [approval.approved, approval.decided, approval.required, budget.soft_exceeded, budget.warning, checkpoint.acknowledged, merge.completed, process.exited, process.started, process.terminated, run.cancel_requested, run.cancelled, run.completed, run.expired, run.failed, run.reattached, run.recovering, run.resumed, scheduler.claimed, server.restart, tool.requested]
         schema_version:
           type: integer
           enum: [1]

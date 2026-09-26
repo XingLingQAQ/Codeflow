@@ -1181,15 +1181,15 @@ func TestAppendEventRejectsInvalidInput(t *testing.T) {
 }
 
 // TestAppendEventAcceptsEveryEnumType proves the store's enum is exactly as wide
-// as the schema: every one of the 15 types must be appendable, and the migration
+// as the schema: every one of the enum types must be appendable, and the migration
 // CHECK must accept the same set. A type the Go list knows but the CHECK does
 // not would fail here with a raw constraint error.
 func TestAppendEventAcceptsEveryEnumType(t *testing.T) {
 	f := newEventFixture(t)
 
-	if len(run.ExecutionEventTypes) != 15 {
-		t.Fatalf("run.ExecutionEventTypes has %d entries, want the 15 of execution-event.schema.json",
-			len(run.ExecutionEventTypes))
+	if want := len(eventTypesFromSchema(t)); len(run.ExecutionEventTypes) != want {
+		t.Fatalf("run.ExecutionEventTypes has %d entries, want the %d of execution-event.schema.json",
+			len(run.ExecutionEventTypes), want)
 	}
 	for i, eventType := range run.ExecutionEventTypes {
 		// The fixture supplies the attempt and agent revision the type
