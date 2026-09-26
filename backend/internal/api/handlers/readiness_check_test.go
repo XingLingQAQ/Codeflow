@@ -884,3 +884,339 @@ func TestReadinessCapabilitiesReflectProbeFailures(t *testing.T) {
 	assert.True(t, found, "vault blocker missing: %+v", capabilities.Execution.Blocking)
 	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Merge.State)
 }
+
+// --- T0.12.c: GET /ready and the Run creation gate must agree ---------------
+
+// capabilityProvider is the plan's "fake capability provider" (section 28
+// T0.12.c): an independent Registry whose probes answer from a table the test
+// rewrites between checks. No I/O and no timing, so one combination is
+// described once and both consumers of the same snapshot are asked the same
+// question — GET /ready and readiness.CheckExecution, the gate the Run
+// creation path (T1.04) calls before creating a Run.
+type capabilityProvider struct {
+	registry *readiness.Registry
+	results  map[string]readiness.Result
+}
+
+func newCapabilityProvider() *capabilityProvider {
+	return &capabilityProvider{registry: readiness.NewRegistry(), results: map[string]readiness.Result{}}
+}
+
+// set registers (or replaces) one dependency's outcome; re-registering is how
+// the fake provider flips a dependency between two checks.
+func (p *capabilityProvider) set(t *testing.T, name string, result readiness.Result) {
+	t.Helper()
+	p.results[name] = result
+	require.NoError(t, p.registry.Register(readiness.Spec{
+		Probe: readiness.NewProbeFunc(name, func(context.Context) readiness.Result { return result }),
+	}))
+}
+
+func (p *capabilityProvider) ready(t *testing.T, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		p.set(t, name, readiness.Result{State: readiness.StateReady})
+	}
+}
+
+// capabilityDependencies is the dependency enumeration of plan section 15
+// T0.12 step 1, so a combination never leaves a dependency out by accident.
+var capabilityDependencies = []string{
+	readiness.ComponentFrontendProtocol,
+	readiness.ComponentPolicy,
+	readiness.ComponentWorkspace,
+	readiness.ComponentDatabase,
+	readiness.ComponentMigrations,
+	readiness.ComponentEventStore,
+	readiness.ComponentOutboxDispatcher,
+	readiness.ComponentVault,
+}
+
+// readyCapabilityProvider returns a provider where every dependency and both
+// execution backends are ready.
+func readyCapabilityProvider(t *testing.T) *capabilityProvider {
+	t.Helper()
+	provider := newCapabilityProvider()
+	provider.ready(t, capabilityDependencies...)
+	provider.ready(t, readiness.ExecBackendPrefix+"claude_code", readiness.ExecBackendPrefix+"codex")
+	return provider
+}
+
+// install serves the provider's probes through the package-level registry GET
+// /ready reads, so the endpoint and CheckExecution observe the same probes.
+func (p *capabilityProvider) install(t *testing.T) {
+	t.Helper()
+	clearReadinessProbesForTest(t)
+	require.NoError(t, readiness.Register(p.registry.Snapshot()...))
+}
+
+// sortedBackendNames returns the backend keys of a decoded capability payload.
+func sortedBackendNames(backends map[string]capabilityEntry) []string {
+	names := make([]string, 0, len(backends))
+	for name := range backends {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// capabilityBlockerNames names the components of a domain blocker list.
+func capabilityBlockerNames(blocking []readiness.Blocker) []string {
+	names := make([]string, 0, len(blocking))
+	for _, blocker := range blocking {
+		names = append(names, blocker.Component)
+	}
+	return names
+}
+
+// blockerJSON renders a blocker list as JSON so a published payload and a
+// domain verdict can be compared field by field; the evaluator publishes a
+// stable order and both sides use the same field names.
+func blockerJSON(t *testing.T, blockers interface{}) string {
+	t.Helper()
+	encoded, err := json.Marshal(blockers)
+	require.NoError(t, err)
+	return string(encoded)
+}
+
+// TestReadinessCapabilityMatchesCreateRun is the plan's named test for
+// T0.12.c: for every combination, the execution verdict GET /ready publishes
+// (global and per backend) equals what readiness.CheckExecution — the gate the
+// Run creation path uses — returns for the same snapshot, field by field.
+func TestReadinessCapabilityMatchesCreateRun(t *testing.T) {
+	ctx := context.Background()
+
+	combinations := []struct {
+		name string
+		// arrange mutates the provider into the combination.
+		arrange func(t *testing.T, provider *capabilityProvider)
+		// legacyReady false means the required Has* services are absent, which
+		// is the same verdict both consumers must derive from that snapshot.
+		legacyReady bool
+	}{
+		{
+			name:        "all_dependencies_ready",
+			arrange:     func(t *testing.T, provider *capabilityProvider) {},
+			legacyReady: true,
+		},
+		{
+			name: "vault_not_ready",
+			arrange: func(t *testing.T, provider *capabilityProvider) {
+				provider.set(t, readiness.ComponentVault,
+					readiness.Result{State: readiness.StateNotConfigured, Detail: "wired by T2.04"})
+			},
+			legacyReady: true,
+		},
+		{
+			name: "only_codex_backend_ready",
+			arrange: func(t *testing.T, provider *capabilityProvider) {
+				provider.set(t, readiness.ExecBackendPrefix+"claude_code",
+					readiness.Result{State: readiness.StateNotConfigured})
+			},
+			legacyReady: true,
+		},
+		{
+			name:        "legacy_read_only_not_ready",
+			arrange:     func(t *testing.T, provider *capabilityProvider) {},
+			legacyReady: false,
+		},
+		{
+			name: "no_backend_registered",
+			arrange: func(t *testing.T, provider *capabilityProvider) {
+				provider.registry.Clear()
+				provider.ready(t, capabilityDependencies...)
+			},
+			legacyReady: true,
+		},
+		{
+			name: "vault_locked_and_protocol_failed",
+			arrange: func(t *testing.T, provider *capabilityProvider) {
+				provider.set(t, readiness.ComponentVault, readiness.Result{
+					State:   readiness.StateFailed,
+					ErrCode: readiness.RemediationVaultLocked,
+					Detail:  "sealed",
+				})
+				provider.set(t, readiness.ComponentFrontendProtocol,
+					readiness.Result{State: readiness.StateFailed, ErrCode: readiness.CodeFailed})
+			},
+			legacyReady: true,
+		},
+	}
+
+	for _, combination := range combinations {
+		t.Run(combination.name, func(t *testing.T) {
+			provider := readyCapabilityProvider(t)
+			combination.arrange(t, provider)
+			provider.install(t)
+
+			// The legacy Has* layer is real process state, not a test fake:
+			// either the seven required services are stubbed ready or they are
+			// absent. The Run creation gate is given the same verdict the
+			// endpoint derives from that state.
+			var legacy func() (bool, []string)
+			if combination.legacyReady {
+				stubRequiredReadinessServices(t)
+				legacy = func() (bool, []string) { return true, nil }
+			} else {
+				nilRequiredReadinessServices(t)
+				legacy = func() (bool, []string) { return false, requiredLegacyReadinessNames }
+			}
+
+			// GET /ready: what the shell reads before it offers a Run.
+			code, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+			require.Contains(t, []int{http.StatusOK, http.StatusServiceUnavailable}, code,
+				"unexpected status %d: %#v", code, parsed.Data)
+			ready := readinessCapabilities(t, parsed.Data)
+
+			backends := sortedBackendNames(ready.Execution.Backends)
+			if len(backends) == 0 {
+				// No backend is registered at all: execution cannot be ready,
+				// and the Run creation gate refuses every backend name.
+				assert.Equal(t, string(readiness.CapabilityUnavailable), ready.Execution.State)
+				refused := readiness.CheckExecution(ctx, provider.registry, "codex", legacy)
+				assert.Equal(t, string(readiness.CapabilityUnavailable), string(refused.State),
+					"an unregistered backend must not be executable")
+				return
+			}
+
+			for _, backend := range backends {
+				fromEndpoint := ready.Execution.Backends[backend]
+				fromCreateRun := readiness.CheckExecution(ctx, provider.registry, backend, legacy)
+				assert.Equal(t, string(fromCreateRun.State), string(fromEndpoint.State),
+					"backend %s: /ready and CheckExecution disagree", backend)
+				assert.Equal(t, blockerJSON(t, fromCreateRun.Blocking), blockerJSON(t, fromEndpoint.Blocking),
+					"backend %s: blockers differ", backend)
+			}
+
+			// The global verdict summarises the per-backend ones: ready exactly
+			// when some backend is executable.
+			anyExecutable := false
+			for _, backend := range backends {
+				if ready.Execution.Backends[backend].State == string(readiness.CapabilityReady) {
+					anyExecutable = true
+					break
+				}
+			}
+			assert.Equal(t, anyExecutable, ready.Execution.State == string(readiness.CapabilityReady),
+				"global execution %s does not summarise backends %+v", ready.Execution.State, ready.Execution.Backends)
+
+			// The Run creation gate agrees with the published capability for
+			// every backend, and never accepts while read_only is broken.
+			for _, backend := range backends {
+				fromCreateRun := readiness.CheckExecution(ctx, provider.registry, backend, legacy)
+				wantReady := ready.Execution.Backends[backend].State == string(readiness.CapabilityReady)
+				assert.Equal(t, wantReady, fromCreateRun.State == readiness.CapabilityReady,
+					"backend %s: CheckExecution %s vs /ready %s", backend, fromCreateRun.State,
+					ready.Execution.Backends[backend].State)
+				if fromCreateRun.State == readiness.CapabilityReady {
+					assert.Equal(t, string(readiness.CapabilityReady), string(ready.ReadOnly.State),
+						"backend %s is creatable while read_only is %s", backend, ready.ReadOnly.State)
+				}
+			}
+
+			// An unregistered backend is never creatable, whatever the
+			// snapshot says about the registered ones.
+			unregistered := readiness.CheckExecution(ctx, provider.registry, "not_a_backend", legacy)
+			assert.Equal(t, string(readiness.CapabilityUnavailable), string(unregistered.State),
+				"an unregistered backend must not be executable")
+		})
+	}
+}
+
+// TestReadinessCapabilityMatchesCreateRunAfterRepair covers the acceptance
+// assertion "repair the dependency and the next check reflects it" for both
+// consumers: neither GET /ready nor CheckExecution serves a cached verdict, so
+// the flip from unavailable to ready is visible to both with no restart.
+func TestReadinessCapabilityMatchesCreateRunAfterRepair(t *testing.T) {
+	ctx := context.Background()
+	stubRequiredReadinessServices(t)
+	legacy := func() (bool, []string) { return true, nil }
+
+	provider := readyCapabilityProvider(t)
+	provider.set(t, readiness.ComponentVault, readiness.Result{State: readiness.StateNotConfigured})
+	provider.install(t)
+
+	_, parsed := callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	before := readinessCapabilities(t, parsed.Data)
+	require.Equal(t, string(readiness.CapabilityUnavailable), before.Execution.State)
+	beforeCreate := readiness.CheckExecution(ctx, provider.registry, "codex", legacy)
+	require.Equal(t, string(readiness.CapabilityUnavailable), string(beforeCreate.State),
+		"before repair: CheckExecution must refuse")
+
+	// The dependency is repaired; both consumers must see it on the next call.
+	provider.set(t, readiness.ComponentVault, readiness.Result{State: readiness.StateReady})
+	provider.install(t)
+
+	_, parsed = callReadinessProbeEndpoint(t, readinessProbeTestRouter())
+	after := readinessCapabilities(t, parsed.Data)
+	assert.Equal(t, string(readiness.CapabilityReady), after.Execution.State,
+		"the second poll must see the repaired dependency, not a cached verdict")
+	afterCreate := readiness.CheckExecution(ctx, provider.registry, "codex", legacy)
+	assert.Equal(t, string(readiness.CapabilityReady), string(afterCreate.State),
+		"after repair: CheckExecution must accept")
+	assert.Equal(t, blockerJSON(t, afterCreate.Blocking),
+		blockerJSON(t, after.Execution.Backends["codex"].Blocking),
+		"after repair: blockers differ between /ready and CheckExecution")
+}
+
+// TestProbeTimeoutDoesNotHangReady is the plan's named T0.12.c case seen from
+// the capability side: a dependency probe that ignores its context must not
+// stall GET /ready, and the capability set it feeds must keep execution
+// unavailable — a Run may not be created from a snapshot whose dependency never
+// answered.
+func TestProbeTimeoutDoesNotHangReady(t *testing.T) {
+	stubRequiredReadinessServices(t)
+	clearReadinessProbesForTest(t)
+
+	healthy := func(context.Context) readiness.Result { return readiness.Result{State: readiness.StateReady} }
+	specs := []readiness.Spec{
+		{Probe: readiness.NewProbeFunc(readiness.ComponentFrontendProtocol, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentPolicy, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentWorkspace, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentMigrations, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentEventStore, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentOutboxDispatcher, healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ExecBackendPrefix+"codex", healthy)},
+		{Probe: readiness.NewProbeFunc(readiness.ComponentVault, func(context.Context) readiness.Result {
+			// Deliberately ignores ctx: the deadline is the runner's contract.
+			time.Sleep(5 * time.Second)
+			return readiness.Result{State: readiness.StateReady}
+		}), Timeout: 50 * time.Millisecond},
+	}
+	require.NoError(t, readiness.Register(specs...))
+
+	router := readinessProbeTestRouter()
+	start := time.Now()
+	code, parsed := callReadinessProbeEndpoint(t, router)
+	elapsed := time.Since(start)
+	t.Logf("first /ready with a hung dependency probe returned in %s (probe timeout 50ms plus the runner's grace)",
+		elapsed)
+
+	require.Less(t, elapsed, time.Second, "a hung probe must not block /ready")
+	require.Equal(t, http.StatusOK, code,
+		"the hung probe is optional and must not 503 the read-only surface: %#v", parsed.Data)
+
+	component := readinessProbeComponents(t, parsed.Data)[readiness.ComponentVault]
+	require.NotNil(t, component)
+	assert.Equal(t, false, component["ready"])
+	assert.Equal(t, readiness.CodeTimeout, component["error_code"])
+
+	// The capability sets agree with the component: the dependency that timed
+	// out keeps execution unavailable.
+	capabilities := readinessCapabilities(t, parsed.Data)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), capabilities.Execution.State,
+		"a timed-out dependency must keep execution unavailable")
+	assert.Contains(t, blockerNames(capabilities.Execution.Blocking), readiness.ComponentVault,
+		"the timed-out dependency must be named as blocking: %+v", capabilities.Execution.Blocking)
+
+	// The Run creation gate refuses for the same snapshot. Wait out the
+	// probe's own budget first so the run is unambiguously past its deadline.
+	if remaining := 50*time.Millisecond + 500*time.Millisecond - time.Since(start); remaining > 0 {
+		time.Sleep(remaining + 50*time.Millisecond)
+	}
+	refused := readiness.CheckExecution(context.Background(), readiness.Default, "codex", nil)
+	assert.Equal(t, string(readiness.CapabilityUnavailable), string(refused.State),
+		"CheckExecution must refuse while a dependency probe times out")
+	assert.Contains(t, capabilityBlockerNames(refused.Blocking), readiness.ComponentVault,
+		"the timed-out dependency must be named as blocking: %+v", refused.Blocking)
+}
