@@ -2206,7 +2206,7 @@ export interface ExecutionEvent {
   project_id: string;
   run_id?: string | null;
   sequence: number;
-  type: 'approval.approved' | 'approval.decided' | 'approval.required' | 'budget.soft_exceeded' | 'budget.warning' | 'checkpoint.acknowledged' | 'merge.completed' | 'process.exited' | 'process.started' | 'process.terminated' | 'run.cancel_requested' | 'run.cancelled' | 'run.completed' | 'run.expired' | 'run.failed' | 'run.reattached' | 'run.recovering' | 'run.resumed' | 'scheduler.claimed' | 'server.restart' | 'tool.requested';
+  type: 'approval.approved' | 'approval.decided' | 'approval.required' | 'budget.soft_exceeded' | 'budget.warning' | 'checkpoint.acknowledged' | 'legacy.flow_event' | 'merge.completed' | 'process.exited' | 'process.started' | 'process.terminated' | 'run.cancel_requested' | 'run.cancelled' | 'run.completed' | 'run.expired' | 'run.failed' | 'run.reattached' | 'run.recovering' | 'run.resumed' | 'scheduler.claimed' | 'server.restart' | 'tool.requested';
   schema_version: 1;
   occurred_at: string;
   identity: ExecutionIdentity;

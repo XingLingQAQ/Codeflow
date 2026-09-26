@@ -1,0 +1,24 @@
+{
+  "id": "5c0e2b7a-8d41-4f6e-9a3b-7e2d1c0f4a96",
+  "scope": "project:b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+  "project_id": "b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+  "sequence": 12,
+  "type": "legacy.flow_event",
+  "schema_version": 1,
+  "occurred_at": "2026-09-26T08:15:00Z",
+  "identity": {
+    "project_id": "b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
+    "run_id": null,
+    "attempt_id": null,
+    "agent_revision_id": null,
+    "actor": {"type": "system", "id": "legacy-flow-projector", "source": "floweng"}
+  },
+  "payload": {
+    "source_store": "floweng",
+    "source_event_id": "0b6f4d2e-1a9c-4e7b-8f35-6d2c9a1e7b40",
+    "source_type": "stage.done",
+    "flow_id": "flow_42",
+    "stage_id": "stage_3",
+    "message": "completed stage type=design"
+  }
+}

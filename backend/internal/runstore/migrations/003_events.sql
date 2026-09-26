@@ -28,6 +28,11 @@
 -- Amended in place by contract amendment CA-1 (2026-09-26, plan section 26.31):
 -- the type CHECK gained the six run.* state events (run.cancel_requested,
 -- run.cancelled, run.expired, run.reattached, run.recovering, run.resumed).
+-- Amended in place again by contract amendment CA-2 (2026-09-26, plan section
+-- 26.31): the type CHECK gained legacy.flow_event, the project-scoped
+-- projection of a pre-3.0 Flow timeline entry (T1.05.c). Both amendments are
+-- allowed only because runstore is not wired into production start-up yet; from
+-- T1.04 on, migrations are frozen and a change must be a new migration.
 -- This was done in place rather than as a table rebuild because runstore was
 -- not yet wired into production start-up (T1.04): no database outside of tests
 -- was ever created from the earlier text. From T1.04 on, migrations are frozen
@@ -105,6 +110,7 @@ CREATE TABLE events (
         'budget.soft_exceeded',
         'budget.warning',
         'checkpoint.acknowledged',
+        'legacy.flow_event',
         'merge.completed',
         'process.exited',
         'process.started',

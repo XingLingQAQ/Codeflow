@@ -9208,7 +9208,7 @@ components:
           minimum: 1
         type:
           type: string
-          enum: [approval.approved, approval.decided, approval.required, budget.soft_exceeded, budget.warning, checkpoint.acknowledged, merge.completed, process.exited, process.started, process.terminated, run.cancel_requested, run.cancelled, run.completed, run.expired, run.failed, run.reattached, run.recovering, run.resumed, scheduler.claimed, server.restart, tool.requested]
+          enum: [approval.approved, approval.decided, approval.required, budget.soft_exceeded, budget.warning, checkpoint.acknowledged, legacy.flow_event, merge.completed, process.exited, process.started, process.terminated, run.cancel_requested, run.cancelled, run.completed, run.expired, run.failed, run.reattached, run.recovering, run.resumed, scheduler.claimed, server.restart, tool.requested]
         schema_version:
           type: integer
           enum: [1]

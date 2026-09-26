@@ -43,6 +43,7 @@
         "budget.soft_exceeded",
         "budget.warning",
         "checkpoint.acknowledged",
+        "legacy.flow_event",
         "merge.completed",
         "process.exited",
         "process.started",
@@ -59,7 +60,7 @@
         "server.restart",
         "tool.requested"
       ],
-      "description": "封闭枚举：计划文档已命名的事件类型（§20.2 tool.requested；§21.1 scheduler.claimed/process.started/approval.required/approval.approved/budget.soft_exceeded/checkpoint.acknowledged/process.exited/process.terminated/server.restart；§19.3 approval.decided/merge.completed；§15 T9.01 approval.required/run.failed/run.completed/budget.warning），以及契约修订 CA-1（计划 §26.31）为让每个 §21.1 迁移都有状态事件而增加的 run.cancel_requested（run.cancel/hard deadline → cancelling，payload 记期望终态）、run.resumed、run.recovering、run.reattached、run.cancelled、run.expired。§21.1 的 run.cancel/run.resume 是命令不是事件，process_kill_failed 是失败 code，均不在此枚举。新增枚举值是向后兼容的（消费端按外层规则推进游标），schema_version 不变。规则见外层 description。"
+      "description": "封闭枚举：计划文档已命名的事件类型（§20.2 tool.requested；§21.1 scheduler.claimed/process.started/approval.required/approval.approved/budget.soft_exceeded/checkpoint.acknowledged/process.exited/process.terminated/server.restart；§19.3 approval.decided/merge.completed；§15 T9.01 approval.required/run.failed/run.completed/budget.warning），以及契约修订 CA-1（计划 §26.31）为让每个 §21.1 迁移都有状态事件而增加的 run.cancel_requested（run.cancel/hard deadline → cancelling，payload 记期望终态）、run.resumed、run.recovering、run.reattached、run.cancelled、run.expired；以及契约修订 CA-2（计划 §26.31）为 T1.05.c 把旧 Flow 时间线经本地 outbox 投影进运行库而增加的 legacy.flow_event（项目级、无 Run；原事件名放在 payload.source_type）。§21.1 的 run.cancel/run.resume 是命令不是事件，process_kill_failed 是失败 code，均不在此枚举。新增枚举值是向后兼容的（消费端按外层规则推进游标），schema_version 不变。规则见外层 description。"
     },
     "schema_version": {
       "const": 1,

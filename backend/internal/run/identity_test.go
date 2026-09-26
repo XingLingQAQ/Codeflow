@@ -231,6 +231,7 @@ func TestRequiredIdentityTable(t *testing.T) {
 		"budget.soft_exceeded":    {Run: true},
 		"budget.warning":          {Run: true},
 		"checkpoint.acknowledged": {Run: true, Attempt: true, AgentRevision: true},
+		"legacy.flow_event":       {},
 		"merge.completed":         {Run: true},
 		"process.exited":          {Run: true, Attempt: true, AgentRevision: true},
 		"process.started":         {Run: true, Attempt: true, AgentRevision: true},
@@ -444,13 +445,13 @@ func TestValidateForRequiredFields(t *testing.T) {
 		ProjectID: "b7f1d0a2-3c4e-4f5a-8b6c-9d0e1f2a3b4c",
 		Actor:     run.Actor{Type: run.ActorTypeUser, ID: "local-user", Source: "desktop"},
 	}
-	for _, et := range []string{"approval.decided", "server.restart"} {
+	for _, et := range []string{"approval.decided", "legacy.flow_event", "server.restart"} {
 		if err := gate.ValidateFor(et); err != nil {
 			t.Errorf("Run-less identity for %q = %v, want nil", et, err)
 		}
 	}
 	for _, et := range run.ExecutionEventTypes {
-		if et == "approval.decided" || et == "server.restart" {
+		if et == "approval.decided" || et == "legacy.flow_event" || et == "server.restart" {
 			continue
 		}
 		err := gate.ValidateFor(string(et))

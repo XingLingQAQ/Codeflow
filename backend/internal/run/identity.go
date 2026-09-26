@@ -31,7 +31,9 @@ type ExecutionEventType string
 // The event types of the closed enum, in the schema's declaration order: the 15
 // types T0.03 named from the plan, plus the six run.* state events contract
 // amendment CA-1 (plan §26.31) added so that every §21.1 transition has an event
-// type to write in its CAS transaction (§19.3 item 1).
+// type to write in its CAS transaction (§19.3 item 1), plus legacy.flow_event,
+// which contract amendment CA-2 (plan §26.31) added for the T1.05.c projection
+// of pre-3.0 Flow timelines.
 const (
 	// EventApprovalApproved: a waiting_approval Run is approved (§21.1).
 	EventApprovalApproved ExecutionEventType = "approval.approved"
@@ -49,6 +51,13 @@ const (
 	// EventCheckpointAcknowledged: the backend acknowledged a checkpoint; the
 	// Run may be paused on it (§21.1).
 	EventCheckpointAcknowledged ExecutionEventType = "checkpoint.acknowledged"
+	// EventLegacyFlowEvent: one timeline entry of a pre-3.0 Flow, projected from
+	// the legacy flow store's local outbox after the Flow write committed
+	// (T1.05.c, CA-2). The legacy name (flow.created, stage.done, gate.approved,
+	// ...) travels in payload.source_type, so the enum does not grow a second
+	// copy of the Flow vocabulary that T3.01 will replace. A Flow is not a Run:
+	// the event is project-scoped and carries no run_id.
+	EventLegacyFlowEvent ExecutionEventType = "legacy.flow_event"
 	// EventMergeCompleted: a MergeOperation reached applied (§19.3).
 	EventMergeCompleted ExecutionEventType = "merge.completed"
 	// EventProcessExited: the backend process exited, with its exit code (§21.1).
@@ -92,7 +101,7 @@ const (
 var ExecutionEventTypes = []ExecutionEventType{
 	EventApprovalApproved, EventApprovalDecided, EventApprovalRequired,
 	EventBudgetSoftExceeded, EventBudgetWarning, EventCheckpointAcknowledged,
-	EventMergeCompleted, EventProcessExited, EventProcessStarted,
+	EventLegacyFlowEvent, EventMergeCompleted, EventProcessExited, EventProcessStarted,
 	EventProcessTerminated, EventRunCancelRequested, EventRunCancelled,
 	EventRunCompleted, EventRunExpired, EventRunFailed, EventRunReattached,
 	EventRunRecovering, EventRunResumed, EventSchedulerClaimed,
@@ -104,7 +113,7 @@ func (t ExecutionEventType) Valid() bool {
 	switch t {
 	case EventApprovalApproved, EventApprovalDecided, EventApprovalRequired,
 		EventBudgetSoftExceeded, EventBudgetWarning, EventCheckpointAcknowledged,
-		EventMergeCompleted, EventProcessExited, EventProcessStarted,
+		EventLegacyFlowEvent, EventMergeCompleted, EventProcessExited, EventProcessStarted,
 		EventProcessTerminated, EventRunCancelRequested, EventRunCancelled,
 		EventRunCompleted, EventRunExpired, EventRunFailed, EventRunReattached,
 		EventRunRecovering, EventRunResumed, EventSchedulerClaimed,
@@ -306,6 +315,12 @@ var identityRules = []EventIdentityRule{
 		Requirement: IdentityRequirement{Run: true, Attempt: true, AgentRevision: true},
 		Reason: "§21.1 running→paused：暂停/恢复必须绑定产生该 checkpoint 的 attempt（S1 一 Run 一 Attempt）" +
 			" (the checkpoint belongs to a live attempt)",
+	},
+	{
+		Event:       EventLegacyFlowEvent,
+		Requirement: IdentityRequirement{},
+		Reason: "§27.1/§19.3 旧 Flow 时间线条目属于项目、不属于 Run（S1 旧 Flow 仍由旧库写，" +
+			"经本地 outbox 投影进运行库），故 run_id 可空 (legacy Flow timeline entry: project-scoped, no Run)",
 	},
 	{
 		Event:       EventMergeCompleted,
