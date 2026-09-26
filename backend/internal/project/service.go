@@ -936,6 +936,12 @@ type SQLiteProjectService struct {
 	db      *sql.DB
 	dbMu    sync.RWMutex
 	writeMu sync.Mutex
+
+	// failNextBindingWrite, when non-nil, runs in place of the next binding
+	// write *inside its transaction* and is then cleared. It exists so a test
+	// can prove that the projects rewrite and the binding write share one
+	// commit; it is only ever set by tests.
+	failNextBindingWrite bindingWriteFaultFunc
 }
 
 const createProjectTablesSQL = `
@@ -1029,6 +1035,13 @@ func (s *SQLiteProjectService) initialize() error {
 
 	if _, err := s.db.Exec(createProjectTablesSQL); err != nil {
 		return fmt.Errorf("create project tables: %w", err)
+	}
+	// The binding tables are separate from the project tables because the
+	// project persistence rewrites the whole projects table on every save; see
+	// binding_store.go. Every statement there is IF NOT EXISTS, so an existing
+	// database gains them on this open.
+	if _, err := s.db.Exec(createBindingTablesSQL); err != nil {
+		return fmt.Errorf("create workspace binding tables: %w", err)
 	}
 	// Existing databases predate the binding columns. SQLite has no IF NOT
 	// EXISTS form for ALTER COLUMN, so probe each column and add it when needed.
@@ -1303,7 +1316,16 @@ func (s *SQLiteProjectService) CreateProject(ctx context.Context, req *ProjectCr
 	if err != nil {
 		return nil, err
 	}
-	if err := s.persistCurrentState(); err != nil {
+	// The binding snapshot is captured before the transaction (reading a
+	// directory identity is filesystem I/O) and written inside it, so the new
+	// project row and its primary binding commit or roll back together. A
+	// project created without a root has nothing to bind.
+	write, err := s.planPrimaryBinding(ctx, project, strings.TrimSpace(project.WorkspaceRoot) != "")
+	if err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	if err := s.persistCurrentStateWith(ctx, write); err != nil {
 		s.restoreState(before)
 		return nil, err
 	}
@@ -1319,7 +1341,18 @@ func (s *SQLiteProjectService) UpdateProject(ctx context.Context, id string, req
 	if err != nil {
 		return nil, err
 	}
-	if err := s.persistCurrentState(); err != nil {
+	// A workspace root in the request goes through the same decision as a
+	// rebind: revision + 1 when the directory really changed, no write at all
+	// when the root (or the directory behind another spelling of it) is
+	// unchanged. The root the InMemory layer reported is already canonical, so
+	// comparing it with the row in force is a plain string comparison.
+	rootChanged := req.WorkspaceRoot != nil && strings.TrimSpace(project.WorkspaceRoot) != ""
+	write, err := s.planPrimaryBinding(ctx, project, rootChanged)
+	if err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	if err := s.persistCurrentStateWith(ctx, write); err != nil {
 		s.restoreState(before)
 		return nil, err
 	}
@@ -1394,7 +1427,14 @@ func (s *SQLiteProjectService) BindWorkspaceRoot(ctx context.Context, id, root s
 	if err != nil {
 		return nil, err
 	}
-	if err := s.persistCurrentState(); err != nil {
+	// BindWorkspaceRoot always names a root, so the binding decision always
+	// runs: create revision 1, or bump the revision when the directory changed.
+	write, err := s.planPrimaryBinding(ctx, project, true)
+	if err != nil {
+		s.restoreState(before)
+		return nil, err
+	}
+	if err := s.persistCurrentStateWith(ctx, write); err != nil {
 		s.restoreState(before)
 		return nil, err
 	}
@@ -1495,15 +1535,32 @@ func (s *SQLiteProjectService) RecalculateProgress(ctx context.Context, projectI
 }
 
 func (s *SQLiteProjectService) persistCurrentState() error {
+	return s.persistCurrentStateWith(context.Background(), nil)
+}
+
+// persistCurrentStateWith persists the in-memory projects and applies one
+// optional binding change in the *same* SQL transaction, so the projects rewrite
+// and the binding rows commit or roll back together. A failure leaves both
+// untouched; the caller is responsible for restoreState(before) so memory
+// matches the rolled-back database.
+func (s *SQLiteProjectService) persistCurrentStateWith(ctx context.Context, write *bindingWrite) error {
 	snapshot := s.snapshotState()
-	return s.saveSnapshot(snapshot)
+	return s.saveSnapshotWith(ctx, snapshot, write)
 }
 
 func (s *SQLiteProjectService) saveSnapshot(snapshot projectStateSnapshot) error {
+	return s.saveSnapshotWith(context.Background(), snapshot, nil)
+}
+
+// saveSnapshotWith rewrites the project tables and, when write is non-nil,
+// applies the pending binding change inside the same transaction. The binding
+// tables are never cleared here: they are not derived from the in-memory project
+// map, and DELETE FROM projects must not touch them (see binding_store.go).
+func (s *SQLiteProjectService) saveSnapshotWith(ctx context.Context, snapshot projectStateSnapshot, write *bindingWrite) error {
 	s.dbMu.Lock()
 	defer s.dbMu.Unlock()
 
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin project transaction: %w", err)
 	}
@@ -1543,10 +1600,26 @@ func (s *SQLiteProjectService) saveSnapshot(snapshot projectStateSnapshot) error
 		}
 	}
 
+	if err := write.Apply(ctx, tx, s.bindingWriteFault()); err != nil {
+		return err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit project transaction: %w", err)
 	}
 	return nil
+}
+
+// bindingWriteFault returns the injected binding-write fault, if any, and clears
+// it so a one-shot injection cannot leak into the next write. See
+// SQLiteProjectService.failNextBindingWrite.
+func (s *SQLiteProjectService) bindingWriteFault() bindingWriteFaultFunc {
+	if s.failNextBindingWrite == nil {
+		return nil
+	}
+	fault := s.failNextBindingWrite
+	s.failNextBindingWrite = nil
+	return fault
 }
 
 func (s *SQLiteProjectService) snapshotState() projectStateSnapshot {
