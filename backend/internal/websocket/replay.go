@@ -79,6 +79,14 @@ const (
 	// MsgTypeInvalidRequest reports a frame the parser refused. Its reason is a
 	// fixed phrase, never the client's bytes.
 	MsgTypeInvalidRequest MessageType = "invalid_request"
+	// MsgTypeUnavailable reports that the ordered-subscription backend is not
+	// wired up on this server, or that a read failed for a reason that is not the
+	// client's cursor. It is retryable: the client keeps its cursor and retries
+	// rather than replacing its cache. T1.12.b added it because the alternative
+	// answers would both be wrong — invalid_request would blame the client for a
+	// server-side condition, and the cursor frames would have to quote a position
+	// the server never judged.
+	MsgTypeUnavailable MessageType = "unavailable"
 )
 
 // Error codes carried by the error frames: the cursor reason names of §27.4
@@ -90,6 +98,10 @@ const (
 	CodeCursorExpired  = "cursor_expired"
 	CodeInvalidCursor  = "invalid_cursor"
 	CodeInvalidRequest = "invalid_request"
+	// CodeBackendUnavailable is one of the error envelope's 13 codes (§20.4
+	// clarification), reused here because "the backend this subscription needs is
+	// not available" is exactly what the envelope code means.
+	CodeBackendUnavailable = "backend_unavailable"
 )
 
 // RecoverySnapshot is the machine-readable recovery instruction of a
@@ -106,6 +118,7 @@ const (
 	forbiddenMessage     = "subscription is not authorized for this connection"
 	cursorExpiredMessage = "cursor is below the retention floor; replace the local cache with a snapshot"
 	invalidCursorMessage = "cursor is above the scope high watermark"
+	unavailableMessage   = "subscription backend is not available; retry with the same cursor"
 )
 
 // MaxSubscribeFrameBytes bounds one control frame (§27.4: control frames 64 KiB).
@@ -163,10 +176,13 @@ const (
 //
 // After is the client's last applied sequence on the scope's own counter; 0
 // means "from the beginning of the retained history" (§20.2: after=0 with
-// retention_floor=1 is the legal first replay). ClientRequestID is optional in
-// the plan's frame (the §20.3 example sends "sub_1"); every server frame echoes
-// it so the client can correlate the answer, and an empty value simply means the
-// client asked for no correlation.
+// retention_floor=1 is the legal first replay). Both After and ClientRequestID
+// are REQUIRED keys — the StreamSubscribeFrame contract lists all four data
+// properties as required, and a client that omits its cursor cannot be served
+// (guessing 0 would silently replay history it may already have applied) while a
+// client that omits the correlation id could not match the answer to its
+// request. An empty *value* is still a value: `"client_request_id":""` is the
+// client saying "no correlation wanted".
 type SubscribeRequest struct {
 	ResourceType    string
 	ResourceID      string
@@ -232,15 +248,69 @@ func SubscribeErrorReason(err error) string {
 //     '}' and would silently drop it);
 //   - a top-level key other than "type" and "data", or a data key other than
 //     resource_type/resource_id/after/client_request_id;
-//   - a missing or non-"subscribe" type, a missing or non-object data;
+//   - a missing or non-"subscribe" type, a missing or non-object data, a missing
+//     resource_type/resource_id/after/client_request_id (all four are required by
+//     the StreamSubscribeFrame contract);
 //   - resource_type outside {project, run}; resource_id that is empty, over 128
 //     bytes, has surrounding whitespace, or contains the scope separator ':'
 //     (the wire scope is "project:<id>" / "run:<id>" per §20.2, and an id that
 //     contains ':' could not be represented in it);
-//   - after that is not a non-negative JSON integer (absent means 0; a decimal,
-//     a string, null, a boolean or a value that overflows int64 is refused);
+//   - after that is not a non-negative JSON integer (a decimal, a string, null,
+//     a boolean or a value that overflows int64 is refused; an absent after is
+//     refused too, as a missing required field rather than as an implicit 0);
 //   - client_request_id longer than 128 bytes or not a string.
+//
+// Key order does not decide the reason: the frame-level checks (the type must be
+// "subscribe") are answered before a missing required field, so
+// `{"data":{…},"type":"unsubscribe"}` reports wrong_frame_type and not a
+// missing-field reason.
 func ParseSubscribeFrame(raw []byte) (SubscribeRequest, error) {
+	return parseSubscriptionFrame(raw, MsgTypeSubscribe)
+}
+
+// ParseUnsubscribeFrame decodes one new-protocol unsubscribe frame:
+//
+//	{"type":"unsubscribe","data":{"resource_type":"run","resource_id":"run_88",
+//	 "client_request_id":"sub_2"}}
+//
+// It is the same strict walk as ParseSubscribeFrame with two differences that
+// follow from what the frame means: there is no cursor (an `after` key is an
+// unknown key, not an ignored one — an unsubscribe has no position to resume
+// from) and client_request_id stays optional, because the server has no answer
+// frame to correlate and the field is only an echo for logs. resource_type and
+// resource_id are required, exactly as in a subscribe frame.
+func ParseUnsubscribeFrame(raw []byte) (UnsubscribeRequest, error) {
+	req, err := parseSubscriptionFrame(raw, MsgTypeUnsubscribe)
+	if err != nil {
+		return UnsubscribeRequest{}, err
+	}
+	return UnsubscribeRequest{
+		ResourceType:    req.ResourceType,
+		ResourceID:      req.ResourceID,
+		ClientRequestID: req.ClientRequestID,
+	}, nil
+}
+
+// UnsubscribeRequest is a parsed, still-unauthorized unsubscribe frame: the one
+// scope the client stops following. It carries no cursor and no `after`.
+type UnsubscribeRequest struct {
+	ResourceType    string
+	ResourceID      string
+	ClientRequestID string
+}
+
+// Scope renders the request as the wire scope the subscription table is keyed
+// by, or "" for a resource type outside the enum (which the parser already
+// refused, so a caller can treat "" as unreachable).
+func (r UnsubscribeRequest) Scope() Scope {
+	return Scope{Kind: r.ResourceType, ID: r.ResourceID}
+}
+
+// parseSubscriptionFrame is the shared strict walk of a subscribe/unsubscribe
+// frame. want is the only type value accepted; whether a cursor is required
+// follows from it (a subscribe frame must carry `after`, an unsubscribe frame
+// must not).
+func parseSubscriptionFrame(raw []byte, want MessageType) (SubscribeRequest, error) {
 	if len(raw) == 0 {
 		return SubscribeRequest{}, &SubscribeError{Reason: ReasonNotJSONObject}
 	}
@@ -264,6 +334,10 @@ func ParseSubscribeFrame(raw []byte) (SubscribeRequest, error) {
 		frameType string
 		typeSeen  bool
 		dataSeen  bool
+		// deferred is a missing-required-field failure. It is held back so the
+		// frame-level checks run first: key order must not decide which reason a
+		// rejected frame reports.
+		deferred *SubscribeError
 	)
 	for dec.More() {
 		key, err := objectKey(dec)
@@ -284,8 +358,12 @@ func ParseSubscribeFrame(raw []byte) (SubscribeRequest, error) {
 				return SubscribeRequest{}, &SubscribeError{Reason: ReasonDuplicateField, Field: "data"}
 			}
 			dataSeen = true
-			if err := parseSubscribeData(dec, &req); err != nil {
+			missing, err := parseSubscribeData(dec, &req, want)
+			if err != nil {
 				return SubscribeRequest{}, err
+			}
+			if missing != nil {
+				deferred = missing
 			}
 		default:
 			// The key is not echoed: it is client text.
@@ -298,22 +376,30 @@ func ParseSubscribeFrame(raw []byte) (SubscribeRequest, error) {
 	if err := requireFrameEnd(dec); err != nil {
 		return SubscribeRequest{}, err
 	}
-	if !typeSeen || frameType != string(MsgTypeSubscribe) {
+	if !typeSeen || frameType != string(want) {
 		return SubscribeRequest{}, &SubscribeError{Reason: ReasonWrongFrameType, Field: "type"}
 	}
 	if !dataSeen {
 		return SubscribeRequest{}, &SubscribeError{Reason: ReasonInvalidData, Field: "data"}
 	}
+	if deferred != nil {
+		return SubscribeRequest{}, deferred
+	}
 	return req, nil
 }
 
-// parseSubscribeData decodes the data object of a subscribe frame into req. The
-// caller has just read the "data" key; this function consumes the object itself
-// (including its closing brace).
-func parseSubscribeData(dec *json.Decoder, req *SubscribeRequest) error {
+// parseSubscribeData decodes the data object of a subscribe/unsubscribe frame
+// into req. The caller has just read the "data" key; this function consumes the
+// object itself (including its closing brace).
+//
+// A missing REQUIRED field is returned as the first value rather than as an
+// error: the object is then fully consumed, so the caller can keep walking the
+// frame and answer the frame-level checks first. Every other failure is returned
+// as an error and aborts the walk where it happened.
+func parseSubscribeData(dec *json.Decoder, req *SubscribeRequest, want MessageType) (*SubscribeError, error) {
 	tok, err := dec.Token()
 	if err != nil || !isDelim(tok, '{') {
-		return &SubscribeError{Reason: ReasonInvalidData, Field: "data"}
+		return nil, &SubscribeError{Reason: ReasonInvalidData, Field: "data"}
 	}
 
 	var (
@@ -325,80 +411,93 @@ func parseSubscribeData(dec *json.Decoder, req *SubscribeRequest) error {
 	for dec.More() {
 		key, err := objectKey(dec)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		switch key {
 		case "resource_type":
 			if resourceTypeSeen {
-				return &SubscribeError{Reason: ReasonDuplicateField, Field: "data.resource_type"}
+				return nil, &SubscribeError{Reason: ReasonDuplicateField, Field: "data.resource_type"}
 			}
 			resourceTypeSeen = true
 			var value string
 			if err := dec.Decode(&value); err != nil {
-				return &SubscribeError{Reason: ReasonInvalidResourceType, Field: "data.resource_type"}
+				return nil, &SubscribeError{Reason: ReasonInvalidResourceType, Field: "data.resource_type"}
 			}
 			if value != ResourceTypeProject && value != ResourceTypeRun {
-				return &SubscribeError{Reason: ReasonInvalidResourceType, Field: "data.resource_type"}
+				return nil, &SubscribeError{Reason: ReasonInvalidResourceType, Field: "data.resource_type"}
 			}
 			req.ResourceType = value
 		case "resource_id":
 			if resourceIDSeen {
-				return &SubscribeError{Reason: ReasonDuplicateField, Field: "data.resource_id"}
+				return nil, &SubscribeError{Reason: ReasonDuplicateField, Field: "data.resource_id"}
 			}
 			resourceIDSeen = true
 			var value string
 			if err := dec.Decode(&value); err != nil {
-				return malformedOr(&SubscribeError{Reason: ReasonInvalidResourceID, Field: "data.resource_id"}, err)
+				return nil, malformedOr(&SubscribeError{Reason: ReasonInvalidResourceID, Field: "data.resource_id"}, err)
 			}
 			if err := checkResourceID(value); err != nil {
-				return err
+				return nil, err
 			}
 			req.ResourceID = value
 		case "after":
+			if want != MsgTypeSubscribe {
+				// An unsubscribe frame has no position to resume from, so `after`
+				// is an unknown key rather than a field to ignore: accepting it
+				// would let a client believe the server remembered a cursor.
+				return nil, &SubscribeError{Reason: ReasonUnknownField, Field: "data"}
+			}
 			if afterSeen {
-				return &SubscribeError{Reason: ReasonDuplicateField, Field: "data.after"}
+				return nil, &SubscribeError{Reason: ReasonDuplicateField, Field: "data.after"}
 			}
 			afterSeen = true
 			var value any
 			if err := dec.Decode(&value); err != nil {
-				return malformedOr(&SubscribeError{Reason: ReasonInvalidAfter, Field: "data.after"}, err)
+				return nil, malformedOr(&SubscribeError{Reason: ReasonInvalidAfter, Field: "data.after"}, err)
 			}
 			after, err := checkAfter(value)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			req.After = after
 		case "client_request_id":
 			if clientRequestIDSeen {
-				return &SubscribeError{Reason: ReasonDuplicateField, Field: "data.client_request_id"}
+				return nil, &SubscribeError{Reason: ReasonDuplicateField, Field: "data.client_request_id"}
 			}
 			clientRequestIDSeen = true
 			var value string
 			if err := dec.Decode(&value); err != nil {
-				return malformedOr(&SubscribeError{Reason: ReasonInvalidClientRequestID, Field: "data.client_request_id"}, err)
+				return nil, malformedOr(&SubscribeError{Reason: ReasonInvalidClientRequestID, Field: "data.client_request_id"}, err)
 			}
 			if len(value) > maxSubscribeClientRequestIDBytes {
-				return &SubscribeError{Reason: ReasonInvalidClientRequestID, Field: "data.client_request_id"}
+				return nil, &SubscribeError{Reason: ReasonInvalidClientRequestID, Field: "data.client_request_id"}
 			}
 			req.ClientRequestID = value
 		default:
 			// The key is not echoed: it is client text.
-			return &SubscribeError{Reason: ReasonUnknownField, Field: "data"}
+			return nil, &SubscribeError{Reason: ReasonUnknownField, Field: "data"}
 		}
 	}
 	if err := consumeObjectEnd(dec); err != nil {
-		return err
+		return nil, err
 	}
 	if !resourceTypeSeen {
-		return &SubscribeError{Reason: ReasonInvalidResourceType, Field: "data.resource_type"}
+		return &SubscribeError{Reason: ReasonInvalidResourceType, Field: "data.resource_type"}, nil
 	}
 	if !resourceIDSeen {
-		return &SubscribeError{Reason: ReasonInvalidResourceID, Field: "data.resource_id"}
+		return &SubscribeError{Reason: ReasonInvalidResourceID, Field: "data.resource_id"}, nil
 	}
-	// after and client_request_id are optional: an absent after means 0 (the
-	// legal first replay of §20.2), an absent client_request_id means no
-	// correlation.
-	return nil
+	// A subscribe frame must state its cursor (the contract lists `after` as
+	// required) and its correlation id. An unsubscribe frame carries no cursor at
+	// all; its client_request_id stays optional because there is no answer frame
+	// to correlate.
+	if want == MsgTypeSubscribe && !afterSeen {
+		return &SubscribeError{Reason: ReasonInvalidAfter, Field: "data.after"}, nil
+	}
+	if want == MsgTypeSubscribe && !clientRequestIDSeen {
+		return &SubscribeError{Reason: ReasonInvalidClientRequestID, Field: "data.client_request_id"}, nil
+	}
+	return nil, nil
 }
 
 // malformedOr keeps a JSON-level failure from being reported as a bad value. A
@@ -1034,5 +1133,29 @@ func InvalidRequestFrame(clientRequestID, reason string) []byte {
 		ClientRequestID: clientRequestID,
 		Code:            CodeInvalidRequest,
 		Reason:          reason,
+	})
+}
+
+// unavailableData is the data object of an unavailable frame.
+type unavailableData struct {
+	ClientRequestID string `json:"client_request_id"`
+	Code            string `json:"code"`
+	Message         string `json:"message"`
+	Retryable       bool   `json:"retryable"`
+}
+
+// UnavailableFrame tells the client that this server cannot serve the ordered
+// subscription right now: the replay backend is not wired up (T1.04 owns that
+// wiring) or a read failed for a reason that is not the client's cursor. code is
+// the error envelope's backend_unavailable and retryable is always true, so the
+// client's rule is mechanical — keep the cursor, do not touch the cache, retry
+// the same frame. The frame carries no scope: a subscription that never started
+// has no position to quote.
+func UnavailableFrame(clientRequestID string) []byte {
+	return encodeFrame(MsgTypeUnavailable, unavailableData{
+		ClientRequestID: clientRequestID,
+		Code:            CodeBackendUnavailable,
+		Message:         unavailableMessage,
+		Retryable:       true,
 	})
 }

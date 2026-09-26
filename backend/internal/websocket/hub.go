@@ -56,6 +56,23 @@ type Client struct {
 	Hub           *Hub
 	mu            sync.Mutex
 	allowedTopics map[string]struct{}
+
+	// subMu guards subs, the ordered-subscription table of this connection
+	// (T1.12.b). Each subscription owns its own cursor; the table is what lets
+	// the connection stop them all when it goes away, and what a wake-up walks.
+	subMu sync.Mutex
+	subs  map[string]*subscription
+
+	// sendMu guards Send against the hub's close: subscription goroutines enqueue
+	// frames from outside the hub's own goroutine, and a send on a closed channel
+	// panics the process. Legacy fan-out sends run inside Hub.Run, which is
+	// serialized with closeSend, so they need no lock.
+	sendMu     sync.Mutex
+	sendClosed bool
+
+	// slowOnce makes "this client is too slow" a single decision: the close frame
+	// and the TCP close happen once, however many goroutines noticed.
+	slowOnce sync.Once
 }
 
 // AccessPolicy carries the process identity and the exact browser/topic
@@ -100,6 +117,10 @@ type Hub struct {
 	register   chan *Client
 	unregister chan *Client
 	broadcast  chan *Message
+	// replay is the ordered-subscription backend (T1.12.b). The zero value means
+	// "not wired up yet": ordered subscriptions are answered with an unavailable
+	// frame rather than accepted. T1.04 installs it.
+	replay ReplayDependencies
 }
 
 // NewHub 创建Hub
@@ -153,7 +174,7 @@ func (h *Hub) Run() {
 						}
 					}
 				}
-				close(client.Send)
+				client.closeSend()
 			}
 			h.mu.Unlock()
 			log.Printf("[WS] Client %s disconnected", client.ID)
@@ -408,6 +429,10 @@ func HandleScopedWebSocket(hub *Hub, c *gin.Context, scopeID string, allowedTopi
 // readPump 读取消息
 func (c *Client) readPump() {
 	defer func() {
+		// The subscriptions belong to this connection: stop them (and wait for
+		// their goroutines) before the connection is unregistered, so nothing
+		// keeps reading the store for a socket that is gone.
+		c.stopAllSubscriptions()
 		c.Hub.unregister <- c
 		c.Conn.Close()
 	}()
@@ -426,6 +451,15 @@ func (c *Client) readPump() {
 				log.Printf("[WS] Read error: %v", err)
 			}
 			break
+		}
+
+		// The ordered-subscription protocol (T1.12.b) is parsed from the raw bytes,
+		// because its strictness is about the bytes: encoding/json matches field
+		// names case-insensitively, so a frame that went through Message first
+		// could no longer tell "resource_id" from "RESOURCE_ID". Frames this path
+		// does not take fall through to the legacy decode unchanged.
+		if c.handleSubscriptionFrame(data) {
+			continue
 		}
 
 		var msg Message
@@ -486,11 +520,22 @@ func (c *Client) handleMessage(msg *Message) {
 	case MsgTypePong:
 		// 心跳响应，不需要处理
 	case MsgTypeSubscribe:
+		// A frame that names a resource belongs to the ordered-subscription
+		// protocol and must never be read as a topic subscribe — it is refused
+		// here instead, which is the answer it would have got had readPump seen it
+		// (only a caller that built a Message by hand can reach this branch).
+		if messageNamesResource(msg) {
+			c.enqueueFrame(InvalidRequestFrame("", ReasonInvalidData))
+			break
+		}
 		// Topic subscribe: {type:subscribe, data:{topic:"flow_event"}} or content as topic.
 		if topic := topicFromMessage(msg); topic != "" && c.topicAllowed(topic) {
 			c.Hub.SubscribeTopic(c, topic)
 		}
 	case MsgTypeUnsubscribe:
+		if messageNamesResource(msg) {
+			break
+		}
 		if topic := topicFromMessage(msg); topic != "" {
 			c.Hub.UnsubscribeTopic(c, topic)
 		}
@@ -546,6 +591,90 @@ func (c *Client) SendMessage(msg *Message) {
 	case c.Send <- data:
 	default:
 	}
+}
+
+// slowConsumerReason is the close reason of a 1013 close. It is a fixed phrase:
+// the close text reaches the client, and nothing about the server's state belongs
+// in it.
+const slowConsumerReason = "slow consumer"
+
+// slowConsumerCloseTimeout bounds how long the close frame of a slow client is
+// given to reach it. The frame is 20 bytes, so it goes out at once unless the
+// socket buffer is full — which is exactly the slow-client case, where waiting for
+// the client to drain is the only way to deliver the code it must act on (1013:
+// reconnect from the last applied cursor).
+const slowConsumerCloseTimeout = 5 * time.Second
+
+// enqueueFrame adds one frame to the client's send buffer without blocking, and
+// reports whether it fit.
+//
+// false means the buffer is full — the client is not reading fast enough — or the
+// connection is already gone. Both are "this frame was not queued", and the
+// ordered-subscription path answers a full buffer by closing the connection with
+// 1013 rather than dropping the frame: a dropped frame is a silent gap, which
+// §27.4 forbids.
+func (c *Client) enqueueFrame(frame []byte) bool {
+	if c == nil || frame == nil {
+		return false
+	}
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.Send <- frame:
+		return true
+	default:
+		return false
+	}
+}
+
+// closeSend closes the send buffer exactly once.
+//
+// The hub closes it when the client is unregistered; the guard is what makes that
+// safe against a subscription goroutine that is enqueueing a frame at the same
+// moment (a send on a closed channel panics, and the panic would be in a goroutine
+// no recover covers).
+func (c *Client) closeSend() {
+	if c == nil {
+		return
+	}
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	c.sendClosed = true
+	close(c.Send)
+}
+
+// closeSlowConsumer closes a client that cannot keep up, with 1013 (Try Again
+// Later) and the reason "slow consumer".
+//
+// The close is initiated once, in a goroutine: the write may have to wait for the
+// client to drain the socket before the close frame fits (a blocked write must not
+// block the hub or a subscription goroutine), and the TCP close that follows is
+// what makes readPump notice, unregister the client and stop its subscriptions.
+func (c *Client) closeSlowConsumer() {
+	if c == nil {
+		return
+	}
+	c.slowOnce.Do(func() {
+		conn := c.Conn
+		log.Printf("[WS] Client %s is a slow consumer: closing with %d", c.ID, websocket.CloseTryAgainLater)
+		if conn == nil {
+			return
+		}
+		go func() {
+			_ = conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseTryAgainLater, slowConsumerReason),
+				time.Now().Add(slowConsumerCloseTimeout),
+			)
+			_ = conn.Close()
+		}()
+	})
 }
 
 // generateClientID 生成客户端ID

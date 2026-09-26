@@ -248,6 +248,9 @@ func testIdentity(t *testing.T, projectID string, runID, attemptID *string) json
 func stringPtr(s string) *string { return &s }
 
 // subscribeFrameJSON renders a subscribe frame the way a client would send it.
+// A nil after or client_request_id leaves the key OUT, which the tightened
+// contract refuses; the tests that use nil are the ones proving that refusal, and
+// every other frame passes both values explicitly.
 func subscribeFrameJSON(resourceType, resourceID string, after *int64, clientRequestID *string) string {
 	data := map[string]any{"resource_type": resourceType, "resource_id": resourceID}
 	if after != nil {
@@ -257,6 +260,24 @@ func subscribeFrameJSON(resourceType, resourceID string, after *int64, clientReq
 		data["client_request_id"] = *clientRequestID
 	}
 	encoded, err := json.Marshal(map[string]any{"type": "subscribe", "data": data})
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+// afterZero is the "resume from the beginning of the retained history" cursor,
+// for frames that only need their shape to be legal.
+func afterZero() *int64 { zero := int64(0); return &zero }
+
+// unsubscribeFrameJSON renders an unsubscribe frame the way a client would send
+// it. A nil client_request_id leaves the (optional) key out.
+func unsubscribeFrameJSON(resourceType, resourceID string, clientRequestID *string) string {
+	data := map[string]any{"resource_type": resourceType, "resource_id": resourceID}
+	if clientRequestID != nil {
+		data["client_request_id"] = *clientRequestID
+	}
+	encoded, err := json.Marshal(map[string]any{"type": "unsubscribe", "data": data})
 	if err != nil {
 		panic(err)
 	}
@@ -293,7 +314,8 @@ func projectScopeName(projectID string) string { return "project:" + projectID }
 // ---------------------------------------------------------------------------
 
 // TestParseSubscribeFrameAcceptsSection203Frame pins the frame §20.3 prints,
-// verbatim, plus the project variant and the two optional fields being absent.
+// verbatim, plus the project variant, a full frame in a different key order, and
+// the two id-length limits.
 func TestParseSubscribeFrameAcceptsSection203Frame(t *testing.T) {
 	// §20.3's frame, byte for byte.
 	section203 := `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":41,"client_request_id":"sub_1"}}`
@@ -318,9 +340,9 @@ func TestParseSubscribeFrameAcceptsSection203Frame(t *testing.T) {
 			want: SubscribeRequest{ResourceType: ResourceTypeProject, ResourceID: "p_123", After: 0, ClientRequestID: "sub_2"},
 		},
 		{
-			name: "run scope without after and without client_request_id",
-			raw:  subscribeFrameJSON(ResourceTypeRun, "run_88", nil, nil),
-			want: SubscribeRequest{ResourceType: ResourceTypeRun, ResourceID: "run_88", After: 0},
+			name: "run scope with after 0 and a correlation id",
+			raw:  subscribeFrameJSON(ResourceTypeRun, "run_88", afterZero(), stringPtr("sub_4")),
+			want: SubscribeRequest{ResourceType: ResourceTypeRun, ResourceID: "run_88", After: 0, ClientRequestID: "sub_4"},
 		},
 		{
 			name: "whitespace and key order do not matter",
@@ -329,17 +351,17 @@ func TestParseSubscribeFrameAcceptsSection203Frame(t *testing.T) {
 		},
 		{
 			name: "resource id of exactly 128 bytes",
-			raw:  subscribeFrameJSON(ResourceTypeRun, strings.Repeat("r", 128), nil, nil),
-			want: SubscribeRequest{ResourceType: ResourceTypeRun, ResourceID: strings.Repeat("r", 128)},
+			raw:  subscribeFrameJSON(ResourceTypeRun, strings.Repeat("r", 128), afterZero(), stringPtr("sub_5")),
+			want: SubscribeRequest{ResourceType: ResourceTypeRun, ResourceID: strings.Repeat("r", 128), ClientRequestID: "sub_5"},
 		},
 		{
 			name: "client_request_id of exactly 128 bytes",
-			raw:  subscribeFrameJSON(ResourceTypeRun, "run_88", nil, stringPtr(strings.Repeat("c", 128))),
+			raw:  subscribeFrameJSON(ResourceTypeRun, "run_88", afterZero(), stringPtr(strings.Repeat("c", 128))),
 			want: SubscribeRequest{ResourceType: ResourceTypeRun, ResourceID: "run_88", ClientRequestID: strings.Repeat("c", 128)},
 		},
 		{
 			name: "empty client_request_id means no correlation",
-			raw:  subscribeFrameJSON(ResourceTypeRun, "run_88", nil, stringPtr("")),
+			raw:  subscribeFrameJSON(ResourceTypeRun, "run_88", afterZero(), stringPtr("")),
 			want: SubscribeRequest{ResourceType: ResourceTypeRun, ResourceID: "run_88"},
 		},
 	}
@@ -360,7 +382,7 @@ func TestParseSubscribeFrameAcceptsSection203Frame(t *testing.T) {
 // bound (§27.4) from both sides: exactly 64 KiB is a valid frame, one byte more is
 // not.
 func TestParseSubscribeFrameAcceptsFrameAtTheSizeLimit(t *testing.T) {
-	base := subscribeFrameJSON(ResourceTypeRun, "run_88", nil, nil)
+	base := subscribeFrameJSON(ResourceTypeRun, "run_88", afterZero(), stringPtr("sub_1"))
 	if len(base) > MaxSubscribeFrameBytes {
 		t.Fatalf("base frame is %d bytes, already over the limit", len(base))
 	}
@@ -501,7 +523,7 @@ func TestParseSubscribeFrameRejectsBadTypesAndValues(t *testing.T) {
 		{"resource_id leading space", `{"type":"subscribe","data":{"resource_type":"run","resource_id":" run_88"}}`, ReasonInvalidResourceID},
 		{"resource_id trailing space", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88 "}}`, ReasonInvalidResourceID},
 		{"resource_id contains the scope separator", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run:88"}}`, ReasonInvalidResourceID},
-		{"resource_id 129 bytes", subscribeFrameJSON(ResourceTypeRun, long, nil, nil), ReasonInvalidResourceID},
+		{"resource_id 129 bytes", subscribeFrameJSON(ResourceTypeRun, long, afterZero(), stringPtr("sub_1")), ReasonInvalidResourceID},
 		{"resource_id is a number", `{"type":"subscribe","data":{"resource_type":"run","resource_id":88}}`, ReasonInvalidResourceID},
 		{"after negative", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":-1}}`, ReasonInvalidAfter},
 		{"after decimal", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":1.5}}`, ReasonInvalidAfter},
@@ -511,8 +533,18 @@ func TestParseSubscribeFrameRejectsBadTypesAndValues(t *testing.T) {
 		{"after null", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":null}}`, ReasonInvalidAfter},
 		{"after boolean", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":true}}`, ReasonInvalidAfter},
 		{"after overflows int64", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":99999999999999999999}}`, ReasonInvalidAfter},
-		{"client_request_id 129 bytes", subscribeFrameJSON(ResourceTypeRun, "run_88", nil, stringPtr(long)), ReasonInvalidClientRequestID},
+		{"client_request_id 129 bytes", subscribeFrameJSON(ResourceTypeRun, "run_88", afterZero(), stringPtr(long)), ReasonInvalidClientRequestID},
 		{"client_request_id is a number", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","client_request_id":1}}`, ReasonInvalidClientRequestID},
+		// after and client_request_id are required: the StreamSubscribeFrame contract
+		// lists all four data properties. Guessing after=0 would silently replay
+		// history the client may already have applied, and a missing correlation id
+		// would leave the client unable to match the answer to its request.
+		{"after missing", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","client_request_id":"sub_1"}}`, ReasonInvalidAfter},
+		{"client_request_id missing", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88","after":0}}`, ReasonInvalidClientRequestID},
+		{"both required fields missing", `{"type":"subscribe","data":{"resource_type":"run","resource_id":"run_88"}}`, ReasonInvalidAfter},
+		// The frame-level check comes first, so key order cannot decide the reason:
+		// a wrong type is a wrong type even when the data object is also incomplete.
+		{"type is unsubscribe with an incomplete data object", `{"data":{"resource_type":"run","resource_id":"run_88"},"type":"unsubscribe"}`, ReasonWrongFrameType},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -532,7 +564,7 @@ func TestParseSubscribeFrameRejectsBadTypesAndValues(t *testing.T) {
 // on it would accept `{...}}` and drop the extra delimiter. The check must read a
 // token and require io.EOF.
 func TestParseSubscribeFrameRejectsTrailingContent(t *testing.T) {
-	base := subscribeFrameJSON(ResourceTypeRun, "run_88", nil, nil)
+	base := subscribeFrameJSON(ResourceTypeRun, "run_88", afterZero(), stringPtr("sub_1"))
 	cases := []struct {
 		name string
 		raw  string
@@ -611,7 +643,7 @@ func TestAuthorizeProjectScopeIsBoundToTheConnectionProject(t *testing.T) {
 	f := newReplayFixture(t)
 	ctx := context.Background()
 
-	grant, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, nil, stringPtr("sub_1"))))
+	grant, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, afterZero(), stringPtr("sub_1"))))
 	if err != nil {
 		t.Fatalf("authorize project A from a project A connection: %v", err)
 	}
@@ -624,15 +656,15 @@ func TestAuthorizeProjectScopeIsBoundToTheConnectionProject(t *testing.T) {
 	}
 
 	// A's connection asking for B.
-	if _, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectB, nil, nil))); !errors.Is(err, ErrForbidden) {
+	if _, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectB, afterZero(), stringPtr("sub_1")))); !errors.Is(err, ErrForbidden) {
 		t.Errorf("project A connection subscribing project B error = %v, want ErrForbidden", err)
 	}
 	// B's connection asking for A (the same rule, the other direction).
-	if _, err := f.auth.Authorize(ctx, testProjectB, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, nil, nil))); !errors.Is(err, ErrForbidden) {
+	if _, err := f.auth.Authorize(ctx, testProjectB, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, afterZero(), stringPtr("sub_1")))); !errors.Is(err, ErrForbidden) {
 		t.Errorf("project B connection subscribing project A error = %v, want ErrForbidden", err)
 	}
 	// A connection whose project is empty can authorize nothing.
-	if _, err := f.auth.Authorize(ctx, "", mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, nil, nil))); !errors.Is(err, ErrForbidden) {
+	if _, err := f.auth.Authorize(ctx, "", mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, afterZero(), stringPtr("sub_1")))); !errors.Is(err, ErrForbidden) {
 		t.Errorf("empty connection project subscribing project A error = %v, want ErrForbidden", err)
 	}
 }
@@ -643,7 +675,7 @@ func TestAuthorizeRunScopeRequiresTheRunsProject(t *testing.T) {
 	f := newReplayFixture(t)
 	ctx := context.Background()
 
-	grant, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunA, nil, stringPtr("sub_1"))))
+	grant, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunA, afterZero(), stringPtr("sub_1"))))
 	if err != nil {
 		t.Fatalf("authorize run A from a project A connection: %v", err)
 	}
@@ -656,11 +688,11 @@ func TestAuthorizeRunScopeRequiresTheRunsProject(t *testing.T) {
 	}
 
 	// A's connection asking for B's run.
-	if _, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunB, nil, nil))); !errors.Is(err, ErrForbidden) {
+	if _, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunB, afterZero(), stringPtr("sub_1")))); !errors.Is(err, ErrForbidden) {
 		t.Errorf("project A connection subscribing run B error = %v, want ErrForbidden", err)
 	}
 	// A run that does not exist at all.
-	if _, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunNone, nil, nil))); !errors.Is(err, ErrForbidden) {
+	if _, err := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunNone, afterZero(), stringPtr("sub_1")))); !errors.Is(err, ErrForbidden) {
 		t.Errorf("project A connection subscribing an unknown run error = %v, want ErrForbidden", err)
 	}
 	// A resource type outside the enum never gets a grant either.
@@ -680,8 +712,8 @@ func TestAuthorizeForbiddenIsIdenticalForAnotherProjectsRunAndAMissingRun(t *tes
 	f := newReplayFixture(t)
 	ctx := context.Background()
 
-	_, errOtherProject := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunB, nil, stringPtr("sub_1"))))
-	_, errMissing := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunNone, nil, stringPtr("sub_1"))))
+	_, errOtherProject := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunB, afterZero(), stringPtr("sub_1"))))
+	_, errMissing := f.auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunNone, afterZero(), stringPtr("sub_1"))))
 	if !errors.Is(errOtherProject, ErrForbidden) || !errors.Is(errMissing, ErrForbidden) {
 		t.Fatalf("errors = (%v, %v), want both ErrForbidden", errOtherProject, errMissing)
 	}
@@ -720,7 +752,7 @@ func TestAuthorizePropagatesLookupFailures(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 	auth := Authorizer{Runs: lookup}
-	_, err := auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunA, nil, nil)))
+	_, err := auth.Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunA, afterZero(), stringPtr("sub_1"))))
 	if err == nil {
 		t.Fatal("authorize with a closed database returned no error")
 	}
@@ -742,12 +774,12 @@ func TestAuthorizePropagatesLookupFailures(t *testing.T) {
 
 	// An authorizer with no lookup at all is a wiring bug: it fails closed, but
 	// not as forbidden.
-	if _, err := (Authorizer{}).Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunA, nil, nil))); err == nil || errors.Is(err, ErrForbidden) {
+	if _, err := (Authorizer{}).Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeRun, testRunA, afterZero(), stringPtr("sub_1")))); err == nil || errors.Is(err, ErrForbidden) {
 		t.Errorf("authorize without a run lookup error = %v, want a non-forbidden wiring error", err)
 	}
 	// A project subscription needs no lookup, so the same empty authorizer still
 	// grants it.
-	if _, err := (Authorizer{}).Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, nil, nil))); err != nil {
+	if _, err := (Authorizer{}).Authorize(ctx, testProjectA, mustParse(t, subscribeFrameJSON(ResourceTypeProject, testProjectA, afterZero(), stringPtr("sub_1")))); err != nil {
 		t.Errorf("authorize project without a run lookup: %v", err)
 	}
 }
