@@ -32,6 +32,14 @@ package project
 //     existence is checked by the application against the in-memory project map,
 //     and TestBindingStoreOrdinarySaveDoesNotTouchBindings pins that decision.
 //
+// Archiving a project (T1.10.c) retires every binding the project owns in the
+// same transaction that writes the archived project row. An archived project
+// with an active binding would let an old Run keep passing the merge check, so
+// the two facts commit together. Retired bindings stay readable - the revision
+// history is what a pinned Run is compared against - and a restored project
+// gets a brand-new primary binding instead of reviving the retired one, which
+// keeps every snapshot pinned before the archive refused.
+//
 // Time: this is a new table in a library whose older columns (projects.created_at
 // and friends) hold Unix *seconds*. Bindings use Unix *milliseconds* UTC, matching
 // runstore; the older columns are left alone.
@@ -583,6 +591,9 @@ type bindingWrite struct {
 	refreshPath *bindingRefreshPath
 	// retire marks an existing binding retired.
 	retire *bindingRetire
+	// retireProject retires every active binding of one project at once; it is
+	// the archive path (T1.10.c).
+	retireProject *bindingRetireProject
 }
 
 // bindingCreate inserts a new binding and the first row of its history.
@@ -628,6 +639,24 @@ type bindingRetire struct {
 	Now              int64
 }
 
+// bindingRetireProject retires every active binding of one project: the primary
+// and all of its flow/run descendants.
+//
+// It exists for archiving. Retiring one binding at a time cannot express the
+// archive invariant ("an archived project has no active binding at all"), and a
+// per-binding loop outside the transaction could leave half a project retired if
+// one row lost a race. This is one statement, inside the same transaction that
+// writes the archived project row.
+//
+// There is deliberately no CAS on BindingID/Revision: the caller is not retiring
+// "the binding it read" but "whatever is active when the project is archived",
+// and a binding created concurrently must not survive the archive. The retires
+// are idempotent, so a repeated archive writes nothing.
+type bindingRetireProject struct {
+	ProjectID string
+	Now       int64
+}
+
 // bindingWriteFaultFunc is a test-only interposition on a pending binding
 // change. It runs inside the caller's transaction, before the change, and can
 // either fail it or let it proceed.
@@ -658,6 +687,8 @@ func (w *bindingWrite) Apply(ctx context.Context, tx *sql.Tx, fault bindingWrite
 		return w.refreshPath.apply(ctx, tx)
 	case w.retire != nil:
 		return w.retire.apply(ctx, tx)
+	case w.retireProject != nil:
+		return w.retireProject.apply(ctx, tx)
 	default:
 		return nil
 	}
@@ -784,6 +815,17 @@ func (r *bindingRetire) apply(ctx context.Context, tx *sql.Tx) error {
 	}
 }
 
+func (p *bindingRetireProject) apply(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE workspace_bindings
+		SET state = ?, retired_at = ?, updated_at = ?
+		WHERE project_id = ? AND state = 'active'
+	`, string(BindingStateRetired), p.Now, p.Now, p.ProjectID); err != nil {
+		return classifyBindingWriteError(err, p.ProjectID, "")
+	}
+	return nil
+}
+
 // currentBindingRevision reads a binding's revision in force inside a
 // transaction. A missing or retired binding has no revision in force, which is
 // reported as -1 so callers can tell "gone" from "revision 0".
@@ -864,8 +906,9 @@ func classifyBindingWriteError(err error, projectID, bindingID string) error {
 //   - otherwise: revision + 1 on the same binding id.
 //
 // A project with no workspace root, or whose binding_state is not bound
-// (deleting/archived), gets no binding write: this step does not retire bindings
-// on archive (that is T1.10.c).
+// (deleting/archived), gets no binding write: archiving retires bindings through
+// planArchiveBindings, and nothing else may write one for a project that is no
+// longer bound.
 func (s *SQLiteProjectService) planPrimaryBinding(ctx context.Context, project *Project, rootChanged bool) (*bindingWrite, error) {
 	if project == nil || !rootChanged || project.BindingState != BindingStateBound {
 		return nil, nil
@@ -919,6 +962,33 @@ func (s *SQLiteProjectService) planPrimaryBinding(ctx context.Context, project *
 		ExpectedRevision: existing.Snapshot.Revision,
 		Snapshot:         snapshot,
 		Now:              snapshot.CapturedAt.UTC().UnixMilli(),
+	}}, nil
+}
+
+// planArchiveBindings decides what the binding table needs when a project is
+// archived.
+//
+// Archiving is the one project write that retires bindings instead of creating
+// or advancing them: an archived project must not have a binding a Run can
+// still merge on. The plan is deliberately unconditional - it does not read the
+// binding table and cannot fail - because the invariant is "no active binding
+// remains", and the SQL states it directly: UPDATE ... WHERE state = 'active'
+// retires every row that is active now, including one written by a concurrent
+// writer, and touches nothing when there is none. A read-then-write plan would
+// have to reason about which rows it saw, and a concurrent bind between the read
+// and the transaction would survive the archive.
+//
+// The write is a no-op when the project has no active binding, so archiving an
+// unbound or already-archived project leaves the binding tables byte-identical.
+func (s *SQLiteProjectService) planArchiveBindings(ctx context.Context, projectID string) (*bindingWrite, error) {
+	_ = ctx
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, nil
+	}
+	return &bindingWrite{retireProject: &bindingRetireProject{
+		ProjectID: projectID,
+		Now:       time.Now().UTC().UnixMilli(),
 	}}, nil
 }
 

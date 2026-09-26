@@ -1359,6 +1359,12 @@ func (s *SQLiteProjectService) UpdateProject(ctx context.Context, id string, req
 	return project, nil
 }
 
+// DeleteProject archives the project (the InMemory layer sets Status=archived and
+// BindingState=archived) and retires every binding the project still owns in the
+// same transaction (T1.10.c). The two facts belong together: the archived project
+// row is what stops new work, and the retired bindings are what stop a Run that
+// was created before the archive from merging on the strength of its pinned
+// snapshot. A failure rolls back both and restores the in-memory project.
 func (s *SQLiteProjectService) DeleteProject(ctx context.Context, id string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -1367,7 +1373,12 @@ func (s *SQLiteProjectService) DeleteProject(ctx context.Context, id string) err
 	if err := s.InMemoryProjectService.DeleteProject(ctx, id); err != nil {
 		return err
 	}
-	if err := s.persistCurrentState(); err != nil {
+	write, err := s.planArchiveBindings(ctx, id)
+	if err != nil {
+		s.restoreState(before)
+		return err
+	}
+	if err := s.persistCurrentStateWith(ctx, write); err != nil {
 		s.restoreState(before)
 		return err
 	}

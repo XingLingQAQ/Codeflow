@@ -72,6 +72,13 @@ const (
 	// valid snapshot, so it cannot be trusted as "what is in force". The Detail
 	// names the field that failed.
 	BindingCodeCandidateInvalid = "binding_candidate_invalid"
+	// BindingCodeRetired: the binding in force has been retired, so nothing may
+	// be created, dispatched or merged on it. A project is retired when it is
+	// archived (T1.10.c), and retiring a binding individually is how a project
+	// gets a new primary binding, so this is a permanent refusal for anything
+	// pinned before the retire - the replacement binding has a different id and
+	// would report binding_rebound instead.
+	BindingCodeRetired = "binding_retired"
 )
 
 // BindingValidationError reports that a binding may not be used for the
@@ -163,6 +170,40 @@ func ValidateBinding(pinned, current WorkspaceBindingSnapshot, purpose BindingPu
 		}
 	}
 	return nil
+}
+
+// ValidateBindingRecord checks a pinned snapshot against the binding record the
+// store says is in force *right now*, including the record's lifecycle state.
+//
+// ValidateBinding answers "is the binding in force the one the run pinned, at a
+// root that is still the same directory?" but it only ever sees a snapshot, and a
+// snapshot does not carry the state: a retired binding row still holds the
+// snapshot it was retired at, which is exactly the snapshot a run pinned before
+// the archive. Passing that snapshot to ValidateBinding therefore succeeds, and
+// an archived project's old Run would be allowed to merge. This entry point is
+// what closes that gap:
+//
+//  1. state - a record that is not active (retired) is refused with
+//     binding_retired, for every purpose, before any other check. The refusal is
+//     about the row, not about the filesystem, so it does not depend on the
+//     directory still existing.
+//  2. everything ValidateBinding already checks - project, rebound, purpose,
+//     drift - is delegated to it unchanged, so the two entry points can never
+//     disagree about the snapshot half.
+//
+// Callers that hold a *WorkspaceBindingRecord (T1.04 run creation/dispatch,
+// T1.09 merge) use this; callers that only have a snapshot (a run replaying its
+// own frozen record) keep using ValidateBinding.
+func ValidateBindingRecord(pinned WorkspaceBindingSnapshot, current WorkspaceBindingRecord, purpose BindingPurpose, projectID string, allowedRoots []string) error {
+	if !current.Active() {
+		return &BindingValidationError{
+			Code:    BindingCodeRetired,
+			Purpose: purpose,
+			Detail: fmt.Sprintf("workspace binding %s of project %s is %s and may not be used",
+				current.Snapshot.BindingID, current.Snapshot.ProjectID, string(current.State)),
+		}
+	}
+	return ValidateBinding(pinned, current.Snapshot, purpose, projectID, allowedRoots)
 }
 
 // withPurpose stamps the purpose onto a validation error built by one of the
