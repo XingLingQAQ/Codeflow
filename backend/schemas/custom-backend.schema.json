@@ -1,0 +1,332 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "custom-backend.schema.json",
+  "title": "CustomBackendFrame",
+  "description": "自定义执行器协议 v1（§15 T4.03、§28 T4.03.a）的帧契约。传输：受监督的本地子进程，服务端→后端走 stdin、后端→服务端走 stdout，UTF-8 JSON Lines，一帧一行、以 \\n 结尾；stderr 只是诊断，永不作为帧解析。行上限：单帧（含信封）≤ 256 KiB + 16 KiB 信封余量；控制帧（hello/exit/start/approval_response/cancel，以及 kind 为控制类的 observation）整行 ≤ 64 KiB（§27.4）。本 schema 覆盖两个方向：后端→服务端 hello/observation/exit，服务端→后端 start/approval_response/cancel。冻结约束：每帧必带 schema_version=1 与自己的 type；每个 object 都 additionalProperties:false（未知字段拒绝而不是忽略）；后端→服务端帧在任何层级都不得出现序号/身份/审计字段（project_seq/run_seq/sequence/seq/event_id/event_type/occurred_at/identity/actor/audit/project_id/run_id/attempt_id/agent_revision_id），event ID、sequence、identity、occurred_at 一律由服务端在同一数据库事务内分配（§27.4）——observation 顶层 payload 不限制键集合（后端原生 JSON，原样保留、由服务端映射），但服务端不会把 payload 里的键当身份或序号使用。start.identity 复用 execution-identity.schema.json：它是服务端发给后端的只读执行上下文，后端不得回写。Env 永远不出现在协议帧里（由监督器在 spawn 时设置）。能力声明只是声明不是证据（§27.7）：缺证据的能力一律 false，未证明的能力调用返回 capability_unavailable。字符串长度约束只表达 Go 侧真实强制的规则（非空字段 minLength:1、tool name/backend name/version ≤128、provider_ref ≤256）；帧长上限已是硬边界。",
+  "oneOf": [
+    { "$ref": "#/definitions/hello" },
+    { "$ref": "#/definitions/observation" },
+    { "$ref": "#/definitions/exit" },
+    { "$ref": "#/definitions/start" },
+    { "$ref": "#/definitions/approval_response" },
+    { "$ref": "#/definitions/cancel" }
+  ],
+  "definitions": {
+    "schema_version": {
+      "const": 1,
+      "description": "帧信封版本，当前固定为 1。任何不兼容变更必须提升该版本并同步本 schema、Go 类型与 fixtures；不等于 1 的帧一律拒绝（Go 侧错误码 schema_version_mismatch）。"
+    },
+    "protocol_version": {
+      "const": 1,
+      "description": "hello.protocol_version：握手协议版本，当前固定为 1。不等于 1 的握手拒绝启动（Go 侧错误码 protocol_version_mismatch）。"
+    },
+    "frame_type": {
+      "enum": ["hello", "observation", "exit", "start", "approval_response", "cancel"],
+      "description": "封闭枚举：hello/observation/exit 为后端→服务端；start/approval_response/cancel 为服务端→后端。未知 type 拒绝（Go 侧错误码 unknown_frame_type）。每个帧定义再用 const 钉住自己的 type，因此一个 hello 形状的帧不能自称 type=start。"
+    },
+    "capability": {
+      "enum": [
+        "non_interactive",
+        "json_stream",
+        "approval_hook",
+        "cancel_graceful",
+        "resume_checkpoint",
+        "mcp",
+        "sandbox",
+        "pty",
+        "inject",
+        "usage_tokens",
+        "usage_cost"
+      ],
+      "description": "能力标识，与 execbackend.Capability 一致（§27.7）。hello.capabilities 是后端声明；hello.requires 是后端要求服务端具备的能力，其中出现枚举外的值必须拒绝启动（未知必需 capability 拒绝启动）；start.required 是本次 Run 需要的能力，未被 hello.capabilities 声明时返回 capability_unavailable。"
+    },
+    "observation_kind": {
+      "enum": [
+        "process_started",
+        "output",
+        "tool_requested",
+        "tool_result",
+        "approval_required",
+        "usage",
+        "protocol_warning"
+      ],
+      "description": "观察类型，与 execbackend.ObservationKind 去掉终结值 exited 后一致：终结只能通过 exit 帧表达（唯一终结帧）。process_started/approval_required/protocol_warning 属于控制类，适用 64 KiB 控制帧上限。"
+    },
+    "exit_reason": {
+      "enum": ["completed", "failed", "cancelled", "timeout", "crashed", "protocol_error"],
+      "description": "终结原因，与 execbackend.ExitReason 一致。"
+    },
+    "usage_quality": {
+      "enum": ["reported", "estimated", "unknown"],
+      "description": "用量数据质量，与 execbackend.UsageQuality 一致。未知必须标 unknown，不得当成 0（§27.6）。"
+    },
+    "cancel_mode": {
+      "enum": ["graceful", "force"],
+      "description": "取消方式，与 execbackend.CancelMode 一致：graceful 先软终止、超过 grace_period_ms 再强制；force 直接强制，永远可用、不受能力闸控（§27.2 第 6 条）。"
+    },
+    "tool_effect_kind": {
+      "enum": ["read_workspace", "write_workspace", "execute_process", "network"],
+      "description": "工具效果声明（封闭枚举）：读工作副本、写工作副本、启动子进程、访问网络。声明本身不授予权限；后端不得写主树或 runstore（§27.5.7）。"
+    },
+    "backend_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "后端稳定标识（不透明字符串）。"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "可选。后端版本字符串；缺省表示未声明版本（不表示无限制）。"
+        }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "effects"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "工具名（后端原生名，不透明字符串），同一 hello 内不得重复。"
+        },
+        "effects": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/tool_effect_kind" },
+          "description": "该工具的效果集合，至少一项、不得重复。"
+        }
+      }
+    },
+    "hello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "protocol_version", "backend"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "type": { "allOf": [{ "$ref": "#/definitions/frame_type" }, { "const": "hello" }] },
+        "protocol_version": { "$ref": "#/definitions/protocol_version" },
+        "backend": { "$ref": "#/definitions/backend_info" },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/capability" },
+          "description": "后端声明支持的能力，可选（缺省或空数组表示什么都没声明）。枚举外的值拒绝（不是忽略）：服务端不会承认一个自己不认识的 capability，静默丢弃会让后端误以为协商成功。"
+        },
+        "requires": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/capability" },
+          "description": "后端要求服务端具备的能力，可选。任何枚举外的值一律拒绝启动（未知必需 capability 拒绝启动）。"
+        },
+        "tools": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/tool" },
+          "description": "可选。工具效果声明，供服务端判断审批/沙箱需求；工具名不得重复。"
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "kind", "observed_at"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "type": { "allOf": [{ "$ref": "#/definitions/frame_type" }, { "const": "observation" }] },
+        "kind": { "$ref": "#/definitions/observation_kind" },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "后端本地时钟（RFC3339），仅供参考；领域事件的 occurred_at 由服务端分配（§27.4），本字段不得用作事件时间。"
+        },
+        "provider_ref": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "可选。后端原生消息/工具调用 ID，供服务端去重；不是序号，服务端不得把它当作 event ID。"
+        },
+        "payload": {
+          "description": "可选。后端原生 JSON 负载，原样保留、由服务端映射为领域事件 payload（单条 ≤ 256 KiB，控制类 kind ≤ 64 KiB）；本 schema 不限制其键集合，但 payload 里的 project_seq/sequence/audit 等键不会被服务端当序号/身份/审计使用。"
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quality"],
+      "dependencies": { "cost_minor": ["currency"] },
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "可选。未知时缺省（不是 0）。"
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "可选。未知时缺省（不是 0）。"
+        },
+        "cost_minor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "可选。金额以最小单位整数表示（§27.1）；出现时必须同时给出 currency。"
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 1,
+          "description": "可选。cost_minor 的币种。"
+        },
+        "quality": { "$ref": "#/definitions/usage_quality" }
+      }
+    },
+    "exit_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "retryable", "usage"],
+      "properties": {
+        "exit_code": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "可选。进程退出码；未知时缺省（不得用 0 冒充未知）。"
+        },
+        "reason": { "$ref": "#/definitions/exit_reason" },
+        "retryable": {
+          "type": "boolean",
+          "description": "是否可安全重试（§27.6：仅对尚未确认接收且无副作用的失败重试）。"
+        },
+        "usage": { "$ref": "#/definitions/usage" }
+      }
+    },
+    "exit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "result"],
+      "description": "终结帧：映射为 ObservationExited + ExitResult 负载。服务端据此按 §21.1 判定 Run 的终结状态，后端不能自报状态迁移；本帧是唯一的终结帧（observation 的 kind 不含 exited）。",
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "type": { "allOf": [{ "$ref": "#/definitions/frame_type" }, { "const": "exit" }] },
+        "result": { "$ref": "#/definitions/exit_result" }
+      }
+    },
+    "process_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grace_period_ms", "max_output_bytes"],
+      "properties": {
+        "grace_period_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "软终止到强制终止的宽限期（毫秒），不得为负。"
+        },
+        "hard_deadline": {
+          "type": "string",
+          "format": "date-time",
+          "description": "可选。硬截止时间（wall deadline）；缺省表示服务端另行控制。"
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "输出字节上限，不得为负；0 表示未设上限（由服务端 spool/磁盘上限控制）。"
+        }
+      }
+    },
+    "frozen_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_id", "snapshot_hash", "prompt"],
+      "properties": {
+        "snapshot_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "冻结输入快照标识（不透明字符串）。"
+        },
+        "snapshot_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "快照内容 hash，固定为 \"sha256:\" + 64 位小写 hex（§27.2.1 冻结输入）。"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "用户提示词；是否为空由 Run 创建侧约束，本层不强制。"
+        }
+      }
+    },
+    "start": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "identity", "input", "work_dir", "process"],
+      "description": "启动帧：只读身份 + 冻结输入 + 工作副本绝对路径 + 进程控制 + 所需能力。不含 Env：环境变量由监督器在 spawn 时设置（可能含受控变量），不能进协议帧。work_dir 是唯一可写根；协议里不存在写主树/写 runstore/写审计的帧。",
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "type": { "allOf": [{ "$ref": "#/definitions/frame_type" }, { "const": "start" }] },
+        "identity": { "$ref": "execution-identity.schema.json" },
+        "input": { "$ref": "#/definitions/frozen_input" },
+        "work_dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Run 工作副本绝对路径，唯一可写根。本 schema 只校验非空字符串；\"绝对且已 Clean\" 由 Go 侧复用 execbackend.StartRequest.Validate 强制（跨平台绝对路径无法用 draft-07 pattern 可靠表达）。"
+        },
+        "process": { "$ref": "#/definitions/process_spec" },
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/definitions/capability" },
+          "description": "可选。本次 Run 需要的能力；未在 hello.capabilities 里声明（或未获证明）的能力返回 capability_unavailable。"
+        }
+      }
+    },
+    "approval_decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approval_id", "approved"],
+      "properties": {
+        "approval_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "服务端审批对象 ID（不透明字符串）。"
+        },
+        "provider_ref": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "可选。对应 approval_required 观察的 provider_ref，便于后端关联；不是 event ID。"
+        },
+        "approved": {
+          "type": "boolean",
+          "description": "是否批准；false 是明确拒绝，不能当成\"未填写\"。批准后执行时重验，同一 tool_call_id 最多一次授权消费（§27.2.5）。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "可选。裁决原因（拒绝时建议填写）。"
+        }
+      }
+    },
+    "approval_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "decision"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "type": { "allOf": [{ "$ref": "#/definitions/frame_type" }, { "const": "approval_response" }] },
+        "decision": { "$ref": "#/definitions/approval_decision" }
+      }
+    },
+    "cancel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "mode"],
+      "properties": {
+        "schema_version": { "$ref": "#/definitions/schema_version" },
+        "type": { "allOf": [{ "$ref": "#/definitions/frame_type" }, { "const": "cancel" }] },
+        "mode": { "$ref": "#/definitions/cancel_mode" }
+      }
+    }
+  }
+}

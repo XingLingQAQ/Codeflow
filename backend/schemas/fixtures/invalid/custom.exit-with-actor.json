@@ -1,0 +1,1 @@
+{"schema_version": 1, "type": "exit", "result": {"reason": "completed", "retryable": false, "usage": {"quality": "unknown"}, "actor": "agent"}}

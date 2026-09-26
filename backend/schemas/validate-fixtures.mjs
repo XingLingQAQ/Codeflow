@@ -56,6 +56,7 @@ const SCHEMAS = {
   event: 'execution-event.schema.json',
   error: 'error.schema.json',
   response: 'response.schema.json',
+  custom: 'custom-backend.schema.json',
 };
 
 function readJson(file) {
@@ -92,6 +93,21 @@ const EXPECT = {
   'response.legacy-shape.json': ['oneOf'],
   'response.missing-meta.json': ['oneOf', 'required'],
   'response.error-unknown-code.json': ['oneOf', 'enum'],
+  // T4.03.a — 自定义执行器协议 v1。后端→服务端帧的序号/身份/审计字段必须被拒绝，
+  // 未知必需 capability / 未知工具效果 / schema_version≠1 / 未知 type 同样拒绝。
+  // 帧 schema 是 oneOf，ajv 会在每个分支上报错，因此期望关键字包含 oneOf 与内层关键字。
+  'custom.observation-with-project-seq.json': ['oneOf', 'additionalProperties'],
+  'custom.exit-with-actor.json': ['oneOf', 'additionalProperties'],
+  'custom.hello-schema-version-2.json': ['oneOf', 'const'],
+  'custom.unknown-type.json': ['oneOf', 'const', 'enum'],
+  'custom.start-missing-identity.json': ['oneOf', 'required'],
+  'custom.observation-bad-kind.json': ['oneOf', 'enum'],
+  'custom.hello-bad-effect.json': ['oneOf', 'enum'],
+  'custom.hello-unknown-required-capability.json': ['oneOf', 'enum'],
+  'custom.hello-duplicate-capability.json': ['oneOf', 'uniqueItems'],
+  'custom.observation-missing-observed-at.json': ['oneOf', 'required'],
+  'custom.exit-bad-reason.json': ['oneOf', 'enum'],
+  'custom.cancel-bad-mode.json': ['oneOf', 'enum'],
 };
 
 function listFixtures(kind) {

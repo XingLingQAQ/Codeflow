@@ -1,0 +1,1 @@
+{"schema_version": 1, "type": "exit", "result": {"exit_code": 0, "reason": "completed", "retryable": false, "usage": {"input_tokens": 1200, "output_tokens": 340, "quality": "reported"}}}

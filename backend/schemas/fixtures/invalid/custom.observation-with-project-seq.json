@@ -1,0 +1,1 @@
+{"schema_version": 1, "type": "observation", "kind": "output", "observed_at": "2026-09-26T08:00:00Z", "project_seq": 42, "payload": {"stream": "stdout", "text": "hi"}}

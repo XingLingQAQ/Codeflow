@@ -1,0 +1,1 @@
+{"schema_version": 1, "type": "approval_response", "decision": {"approval_id": "ap_1", "provider_ref": "call_1", "approved": true, "reason": "one-off edit approved"}}

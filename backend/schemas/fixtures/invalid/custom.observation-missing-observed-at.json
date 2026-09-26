@@ -1,0 +1,1 @@
+{"schema_version": 1, "type": "observation", "kind": "output", "payload": {"stream": "stdout", "text": "hi"}}

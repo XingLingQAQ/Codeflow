@@ -1,0 +1,1 @@
+{"schema_version": 1, "type": "start", "input": {"snapshot_id": "snap_1", "snapshot_hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "prompt": "x"}, "work_dir": "D:\\Project\\Codeflow\\.tmp\\r31\\ws\\run_88", "process": {"grace_period_ms": 5000, "max_output_bytes": 262144}}
