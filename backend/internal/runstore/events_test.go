@@ -1973,8 +1973,8 @@ func TestEventsSurviveReopen(t *testing.T) {
 		t.Fatalf("reopen %s: %v", path, err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	if len(res.Applied) != 0 || res.ToVersion != 5 {
-		t.Errorf("reopen migration result = %+v, want nothing applied at version 5", res)
+	if len(res.Applied) != 0 || res.ToVersion != 6 {
+		t.Errorf("reopen migration result = %+v, want nothing applied at version 6", res)
 	}
 
 	// The rows are byte-identical, including the nullable run columns.

@@ -878,6 +878,39 @@ func TestGetInputSnapshotReturnsStoredBody(t *testing.T) {
 	}
 }
 
+// TestCompoundCredentialKeysAreSecrets pins the suffix rule: the credential
+// names real payloads use are refused, and the look-alikes that are not
+// credentials (counts, hints, policies, paging cursors, references) are not.
+func TestCompoundCredentialKeysAreSecrets(t *testing.T) {
+	refused := []string{
+		"access_token", "refresh_token", "id_token", "GITHUB_TOKEN", "csrf-token",
+		"client_secret", "db_password", "smtp_passwd", "gpg_passphrase",
+		"openai_api_key", "x-api-key", "aws_secret_access_key", "jwt_secret_key",
+		"service_account_credentials", "set-cookie", "proxy_authorization", "ssh_private_key",
+	}
+	for _, key := range refused {
+		body := `{"` + key + `":"value-that-must-not-be-stored"}`
+		if err := checkNoSecrets([]byte(body)); !errors.Is(err, ErrSecretInSnapshot) {
+			t.Errorf("key %q was accepted (%v), want ErrSecretInSnapshot", key, err)
+		}
+	}
+	accepted := []string{
+		"max_tokens", "input_tokens", "output_tokens", "token_count", "tokenizer",
+		"password_hint", "secret_count", "next_page_token", "page_token", "continuation_token",
+		"client_secret_ref", "api_key_id", "token_name", "credential_id",
+	}
+	for _, key := range accepted {
+		body := `{"` + key + `":"ordinary value"}`
+		if err := checkNoSecrets([]byte(body)); err != nil {
+			t.Errorf("key %q was refused (%v), want acceptance", key, err)
+		}
+	}
+	// Only string values are credentials: a flag named like one is not.
+	if err := checkNoSecrets([]byte(`{"has_password":true,"api_token":null}`)); err != nil {
+		t.Errorf("non-string values were refused: %v", err)
+	}
+}
+
 // TestSecretsAreFoundThroughTheWholeDocument pins the traversal: a secret is
 // caught wherever it sits, and a reference that merely mentions a credential is
 // not a false positive.

@@ -173,6 +173,27 @@ var secretKeyNames = []string{
 	"apikey", "privatekey", "authorization", "cookie",
 }
 
+// secretKeySuffixes extend the exact names to the compound credential names
+// callers actually use: access_token, refresh_token, id_token, GITHUB_TOKEN,
+// client_secret, db_password, openai_api_key, x-api-key, aws_secret_access_key.
+// An exact-name list let every one of those through (found while accepting
+// T1.11.a, whose command responses go through the same scan). Matching is on
+// the compact form's suffix, not a substring, so password_hint, password_policy,
+// token_count, tokenizer, max_tokens and input_tokens stay legal.
+var secretKeySuffixes = []string{
+	"password", "passwd", "passphrase", "secret", "secretkey", "secretaccesskey",
+	"token", "apikey", "privatekey", "credential", "credentials", "cookie", "authorization",
+}
+
+// nonSecretCompactKeys end like a credential name but are not one: paging and
+// continuation cursors are opaque positions, not keys to anything.
+var nonSecretCompactKeys = map[string]bool{
+	"pagetoken":         true,
+	"nextpagetoken":     true,
+	"prevpagetoken":     true,
+	"continuationtoken": true,
+}
+
 // referenceKeySuffixes are the suffixes that mark a value as a reference rather
 // than a secret: secret_ref, token_name, api_key_id and friends name where the
 // secret lives, they do not carry it. They are checked first, so
@@ -377,6 +398,14 @@ func isSecretKey(key string) bool {
 	compact := strings.NewReplacer("_", "", "-", "", " ", "").Replace(normalized)
 	for _, name := range secretKeyNames {
 		if compact == name {
+			return true
+		}
+	}
+	if nonSecretCompactKeys[compact] {
+		return false
+	}
+	for _, suffix := range secretKeySuffixes {
+		if strings.HasSuffix(compact, suffix) {
 			return true
 		}
 	}

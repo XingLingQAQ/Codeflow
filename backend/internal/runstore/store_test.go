@@ -26,8 +26,8 @@ func newTestStore(t *testing.T) (*Store, string) {
 	if err != nil {
 		t.Fatalf("OpenStore(%s): %v", path, err)
 	}
-	if res.ToVersion != 5 {
-		t.Fatalf("OpenStore migrated to version %d, want 5", res.ToVersion)
+	if res.ToVersion != 6 {
+		t.Fatalf("OpenStore migrated to version %d, want 6", res.ToVersion)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, path
@@ -979,8 +979,8 @@ func TestStoreReopenPreservesRows(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer reopened.Close()
-	if len(res.Applied) != 0 || res.ToVersion != 5 {
-		t.Errorf("reopen migration result = %+v, want nothing applied at version 5", res)
+	if len(res.Applied) != 0 || res.ToVersion != 6 {
+		t.Errorf("reopen migration result = %+v, want nothing applied at version 6", res)
 	}
 
 	afterTask, err := GetTask(ctx, reopened.DB(), "t-1")

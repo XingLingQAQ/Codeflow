@@ -143,6 +143,46 @@ var ErrLegacySourceConflict = errors.New("runstore: legacy source conflict")
 // depend on the lock mode.
 var ErrLegacyProjectionRaced = errors.New("runstore: legacy source projected concurrently")
 
+// ErrInvalidCommand means the caller handed the command ledger something the
+// contract rejects: a key field that is blank, oversized, whitespace-padded or
+// outside its character set; a request body that is not one JSON document or
+// that names a secret field; an outcome whose state is not terminal, whose
+// status code is not an HTTP status, whose response is not a JSON object within
+// the size limit, or whose resource reference is half-filled. Like
+// ErrInvalidRecord and ErrInvalidEvent these are caught before any SQL runs, so
+// a rejected call leaves the caller's transaction — including a key the caller
+// was about to claim — exactly as it was.
+var ErrInvalidCommand = errors.New("runstore: invalid command")
+
+// ErrCommandKeyReused means an idempotency key is already claimed for a
+// different request: the same (principal, project, operation, command_id) with a
+// different request_hash (§27.3 "同 key 不同 hash 返回 409"). The API layer
+// answers 409 idempotency_key_reused. The stored command must NOT be returned to
+// the caller: that would tell a client its new request had been applied when the
+// recorded answer belongs to another one.
+var ErrCommandKeyReused = errors.New("runstore: idempotency key reused")
+
+// ErrCommandAlreadyCompleted means the command is already in a terminal state
+// (succeeded, failed, or an expired tombstone), so its recorded outcome stands
+// and cannot be written again. A retry that reaches this has nothing to do: the
+// response it wants is the one already stored, and it should read the record
+// (GetCommand) rather than repeat the work. It is also what an attempt to revive
+// an expired tombstone reports, directly or through the schema trigger
+// trg_command_records_expired_is_final.
+var ErrCommandAlreadyCompleted = errors.New("runstore: command already completed")
+
+// ErrCommandClaimRaced means a claim of an idempotency key hit the primary key
+// of command_records while the conflicting row was not visible to the caller's
+// transaction — another writer's uncommitted insert. It is the one transient
+// outcome of ClaimCommandTx: roll the transaction back and retry, and the retry
+// reads the committed row and returns owner = false. Under the BEGIN IMMEDIATE
+// transactions OpenStore pins it is not expected to occur; it exists so
+// correctness does not depend on the lock mode, exactly as
+// ErrLegacyProjectionRaced does for the legacy projection. It is deliberately
+// not ErrCommandKeyReused: the caller's action is the opposite (retry, do not
+// give up).
+var ErrCommandClaimRaced = errors.New("runstore: command key claimed concurrently")
+
 // RevisionConflictError reports a Run CAS whose expected revision no longer
 // matches the stored one. It carries both sides so a caller can decide whether
 // to re-read and retry, and it wraps ErrRevisionConflict.
@@ -199,6 +239,9 @@ const (
 	errNameRunHistoryDeleteForbidden = "run_history_delete_forbidden"
 	errNameEventImmutable            = "event_immutable"
 	errNameOutboxDeadLetterRetained  = "outbox_dead_letter_retained"
+	// The RAISE body of migration 006's BEFORE UPDATE trigger: an expired
+	// tombstone never becomes an active command again.
+	errNameCommandExpiredIsFinal = "command_expired_is_final"
 )
 
 // mapConstraintError turns a database refusal into the store's typed error. op
@@ -246,6 +289,13 @@ func mapConstraintError(op string, err error) error {
 		// The row records an abandoned delivery that an operator must still be
 		// able to find and replay; deleting it would erase that fact.
 		return fmt.Errorf("%s: %w", op, ErrOutboxDeadLetterRetained)
+	case strings.Contains(msg, errNameCommandExpiredIsFinal):
+		// An expired command record is a tombstone whose only job is to keep the
+		// key claimed forever (§27.3). Reviving it would make an old key
+		// executable a second time, which is the double execution the ledger
+		// exists to prevent; the store has no path that does this, so reaching
+		// the trigger means a statement was written by hand.
+		return fmt.Errorf("%s: %w", op, ErrCommandAlreadyCompleted)
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}
