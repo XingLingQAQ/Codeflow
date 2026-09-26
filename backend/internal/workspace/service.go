@@ -35,6 +35,12 @@ func (s *FSService) SetGuard(g WriteGuard) {
 
 // SetAllowedRoots restricts workspace operations to the given absolute roots.
 // Empty list means unrestricted (backward compatible for unit tests).
+//
+// Each root is stored as its final path when it exists (see FinalPath), so the
+// stored form is the real directory the OS routes to and not a link/junction
+// that could later be re-pointed. A root that cannot be resolved is kept in its
+// absolute, cleaned form: it is a not-yet-existing root, which the readiness
+// probe must still be able to report as missing.
 func (s *FSService) SetAllowedRoots(roots []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -48,23 +54,35 @@ func (s *FSService) SetAllowedRoots(roots []string) {
 		if err != nil {
 			continue
 		}
-		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-			abs = resolved
+		if final, err := FinalPath(abs); err == nil {
+			abs = final
 		}
 		s.allowedRoots = append(s.allowedRoots, filepath.Clean(abs))
 	}
 }
 
 // AllowedRoots returns a copy of the configured allowed roots (absolute,
-// cleaned, symlinks resolved). An empty slice means unrestricted: the caller
-// must treat it as "nothing was configured", not as "every path is allowed"
-// (readiness probes and startup diagnostics need that distinction).
+// cleaned, resolved to their final paths). An empty slice means unrestricted:
+// the caller must treat it as "nothing was configured", not as "every path is
+// allowed" (readiness probes and startup diagnostics need that distinction).
 func (s *FSService) AllowedRoots() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]string(nil), s.allowedRoots...)
 }
 
+// ensureRootAllowed reports whether root is inside the configured allow-list.
+//
+// The comparison is made on final paths: both the candidate root and every
+// configured root are resolved to the directory the OS actually routes to (see
+// FinalPath), so a junction inside an allowed root that points outside it is
+// rejected even though its path string looks allow-listed. A candidate that
+// cannot be resolved at all is rejected as not allowed, and a configured root
+// that cannot be resolved is skipped.
+//
+// An empty allow-list still returns nil (unrestricted). That is the desktop
+// default and is deliberately left as is by this step; see the receipt of
+// T1.10.b group 1/2.
 func (s *FSService) ensureRootAllowed(root string) error {
 	s.mu.RLock()
 	allowed := append([]string(nil), s.allowedRoots...)
@@ -76,12 +94,14 @@ func (s *FSService) ensureRootAllowed(root string) error {
 	if err != nil {
 		return fmt.Errorf("resolve root: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
+	final, err := FinalPath(abs)
+	if err != nil {
+		// The candidate cannot be resolved, so there is no way to tell where it
+		// leads. Fail closed instead of comparing an unresolved spelling.
+		return fmt.Errorf("workspace root not allowed: %s", root)
 	}
-	abs = filepath.Clean(abs)
 	for _, a := range allowed {
-		if abs == a || strings.HasPrefix(abs, a+string(filepath.Separator)) {
+		if final == a || strings.HasPrefix(final, a+string(filepath.Separator)) {
 			return nil
 		}
 	}
@@ -89,9 +109,9 @@ func (s *FSService) ensureRootAllowed(root string) error {
 }
 
 // Resolve joins root+rel and ensures the result is inside root.
-// Existing path components are EvalSymlinks'd so a symlink inside the tree
-// cannot point outside the project root. Non-existent write targets are
-// checked via the deepest existing ancestor.
+// Existing path components are resolved to their final paths so a symlink or
+// junction inside the tree cannot point outside the project root. Non-existent
+// write targets are checked via the deepest existing ancestor.
 func (s *FSService) Resolve(root, rel string) (string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", fmt.Errorf("workspace root is required")
@@ -103,8 +123,10 @@ func (s *FSService) Resolve(root, rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve root: %w", err)
 	}
-	if resolvedRoot, err := filepath.EvalSymlinks(absRoot); err == nil {
-		absRoot = resolvedRoot
+	// The root is returned to callers as its final path: a junction root must
+	// yield the directory the OS writes into, not the junction path.
+	if finalRoot, err := FinalPath(absRoot); err == nil {
+		absRoot = finalRoot
 	}
 	info, err := os.Stat(absRoot)
 	if err != nil {
@@ -150,7 +172,7 @@ func (s *FSService) Resolve(root, rel string) (string, error) {
 			return absCandidate, nil
 		}
 		if fi.Mode()&os.ModeSymlink != 0 {
-			resolved, err := filepath.EvalSymlinks(next)
+			resolved, err := FinalPath(next)
 			if err != nil {
 				return "", fmt.Errorf("resolve symlink: %w", err)
 			}
@@ -161,12 +183,21 @@ func (s *FSService) Resolve(root, rel string) (string, error) {
 			continue
 		}
 		// Reparse points that are not symlinks (Windows junctions / mount points)
-		// are reported as irregular. EvalSymlinks cannot reliably resolve them to a
-		// real path, yet the OS transparently redirects reads/writes through them —
-		// a no-privilege sandbox escape. Fail closed. (On Unix regular files/dirs are
-		// never irregular, so this only affects genuine reparse points.)
+		// are reported as irregular by os.Lstat, yet the OS transparently
+		// redirects reads/writes through them. Resolve them to their final path
+		// and require the result to stay inside the root; anything that cannot be
+		// resolved fails closed. (On Unix regular files/dirs are never irregular,
+		// so this only affects genuine reparse points.)
 		if fi.Mode()&os.ModeIrregular != 0 {
-			return "", fmt.Errorf("path escapes project root: %s", rel)
+			final, err := FinalPath(next)
+			if err != nil {
+				return "", fmt.Errorf("path escapes project root: %s", rel)
+			}
+			if !pathWithinRoot(absRoot, final) {
+				return "", fmt.Errorf("path escapes project root: %s", rel)
+			}
+			cur = final
+			continue
 		}
 		absNext, err := filepath.Abs(next)
 		if err != nil {

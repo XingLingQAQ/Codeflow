@@ -14,6 +14,12 @@ import (
 // CanonicalizeWorkspaceRoot resolves a workspace root to the path the server
 // will use for all subsequent operations. It fails closed for missing roots,
 // files, and roots outside the configured allow-list.
+//
+// The returned path is the *final path* of the root: every link, symlink and
+// junction on the way is followed, and on Windows the name is the OS-normalized
+// long name. That is the directory the OS actually routes reads and writes to,
+// so a junction inside an allowed root that points outside it cannot be used to
+// smuggle in a root that merely looks allow-listed (see workspace.FinalPath).
 func CanonicalizeWorkspaceRoot(root string, allowedRoots []string) (string, error) {
 	return canonicalizeWorkspaceRoot(root, allowedRoots, false)
 }
@@ -27,7 +33,7 @@ func canonicalizeWorkspaceRoot(root string, allowedRoots []string, allowUnrestri
 	if err != nil {
 		return "", fmt.Errorf("canonicalize workspace root: %w", err)
 	}
-	abs, err = filepath.EvalSymlinks(abs)
+	abs, err = workspace.FinalPath(abs)
 	if err != nil {
 		return "", fmt.Errorf("canonicalize workspace root: %w", err)
 	}
@@ -40,18 +46,10 @@ func canonicalizeWorkspaceRoot(root string, allowedRoots []string, allowUnrestri
 	}
 	abs = filepath.Clean(abs)
 	for _, allowed := range allowedRoots {
-		allowed = strings.TrimSpace(allowed)
-		if allowed == "" {
+		allowedAbs, ok := finalAllowedRoot(allowed)
+		if !ok {
 			continue
 		}
-		allowedAbs, err := filepath.Abs(allowed)
-		if err != nil {
-			continue
-		}
-		if resolved, err := filepath.EvalSymlinks(allowedAbs); err == nil {
-			allowedAbs = resolved
-		}
-		allowedAbs = filepath.Clean(allowedAbs)
 		if abs == allowedAbs || strings.HasPrefix(abs, allowedAbs+string(filepath.Separator)) {
 			return abs, nil
 		}
@@ -63,6 +61,24 @@ func canonicalizeWorkspaceRoot(root string, allowedRoots []string, allowUnrestri
 		return "", fmt.Errorf("workspace root binding is disabled until CODEFLOW_WORKSPACE_ROOTS is configured")
 	}
 	return "", fmt.Errorf("workspace root is outside allowed roots: %s", root)
+}
+
+// finalAllowedRoot resolves one configured allowed root to its final path. An
+// unparseable or unresolvable entry is skipped, matching the previous
+// best-effort behaviour for allow-list entries.
+func finalAllowedRoot(allowed string) (string, bool) {
+	allowed = strings.TrimSpace(allowed)
+	if allowed == "" {
+		return "", false
+	}
+	allowedAbs, err := filepath.Abs(allowed)
+	if err != nil {
+		return "", false
+	}
+	if final, err := workspace.FinalPath(allowedAbs); err == nil {
+		allowedAbs = final
+	}
+	return filepath.Clean(allowedAbs), true
 }
 
 // BindWorkspaceRoot canonicalizes and persists the root on a project.
@@ -265,13 +281,16 @@ const (
 	DriftRootReplaced = "root_replaced"
 	// DriftRootNotAllowed: the root is no longer inside allowedRoots.
 	DriftRootNotAllowed = "root_not_allowed"
+	// DriftRootUnverifiable: the directory exists, but the OS could not report
+	// its final path, so neither the path nor the identity can be trusted.
+	DriftRootUnverifiable = "root_unverifiable"
 )
 
 // BindingDriftError reports that a binding snapshot no longer matches the
 // filesystem. Retrieve it with errors.As.
 type BindingDriftError struct {
 	// Code is one of DriftRootMissing, DriftRootRedirected, DriftRootReplaced,
-	// DriftRootNotAllowed.
+	// DriftRootNotAllowed, DriftRootUnverifiable.
 	Code string
 	// Detail explains the drift. It may contain filesystem paths but never
 	// tokens or environment information.
@@ -295,18 +314,20 @@ func (e *BindingDriftError) Error() string {
 //     directory. Stat follows links, so a root that is still reachable through
 //     a live junction is *present* here; this check is about
 //     existence, not about where the path leads.
-//  2. root_redirected  - filepath.Abs + filepath.EvalSymlinks of CanonicalRoot
-//     either fails or returns a different path. CanonicalRoot was itself
-//     produced by EvalSymlinks (see CaptureBindingSnapshot), so re-resolving it
-//     is byte-stable for an untouched directory; any difference means the path
-//     or one of its ancestors was replaced by a link/junction. Note that
-//     EvalSymlinks fails outright for a path whose ancestor is a Windows
-//     junction, so that case also lands here.
-//  3. root_replaced    - the path resolves to itself but the OS identity of the
+//  2. root_unverifiable - the OS could not report the final path of
+//     CanonicalRoot (workspace.FinalPath fails on an existing directory). The
+//     path cannot be compared with the snapshot and the identity cannot be
+//     trusted, so this fails closed.
+//  3. root_redirected  - the final path of CanonicalRoot differs from
+//     CanonicalRoot. CanonicalRoot was itself produced by FinalPath (see
+//     CaptureBindingSnapshot), so re-resolving an untouched directory is
+//     byte-stable; any difference means the path or one of its ancestors was
+//     replaced by a link/junction, or a junction was re-pointed.
+//  4. root_replaced    - the path resolves to itself but the OS identity of the
 //     directory behind it differs from RootIdentity. This catches a directory
-//     that was deleted and recreated at the same path, renamed away with a new
-//     directory taking its name, or a junction re-pointed at another target.
-//  4. root_not_allowed - the root is no longer inside allowedRoots. An empty
+//     that was deleted and recreated at the same path or renamed away with a new
+//     directory taking its name.
+//  5. root_not_allowed - the root is no longer inside allowedRoots. An empty
 //     allowedRoots list allows nothing, matching the fail-closed default of
 //     canonicalizeWorkspaceRoot.
 //
@@ -340,11 +361,11 @@ func (s WorkspaceBindingSnapshot) Recheck(allowedRoots []string) error {
 			Detail: fmt.Sprintf("workspace root %s could not be resolved: %v", root, err),
 		}
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
+	resolved, err := workspace.FinalPath(abs)
 	if err != nil {
 		return &BindingDriftError{
-			Code:   DriftRootRedirected,
-			Detail: fmt.Sprintf("workspace root %s ancestry could not be resolved: %v", root, err),
+			Code:   DriftRootUnverifiable,
+			Detail: fmt.Sprintf("workspace root %s final path could not be read: %v", root, err),
 		}
 	}
 	resolved = filepath.Clean(resolved)
@@ -380,32 +401,21 @@ func (s WorkspaceBindingSnapshot) Recheck(allowedRoots []string) error {
 }
 
 // rootWithinAllowedRoots mirrors the allow-list comparison of
-// canonicalizeWorkspaceRoot (Abs, then EvalSymlinks when it succeeds, then Clean,
-// then equal-or-descendant) without its error reporting, so Recheck can classify
-// an out-of-list root as drift instead of a capture error.
+// canonicalizeWorkspaceRoot (final path of the candidate and of every allowed
+// root, then equal-or-descendant) without its error reporting, so Recheck can
+// classify an out-of-list root as drift instead of a capture error.
 func rootWithinAllowedRoots(root string, allowedRoots []string) bool {
-	rootAbs, err := filepath.Abs(root)
+	rootFinal, err := workspace.FinalPath(root)
 	if err != nil {
 		return false
 	}
-	if resolved, err := filepath.EvalSymlinks(rootAbs); err == nil {
-		rootAbs = resolved
-	}
-	rootAbs = filepath.Clean(rootAbs)
+	rootFinal = filepath.Clean(rootFinal)
 	for _, allowed := range allowedRoots {
-		allowed = strings.TrimSpace(allowed)
-		if allowed == "" {
+		allowedFinal, ok := finalAllowedRoot(allowed)
+		if !ok {
 			continue
 		}
-		allowedAbs, err := filepath.Abs(allowed)
-		if err != nil {
-			continue
-		}
-		if resolved, err := filepath.EvalSymlinks(allowedAbs); err == nil {
-			allowedAbs = resolved
-		}
-		allowedAbs = filepath.Clean(allowedAbs)
-		if rootAbs == allowedAbs || strings.HasPrefix(rootAbs, allowedAbs+string(filepath.Separator)) {
+		if rootFinal == allowedFinal || strings.HasPrefix(rootFinal, allowedFinal+string(filepath.Separator)) {
 			return true
 		}
 	}

@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/codeflow/backend/internal/workspace"
 )
 
 // --- helpers ---------------------------------------------------------------
@@ -336,6 +338,16 @@ func TestRecheckJunctionRootRePointed(t *testing.T) {
 	snapshot := capturePrimary(t, link, []string{base})
 	t.Logf("junction root: CanonicalRoot=%q identity=%s", snapshot.CanonicalRoot, snapshot.RootIdentity)
 
+	// Since T1.10.b the capture resolves the junction to its final path, so the
+	// snapshot pins the real target (target-a), not the junction spelling.
+	firstFinal, err := workspace.FinalPath(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.CanonicalRoot != firstFinal {
+		t.Fatalf("CanonicalRoot = %q, want the junction target %q", snapshot.CanonicalRoot, firstFinal)
+	}
+
 	// Unchanged junction root re-checks clean.
 	if err := snapshot.Recheck([]string{base}); err != nil {
 		t.Fatalf("Recheck on an untouched junction root must pass, got %v", err)
@@ -344,18 +356,19 @@ func TestRecheckJunctionRootRePointed(t *testing.T) {
 	removeJunction(t, link)
 	makeJunction(t, link, second)
 
-	err := snapshot.Recheck([]string{base})
-	code := driftCode(t, err)
-	if code != DriftRootReplaced && code != DriftRootRedirected {
-		t.Fatalf("re-pointed junction code = %q, want %q or %q", code, DriftRootReplaced, DriftRootRedirected)
+	// Re-pointing the junction does not move the pinned snapshot: target-a is
+	// untouched, so the pinned binding keeps writing into target-a and never
+	// silently follows the link to target-b.
+	if err := snapshot.Recheck([]string{base}); err != nil {
+		t.Fatalf("the pinned target is untouched, Recheck must still pass, got %v", err)
 	}
-	// Measured on this machine: EvalSymlinks leaves a live junction path
-	// unchanged, so the path still resolves to itself and the identity
-	// comparison is what catches the re-point -> root_replaced.
-	if code != DriftRootReplaced {
-		t.Fatalf("measured behaviour is %q; if the platform changed to redirect the path, update this assertion and the receipt", code)
+	// The re-point is visible to a fresh capture through the link, which now
+	// yields a different root; ValidateBinding reports that as a rebind
+	// (TestValidateBindingJunctionRePointDoesNotMoveCapturedRoot).
+	recaptured := capturePrimary(t, link, []string{base})
+	if recaptured.RootIdentity.Equal(snapshot.RootIdentity) {
+		t.Fatalf("a capture through the re-pointed junction must see the new target, got the pinned identity %s", snapshot.RootIdentity)
 	}
-	t.Logf("re-pointed junction detected as %q: %v", code, err)
 }
 
 // --- Recheck: ancestor chain ----------------------------------------------
