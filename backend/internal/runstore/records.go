@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
@@ -227,8 +228,8 @@ func canonicalJSON(raw []byte) (string, string, error) {
 	// A second value (or trailing garbage) means the caller handed us something
 	// that is not one JSON document; hashing a prefix of it would be a silent
 	// data loss.
-	if dec.More() {
-		return "", "", errors.New("trailing content after the JSON value")
+	if err := requireJSONEnd(dec); err != nil {
+		return "", "", err
 	}
 
 	var sb strings.Builder
@@ -238,6 +239,17 @@ func canonicalJSON(raw []byte) (string, string, error) {
 	out := sb.String()
 	sum := sha256.Sum256([]byte(out))
 	return out, "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// requireJSONEnd reports an error unless dec has consumed its whole input apart
+// from whitespace. dec.More() is not enough: it returns false when the next byte
+// is a closing '}' or ']', so `{"a":1}}` would pass and the stray delimiter
+// would be dropped without a trace.
+func requireJSONEnd(dec *json.Decoder) error {
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("trailing content after the JSON value")
+	}
+	return nil
 }
 
 // writeCanonical writes value in canonical form. It handles exactly the JSON
@@ -557,15 +569,15 @@ func GetRun(ctx context.Context, q Querier, id string) (run.Run, error) {
 
 func scanRun(row scanner) (run.Run, error) {
 	var (
-		r              run.Run
-		commandID      sql.NullString
-		baseCommit     sql.NullString
-		budgetJSON     string
-		status         string
-		retryOfRunID   sql.NullString
-		createdAt      int64
-		updatedAt      int64
-		finishedAt     sql.NullInt64
+		r               run.Run
+		commandID       sql.NullString
+		baseCommit      sql.NullString
+		budgetJSON      string
+		status          string
+		retryOfRunID    sql.NullString
+		createdAt       int64
+		updatedAt       int64
+		finishedAt      sql.NullInt64
 		bindingRevision int64
 	)
 	if err := row.Scan(

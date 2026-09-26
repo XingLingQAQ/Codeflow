@@ -330,7 +330,7 @@ func TestRunStoreReopen(t *testing.T) {
 	task := run.Task{
 		ID: accReopenTaskID, ProjectID: accReopenProjectID,
 		FlowID: &flowID, // StageID stays nil.
-		Title: "add tests", Kind: run.TaskKindCode, Status: run.TaskStatusReady, Priority: 7,
+		Title:  "add tests", Kind: run.TaskKindCode, Status: run.TaskStatusReady, Priority: 7,
 		InputJSON:  `{"prompt":"add tests","n":1}`,
 		LeaseOwner: &leaseOwner, LeaseUntil: &leaseUntil, LeaseEpoch: 2,
 		CreatedAt: accT0, UpdatedAt: accT1,
@@ -425,8 +425,8 @@ func TestRunStoreReopen(t *testing.T) {
 	if len(res.Applied) != 0 {
 		t.Errorf("reopen applied %d migrations, want 0 (the schema is already current): %+v", len(res.Applied), res.Applied)
 	}
-	if res.FromVersion != 2 || res.ToVersion != 2 {
-		t.Errorf("reopen migration result = %d -> %d, want 2 -> 2", res.FromVersion, res.ToVersion)
+	if res.FromVersion != 3 || res.ToVersion != 3 {
+		t.Errorf("reopen migration result = %d -> %d, want 3 -> 3", res.FromVersion, res.ToVersion)
 	}
 	t.Logf("EVIDENCE reopen MigrationResult: applied=%d from=%d to=%d", len(res.Applied), res.FromVersion, res.ToVersion)
 

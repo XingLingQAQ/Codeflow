@@ -63,6 +63,29 @@ var ErrHistoryDeleteForbidden = errors.New("runstore: run history cannot be dele
 // SQL runs so a partial write cannot happen.
 var ErrInvalidRecord = errors.New("runstore: invalid record")
 
+// ErrInvalidEvent means the caller handed AppendEventTx an event the contract
+// rejects: a type outside the closed enum, an identity without project_id or
+// actor (or one naming a different project/run than the row it would be written
+// under), a payload that is not a JSON object, or a payload over the 256 KiB
+// limit (§27.4). Like ErrInvalidRecord these are caught before any SQL runs, so
+// a rejected event leaves the caller's transaction — including its sequence
+// counters — exactly as it was.
+var ErrInvalidEvent = errors.New("runstore: invalid event")
+
+// ErrEventImmutable means a statement tried to UPDATE or DELETE an event row.
+// The event stream is the record of what happened (§19.3/§27.4): a correction
+// is a new event, never an edit, so the triggers refuse both and the store
+// reports that refusal as this error. The store exposes no update or delete
+// path; reaching this means a statement was issued by hand.
+var ErrEventImmutable = errors.New("runstore: event is immutable")
+
+// ErrOutboxDeadLetterRetained means a DELETE against an outbox row was refused
+// because the row is dead_letter. A failed notification is itself a fact an
+// operator must be able to find and replay (§19.1 "dead-letter 不删除"), and the
+// event it carries must never be erasable from the fact stream. Delivered rows
+// are still deletable: retention (T12.02) needs a way to trim them.
+var ErrOutboxDeadLetterRetained = errors.New("runstore: dead-letter delivery is retained")
+
 // RevisionConflictError reports a Run CAS whose expected revision no longer
 // matches the stored one. It carries both sides so a caller can decide whether
 // to re-read and retry, and it wraps ErrRevisionConflict.
@@ -117,6 +140,8 @@ const (
 	errNameInputSnapshotImmutable    = "input_snapshot_immutable"
 	errNameRunInputSnapshotMismatch  = "run_input_snapshot_mismatch"
 	errNameRunHistoryDeleteForbidden = "run_history_delete_forbidden"
+	errNameEventImmutable            = "event_immutable"
+	errNameOutboxDeadLetterRetained  = "outbox_dead_letter_retained"
 )
 
 // mapConstraintError turns a database refusal into the store's typed error. op
@@ -156,6 +181,14 @@ func mapConstraintError(op string, err error) error {
 		// attempt's identity, so reaching either trigger means the store (or a
 		// caller composing statements by hand) built an invalid update.
 		return fmt.Errorf("%s: %w", op, ErrInvalidRecord)
+	case strings.Contains(msg, errNameEventImmutable):
+		// A fact cannot be rewritten or erased. The store has no update/delete
+		// path for events, so this is either a hand-written statement or a bug.
+		return fmt.Errorf("%s: %w", op, ErrEventImmutable)
+	case strings.Contains(msg, errNameOutboxDeadLetterRetained):
+		// The row records an abandoned delivery that an operator must still be
+		// able to find and replay; deleting it would erase that fact.
+		return fmt.Errorf("%s: %w", op, ErrOutboxDeadLetterRetained)
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}
