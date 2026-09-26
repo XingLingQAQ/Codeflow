@@ -77,11 +77,11 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.FromVersion != 0 {
 		t.Errorf("FromVersion = %d, want 0", res.FromVersion)
 	}
-	if res.ToVersion != 4 {
-		t.Errorf("ToVersion = %d, want 4", res.ToVersion)
+	if res.ToVersion != 5 {
+		t.Errorf("ToVersion = %d, want 5", res.ToVersion)
 	}
-	if len(res.Applied) != 4 {
-		t.Fatalf("Applied = %v, want all four migrations", res.Applied)
+	if len(res.Applied) != 5 {
+		t.Fatalf("Applied = %v, want all five migrations", res.Applied)
 	}
 	if res.Applied[0].Version != 1 || res.Applied[0].Name != "runtime" {
 		t.Errorf("Applied[0] = %+v, want version 1 named runtime", res.Applied[0])
@@ -95,10 +95,14 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.Applied[3].Version != 4 || res.Applied[3].Name != "dispatch" {
 		t.Errorf("Applied[3] = %+v, want version 4 named dispatch", res.Applied[3])
 	}
+	if res.Applied[4].Version != 5 || res.Applied[4].Name != "legacy_sources" {
+		t.Errorf("Applied[4] = %+v, want version 5 named legacy_sources", res.Applied[4])
+	}
 
 	for _, table := range []string{
 		"project_refs", "legacy_resource_refs", "tasks", "runs", "attempts",
 		"input_snapshots", "events", "outbox", "scope_counters", "consumer_offsets",
+		"legacy_event_sources",
 		"runstore_migrations",
 	} {
 		if !tableExists(t, db, table) {
@@ -227,8 +231,8 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if first.ToVersion != 4 {
-		t.Fatalf("first Migrate ToVersion = %d, want 4", first.ToVersion)
+	if first.ToVersion != 5 {
+		t.Fatalf("first Migrate ToVersion = %d, want 5", first.ToVersion)
 	}
 
 	seedRuntimeFixture(t, db)
@@ -239,13 +243,13 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
-	if second.FromVersion != 4 || second.ToVersion != 4 {
-		t.Errorf("second Migrate versions = %d -> %d, want 4 -> 4", second.FromVersion, second.ToVersion)
+	if second.FromVersion != 5 || second.ToVersion != 5 {
+		t.Errorf("second Migrate versions = %d -> %d, want 5 -> 5", second.FromVersion, second.ToVersion)
 	}
 	if len(second.Applied) != 0 {
 		t.Errorf("second Migrate applied %v, want nothing", second.Applied)
 	}
-	assertMigrationRowCount(t, db, 4)
+	assertMigrationRowCount(t, db, 5)
 	assertRunUnchanged(t, db, "r-1", before)
 
 	// Close and reopen the file: the recorded version must make the third call
@@ -263,10 +267,10 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate after reopen: %v", err)
 	}
-	if third.FromVersion != 4 || third.ToVersion != 4 || len(third.Applied) != 0 {
-		t.Errorf("reopen Migrate = %+v, want 4 -> 4 with nothing applied", third)
+	if third.FromVersion != 5 || third.ToVersion != 5 || len(third.Applied) != 0 {
+		t.Errorf("reopen Migrate = %+v, want 5 -> 5 with nothing applied", third)
 	}
-	assertMigrationRowCount(t, reopened, 4)
+	assertMigrationRowCount(t, reopened, 5)
 	assertRunUnchanged(t, reopened, "r-1", before)
 }
 
@@ -380,7 +384,7 @@ func TestMigrateChecksumMismatchFailsClosed(t *testing.T) {
 	if checksum != "sha256:0000" {
 		t.Errorf("checksum = %s, want the tampered value to be left alone", checksum)
 	}
-	assertMigrationRowCount(t, db, 4)
+	assertMigrationRowCount(t, db, 5)
 
 	// A renamed file is the same class of mismatch and must also stop the run.
 	if _, err := db.Exec(`UPDATE runstore_migrations SET checksum=? WHERE version=1`,
@@ -483,7 +487,7 @@ func TestMigrateRejectsNewerSchema(t *testing.T) {
 		t.Fatalf("Migrate error = %v, want ErrSchemaTooNew", err)
 	}
 	// Nothing was applied and the future row is untouched.
-	assertMigrationRowCount(t, db, 5)
+	assertMigrationRowCount(t, db, 6)
 }
 
 // TestMigrateRejectsCorruptHistory covers a hole in the recorded version set.
@@ -516,8 +520,8 @@ func TestOpenCreatesMigratedDatabase(t *testing.T) {
 	}
 	defer db.Close()
 
-	if res.FromVersion != 0 || res.ToVersion != 4 {
-		t.Errorf("Open migration result = %d -> %d, want 0 -> 4", res.FromVersion, res.ToVersion)
+	if res.FromVersion != 0 || res.ToVersion != 5 {
+		t.Errorf("Open migration result = %d -> %d, want 0 -> 5", res.FromVersion, res.ToVersion)
 	}
 	if !tableExists(t, db, "runs") {
 		t.Error("runs table is missing after Open")
@@ -531,8 +535,8 @@ func TestOpenCreatesMigratedDatabase(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer db2.Close()
-	if len(res2.Applied) != 0 || res2.ToVersion != 4 {
-		t.Errorf("second Open = %+v, want no applied migrations at version 4", res2)
+	if len(res2.Applied) != 0 || res2.ToVersion != 5 {
+		t.Errorf("second Open = %+v, want no applied migrations at version 5", res2)
 	}
 	_ = runRow(t, db2, "r-1")
 }
@@ -566,7 +570,7 @@ func TestOpenClosesHandleOnMigrationFailure(t *testing.T) {
 		t.Fatalf("reopen after failed Open: %v", err)
 	}
 	defer verify.Close()
-	assertMigrationRowCount(t, verify, 5)
+	assertMigrationRowCount(t, verify, 6)
 }
 
 // TestLoadMigrationsRejectsBadNames pins the file naming contract, because a

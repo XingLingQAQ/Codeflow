@@ -112,6 +112,37 @@ var ErrCursorExpired = errors.New("runstore: cursor expired")
 // release.
 var ErrInvalidDispatcherConfig = errors.New("runstore: invalid dispatcher config")
 
+// ErrInvalidLegacySource means the legacy source identity handed to
+// ProjectLegacyEventTx or LegacyEventFor is not usable: a blank store or event
+// id, one over the column limit (64 / 128 bytes), or one with surrounding
+// whitespace. Like ErrInvalidRecord these are caught before any SQL runs, so a
+// rejected call leaves the caller's transaction - including its sequence
+// counters - exactly as it was. Whitespace is refused rather than trimmed
+// because " floweng" and "floweng" are different rows: accepting both spellings
+// as one store would let one source event be projected twice.
+var ErrInvalidLegacySource = errors.New("runstore: invalid legacy source")
+
+// ErrLegacySourceConflict means a legacy source event was reused for a fact it
+// was not projected as. One source event becomes exactly one runtime event, so
+// a second projection naming a different project or a different event type is
+// refused instead of silently returning the first event: the projector would
+// otherwise mark its local outbox row delivered while the fact it believed it
+// had written was never stored. It is a bug in the producer or the source
+// store, and retrying cannot fix it: a projector should dead-letter the source
+// row with this error so an operator sees it, not retry it forever.
+var ErrLegacySourceConflict = errors.New("runstore: legacy source conflict")
+
+// ErrLegacyProjectionRaced means the mapping insert of a projection hit the
+// primary key because another writer projected the same source event while
+// this transaction was open. It is the one transient outcome of
+// ProjectLegacyEventTx: roll the transaction back and retry, and the retry
+// takes the already-projected path and returns the other writer's event. It is
+// deliberately a different sentinel from ErrLegacySourceConflict, whose
+// guidance is the opposite (do not retry). Under the store's BEGIN IMMEDIATE
+// transactions it is not expected to occur; it exists so correctness does not
+// depend on the lock mode.
+var ErrLegacyProjectionRaced = errors.New("runstore: legacy source projected concurrently")
+
 // RevisionConflictError reports a Run CAS whose expected revision no longer
 // matches the stored one. It carries both sides so a caller can decide whether
 // to re-read and retry, and it wraps ErrRevisionConflict.
