@@ -15,6 +15,7 @@ import (
 	"github.com/codeflow/backend/internal/floweng"
 	"github.com/codeflow/backend/internal/project"
 	"github.com/codeflow/backend/internal/websocket"
+	"github.com/codeflow/backend/internal/workspace"
 )
 
 // GetProjects handles GET /api/v1/projects
@@ -136,8 +137,37 @@ func StreamProjectEvents(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "Project not found")
 		return
 	}
-	topic := "flow:project:" + id
-	websocket.HandleScopedWebSocket(websocket.GetHub(), c, "project:"+id, topic)
+	websocket.HandleScopedWebSocket(websocket.GetHub(), c, "project:"+id, projectStreamTopics(result)...)
+}
+
+// projectStreamTopics is the exact topic allowlist of one project's stream: the
+// project's own flow topic, plus its own workspace topic when the project has a
+// bound workspace root and the root resolves.
+//
+// The workspace topic must be derived the same way CreateWorkspaceWatch derives
+// the topic it hands the client (Resolve(root, ".") → WorkspaceTopicForRoot), or
+// the workbench would subscribe the watch's topic and never match the broadcast.
+// It is deliberately the project's root and nothing else: this route is
+// authorized by the project's identity, so a request that carried an arbitrary
+// root must not widen what its connection may hear (that is what the
+// X-Codeflow-Workspace-Root path of the watch API is for).
+//
+// A root that does not resolve adds no topic. The stream stays open — flow
+// events of the project are still its own — and a project with no root yet
+// simply has no workspace fan-out. Nothing here can leak another project's
+// events: a flow topic is keyed by this project's id and the workspace topic by
+// the hash of this project's root.
+func projectStreamTopics(p *project.Project) []string {
+	topics := []string{"flow:project:" + p.ID}
+	root := strings.TrimSpace(p.WorkspaceRoot)
+	if root == "" || !workspace.HasService() {
+		return topics
+	}
+	absRoot, err := workspace.GetService().Resolve(root, ".")
+	if err != nil {
+		return topics
+	}
+	return append(topics, workspace.WorkspaceTopicForRoot(absRoot))
 }
 
 // UpdateProject handles PUT /api/v1/projects/:id

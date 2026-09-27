@@ -9,7 +9,7 @@ import { useEditorStore } from '../stores/editor';
 import { useActivityStore } from '../stores/activity';
 import { isDevMockActive } from '../lib/devMock';
 import { createWorkspaceWatch, deleteWorkspaceWatch } from '../services-bridge/workspace';
-import { subscribe as wsSubscribe } from '../services-bridge/ws';
+import { subscribeTopic as wsSubscribeTopic } from '../services-bridge/ws';
 import { FileTree } from '../workbench/FileTree';
 import { EditorPane } from '../workbench/EditorPane';
 import { StagedPanel } from '../workbench/StagedPanel';
@@ -77,7 +77,7 @@ export default function CodingCanvas() {
   // topic from the response, and refresh the tree + staged list on external
   // edits. The previous watch is deleted only when the root changes.
   useEffect(() => {
-    if (!root || isDevMockActive()) return;
+    if (!projectId || !root || isDevMockActive()) return;
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     (async () => {
@@ -89,7 +89,7 @@ export default function CodingCanvas() {
         const watch = await createWorkspaceWatch(root);
         if (cancelled) return;
         activeWatch = { root, id: watch.watch_id };
-        unsubscribe = wsSubscribe(watch.topic, (frame) => {
+        unsubscribe = wsSubscribeTopic(projectId, watch.topic, (frame) => {
           qc.invalidateQueries({ queryKey: ['workspace', root] });
           qc.invalidateQueries({ queryKey: ['workspace-file', root] });
           qc.invalidateQueries({ queryKey: qk.staged(root) });
@@ -110,7 +110,7 @@ export default function CodingCanvas() {
       cancelled = true;
       unsubscribe?.();
     };
-  }, [root, qc]);
+  }, [projectId, root, qc]);
 
   const guardQ = useGuardRules(true);
   const rules = guardQ.data?.items ?? [];

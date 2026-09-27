@@ -376,7 +376,7 @@ describe('T0.08.b auth wiring — HTTP bearer', () => {
 
     await api.get(`${BASE}/api/v1/projects`);
     const ws = await import('./ws');
-    ws.subscribe('flow:project:p1', () => undefined);
+    ws.subscribeTopic('p1', 'flow:project:p1', () => undefined);
 
     const joinedLogs = logs.join('\n');
     expect(joinedLogs).toContain('127.0.0.1:41234'); // 就绪日志确实产生
@@ -401,11 +401,11 @@ describe('T0.08.b auth wiring — WebSocket subprotocols', () => {
     const fakeWs = stubWebSocket();
 
     const ws = await import('./ws');
-    ws.subscribe('flow:project:p1', () => undefined);
+    ws.subscribeTopic('p1', 'flow:project:p1', () => undefined);
 
     expect(fakeWs.instances).toHaveLength(1);
     const inst = fakeWs.instances[0];
-    expect(inst.url).toMatch(/^ws:\/\/127\.0\.0\.1:41234\/api\/v1\/conversations\/wb-[a-z0-9]+\/stream$/);
+    expect(inst.url).toMatch(/^ws:\/\/127\.0\.0\.1:41234\/api\/v1\/projects\/p1\/stream$/);
     expect(inst.url).not.toContain(TOKEN);
     expect(inst.protocols).toEqual(['codeflow.v1', `codeflow.token.${TOKEN}`]);
   });
@@ -416,7 +416,7 @@ describe('T0.08.b auth wiring — WebSocket subprotocols', () => {
     stubWindow();
     let fakeWs = stubWebSocket();
     let ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances).toHaveLength(1);
     expect(fakeWs.instances[0].protocols).toEqual(['codeflow.v1']);
     expect(JSON.stringify(fakeWs.instances[0].protocols)).not.toContain(TOKEN);
@@ -428,7 +428,7 @@ describe('T0.08.b auth wiring — WebSocket subprotocols', () => {
     await connection.initBackendConnection({ isTauri: () => false });
     fakeWs = stubWebSocket();
     ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances).toHaveLength(1);
     expect(fakeWs.instances[0].url).toContain('ws://localhost:3000/');
     expect(fakeWs.instances[0].protocols).toEqual(['codeflow.v1']);
@@ -440,7 +440,7 @@ describe('T0.08.b auth wiring — WebSocket subprotocols', () => {
     stubWindow();
     const fakeWs = stubWebSocket();
     const ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances).toHaveLength(1);
 
     vi.useFakeTimers();
@@ -462,7 +462,7 @@ describe('T0.08.b auth wiring — WebSocket subprotocols', () => {
     stubWindow();
     const fakeWs = stubWebSocket();
     const ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
 
     vi.useFakeTimers();
     fakeWs.instances[0].drop();
@@ -477,7 +477,7 @@ describe('T0.08.b auth wiring — WebSocket subprotocols', () => {
     stubWindow();
     const fakeWs = stubWebSocket();
     const ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances).toHaveLength(1);
 
     vi.useFakeTimers();

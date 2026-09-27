@@ -13,7 +13,7 @@ import { useLayoutStore } from '../stores/layout';
 import { useShellStore } from '../stores/shell';
 import { useActivityStore } from '../stores/activity';
 import { useFlows, useProjects, qk } from '../lib/queries';
-import { subscribe as wsSubscribe } from '../services-bridge/ws';
+import { subscribeTopic as wsSubscribeTopic } from '../services-bridge/ws';
 import { isModEvent } from '../lib/platform';
 import { isStageSlug, STAGE_BY_TYPE, DEFAULT_STAGE } from '../stages/stageMeta';
 import { EASE_FLOW } from '../lib/motion';
@@ -79,9 +79,11 @@ export default function Workbench() {
 
   // Realtime: one per-project flow topic feeds both the flow queries and the
   // activity timeline (FlowProgress = structure, timeline = event stream).
+  // It rides the project's own stream (T1.12.b), so the topic is authorized by
+  // the connection's project rather than by a client-chosen id.
   useEffect(() => {
     if (!projectId) return;
-    return wsSubscribe(`flow:project:${projectId}`, (frame) => {
+    return wsSubscribeTopic(projectId, `flow:project:${projectId}`, (frame) => {
       qc.invalidateQueries({ queryKey: qk.flows(projectId) });
       const d = frame.data ?? {};
       useActivityStore.getState().push({

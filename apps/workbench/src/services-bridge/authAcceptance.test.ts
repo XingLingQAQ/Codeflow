@@ -236,7 +236,7 @@ describe('T0.08.c acceptance — credential origin gate', () => {
     // WebSocket 同源：唯一带凭据的方向。
     const fakeWs = stubWebSocket();
     const ws = await import('./ws');
-    ws.subscribe('flow:project:p1', () => undefined);
+    ws.subscribeTopic('p1', 'flow:project:p1', () => undefined);
     expect(fakeWs.instances).toHaveLength(1);
     expect(fakeWs.instances[0].url.startsWith('ws://127.0.0.1:41234/')).toBe(true);
     expect(fakeWs.instances[0].protocols).toEqual(['codeflow.v1', `codeflow.token.${TOKEN}`]);
@@ -278,7 +278,7 @@ describe('T0.08.c acceptance — credential origin gate', () => {
     expect(xauth.getTokenForUrl('ws://evil.example:9999/api/v1/conversations/x/stream')).toBeNull();
     const crossWs = stubWebSocket();
     const xws = await import('./ws');
-    xws.subscribe('t', () => undefined);
+    xws.subscribeTopic('p1', 't', () => undefined);
     expect(crossWs.instances).toHaveLength(1);
     expect(crossWs.instances[0].url.startsWith('ws://evil.example:9999/')).toBe(true);
     expect(crossWs.instances[0].protocols).toEqual(['codeflow.v1']);
@@ -300,7 +300,7 @@ describe('T0.08.c acceptance — WebSocket token subprotocol', () => {
     let fakeWs = stubWebSocket();
 
     let ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances).toHaveLength(1);
     expect(fakeWs.instances[0].protocols).toEqual(['codeflow.v1', `codeflow.token.${TOKEN}`]);
     expect(fakeWs.instances[0].url).not.toContain(TOKEN);
@@ -311,7 +311,7 @@ describe('T0.08.c acceptance — WebSocket token subprotocol', () => {
     await readyWith([LEGACY_CONN]);
     fakeWs = stubWebSocket();
     ws = await import('./ws');
-    ws.subscribe('t', () => undefined);
+    ws.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances[0].protocols).toEqual(['codeflow.v1']);
     expect(JSON.stringify(fakeWs.instances[0].protocols)).not.toContain(TOKEN);
 
@@ -321,7 +321,7 @@ describe('T0.08.c acceptance — WebSocket token subprotocol', () => {
     await browser.connection.initBackendConnection({ isTauri: () => false });
     fakeWs = stubWebSocket();
     const browserWs = await import('./ws');
-    browserWs.subscribe('t', () => undefined);
+    browserWs.subscribeTopic('p1', 't', () => undefined);
     expect(fakeWs.instances[0].protocols).toEqual(['codeflow.v1']);
     expect(fakeWs.instances[0].url).not.toContain(TOKEN);
 
