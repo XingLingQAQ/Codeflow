@@ -11,8 +11,11 @@
 //     HookBeforeSend、HookPreToolUse、HookRunStart。hook 的“放行”永远不能推翻
 //     Guard/policy 的拒绝：policy.EnforceBoundary 在每次 hook 执行前运行
 //     （T0.09.c，manager.go Trigger/TriggerHook），本表不改变这个顺序。
-//   - warn：操作照常进行，错误必须被记录（今天是日志；T1.07.b 起写 outbox
-//     warning）。绝不重做操作本身。
+//   - warn：操作照常进行，错误必须被记录。今天的记录有两处：触发点把错误交给
+//     execbackend 的警告 sink（internal/execbackend 的 HookWarningSink，nil sink
+//     时写一行固定格式日志），以及 hook 管理器自身的审计记录（失败写
+//     OutcomeFailure）。警告的持久化（outbox / Run 时间线）需要新的事件类型，
+//     封闭的 run.ExecutionEventTypes 里没有，归 T1.04。绝不重做操作本身。
 //   - retry：只重跑 hook handler（HookConfig.RetryCount / executeWithRetry），
 //     用尽后降级为 warn；绝不重做底层操作。只用于 handler 可安全重复的点
 //     （after 类：操作已经发生，重跑观察者不会重放它）。
@@ -34,13 +37,26 @@
 //
 //   - 表里每个 Owner="existing" 的点在代码里恰好出现一次（Site+Hook 唯一）；
 //   - 代码里每个触发调用都在表里（未登记调用 = 测试失败）；
-//   - 保留点（Owner="T1.07.b"）今天没有调用点，且它的 Site 文件尚不存在；
+//   - 不再有保留点（Owner="T1.07.b"）：四个保留点已由 T1.07.b 第 1 组接线，表里
+//     没有 <tbd> Site；保留机制本身仍在（validate 会拒绝"有调用点却说
+//     not-wired"的行），供将来新增触发点时先用保留点冻结契约；
 //   - 每个 Observation 全局唯一，不跨 Source 共享；
 //   - Policy 与代码现状不一致的点必须出现在 BehaviorGaps() 里并写明收口步骤，
 //     不能静默接受。
 //
-// 本步只冻结契约，不改变任何触发行为：接线（allowlist、execbackend 端口、
-// outbox warning）归 T1.07.b。
+// # 接线状态（T1.07.b 第 1 组）
+//
+// HookPreToolUse / HookPostToolUse / HookRunStart / HookRunFinish 的调用点是
+// internal/runhooks/port.go 的 (*Port).BeforeTool / AfterTool / BeforeRunStart /
+// AfterRunFinish：服务端适配器把 execbackend 的规范请求翻成 payload 契约再触发
+// 管理器。端口在 execbackend（只依赖标准库），策略（before 拒绝不执行、after 失败
+// 只警告不重跑）写在 execbackend/hooks.go，所有后端共用同一语义。
+// DefaultAllowedHooks() 从本表派生运行时 allowlist（main.go 用它），调用点与
+// allowlist 因此同一步落地：allowlist 之外的 hook 类型 Trigger 会返回
+// (payload, nil)，reject 会静默变成放行（§26.30）。
+//
+// 仍未收口的 6 条差距（HookPostResponse、HookOnStream、4 个 planner task hook）在
+// BehaviorGaps() 里逐条写明，归 T1.07.b 第 2/3 组。
 package hooks
 
 import (
@@ -611,53 +627,63 @@ var triggerPoints = []TriggerPoint{
 		Category:        TriggerCategoryToolPre,
 		Source:          ObservationSourceCLIBackend,
 		Observation:     "cli_tool_call",
-		Site:            "internal/execbackend/hooks.go:<tbd>",
+		Site:            "internal/runhooks/port.go:(*Port).BeforeTool",
 		Policy:          FailurePolicyReject,
-		CurrentBehavior: BehaviorNotWired,
+		CurrentBehavior: BehaviorRejected,
 		Retained:        true,
-		Owner:           TriggerPointOwnerT107B,
-		Note: "保留点，今天没有调用点（本步不接线）。在工具请求进入 Guard 之前触发；hook 放行之后 " +
-			"Guard 仍然执行，hook 的放行永远不能推翻 policy 的拒绝。拒绝即工具不执行。",
+		Owner:           TriggerPointOwnerExisting,
+		Note: "T1.07.b 接线：execbackend.AuthorizeToolCall 先校验请求与指纹，再调 (*Port).BeforeTool；" +
+			"payload 不合法、hook 拒绝或端口缺失（失败即关闭）都返回 *HookDeniedError，" +
+			"RunTool 因此一次都不调用 execute。在工具请求进入 Guard 之前触发；hook 放行之后 " +
+			"Guard 仍然执行，hook 的放行永远不能推翻 policy 的拒绝。一个 event_id 只触发一次" +
+			"（Port 内的单飞记忆，T1.07.c 的 TestToolHookCalledOnce）。",
 	},
 	{
 		Hook:            HookPostToolUse,
 		Category:        TriggerCategoryToolPost,
 		Source:          ObservationSourceCLIBackend,
 		Observation:     "cli_tool_result",
-		Site:            "internal/execbackend/hooks.go:<tbd>",
+		Site:            "internal/runhooks/port.go:(*Port).AfterTool",
 		Policy:          FailurePolicyWarn,
-		CurrentBehavior: BehaviorNotWired,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
-		Owner:           TriggerPointOwnerT107B,
-		Note: "保留点，今天没有调用点。在结果净化（脱敏）之后触发，payload 带状态/退出码/脱敏输出引用，" +
-			"绝不带原文；失败只记 warning，绝不重跑已经执行的工具。",
+		Owner:           TriggerPointOwnerExisting,
+		Note: "T1.07.b 接线：execbackend.ReportToolResult 调 (*Port).AfterTool，把错误交给警告 sink" +
+			"（nil sink 写一行固定格式日志），管理器失败时另写 OutcomeFailure 审计。" +
+			"在结果净化（脱敏）之后触发，payload 带状态/退出码/脱敏输出引用，绝不带原文；" +
+			"失败只记 warning，绝不重跑已经执行的工具（T1.07.c 的 TestAfterHookFailureDoesNotReplayTool）。" +
+			"警告的持久化（outbox / Run 时间线）需要新事件类型，归 T1.04。",
 	},
 	{
 		Hook:            HookRunStart,
 		Category:        TriggerCategoryRunStart,
 		Source:          ObservationSourceCLIBackend,
 		Observation:     "cli_run_start",
-		Site:            "internal/execbackend/hooks.go:<tbd>",
+		Site:            "internal/runhooks/port.go:(*Port).BeforeRunStart",
 		Policy:          FailurePolicyReject,
-		CurrentBehavior: BehaviorNotWired,
+		CurrentBehavior: BehaviorRejected,
 		Retained:        true,
-		Owner:           TriggerPointOwnerT107B,
-		Note: "保留点，今天没有调用点。claim 之后（Run 处于 starting、attempt 已创建）、进程启动之前触发；" +
-			"reject 即不启动进程（T1.07.c 的 TestBeforeHookDenyPreventsProcess）。" +
-			"EventID 是 scheduler.claimed 事件 ID，身份需要 run+attempt+agent_revision。",
+		Owner:           TriggerPointOwnerExisting,
+		Note: "T1.07.b 接线：execbackend.AuthorizeRunStart 校验后调 (*Port).BeforeRunStart；" +
+			"错误（含 payload 不合法、hook 拒绝、端口缺失）即不启动进程" +
+			"（T1.07.c 的 TestBeforeHookDenyPreventsProcess）。claim 之后（Run 处于 starting、" +
+			"attempt 已创建）、进程启动之前触发；EventID 是 scheduler.claimed 事件 ID，" +
+			"身份是 run+attempt+agent_revision（actor 是 system：认领是服务端自己的决定）。",
 	},
 	{
 		Hook:            HookRunFinish,
 		Category:        TriggerCategoryRunFinish,
 		Source:          ObservationSourceCLIBackend,
 		Observation:     "cli_run_finish",
-		Site:            "internal/execbackend/hooks.go:<tbd>",
+		Site:            "internal/runhooks/port.go:(*Port).AfterRunFinish",
 		Policy:          FailurePolicyWarn,
-		CurrentBehavior: BehaviorNotWired,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
-		Owner:           TriggerPointOwnerT107B,
-		Note: "保留点，今天没有调用点。终态迁移之后触发（Status 必须是四个终态之一），" +
-			"失败只记 warning；Run 的终态不因 hook 改变。",
+		Owner:           TriggerPointOwnerExisting,
+		Note: "T1.07.b 接线：execbackend.ReportRunFinish 调 (*Port).AfterRunFinish，失败只交给警告 sink" +
+			"（+ 管理器的 OutcomeFailure 审计）。终态迁移之后触发（Status 必须是四个终态之一，" +
+			"由 payload.Validate 强制），Run 的终态不因 hook 失败而改变；" +
+			"警告持久化同样归 T1.04。",
 	},
 }
 
@@ -679,8 +705,11 @@ func RetainedTriggerPoints() []TriggerPoint {
 	return out
 }
 
-// PendingTriggerPoints returns the retained points that have no call site yet
-// (Owner "T1.07.b"): they are the work the wiring step must pick up.
+// PendingTriggerPoints returns the points that have no call site yet (Owner
+// "T1.07.b"): the frozen contract for a trigger point whose wiring step has not
+// landed. It is empty today — T1.07.b wired the last four reserved points — and
+// trigger_points_test.go asserts it stays empty until a new reserved point is
+// declared.
 func PendingTriggerPoints() []TriggerPoint {
 	out := make([]TriggerPoint, 0, len(triggerPoints))
 	for _, point := range triggerPoints {
@@ -793,6 +822,35 @@ func HookTypesWithTriggerPoint() []HookType {
 	out := make([]HookType, 0, len(allHookTypes))
 	for _, hook := range allHookTypes {
 		if len(TriggerPointsForHook(hook)) > 0 {
+			out = append(out, hook)
+		}
+	}
+	return out
+}
+
+// DefaultAllowedHooks returns the runtime allowlist derived from the trigger
+// point table: every hook type that has a retained, wired row (Owner
+// "existing", non-empty Hook), deduplicated, in AllHookTypes order.
+//
+// 它是派生值，不是手写清单：main.go 的 configureHookRuntimeControls 用它装配
+// HookRuntimeControls.AllowedHooks，于是新增一个已接线的触发点会自动进入
+// allowlist，不可能出现"有调用点却不在 allowlist"的组合。那个组合是危险的：
+// manager.Trigger 对 allowlist 之外的类型直接返回 (payload, nil)，reject 会静默
+// 变成放行（§26.30 T1.07.b 须知）。
+//
+// 按名手动触发（Hook 为空）不进 allowlist：它由 TriggerHook 按名字触发，hook 类型
+// 来自请求，不属于任何固定类型。
+func DefaultAllowedHooks() []HookType {
+	seen := map[HookType]bool{}
+	for _, point := range triggerPoints {
+		if !point.Retained || point.Owner != TriggerPointOwnerExisting || point.Hook == "" {
+			continue
+		}
+		seen[point.Hook] = true
+	}
+	out := make([]HookType, 0, len(seen))
+	for _, hook := range allHookTypes {
+		if seen[hook] {
 			out = append(out, hook)
 		}
 	}

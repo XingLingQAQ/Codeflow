@@ -64,6 +64,9 @@ func TestTriggerPointTableIsWellFormed(t *testing.T) {
 
 	// Every closed enum value is exercised by the table: a category or source
 	// that nothing uses is either a missing trigger point or a dead enum value.
+	// BehaviorNotWired is exempt: T1.07.b wired the last four reserved rows, so no
+	// row uses it today. The value stays for the next new trigger point, and
+	// TestReservedRowMechanismStaysUsable pins that a reserved row is still legal.
 	for _, category := range TriggerCategories {
 		if !usedCategory[category] {
 			t.Errorf("category %q is declared but used by no trigger point", category)
@@ -80,13 +83,18 @@ func TestTriggerPointTableIsWellFormed(t *testing.T) {
 		}
 	}
 	for _, behavior := range CurrentBehaviors {
+		if behavior == BehaviorNotWired {
+			continue
+		}
 		if !usedBehavior[behavior] {
 			t.Errorf("behaviour %q is declared but used by no trigger point", behavior)
 		}
 	}
 
-	if existing == 0 || pending == 0 {
-		t.Fatalf("expected both existing and pending rows, got existing=%d pending=%d", existing, pending)
+	// T1.07.b wired every reserved row: nothing is pending any more.
+	if existing != len(points) || pending != 0 {
+		t.Fatalf("expected all %d rows to be wired (Owner %q), got existing=%d pending=%d",
+			len(points), TriggerPointOwnerExisting, existing, pending)
 	}
 	if got := len(PendingTriggerPoints()); got != pending {
 		t.Errorf("PendingTriggerPoints() = %d rows, want %d", got, pending)
@@ -183,8 +191,14 @@ func TestNoDoubleCountingLegacyWriteVsCLITool(t *testing.T) {
 	if prePoint.Category != TriggerCategoryToolPre || prePoint.Source != ObservationSourceCLIBackend {
 		t.Errorf("HookPreToolUse point = %s/%s, want tool_pre/cli_backend", prePoint.Category, prePoint.Source)
 	}
-	if prePoint.Owner != TriggerPointOwnerT107B || prePoint.Policy != FailurePolicyReject {
-		t.Errorf("HookPreToolUse point = owner %s policy %s, want T1.07.b/reject", prePoint.Owner, prePoint.Policy)
+	if prePoint.Owner != TriggerPointOwnerExisting || prePoint.Policy != FailurePolicyReject {
+		t.Errorf("HookPreToolUse point = owner %s policy %s, want existing/reject (T1.07.b wired it)", prePoint.Owner, prePoint.Policy)
+	}
+	if prePoint.CurrentBehavior != BehaviorRejected {
+		t.Errorf("HookPreToolUse behaviour = %s, want %s: a denial must stop the tool", prePoint.CurrentBehavior, BehaviorRejected)
+	}
+	if prePoint.Site != "internal/runhooks/port.go:(*Port).BeforeTool" {
+		t.Errorf("HookPreToolUse site = %s, want the runhooks adapter method", prePoint.Site)
 	}
 	if prePoint.Observation == writePoint.Observation {
 		t.Errorf("the two write paths share the observation %q: that is double counting", writePoint.Observation)
@@ -203,9 +217,23 @@ func TestNoDoubleCountingLegacyWriteVsCLITool(t *testing.T) {
 	}
 
 	// Only one point observes each of these two facts, and the post point is a
-	// different fact again.
-	if got := TriggerPointsForHook(HookPostToolUse); len(got) != 1 || got[0].Observation == prePoint.Observation {
-		t.Errorf("HookPostToolUse must observe a distinct fact from HookPreToolUse: %+v", got)
+	// different fact again. T1.07.b wired it as logged-warn: reporting a result
+	// never replays the tool.
+	postPoints := TriggerPointsForHook(HookPostToolUse)
+	if len(postPoints) != 1 || postPoints[0].Observation == prePoint.Observation {
+		t.Errorf("HookPostToolUse must observe a distinct fact from HookPreToolUse: %+v", postPoints)
+	}
+	if postPoints[0].CurrentBehavior != BehaviorLoggedWarn || postPoints[0].Policy != FailurePolicyWarn {
+		t.Errorf("HookPostToolUse = behaviour %s policy %s, want logged-warn/warn",
+			postPoints[0].CurrentBehavior, postPoints[0].Policy)
+	}
+	finishPoints := TriggerPointsForHook(HookRunFinish)
+	if len(finishPoints) != 1 || finishPoints[0].CurrentBehavior != BehaviorLoggedWarn || finishPoints[0].Policy != FailurePolicyWarn {
+		t.Errorf("HookRunFinish = %+v, want a single logged-warn/warn row (the Run's terminal state never changes because of a hook)", finishPoints)
+	}
+	startPoints := TriggerPointsForHook(HookRunStart)
+	if len(startPoints) != 1 || startPoints[0].CurrentBehavior != BehaviorRejected || startPoints[0].Policy != FailurePolicyReject {
+		t.Errorf("HookRunStart = %+v, want a single rejected/reject row (a denial must stop the process)", startPoints)
 	}
 }
 
@@ -377,7 +405,7 @@ func TestAllHookTypesMatchTypesGo(t *testing.T) {
 		t.Errorf("HookTypesWithTriggerPoint() = %d types, want %d", got, len(all))
 	}
 
-	// The four reserved types exist and are owned by T1.07.b.
+	// The four reserved types exist, are wired, and are owned by "existing" now.
 	reserved := []HookType{HookPreToolUse, HookPostToolUse, HookRunStart, HookRunFinish}
 	for _, hook := range reserved {
 		if !hook.Valid() {
@@ -388,8 +416,11 @@ func TestAllHookTypesMatchTypesGo(t *testing.T) {
 			t.Errorf("reserved hook %q has %d trigger points, want 1", hook, len(rows))
 			continue
 		}
-		if rows[0].Owner != TriggerPointOwnerT107B {
-			t.Errorf("reserved hook %q has owner %q, want %q", hook, rows[0].Owner, TriggerPointOwnerT107B)
+		if rows[0].Owner != TriggerPointOwnerExisting {
+			t.Errorf("reserved hook %q has owner %q, want %q (T1.07.b wired it)", hook, rows[0].Owner, TriggerPointOwnerExisting)
+		}
+		if !strings.HasPrefix(rows[0].Site, "internal/runhooks/port.go:") {
+			t.Errorf("reserved hook %q has site %s, want the runhooks adapter method", hook, rows[0].Site)
 		}
 	}
 	if HookType("hook_not_a_real_type").Valid() {
@@ -397,38 +428,100 @@ func TestAllHookTypesMatchTypesGo(t *testing.T) {
 	}
 }
 
-// TestReservedHookTypesHaveNoCallSite proves the wiring has not started: no
-// production call site triggers a reserved type, and the sites its rows name do
-// not exist yet.
-//
-// When T1.07.b wires them, this test fails on purpose: the rows must be re-pointed
-// to their real Sites and their Owner must change in the same step.
-func TestReservedHookTypesHaveNoCallSite(t *testing.T) {
-	root := findBackendRoot(t)
-	report, err := scanTriggerCalls(root)
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	reserved := map[HookType]bool{
-		HookPreToolUse:  true,
-		HookPostToolUse: true,
-		HookRunStart:    true,
-		HookRunFinish:   true,
-	}
-	for _, call := range report.Calls {
-		if reserved[call.Hook] {
-			t.Errorf("reserved hook %q is already triggered at %s:%d (%s); its wiring belongs to T1.07.b", call.Hook, call.File, call.Line, call.Site)
+// TestWiredHookTypesAreInDefaultAllowlist pins the §26.30 rule for the wiring:
+// every retained, wired row's hook type must be in DefaultAllowedHooks(). A hook
+// type outside the runtime allowlist is skipped by Trigger with (payload, nil),
+// which would silently turn a reject policy into a pass.
+func TestWiredHookTypesAreInDefaultAllowlist(t *testing.T) {
+	allowed := map[HookType]bool{}
+	for _, hook := range DefaultAllowedHooks() {
+		if allowed[hook] {
+			t.Errorf("DefaultAllowedHooks() lists %q twice", hook)
+		}
+		allowed[hook] = true
+		if !hook.Valid() {
+			t.Errorf("DefaultAllowedHooks() contains the undeclared type %q", hook)
 		}
 	}
-	for _, point := range PendingTriggerPoints() {
-		if _, isFile := SiteFile(point.Site); isFile {
-			t.Errorf("pending row %s (%q) names a real file site", point.Site, point.Hook)
+
+	wired := map[HookType]bool{}
+	for _, point := range TriggerPoints() {
+		if !point.Retained || point.Owner != TriggerPointOwnerExisting || point.Hook == "" {
 			continue
 		}
-		rel := strings.TrimSuffix(point.Site, ":<tbd>")
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
-			t.Errorf("pending row %s (%q) points at a file that already exists; re-point the row instead of leaving it <tbd>", point.Site, point.Hook)
+		wired[point.Hook] = true
+		if !allowed[point.Hook] {
+			t.Errorf("wired row %s (%q) is not in DefaultAllowedHooks(): its reject policy would silently become a pass",
+				point.Site, point.Hook)
 		}
+	}
+	if len(DefaultAllowedHooks()) != len(wired) {
+		t.Errorf("DefaultAllowedHooks() has %d entries, want %d (exactly the wired hook types)", len(DefaultAllowedHooks()), len(wired))
+	}
+
+	// Order is AllHookTypes order, so the allowlist is stable across builds.
+	last := -1
+	for i, hook := range DefaultAllowedHooks() {
+		index := -1
+		for j, known := range AllHookTypes() {
+			if known == hook {
+				index = j
+				break
+			}
+		}
+		if index <= last {
+			t.Errorf("DefaultAllowedHooks()[%d] = %q is out of AllHookTypes order", i, hook)
+		}
+		last = index
+	}
+
+	// The four types T1.07.b wired are all present: that is the whole point of
+	// deriving the allowlist instead of hand-writing it.
+	for _, hook := range []HookType{HookPreToolUse, HookPostToolUse, HookRunStart, HookRunFinish, HookBeforeWrite} {
+		if !allowed[hook] {
+			t.Errorf("DefaultAllowedHooks() is missing %q", hook)
+		}
+	}
+	// A manual by-name trigger has no hook type and must not enter the allowlist.
+	if allowed[""] {
+		t.Error("DefaultAllowedHooks() contains the empty hook type")
+	}
+}
+
+// TestReservedRowMechanismStaysUsable pins the invariants the reserved-row
+// mechanism still enforces now that no row uses it (T1.07.b wired the last four):
+// a pending row must keep a <tbd> site, must be not-wired, and a wired row must
+// not claim not-wired.
+func TestReservedRowMechanismStaysUsable(t *testing.T) {
+	pending := TriggerPoint{
+		Hook:            HookPreToolUse,
+		Category:        TriggerCategoryToolPre,
+		Source:          ObservationSourceCLIBackend,
+		Observation:     "fixture_pending",
+		Site:            "internal/fixture/port.go:<tbd>",
+		Policy:          FailurePolicyReject,
+		CurrentBehavior: BehaviorNotWired,
+		Retained:        true,
+		Owner:           TriggerPointOwnerT107B,
+	}
+	if err := pending.validate(0); err != nil {
+		t.Errorf("a well-formed pending row was rejected: %v", err)
+	}
+	withCallSite := pending
+	withCallSite.Site = "internal/fixture/port.go:Trigger"
+	if err := withCallSite.validate(0); err == nil {
+		t.Error("a pending row with a real call site was accepted: the wiring must change the Owner in the same step")
+	}
+	wrongBehavior := pending
+	wrongBehavior.CurrentBehavior = BehaviorRejected
+	if err := wrongBehavior.validate(0); err == nil {
+		t.Error("a pending row claiming a current behaviour was accepted")
+	}
+
+	wired := pending
+	wired.Owner = TriggerPointOwnerExisting
+	if err := wired.validate(0); err == nil {
+		t.Error("a wired row claiming not-wired was accepted")
 	}
 }
 

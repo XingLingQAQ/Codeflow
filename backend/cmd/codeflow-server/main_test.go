@@ -24,15 +24,33 @@ func TestConfigureHookRuntimeControls(t *testing.T) {
 	if controls.Enabled == nil || !*controls.Enabled {
 		t.Fatalf("expected hooks to be enabled by default, got %#v", controls.Enabled)
 	}
+
+	// The allowlist is exactly hooks.DefaultAllowedHooks(): all 17 hook types with
+	// a retained wired trigger point (the 13 pre-3.0 types plus the four T1.07.b
+	// wired ones), in AllHookTypes order. GetControls sorts its copy, so compare
+	// as sets.
 	allowed := map[backendhooks.HookType]bool{}
 	for _, hookType := range controls.AllowedHooks {
 		allowed[hookType] = true
+	}
+	expected := backendhooks.DefaultAllowedHooks()
+	if len(expected) != 17 {
+		t.Fatalf("DefaultAllowedHooks() has %d entries, want 17", len(expected))
+	}
+	if len(controls.AllowedHooks) != len(expected) {
+		t.Fatalf("allowlist has %d entries, want %d (%v)", len(controls.AllowedHooks), len(expected), controls.AllowedHooks)
+	}
+	for _, hookType := range expected {
+		if !allowed[hookType] {
+			t.Fatalf("expected hook %s to be allowed by default, got %v", hookType, controls.AllowedHooks)
+		}
 	}
 	for _, hookType := range []backendhooks.HookType{
 		backendhooks.HookBeforeSend,
 		backendhooks.HookPostResponse,
 		backendhooks.HookOnStream,
 		backendhooks.HookBeforeCompress,
+		backendhooks.HookBeforeWrite,
 		backendhooks.HookOnMessageComplete,
 		backendhooks.HookAfterExec,
 		backendhooks.HookRestoreState,
@@ -41,6 +59,10 @@ func TestConfigureHookRuntimeControls(t *testing.T) {
 		backendhooks.HookAfterTaskExecute,
 		backendhooks.HookOnTaskFailure,
 		backendhooks.HookOnTaskComplete,
+		backendhooks.HookPreToolUse,
+		backendhooks.HookPostToolUse,
+		backendhooks.HookRunStart,
+		backendhooks.HookRunFinish,
 	} {
 		if !allowed[hookType] {
 			t.Fatalf("expected hook %s to be allowed by default, got %v", hookType, controls.AllowedHooks)

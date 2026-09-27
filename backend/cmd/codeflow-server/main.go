@@ -307,25 +307,20 @@ type closer interface {
 	Close() error
 }
 
+// configureHookRuntimeControls installs the hook runtime allowlist.
+//
+// The list is derived from the trigger-point table (hooks.DefaultAllowedHooks):
+// exactly the hook types that have a retained, wired call site. Deriving it means
+// a new wired trigger point enters the allowlist in the same step as its call
+// site, so the two can never drift apart. That drift is dangerous:
+// manager.Trigger returns (payload, nil) for a hook type outside an explicit
+// allowlist, so a wired reject hook missing from the allowlist would silently
+// become a pass (§26.30 T1.07.b 须知).
 func configureHookRuntimeControls() {
 	enabled := true
 	backendhooks.GetHookManager().SetControls(backendhooks.HookRuntimeControls{
-		Enabled: &enabled,
-		AllowedHooks: []backendhooks.HookType{
-			backendhooks.HookBeforeSend,
-			backendhooks.HookPostResponse,
-			backendhooks.HookOnStream,
-			backendhooks.HookBeforeCompress,
-			backendhooks.HookBeforeWrite,
-			backendhooks.HookOnMessageComplete,
-			backendhooks.HookAfterExec,
-			backendhooks.HookRestoreState,
-			backendhooks.HookOnUserInputSubmitted,
-			backendhooks.HookBeforeTaskExecute,
-			backendhooks.HookAfterTaskExecute,
-			backendhooks.HookOnTaskFailure,
-			backendhooks.HookOnTaskComplete,
-		},
+		Enabled:      &enabled,
+		AllowedHooks: backendhooks.DefaultAllowedHooks(),
 	})
 }
 
