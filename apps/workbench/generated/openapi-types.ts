@@ -2229,6 +2229,17 @@ export interface RunEventsEnvelope {
 export interface CommandStatus {
   command_id: string;
   status: 'accepted' | 'applied' | 'rejected' | 'reconciling';
+  operation?: string;
+  status_code?: number;
+  resource?: CommandResourceRef;
+  expired?: boolean;
+  created_at?: string;
+  completed_at?: string;
+}
+
+export interface CommandResourceRef {
+  type: string;
+  id: string;
 }
 
 export interface CommandEnvelope {
@@ -2536,6 +2547,7 @@ export interface OpenApiSchemas {
   RunEventsPage: RunEventsPage;
   RunEventsEnvelope: RunEventsEnvelope;
   CommandStatus: CommandStatus;
+  CommandResourceRef: CommandResourceRef;
   CommandEnvelope: CommandEnvelope;
   StreamSubscribeFrame: StreamSubscribeFrame;
 }

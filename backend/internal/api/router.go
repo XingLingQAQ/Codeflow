@@ -465,6 +465,9 @@ func (s *Server) setupRoutes() {
 			projects.POST("/:id/plan/revise", handlers.ReviseProjectPlan)
 			projects.POST("/:id/plan/approve", handlers.ApproveProjectPlan)
 			projects.POST("/:id/plan/execute", handlers.ExecuteProjectPlan)
+			// Command reconciliation (plan §20.4/§27.3, T1.11.b): a client whose response
+			// was lost asks about the Idempotency-Key it generated before sending.
+			projects.GET("/:id/commands/:command_id", handlers.GetCommand)
 		}
 
 		// Plan routes

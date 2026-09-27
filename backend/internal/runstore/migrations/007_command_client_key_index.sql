@@ -1,0 +1,47 @@
+-- 007_command_client_key_index.sql — the lookup index behind GET
+-- /api/v1/projects/:pid/commands/:command_id (T1.11.b).
+--
+-- Scope (plan §28 T1.11.b, §20.4, §27.3): the reconciliation endpoint looks a
+-- command up by the client's own Idempotency-Key, *without* knowing the
+-- operation it was claimed under — that is the whole point of §20.4, where a
+-- client that lost the response only still holds the key it generated before
+-- sending. The primary key of command_records is
+-- (principal_id, project_id, operation, command_id), so a lookup that does not
+-- name the operation cannot use it for the full equality test: SQLite would
+-- scan every command of the principal/project pair. This migration adds the
+-- index that makes the reconciliation lookup a point query.
+--
+-- What this migration deliberately does NOT do:
+--   - it does not change the table, its CHECKs, its trigger or its other index:
+--     the ledger's shape is not in question, and changing 006's statements would
+--     change a recorded migration's checksum;
+--   - it does not add a uniqueness rule. The same client key may legitimately
+--     exist under several operations for one principal/project pair (§27.3's
+--     scope includes the operation), and the API answers 409
+--     ambiguous_command with the operation list rather than pretending one row
+--     is the answer. A UNIQUE index here would make a legal second operation
+--     fail with a database error instead of a contract answer;
+--   - it does not index status_code/response_json: those are the response body,
+--     which the lookup reads from the row it already found.
+--
+-- Column order is (principal_id, project_id, command_id): the equality
+-- predicates the reconciliation query always carries come first, so one index
+-- serves both "all operations of this key" (the ambiguous case) and "this key
+-- under this operation" (the disambiguated case, where the operation is a
+-- residual predicate on the few rows the index returns).
+--
+-- Amendment policy (plan section 26.31, as recorded in 003): until T1.04 wires
+-- the run store into production start-up, the main agent may amend a committed
+-- migration in place and records the amendment in plan section 26. From T1.04
+-- on, migrations are frozen: the runner fails closed on a checksum mismatch
+-- (migrate.go verifyRecorded) rather than re-applying a changed migration, so
+-- any further change to this index is a new, appended migration whose version
+-- is the next integer.
+--
+-- Times are Unix milliseconds (UTC) in INTEGER columns, as in 001-006; this
+-- migration adds no column and therefore no time.
+
+-- One point lookup for the reconciliation endpoint: the client key inside the
+-- (principal, project) scope, whatever operation it was claimed under.
+CREATE INDEX idx_command_records_client_key
+    ON command_records (principal_id, project_id, command_id);

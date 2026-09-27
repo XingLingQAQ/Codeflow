@@ -5216,9 +5216,8 @@ paths:
     get:
       tags: [Runs]
       summary: Reconcile a command by client idempotency key
-      description: Contract-first CodeFlow 3.0 endpoint (plan §20.4/§27.3); not yet registered in the backend router. After a client-side timeout the client keeps the Idempotency-Key it generated before sending and reconciles here; re-sending the same key with an identical body is safe, and a command with external side effects whose outcome is unknown stays reconciling and must not be started a second time (§20.4).
+      description: Registered in the backend router (GET /api/v1/projects/:id/commands/:command_id, handlers.GetCommand; T1.11.b). After a client-side timeout the client keeps the Idempotency-Key it generated before sending and reconciles here; re-sending the same key with an identical body is safe, and a command with external side effects whose outcome is unknown stays reconciling and must not be started a second time (§20.4). The lookup is scoped by the authenticated principal and the path project, so another principal's key is answered exactly like an unused one. Because the idempotency scope includes the operation (§27.3) and a client that lost a response may not know it, a key used under several operations is answered 409 conflict with details.reason=ambiguous_command and the operation list; retry with ?operation= to select one. The command-layer reasons command_not_found / ambiguous_command / idempotency_key_invalid are carried in error.details.reason and per the §15 T0.03 namespace ruling are not part of the closed error-code enum.
       operationId: getCommand
-      x-codeflow-experimental: true
       parameters:
         - name: pid
           in: path
@@ -5231,15 +5230,45 @@ paths:
           description: The client-generated Idempotency-Key of the original write command (§20.4)
           schema:
             type: string
+        - name: operation
+          in: query
+          required: false
+          description: Selects which command to answer about when this client key was used for more than one operation (§27.3 scopes the key by operation). Omit it when only one record exists; without it an ambiguous key is 409 conflict + details.reason=ambiguous_command.
+          schema:
+            type: string
       responses:
         '200':
-          description: Command status — accepted/applied/rejected/reconciling (§20.4)
+          description: Command status — accepted/applied/rejected/reconciling (§20.4). Terminal commands also carry status_code, the recorded HTTP status of the original request; a tombstone (expired=true) keeps status_code and the outcome but has no response body.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommandEnvelope'
+        '400':
+          description: The path project is not a UUID — invalid_request with error.details.reason=invalid_project_id, in the same error envelope as every other answer of this endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
         '404':
           description: No command record for this key, principal and project (§20.4) — the error body uses the unified ErrorEnvelope; command_not_found is the command-layer reason and per the §15 T0.03 namespace ruling is not part of the closed error-code enum, it is carried in error.details.reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          description: The client key was used for more than one operation and no ?operation= was supplied (§27.3 scopes the key by operation). error.details.reason=ambiguous_command and error.details.operations lists them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          description: The command_id path segment is not a usable idempotency key (blank, padded with whitespace, non-printable or non-ASCII, or longer than the ledger's limit) — invalid_request with error.details.reason=idempotency_key_invalid. Such a key can never have been recorded, and it is refused rather than answered 404 so a client does not mistake a malformed key for an unused one.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          description: The run store is not configured (error.details.reason=run_store_unavailable) or the command record could not be read. The request may be retried once the dependency is available.
           content:
             application/json:
               schema:
@@ -9254,13 +9283,44 @@ components:
     CommandStatus:
       type: object
       required: [command_id, status]
-      description: Command reconciliation view (§20.4/§27.3). status is the closed 4-value command-state enum. This is the §20.4-frozen minimum; operation-specific result fields are added by the owning S1 cards.
+      description: Command reconciliation view (§20.4/§27.3). status is the closed 4-value command-state enum. This is the §20.4-frozen minimum; the fields below it are the ones the registered reconciliation endpoint (T1.11.b) fills in, all optional so a response stays valid when a field does not apply. A tombstone (expired=true) has status_code and completed_at but no response body — §27.3 keeps the outcome after the retention window, not the body.
       properties:
         command_id:
           type: string
         status:
           type: string
           enum: [accepted, applied, rejected, reconciling]
+        operation:
+          type: string
+          description: Which operation this command was claimed under (§27.3's scope). Filled in whenever it is known, so a client that disambiguated with ?operation= can confirm the server answered about the operation it meant.
+        status_code:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: The HTTP status the original request was (or would have been) answered with. Present for terminal commands.
+        resource:
+          $ref: '#/components/schemas/CommandResourceRef'
+        expired:
+          type: boolean
+          description: True on a tombstone — the recorded answer outlived its retention window (§27.3) and the response body is no longer available. status_code still says what the original outcome was.
+        created_at:
+          type: string
+          format: date-time
+          description: When the key was claimed, RFC3339 UTC.
+        completed_at:
+          type: string
+          format: date-time
+          description: When the command reached a terminal state, RFC3339 UTC. Absent while the command is active.
+
+    CommandResourceRef:
+      type: object
+      required: [type, id]
+      description: The resource a command created, when it created one (§19.1's resource reference pair; T1.04's Run). Both fields are always present together.
+      properties:
+        type:
+          type: string
+        id:
+          type: string
 
     CommandEnvelope:
       type: object
