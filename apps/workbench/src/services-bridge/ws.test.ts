@@ -1053,6 +1053,83 @@ describe('T1.12.b ws — ordered subscriptions', () => {
   });
 });
 
+describe('T1.12.c ws — ReconnectDedupesByEventId', () => {
+  it('ReconnectDedupesByEventId: 重复、乱序、缺口与 1013 重连之后，每个 listener 对每个 event id 恰好应用一次', async () => {
+    const { ws, fakeWs, invoke } = await readyWs();
+    const project = recorder();
+    const run = recorder();
+    const offProject = ws.subscribeScope('p1', PROJECT_P1, 0, project.listener);
+    const offRun = ws.subscribeScope('p1', RUN_R1, 0, run.listener);
+    const first = fakeWs.instances[0];
+    first.open();
+    // H (9) is deliberately far from both cursors, so resuming "from H" and
+    // resuming from the last applied sequence cannot look the same below.
+    const server1 = new FakeServer(first, { highWatermark: 9 });
+    server1.answer();
+
+    // A run event is also a project event: the same id travels on both scopes,
+    // each with its own counter. occurred_at runs backwards against sequence
+    // throughout, so any time-based ordering would fail the assertions below.
+    first.message(eventFrame('project:p1', 1, 'ev-a', '2026-09-06T08:00:09.000Z'));
+    first.message(eventFrame('project:p1', 1, 'ev-a', '2026-09-06T08:00:09.000Z')); // duplicate
+    first.message(eventFrame('project:p1', 2, 'ev-b', '2026-09-06T08:00:08.000Z'));
+    first.message(eventFrame('run:r1', 1, 'ev-b', '2026-09-06T08:00:08.000Z'));
+    first.message(eventFrame('run:r1', 1, 'ev-b', '2026-09-06T08:00:08.000Z')); // duplicate
+    // Project sequence 3 is lost on the way: 4 arrives first and is not applied.
+    first.message(eventFrame('project:p1', 4, 'ev-d', '2026-09-06T08:00:06.000Z'));
+    expect(project.applied.map((e) => e.id)).toEqual(['ev-a', 'ev-b']);
+    const retry = server1.lastSubscribe();
+    expect(retry?.data).toMatchObject({ resource_type: 'project', after: 2 });
+
+    // The server replays the project scope from its cursor, re-sending 2.
+    server1.answer();
+    first.message(eventFrame('project:p1', 2, 'ev-b', '2026-09-06T08:00:08.000Z'));
+    first.message(eventFrame('project:p1', 3, 'ev-c', '2026-09-06T08:00:07.000Z'));
+    first.message(eventFrame('project:p1', 4, 'ev-d', '2026-09-06T08:00:06.000Z'));
+    server1.finishReplay(4);
+    first.message(eventFrame('run:r1', 2, 'ev-c', '2026-09-06T08:00:07.000Z'));
+    expect(ws.getScopeCursor('p1', PROJECT_P1)).toBe(4);
+    expect(ws.getScopeCursor('p1', RUN_R1)).toBe(2);
+
+    // The server sheds the client with 1013. The reconnect resumes each scope from
+    // its own last applied sequence — not from the high watermark — and does not
+    // re-pair the connection.
+    vi.useFakeTimers();
+    first.closeWith(1013);
+    await flushMicro();
+    expect(invoke.fn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fakeWs.instances).toHaveLength(2);
+    const second = fakeWs.instances[1];
+    second.open();
+    const resumed = second.orderedSubscribes();
+    expect(resumed.find((f) => f.data.resource_type === 'project')?.data.after).toBe(4);
+    expect(resumed.find((f) => f.data.resource_type === 'run')?.data.after).toBe(2);
+
+    // The replay after the reconnect overlaps what was already applied on both
+    // scopes, and adds one new event that both scopes carry.
+    const server2 = new FakeServer(second, { highWatermark: 5 });
+    server2.answer();
+    second.message(eventFrame('project:p1', 3, 'ev-c', '2026-09-06T08:00:07.000Z'));
+    second.message(eventFrame('project:p1', 4, 'ev-d', '2026-09-06T08:00:06.000Z'));
+    second.message(eventFrame('project:p1', 5, 'ev-e', '2026-09-06T08:00:05.000Z'));
+    second.message(eventFrame('run:r1', 2, 'ev-c', '2026-09-06T08:00:07.000Z'));
+    second.message(eventFrame('run:r1', 3, 'ev-e', '2026-09-06T08:00:05.000Z'));
+
+    expect(project.applied.map((e) => e.id)).toEqual(['ev-a', 'ev-b', 'ev-c', 'ev-d', 'ev-e']);
+    expect(project.applied.map((e) => e.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(run.applied.map((e) => e.id)).toEqual(['ev-b', 'ev-c', 'ev-e']);
+    expect(run.applied.map((e) => e.sequence)).toEqual([1, 2, 3]);
+    for (const rec of [project, run]) {
+      expect(new Set(rec.applied.map((e) => e.id)).size).toBe(rec.applied.length);
+    }
+    expect(ws.getScopeCursor('p1', PROJECT_P1)).toBe(5);
+    expect(ws.getScopeCursor('p1', RUN_R1)).toBe(3);
+    offProject();
+    offRun();
+  });
+});
+
 describe('T1.12.b ws — auth behaviour per project socket', () => {
   it('SubprotocolsAndUrlStayCredentialSafe: token 只走子协议，URL 无 token', async () => {
     const { ws, fakeWs } = await readyWs();
