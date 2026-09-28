@@ -28,9 +28,9 @@ import (
 	"github.com/codeflow/backend/internal/policy"
 	"github.com/codeflow/backend/internal/privacy"
 	"github.com/codeflow/backend/internal/project"
+	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/skill"
 	"github.com/codeflow/backend/internal/snapshot"
-	"github.com/codeflow/backend/internal/samg"
 	"github.com/codeflow/backend/internal/storage"
 	"github.com/codeflow/backend/internal/summarize"
 	"github.com/codeflow/backend/internal/workspace"
@@ -141,21 +141,33 @@ func run() error {
 		_ = sessionStore.Close()
 	}()
 	agentSvc, err := agent.NewSQLiteAgentService(durableDBPath("sessions.db"))
-	if err != nil { return fmt.Errorf("init agent runtime storage: %w", err) }
+	if err != nil {
+		return fmt.Errorf("init agent runtime storage: %w", err)
+	}
 	defer closeFunc(agentSvc)()
-	if err := registerConfiguredAgents(context.Background(), configSvc, agentSvc); err != nil { return err }
+	if err := registerConfiguredAgents(context.Background(), configSvc, agentSvc); err != nil {
+		return err
+	}
 
 	rawArchive := memory.NewSQLiteRawArchive(durableDBPath("raw_archive.db"))
-	if err := rawArchive.Initialize(); err != nil { return fmt.Errorf("init raw archive: %w", err) }
+	if err := rawArchive.Initialize(); err != nil {
+		return fmt.Errorf("init raw archive: %w", err)
+	}
 	defer rawArchive.Close()
 	memorySvc, err := memory.NewSQLiteService(durableDBPath("memory.db"))
-	if err != nil { return fmt.Errorf("init memory service: %w", err) }
+	if err != nil {
+		return fmt.Errorf("init memory service: %w", err)
+	}
 	defer memorySvc.Close()
 	atomicSvc, err := memory.NewSQLiteAtomicMemoryService(context.Background(), durableDBPath("atomic_memory.db"), durableDBPath("atomic_vectors.db"))
-	if err != nil { return fmt.Errorf("init atomic memory service: %w", err) }
+	if err != nil {
+		return fmt.Errorf("init atomic memory service: %w", err)
+	}
 	defer atomicSvc.Close()
 	samgSvc, err := samg.NewSQLiteSAMGService(durableDBPath("samg.db"), nil)
-	if err != nil { return fmt.Errorf("init samg service: %w", err) }
+	if err != nil {
+		return fmt.Errorf("init samg service: %w", err)
+	}
 	defer samgSvc.Close()
 	memoryAgent := memory.NewMemoryAgent(rawArchive, atomicSvc, samgSvc)
 
@@ -242,26 +254,26 @@ func run() error {
 		},
 	))
 	services := bootstrap.Services{
-		Config:        configSvc,
-		Agent:         agentSvc,
-		Planner:       plannerSvc,
-		Project:       projectSvc,
-		Context:       contextSvc,
-		Snapshot:      snapshotSvc,
-		Debate:        debateMgr,
-		Summarize:     summarize.NewSummarizerService(),
-		Floweng:       flowEngine,
-		Guard:         guardEng,
-		Workspace:     wsSvc,
-		Skill:         skillReg,
-		AgentRegistry: agentReg,
-		Session:       sessionStore,
-		Memory:        memorySvc,
-		RawArchive:    rawArchive,
-		AtomicMemory:  atomicSvc,
-		MemoryAgent:   memoryAgent,
-		SAMG:          samgSvc,
-		Preflight:     memory.NewMemoryPreflightService(),
+		Config:         configSvc,
+		Agent:          agentSvc,
+		Planner:        plannerSvc,
+		Project:        projectSvc,
+		Context:        contextSvc,
+		Snapshot:       snapshotSvc,
+		Debate:         debateMgr,
+		Summarize:      summarize.NewSummarizerService(),
+		Floweng:        flowEngine,
+		Guard:          guardEng,
+		Workspace:      wsSvc,
+		Skill:          skillReg,
+		AgentRegistry:  agentReg,
+		Session:        sessionStore,
+		Memory:         memorySvc,
+		RawArchive:     rawArchive,
+		AtomicMemory:   atomicSvc,
+		MemoryAgent:    memoryAgent,
+		SAMG:           samgSvc,
+		Preflight:      memory.NewMemoryPreflightService(),
 		RequireDurable: true,
 	}
 	if err := services.Apply(); err != nil {
