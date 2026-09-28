@@ -174,6 +174,10 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload Ho
 		return hooks[i].Config.Priority < hooks[j].Config.Priority
 	})
 
+	// 来源事件 ID 从输入 payload 取一次（T1.07.c）：同一批 hook 处理的是同一个事件，
+	// 每条触发记录都带上它，读取方才能按 event_id 去重 / 核对（空值不写键）。
+	sourceEventID, dedupeKey := SourceEventReference(hookType, payload)
+
 	result := payload
 	for _, hook := range hooks {
 		if !hook.Config.Enabled {
@@ -193,6 +197,7 @@ func (m *HookManager) Trigger(ctx context.Context, hookType HookType, payload Ho
 				"retry_count": hook.Config.RetryCount,
 			},
 		}
+		annotateHookEvent(event.Metadata, sourceEventID, dedupeKey)
 
 		// Execute with timeout
 		hookCtx, cancel := context.WithTimeout(ctx, hook.Config.Timeout)
@@ -241,6 +246,9 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload Hook
 		return payload, policy.DenialError(decision)
 	}
 
+	// 来源事件 ID 从输入 payload 取（T1.07.c），语义同 Trigger。
+	sourceEventID, dedupeKey := SourceEventReference(hook.Config.Type, payload)
+
 	event := &HookEvent{
 		ID:        uuid.New().String(),
 		HookName:  hook.Config.Name,
@@ -251,6 +259,7 @@ func (m *HookManager) TriggerHook(ctx context.Context, name string, payload Hook
 			"retry_count": hook.Config.RetryCount,
 		},
 	}
+	annotateHookEvent(event.Metadata, sourceEventID, dedupeKey)
 
 	hookCtx, cancel := context.WithTimeout(ctx, hook.Config.Timeout)
 	defer cancel()
@@ -316,6 +325,9 @@ func (m *HookManager) recordAuditEvent(ctx context.Context, event *HookEvent, co
 	if event.Error != "" {
 		details["error"] = event.Error
 	}
+	// 来源事件 ID 与去重键（T1.07.c）：审计读取方按 (hook_type, source_event_id) 去重
+	// 与核对“一个事件只有一个触发记录”。日志/事件没有这两个来源键时不写。
+	copySourceEventDetails(details, event.Metadata)
 
 	if _, err := audit.Record(ctx, &audit.AuditLogEntry{
 		EventType: audit.EventHook,

@@ -128,9 +128,9 @@ func TestBeforeToolRejectsWhenHandlerFails(t *testing.T) {
 	}
 }
 
-// TestToolHookCalledOnce 是 T1.07.c 点名测试的等价物：20 个 goroutine 并发同一个
-// event_id，只触发一次，且全部拿到同一结论。
-func TestToolHookCalledOnce(t *testing.T) {
+// TestToolHookCalledOncePortLevel 是 T1.07.c 点名测试的端口层等价物：20 个
+// goroutine 并发同一个 event_id，只触发一次，且全部拿到同一结论。
+func TestToolHookCalledOncePortLevel(t *testing.T) {
 	mgr := hookTestEnv(t)
 	var calls int32
 	release := make(chan struct{})

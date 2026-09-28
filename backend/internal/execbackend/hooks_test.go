@@ -335,9 +335,9 @@ func TestNewRunLifecycleRequestValidates(t *testing.T) {
 	}
 }
 
-// TestBeforeHookDenyPreventsProcess 是 T1.07.c 点名测试在端口层的等价物：
+// TestBeforeHookDenyPreventsProcessPortLevel 是 T1.07.c 点名测试在端口层的等价物：
 // before 拒绝时 execute 一次都不执行。
-func TestBeforeHookDenyPreventsProcess(t *testing.T) {
+func TestBeforeHookDenyPreventsProcessPortLevel(t *testing.T) {
 	denied := errors.New("policy says no")
 	port := &fakeHookPort{beforeToolErr: denied}
 	warn := &warnRecorder{}
@@ -399,9 +399,9 @@ func TestHookPortMissingIsFailClosed(t *testing.T) {
 	}
 }
 
-// TestAfterHookFailureDoesNotReplayTool 是 T1.07.c 点名测试在端口层的等价物：
-// after 失败只产生一条警告，execute 仍然只调用一次，返回值不变。
-func TestAfterHookFailureDoesNotReplayTool(t *testing.T) {
+// TestAfterHookFailureDoesNotReplayToolPortLevel 是 T1.07.c 点名测试在端口层的
+// 等价物：after 失败只产生一条警告，execute 仍然只调用一次，返回值不变。
+func TestAfterHookFailureDoesNotReplayToolPortLevel(t *testing.T) {
 	postErr := errors.New("post hook exploded")
 	port := &fakeHookPort{afterToolErr: postErr}
 	warn := &warnRecorder{}
@@ -499,7 +499,7 @@ func TestInvalidRequestIsRejectedBeforeThePort(t *testing.T) {
 	}
 }
 
-// TestRunStartDenyPreventsProcess 与 TestBeforeHookDenyPreventsProcess 对称。
+// TestRunStartDenyPreventsProcess 与 TestBeforeHookDenyPreventsProcessPortLevel 对称。
 func TestRunStartDenyPreventsProcess(t *testing.T) {
 	denied := errors.New("no run start")
 	port := &fakeHookPort{beforeRunErr: denied}
