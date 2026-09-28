@@ -361,9 +361,7 @@ func (a *ClaudeAdapter) Send(ctx context.Context, prompt string, options *SendOp
 		Usage:        resp.Usage,
 		FinishReason: resp.FinishReason,
 	}
-	if err := notifyAdapterPostResponse(ctx, controls.SemanticsControl(), aiResponse); err != nil {
-		return nil, err
-	}
+	notifyAdapterPostResponse(ctx, controls.SemanticsControl(), aiResponse)
 	return aiResponse, nil
 }
 

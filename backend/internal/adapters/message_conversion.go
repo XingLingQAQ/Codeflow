@@ -105,13 +105,26 @@ func applyBeforeSendHooks(ctx context.Context, controls *RequestControls, contex
 	return ApplyHookPayload(context, converted), nil
 }
 
-func notifyAdapterPostResponse(ctx context.Context, controls *RequestControls, response any) error {
-	_, err := triggerAdapterHook(ctx, controls, backendhooks.HookPostResponse, response)
-	return err
+// notifyAdapterPostResponse 通知 HookPostResponse：响应已经拿到，hook 只是观察者。
+//
+// 它从不返回错误：after 类点不得让已经完成的模型调用失败（T1.07.b 第 2 组）。
+// 失败只进警告 sink（emitHookWarning），调用方照常把自己的响应返回给用户——
+// 非流式（claude.go/gemini.go/openai.go）与流式（types.go 的成功终结）两条路径
+// 因此行为一致。触发发生在响应构造完成之后。
+func notifyAdapterPostResponse(ctx context.Context, controls *RequestControls, response any) {
+	if _, err := triggerAdapterHook(ctx, controls, backendhooks.HookPostResponse, response); err != nil {
+		emitHookWarning(ctx, HookWarning{Hook: backendhooks.HookPostResponse, Err: err})
+	}
 }
 
+// notifyAdapterStreamChunk 通知 HookOnStream：一帧已经解析出来，正在投递。
+//
+// 失败只记录（每个失败的分片恰好一条警告），分片照常投递：绝不因为 hook 失败
+// 丢帧或重发帧（T1.07.b 第 2 组）。
 func notifyAdapterStreamChunk(ctx context.Context, controls *RequestControls, chunk StreamChunk) {
-	_, _ = triggerAdapterHook(ctx, controls, backendhooks.HookOnStream, chunk)
+	if _, err := triggerAdapterHook(ctx, controls, backendhooks.HookOnStream, chunk); err != nil {
+		emitHookWarning(ctx, HookWarning{Hook: backendhooks.HookOnStream, Err: err})
+	}
 }
 
 func triggerAdapterHook(ctx context.Context, controls *RequestControls, hookType backendhooks.HookType, payload any) (any, error) {

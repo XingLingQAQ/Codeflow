@@ -72,9 +72,7 @@ func (a *GeminiAdapter) Send(ctx context.Context, prompt string, options *SendOp
 	}
 	a.AddMessage(response.Message)
 	aiResponse := &AIResponse{Content: response.Content, Blocks: cloneBlocks(response.Blocks), Model: response.Model, Usage: response.Usage, FinishReason: response.FinishReason}
-	if err := notifyAdapterPostResponse(ctx, controls.SemanticsControl(), aiResponse); err != nil {
-		return nil, err
-	}
+	notifyAdapterPostResponse(ctx, controls.SemanticsControl(), aiResponse)
 	return aiResponse, nil
 }
 

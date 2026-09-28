@@ -12,10 +12,11 @@
 //     Guard/policy 的拒绝：policy.EnforceBoundary 在每次 hook 执行前运行
 //     （T0.09.c，manager.go Trigger/TriggerHook），本表不改变这个顺序。
 //   - warn：操作照常进行，错误必须被记录。今天的记录有两处：触发点把错误交给
-//     execbackend 的警告 sink（internal/execbackend 的 HookWarningSink，nil sink
-//     时写一行固定格式日志），以及 hook 管理器自身的审计记录（失败写
-//     OutcomeFailure）。警告的持久化（outbox / Run 时间线）需要新的事件类型，
-//     封闭的 run.ExecutionEventTypes 里没有，归 T1.04。绝不重做操作本身。
+//     警告 sink（internal/execbackend 与 internal/adapters 各有一个同形实现：
+//     nil sink 时写一行固定格式日志，且都不打印被观察的内容），以及 hook 管理器
+//     自身的审计记录（失败写 OutcomeFailure）。警告的持久化（outbox / Run 时间线）
+//     需要新的事件类型，封闭的 run.ExecutionEventTypes 里没有，归 T1.04。绝不重做
+//     操作本身。
 //   - retry：只重跑 hook handler（HookConfig.RetryCount / executeWithRetry），
 //     用尽后降级为 warn；绝不重做底层操作。只用于 handler 可安全重复的点
 //     （after 类：操作已经发生，重跑观察者不会重放它）。
@@ -55,8 +56,11 @@
 // allowlist 因此同一步落地：allowlist 之外的 hook 类型 Trigger 会返回
 // (payload, nil)，reject 会静默变成放行（§26.30）。
 //
-// 仍未收口的 6 条差距（HookPostResponse、HookOnStream、4 个 planner task hook）在
-// BehaviorGaps() 里逐条写明，归 T1.07.b 第 2/3 组。
+// 仍未收口的 4 条差距——planner 的四个 task hook（HookBeforeTaskExecute、
+// HookAfterTaskExecute、HookOnTaskFailure、HookOnTaskComplete，同一个 Site：
+// internal/planner/memory_integration.go:emitGlobalTaskHook）——在 BehaviorGaps()
+// 里逐条写明，归 T1.07.b 第 3 组。adapters 的两条（HookPostResponse、HookOnStream）
+// 已由第 2 组收口：失败只进警告 sink，操作照常。
 package hooks
 
 import (
@@ -219,9 +223,13 @@ const (
 	// 操作是否继续由调用方决定，而调用方之间可能并不一致。
 	BehaviorReturnedToCaller CurrentBehavior = "returned-to-caller"
 	// BehaviorDiscarded：错误被完全丢弃，操作照常且没有任何记录。
+	//
+	// 今天没有行使用它：T1.07.b 第 2 组把唯一的 discarded 触发点（HookOnStream）
+	// 改成 logged-warn。值保留给将来新增触发点先用它描述现状（与 BehaviorNotWired
+	// 同理），trigger_points_test.go 断言"未被使用的取值恰好是这两个"。
 	BehaviorDiscarded CurrentBehavior = "discarded"
-	// BehaviorNotWired：今天没有调用点（保留点，接线归 T1.07.b），所以没有
-	// 现状可对照。只有 Owner="T1.07.b" 的行可以用它。
+	// BehaviorNotWired：今天没有调用点（保留点的冻结契约），所以没有现状可对照。
+	// 只有 Owner="T1.07.b" 的行可以用它；保留机制仍在，今天没有行使用它。
 	BehaviorNotWired CurrentBehavior = "not-wired"
 )
 
@@ -260,8 +268,8 @@ func (b CurrentBehavior) Consequence() FailureConsequence {
 //
 //   - discarded 永远不兼容：错误消失了，没有任何记录；
 //   - returned-to-caller 永远不兼容：触发点自己既不拒绝也不记录，结果由调用方
-//     决定，而调用方可能互相矛盾（HookPostResponse 正是这样：非流式路径让 Send
-//     失败，流式路径把错误丢掉）。
+//     决定，而调用方可能互相矛盾（planner 的四个 task hook 正是这样：emitGlobalTaskHook
+//     把错误返回给调用方，planner 记一条 WARN 后继续，触发点自己什么都没留下）。
 func (p FailurePolicy) CompatibleWith(c CurrentBehavior) bool {
 	switch p {
 	case FailurePolicyReject:
@@ -452,14 +460,16 @@ var triggerPoints = []TriggerPoint{
 		Observation:     "adapter_post_response",
 		Site:            "internal/adapters/message_conversion.go:notifyAdapterPostResponse",
 		Policy:          FailurePolicyWarn,
-		CurrentBehavior: BehaviorReturnedToCaller,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
 		Owner:           TriggerPointOwnerExisting,
-		Note: "响应已经拿到，hook 只是通知。非流式路径（claude.go/gemini.go/openai.go）把错误 " +
-			"return 给调用方、让 Send 失败；流式路径（adapters/types.go 的 " +
-			`"_ = notifyAdapterPostResponse(...)"）把错误丢掉。两条路径不一致，所以记 returned-to-caller。`,
-		GapClosure: "T1.07.b：after 类点不得让已经完成的模型调用失败——两条路径统一为 warn（记录错误、" +
-			"继续返回响应），并写 outbox warning。",
+		Note: "响应已经拿到，hook 只是通知。T1.07.b 第 2 组收口：notifyAdapterPostResponse 不再返回" +
+			"错误，失败只交给 adapters 的警告 sink（internal/adapters/hook_warnings.go 的 " +
+			"emitHookWarning，nil sink 写一行固定格式日志、绝不打印响应正文），非流式" +
+			"（claude.go/gemini.go/openai.go）与流式（types.go 成功终结）两条路径因此一致：" +
+			"错误被记录、响应照常返回，Send 绝不因 after 类 hook 失败而失败。管理器仍写 " +
+			"OutcomeFailure 审计。警告的持久化（outbox / Run 时间线）需要新事件类型，归 T1.04。" +
+			"触发发生在响应构造完成之后（aiResponse 已经建好）。",
 	},
 	{
 		Hook:            HookOnStream,
@@ -468,12 +478,14 @@ var triggerPoints = []TriggerPoint{
 		Observation:     "adapter_stream_chunk",
 		Site:            "internal/adapters/message_conversion.go:notifyAdapterStreamChunk",
 		Policy:          FailurePolicyWarn,
-		CurrentBehavior: BehaviorDiscarded,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
 		Owner:           TriggerPointOwnerExisting,
-		Note: `notifyAdapterStreamChunk 用 "_, _ =" 丢弃错误（hook 失败时该帧照常发出）。` +
-			"manager.Trigger 仍会在中心记 HookEvent 与审计，但触发点自己没有留下任何 warning。",
-		GapClosure: "T1.07.b：丢弃改成记录（outbox warning），操作照常——绝不因为 hook 失败丢帧或重发帧。",
+		Note: "T1.07.b 第 2 组收口：notifyAdapterStreamChunk 不再丢弃错误，每个失败的分片恰好交给" +
+			"adapters 的警告 sink 一条（internal/adapters/hook_warnings.go 的 emitHookWarning，" +
+			"nil sink 写一行固定格式日志、绝不打印分片内容），分片照常投递——绝不因为 hook 失败丢帧或重发帧。" +
+			"每个投递出去的帧（内容帧与终结帧）恰好触发一次。管理器仍写 HookEvent 与 OutcomeFailure 审计；" +
+			"警告持久化归 T1.04。",
 	},
 	{
 		Hook:            HookBeforeCompress,

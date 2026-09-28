@@ -166,7 +166,7 @@ func streamProviderBody(
 	assistantMsg := Message{Role: RoleAssistant, Content: content, Blocks: []ContentBlock{{Type: "text", Text: content}}, Timestamp: time.Now()}
 	base.AddMessage(assistantMsg)
 	if sendStreamChunk(ctx, controls, ch, terminal) {
-		_ = notifyAdapterPostResponse(ctx, controls, &AIResponse{Content: content, Blocks: cloneBlocks(assistantMsg.Blocks), Model: model, Usage: derefUsage(result.Usage), FinishReason: result.FinishReason})
+		notifyAdapterPostResponse(ctx, controls, &AIResponse{Content: content, Blocks: cloneBlocks(assistantMsg.Blocks), Model: model, Usage: derefUsage(result.Usage), FinishReason: result.FinishReason})
 	}
 }
 

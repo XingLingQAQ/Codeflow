@@ -64,9 +64,14 @@ func TestTriggerPointTableIsWellFormed(t *testing.T) {
 
 	// Every closed enum value is exercised by the table: a category or source
 	// that nothing uses is either a missing trigger point or a dead enum value.
-	// BehaviorNotWired is exempt: T1.07.b wired the last four reserved rows, so no
-	// row uses it today. The value stays for the next new trigger point, and
-	// TestReservedRowMechanismStaysUsable pins that a reserved row is still legal.
+	// Two CurrentBehavior values are deliberately unused today and stay for the
+	// next new trigger point (they are the vocabulary for describing a gap
+	// before it is closed):
+	//   - BehaviorNotWired: T1.07.b wired the last four reserved rows;
+	//   - BehaviorDiscarded: T1.07.b group 2 closed the only discarded point
+	//     (HookOnStream) into logged-warn.
+	// The unused set is asserted to be exactly these two, so a value that falls
+	// out of use by accident still fails loudly.
 	for _, category := range TriggerCategories {
 		if !usedCategory[category] {
 			t.Errorf("category %q is declared but used by no trigger point", category)
@@ -82,12 +87,22 @@ func TestTriggerPointTableIsWellFormed(t *testing.T) {
 			t.Errorf("policy %q is declared but used by no trigger point", policy)
 		}
 	}
+	unusedBehaviors := []CurrentBehavior{}
 	for _, behavior := range CurrentBehaviors {
-		if behavior == BehaviorNotWired {
-			continue
-		}
 		if !usedBehavior[behavior] {
-			t.Errorf("behaviour %q is declared but used by no trigger point", behavior)
+			unusedBehaviors = append(unusedBehaviors, behavior)
+		}
+	}
+	wantUnused := []CurrentBehavior{BehaviorDiscarded, BehaviorNotWired}
+	if len(unusedBehaviors) != len(wantUnused) {
+		t.Errorf("behaviours used by no trigger point = %v, want exactly %v: any other unused value is a dead enum value",
+			unusedBehaviors, wantUnused)
+	} else {
+		for i := range wantUnused {
+			if unusedBehaviors[i] != wantUnused[i] {
+				t.Errorf("unused behaviours = %v, want exactly %v", unusedBehaviors, wantUnused)
+				break
+			}
 		}
 	}
 
@@ -260,21 +275,9 @@ func TestBehaviorGapsAreExplicit(t *testing.T) {
 
 	// ...and it must equal this fixed list. Editing a policy so that it no longer
 	// matches the code shows up here instead of being silently accepted.
+	// T1.07.b 第 2 组把 adapters 的两条收口了（HookPostResponse 与 HookOnStream
+	// 现在都是 logged-warn）：差距集合只剩 planner 的四个 task hook，归第 3 组。
 	want := []BehaviorGap{
-		{
-			Hook:            HookPostResponse,
-			Site:            "internal/adapters/message_conversion.go:notifyAdapterPostResponse",
-			Policy:          FailurePolicyWarn,
-			CurrentBehavior: BehaviorReturnedToCaller,
-			Owner:           TriggerPointOwnerT107B,
-		},
-		{
-			Hook:            HookOnStream,
-			Site:            "internal/adapters/message_conversion.go:notifyAdapterStreamChunk",
-			Policy:          FailurePolicyWarn,
-			CurrentBehavior: BehaviorDiscarded,
-			Owner:           TriggerPointOwnerT107B,
-		},
 		{
 			Hook:            HookBeforeTaskExecute,
 			Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
@@ -317,6 +320,51 @@ func TestBehaviorGapsAreExplicit(t *testing.T) {
 		if got.Policy != expected.Policy || got.CurrentBehavior != expected.CurrentBehavior {
 			t.Errorf("gap %s (%q) = policy %s / behaviour %s, want %s / %s",
 				expected.Site, expected.Hook, got.Policy, got.CurrentBehavior, expected.Policy, expected.CurrentBehavior)
+		}
+	}
+}
+
+// TestAdapterAfterHooksAreLoggedWarn pins the T1.07.b group-2 closure on the
+// table side: the two model-IO after points (HookPostResponse, HookOnStream) no
+// longer carry a gap, and their rows say exactly what the code now does — the
+// failure goes to the adapters warning sink and the operation continues.
+//
+// The code side of the same claim lives in the adapters package:
+// TestPostResponseHookFailureDoesNotFailNonStreamingSend /
+// ...DoesNotFailStreamingStream / TestOnStreamHookFailureKeepsEveryFrame.
+func TestAdapterAfterHooksAreLoggedWarn(t *testing.T) {
+	for _, hook := range []HookType{HookPostResponse, HookOnStream} {
+		points := TriggerPointsForHook(hook)
+		if len(points) != 1 {
+			t.Fatalf("%q has %d trigger points, want exactly 1", hook, len(points))
+		}
+		point := points[0]
+		if point.Policy != FailurePolicyWarn {
+			t.Errorf("%q policy = %s, want warn (an after point must never fail the completed model call)", hook, point.Policy)
+		}
+		if point.CurrentBehavior != BehaviorLoggedWarn {
+			t.Errorf("%q behaviour = %s, want %s", hook, point.CurrentBehavior, BehaviorLoggedWarn)
+		}
+		if point.GapClosure != "" {
+			t.Errorf("%q still declares a gap (%q): T1.07.b group 2 closed it", hook, point.GapClosure)
+		}
+		if point.Owner != TriggerPointOwnerExisting {
+			t.Errorf("%q owner = %q, want %q", hook, point.Owner, TriggerPointOwnerExisting)
+		}
+		if !strings.Contains(point.Note, "hook_warnings.go") {
+			t.Errorf("%q note does not name the adapters warning sink: %q", hook, point.Note)
+		}
+	}
+
+	// The two sites are unchanged: the table still binds to the very functions
+	// the scanner finds (TestTriggerTableIsBoundToCode checks both directions).
+	for hook, site := range map[HookType]string{
+		HookPostResponse: "internal/adapters/message_conversion.go:notifyAdapterPostResponse",
+		HookOnStream:     "internal/adapters/message_conversion.go:notifyAdapterStreamChunk",
+	} {
+		got := TriggerPointsForHook(hook)[0].Site
+		if got != site {
+			t.Errorf("%q site = %s, want %s", hook, got, site)
 		}
 	}
 }
