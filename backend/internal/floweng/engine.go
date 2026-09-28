@@ -2,6 +2,7 @@ package floweng
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -128,11 +129,15 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 		SessionID:  req.SessionID,
 		TemplateID: tmpl.ID,
 		Status:     FlowStatusActive,
-		Loops:      append([]LoopEdge(nil), tmpl.Loops...),
-		Artifacts:  make([]Artifact, 0),
-		Events:     make([]FlowEvent, 0),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		// T3.01.a: a flow created from a template is the project's flow of
+		// record. Task flows are created by a later step and carry
+		// FlowKindTask. Revision is not set here: the store owns it.
+		Kind:      FlowKindProject,
+		Loops:     append([]LoopEdge(nil), tmpl.Loops...),
+		Artifacts: make([]Artifact, 0),
+		Events:    make([]FlowEvent, 0),
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	stages := make([]Stage, 0, len(tmpl.Stages))
@@ -822,8 +827,18 @@ func cloneFlow(f *Flow) *Flow {
 		cp.Stages[i] = cloneStage(cp.Stages[i])
 	}
 	cp.Loops = append([]LoopEdge(nil), f.Loops...)
+	for i := range cp.Loops {
+		cp.Loops[i].extras = cloneExtras(f.Loops[i].extras)
+	}
 	cp.Artifacts = append([]Artifact(nil), f.Artifacts...)
+	for i := range cp.Artifacts {
+		cp.Artifacts[i].extras = cloneExtras(f.Artifacts[i].extras)
+	}
 	cp.Events = append([]FlowEvent(nil), f.Events...)
+	for i := range cp.Events {
+		cp.Events[i].extras = cloneExtras(f.Events[i].extras)
+	}
+	cp.extras = cloneExtras(f.extras)
 	return &cp
 }
 
@@ -832,12 +847,29 @@ func cloneStage(stage Stage) Stage {
 	for i := range stage.Gates {
 		stage.Gates[i] = cloneGate(stage.Gates[i])
 	}
+	stage.extras = cloneExtras(stage.extras)
 	return stage
 }
 
 func cloneGate(gate Gate) Gate {
 	gate.Config = cloneStringMap(gate.Config)
+	gate.extras = cloneExtras(gate.extras)
 	return gate
+}
+
+// cloneExtras copies a preserved-members map (nil stays nil), values included,
+// so a copy of a document shares nothing with the document it came from: adding
+// or removing an extra on the copy, or changing one of its bytes, leaves the
+// original as it was. See legacy_json.go for what the map holds.
+func cloneExtras(m map[string]json.RawMessage) map[string]json.RawMessage {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		out[k] = append(json.RawMessage(nil), v...)
+	}
+	return out
 }
 
 // cloneStringMap returns a shallow copy of m (nil stays nil) so callers never

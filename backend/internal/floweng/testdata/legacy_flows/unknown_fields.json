@@ -1,0 +1,94 @@
+{
+  "id": "0a0a0a0a-0a0a-4a0a-8a0a-0a0a0a0a0a0a",
+  "project_id": "proj-unknown",
+  "session_id": "sess-unknown",
+  "template_id": "new_project",
+  "status": "active",
+  "Status": "this case variant must stay an extra and must not become the flow status",
+  "kind": "project",
+  "revision": 4,
+  "binding_id": "binding-unknown-1",
+  "template_revision": 7,
+  "parent_project_flow_id": "",
+  "future_flow_key": {"nested": {"deep": [1, 2, {"three": true}]}, "empty_obj": {}, "empty_arr": []},
+  "big_number": 12345678901234567890.5,
+  "unicode_escape": "中文 \"quoted\" \\backslash\\ é",
+  "stages": [
+    {
+      "id": "1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b",
+      "type": "idea",
+      "name": "想法",
+      "canvas": "intent",
+      "status": "done",
+      "optional": false,
+      "snapshot_id": "snap-unknown-1",
+      "gates": [
+        {
+          "id": "2c2c2c2c-2c2c-4c2c-8c2c-2c2c2c2c2c2c",
+          "phase": "enter",
+          "kind": "auto",
+          "passed": true,
+          "future_gate_key": [{"a": 1}, null, "x"],
+          "precise": 0.1000000000000000055511151231257827,
+          "Gate": "gate-level case variant stays an extra"
+        }
+      ],
+      "order": 0,
+      "future_stage_key": "kept verbatim",
+      "stage_array": [1, 2, 3]
+    },
+    {
+      "id": "3d3d3d3d-3d3d-4d3d-8d3d-3d3d3d3d3d3d",
+      "Order": 99,
+      "type": "design",
+      "name": "设计",
+      "canvas": "design_board",
+      "agent_id": "designer-1",
+      "status": "active",
+      "optional": false,
+      "gates": [
+        {
+          "id": "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e4e",
+          "phase": "exit",
+          "kind": "agent_check",
+          "on_fail": "escalate_to_debate",
+          "config": {"approver": "user"},
+          "passed": false
+        }
+      ],
+      "order": 1
+    }
+  ],
+  "loops": [
+    {
+      "from": "coding",
+      "to": "design",
+      "future_loop_key": {"reason": "quality gate"}
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "5f5f5f5f-5f5f-4f5f-8f5f-5f5f5f5f5f5f",
+      "stage_id": "1b1b1b1b-1b1b-4b1b-8b1b-1b1b1b1b1b1b",
+      "type": "intent_doc",
+      "version": 1,
+      "status": "approved",
+      "created_by": "agent",
+      "content_ref": "content://intent/v1",
+      "created_at": "2026-01-05T08:00:00Z",
+      "future_artifact_key": {"checksum": "sha256:abc", "size": 12345},
+      "Version": 99
+    }
+  ],
+  "events": [
+    {
+      "id": "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a",
+      "type": "flow.created",
+      "message": "created template=new_project project=proj-unknown",
+      "timestamp": "2026-01-05T08:00:00Z",
+      "future_event_key": {"trace_id": "trace-1", "spans": [{"name": "create", "ms": 12.5}]}
+    }
+  ],
+  "created_at": "2026-01-05T08:00:00Z",
+  "updated_at": "2026-01-05T08:00:00Z"
+}

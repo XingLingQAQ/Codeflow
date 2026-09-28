@@ -1,0 +1,13 @@
+{
+  "id": "7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a",
+  "project_id": "proj-duplicate",
+  "template_id": "new_project",
+  "status": "active",
+  "status": "completed",
+  "stages": [],
+  "loops": [],
+  "artifacts": [],
+  "events": [],
+  "created_at": "2026-01-06T08:00:00Z",
+  "updated_at": "2026-01-06T08:00:00Z"
+}

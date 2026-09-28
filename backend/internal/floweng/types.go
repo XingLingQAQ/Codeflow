@@ -4,6 +4,7 @@ package floweng
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -15,6 +16,26 @@ const (
 	FlowStatusCompleted FlowStatus = "completed"
 	FlowStatusAborted   FlowStatus = "aborted"
 )
+
+// FlowKind is the level of a Flow (T3.01.a, §28): the project's flow of record,
+// or a short task flow. A project has one active project flow and any number of
+// task flows, and only the project flow drives the project's stages. The value
+// is mirrored into its own flows column so the rule of the next step (one active
+// project flow per project) can be a partial unique index; for that reason every
+// stored row must carry the right kind, including rows written before T3.01.
+type FlowKind string
+
+const (
+	// FlowKindProject is the single flow of record of a project.
+	FlowKindProject FlowKind = "project"
+	// FlowKindTask is a short task flow parented to a project flow.
+	FlowKindTask FlowKind = "task"
+)
+
+// valid reports whether k is a kind this build knows.
+func (k FlowKind) valid() bool {
+	return k == FlowKindProject || k == FlowKindTask
+}
 
 // StageStatus is the lifecycle of a Stage within a Flow.
 type StageStatus string
@@ -96,17 +117,43 @@ const (
 
 // Flow is a running workflow instance for a project.
 type Flow struct {
-	ID         string      `json:"id"`
-	ProjectID  string      `json:"project_id"`
-	SessionID  string      `json:"session_id,omitempty"`
-	TemplateID TemplateID  `json:"template_id"`
-	Status     FlowStatus  `json:"status"`
-	Stages     []Stage     `json:"stages"`
-	Loops      []LoopEdge  `json:"loops"`
-	Artifacts  []Artifact  `json:"artifacts"`
-	Events     []FlowEvent `json:"events"`
-	CreatedAt  time.Time   `json:"created_at"`
-	UpdatedAt  time.Time   `json:"updated_at"`
+	ID         string     `json:"id"`
+	ProjectID  string     `json:"project_id"`
+	SessionID  string     `json:"session_id,omitempty"`
+	TemplateID TemplateID `json:"template_id"`
+	Status     FlowStatus `json:"status"`
+	// Kind is "project" (the project's flow of record) or "task" (a short task
+	// flow). A document written before T3.01 has no kind key at all: it decodes
+	// as FlowKindProject, which is also the flows.kind column default.
+	Kind FlowKind `json:"kind"`
+	// Revision starts at 1 when the flow is created and grows by one on every
+	// store write. It is assigned by the store (SQLite and memory alike), never
+	// by the caller; compare-and-set on it is T3.01.b, not this step.
+	Revision int64 `json:"revision"`
+	// BindingID names the workspace binding this flow runs on. Empty until a
+	// later step binds runtimes; the empty value stays out of the document.
+	BindingID string `json:"binding_id,omitempty"`
+	// TemplateRevision is the revision of the template this flow was
+	// instantiated from. 0 means "unknown" — the state of every flow created
+	// before T3.01.a — and the immutable template revisions that fill it in are
+	// T3.01.a group 3, not this group.
+	TemplateRevision int64 `json:"template_revision,omitempty"`
+	// ParentProjectFlowID is the project flow a task flow belongs to. Empty for
+	// project flows; the link is enforced by the runtime database in T3.01.b.
+	ParentProjectFlowID string      `json:"parent_project_flow_id,omitempty"`
+	Stages              []Stage     `json:"stages"`
+	Loops               []LoopEdge  `json:"loops"`
+	Artifacts           []Artifact  `json:"artifacts"`
+	Events              []FlowEvent `json:"events"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
+	// extras carries the members of a stored document that this build does not
+	// recognize, including case variants such as "Status": keeping them is what
+	// lets T3.01.b copy a document into the runtime database without silently
+	// dropping a key it does not know. See legacy_json.go. The field is
+	// unexported, so the struct's ordinary encoding ignores it and the JSON
+	// methods write it explicitly.
+	extras map[string]json.RawMessage
 }
 
 // Stage is one step in a Flow.
@@ -121,6 +168,8 @@ type Stage struct {
 	SnapshotID string      `json:"snapshot_id,omitempty"`
 	Gates      []Gate      `json:"gates,omitempty"`
 	Order      int         `json:"order"`
+	// extras keeps members of a stored stage that this build does not know.
+	extras map[string]json.RawMessage
 }
 
 // Gate is an enter/exit check on a stage.
@@ -132,12 +181,16 @@ type Gate struct {
 	// Config carries gate parameters (e.g. test pass-rate threshold, approver).
 	Config map[string]string `json:"config,omitempty"`
 	Passed bool              `json:"passed"`
+	// extras keeps members of a stored gate that this build does not know.
+	extras map[string]json.RawMessage
 }
 
 // LoopEdge allows jumping from one stage type back to an earlier type.
 type LoopEdge struct {
 	From StageType `json:"from"`
 	To   StageType `json:"to"`
+	// extras keeps members of a stored loop edge that this build does not know.
+	extras map[string]json.RawMessage
 }
 
 // Artifact is a stage output reference (content stored elsewhere).
@@ -152,6 +205,8 @@ type Artifact struct {
 	// ContentRef is an optional storage pointer (path, blob id, URI).
 	ContentRef string    `json:"content_ref,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+	// extras keeps members of a stored artifact that this build does not know.
+	extras map[string]json.RawMessage
 }
 
 // FlowEvent is an append-only audit/timeline entry for observation adapters.
@@ -161,6 +216,8 @@ type FlowEvent struct {
 	StageID   string    `json:"stage_id,omitempty"`
 	Message   string    `json:"message"`
 	Timestamp time.Time `json:"timestamp"`
+	// extras keeps members of a stored event that this build does not know.
+	extras map[string]json.RawMessage
 }
 
 // CreateFlowRequest creates a Flow from a template.

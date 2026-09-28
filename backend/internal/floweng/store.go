@@ -24,12 +24,29 @@ func newMemoryStore() *memoryStore {
 	return &memoryStore{flows: make(map[string]*Flow)}
 }
 
+// Put stores a copy of the document and assigns its revision.
+//
+// The revision rule is the store's, not the caller's, and it is the same one
+// SQLiteFlowStore.Put applies: 1 for a Flow that is not stored yet, and the
+// stored value plus one for every later Put. The value is written back into the
+// caller's document so the copy the engine returns carries the revision that
+// was just stored. Comparing the caller's revision against the stored one
+// (compare-and-set) is T3.01.b, not this step: here the incoming value is
+// ignored, exactly as it is on the SQLite side.
 func (s *memoryStore) Put(flow *Flow) error {
 	if flow == nil || flow.ID == "" {
 		return fmt.Errorf("flow id is required")
 	}
+	if err := normalizeFlowDocument(flow); err != nil {
+		return fmt.Errorf("put flow: %w", err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rev := int64(1)
+	if prev, ok := s.flows[flow.ID]; ok {
+		rev = prev.Revision + 1
+	}
+	flow.Revision = rev
 	s.flows[flow.ID] = cloneFlow(flow)
 	return nil
 }
