@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -612,25 +611,27 @@ func captureTaskFailureHook(task *Task, phase string, message string) pendingTas
 	}
 }
 
+// emitTaskLifecycleHooks 把锁内收集的待触发 hook 依次交给触发点。T1.07.b 第 3 组
+// 收口后触发点自己记录失败（emitGlobalTaskHook → emitHookWarning），所以这里不再
+// 依赖返回值、也不再打自己的 WARN：一次失败恰好一条记录，不会出现调用方与触发点
+// 各记一条。hook 失败绝不影响 UpdateTask 的结果。
 func emitTaskLifecycleHooks(ctx context.Context, hooks []pendingTaskLifecycleHook) {
 	if len(hooks) == 0 || !backendhooks.HasHookManager() {
 		return
 	}
 	for _, hook := range hooks {
-		if err := emitGlobalTaskHook(ctx, hook.event, hook.payload); err != nil {
-			log.Printf("[WARN] planner task lifecycle hook failed: event=%s task=%s err=%v", hook.event, hook.taskID, err)
-		}
+		emitGlobalTaskHook(ctx, hook.event, hook.payload)
 	}
 }
 
+// emitTaskFailureHooks 同上，只负责触发 HookOnTaskFailure；任务的失败结论由
+// UpdateTask 的状态迁移决定，不受 hook 结果影响。
 func emitTaskFailureHooks(ctx context.Context, hooks []pendingTaskFailureHook) {
 	if len(hooks) == 0 || !backendhooks.HasHookManager() {
 		return
 	}
 	for _, hook := range hooks {
-		if err := emitGlobalTaskHook(ctx, HookOnTaskFailure, hook.payload); err != nil {
-			log.Printf("[WARN] planner task failure hook failed: task=%s err=%v", hook.taskID, err)
-		}
+		emitGlobalTaskHook(ctx, HookOnTaskFailure, hook.payload)
 	}
 }
 

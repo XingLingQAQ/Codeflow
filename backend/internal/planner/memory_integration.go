@@ -95,7 +95,12 @@ func (mi *MemoryIntegration) Register(event TaskHookEvent, handler TaskHookHandl
 	mi.handlers[event] = append(mi.handlers[event], handler)
 }
 
-// Emit 触发 Hook 事件
+// Emit 触发 Hook 事件。
+//
+// 签名保留（返回 error）是为了既有调用方与测试：本地 handler 的单个失败仍只打
+// WARN 并继续，所以这个方法今天总是返回 nil。全局 hook 的失败不在这里产生错误
+// ——触发点 emitGlobalTaskHook 自己记一条警告后继续（T1.07.b 第 3 组），调用方
+// 不再需要判断返回值。未知 event 仍然什么都不做。
 func (mi *MemoryIntegration) Emit(ctx context.Context, event TaskHookEvent, data interface{}) error {
 	handlers, ok := mi.handlers[event]
 	if ok {
@@ -109,23 +114,55 @@ func (mi *MemoryIntegration) Emit(ctx context.Context, event TaskHookEvent, data
 	if !backendhooks.HasHookManager() {
 		return nil
 	}
-	return emitGlobalTaskHook(ctx, event, data)
+	emitGlobalTaskHook(ctx, event, data)
+	return nil
 }
 
-func emitGlobalTaskHook(ctx context.Context, event TaskHookEvent, data interface{}) error {
+// emitGlobalTaskHook 是四个任务 hook 的唯一触发点（HookBeforeTaskExecute、
+// HookAfterTaskExecute、HookOnTaskFailure、HookOnTaskComplete 的触发表行都绑在
+// 这个函数上，函数名因此必须保留）。
+//
+// 它不返回错误：hook 失败在触发点自身恰好记一条警告（emitHookWarning）然后继续，
+// 调用方（planner/service.go 的 emitTaskLifecycleHooks / emitTaskFailureHooks）
+// 不再记录、也不因它失败。策略上，before/after/failure/complete 四个点都是
+// warn 或 retry（retry 只由 hooks 管理器按 HookConfig.RetryCount 重跑 handler，
+// 用尽后返回的错误在这里降级为一条警告），所以触发器永远不会让 UpdateTask 失败
+// 或回滚，也绝不会重做任务状态迁移。未知 event 什么都不做，也不记警告。
+func emitGlobalTaskHook(ctx context.Context, event TaskHookEvent, data interface{}) {
 	manager := backendhooks.GetHookManager()
+	var err error
 	switch event {
 	case HookBeforeTaskExecute:
-		return manager.HookBeforeTaskExecute(ctx, data)
+		err = manager.HookBeforeTaskExecute(ctx, data)
 	case HookAfterTaskExecute:
-		return manager.HookAfterTaskExecute(ctx, data)
+		err = manager.HookAfterTaskExecute(ctx, data)
 	case HookOnTaskFailure:
-		return manager.HookOnTaskFailure(ctx, data)
+		err = manager.HookOnTaskFailure(ctx, data)
 	case HookOnTaskComplete:
-		return manager.HookOnTaskComplete(ctx, data)
+		err = manager.HookOnTaskComplete(ctx, data)
 	default:
-		return nil
+		return
 	}
+	if err != nil {
+		emitHookWarning(ctx, HookWarning{Hook: event, TaskID: taskIDFromHookPayload(data), Err: err})
+	}
+}
+
+// taskIDFromHookPayload 从任务 payload 取任务 ID，供警告定位：两种任务上下文都有
+// TaskID 字段；其它类型（或 nil）没有身份可取，返回空串——警告照记，只是不带
+// task id。这里只读 ID，绝不读标题、描述或元数据（警告不得携带 payload 内容）。
+func taskIDFromHookPayload(data interface{}) string {
+	switch payload := data.(type) {
+	case *TaskExecutionContext:
+		if payload != nil {
+			return payload.TaskID
+		}
+	case *TaskFailureContext:
+		if payload != nil {
+			return payload.TaskID
+		}
+	}
+	return ""
 }
 
 // BuildTaskMemory 从任务执行结果构建记忆记录

@@ -64,14 +64,17 @@ func TestTriggerPointTableIsWellFormed(t *testing.T) {
 
 	// Every closed enum value is exercised by the table: a category or source
 	// that nothing uses is either a missing trigger point or a dead enum value.
-	// Two CurrentBehavior values are deliberately unused today and stay for the
-	// next new trigger point (they are the vocabulary for describing a gap
+	// Three CurrentBehavior values are deliberately unused today and stay for
+	// the next new trigger point (they are the vocabulary for describing a gap
 	// before it is closed):
 	//   - BehaviorNotWired: T1.07.b wired the last four reserved rows;
 	//   - BehaviorDiscarded: T1.07.b group 2 closed the only discarded point
-	//     (HookOnStream) into logged-warn.
-	// The unused set is asserted to be exactly these two, so a value that falls
-	// out of use by accident still fails loudly.
+	//     (HookOnStream) into logged-warn;
+	//   - BehaviorReturnedToCaller: T1.07.b group 3 closed the last four
+	//     returned-to-caller points (the planner task hooks) by recording the
+	//     failure at the trigger point.
+	// The unused set is asserted to be exactly these three, so a value that
+	// falls out of use by accident still fails loudly.
 	for _, category := range TriggerCategories {
 		if !usedCategory[category] {
 			t.Errorf("category %q is declared but used by no trigger point", category)
@@ -93,7 +96,7 @@ func TestTriggerPointTableIsWellFormed(t *testing.T) {
 			unusedBehaviors = append(unusedBehaviors, behavior)
 		}
 	}
-	wantUnused := []CurrentBehavior{BehaviorDiscarded, BehaviorNotWired}
+	wantUnused := []CurrentBehavior{BehaviorReturnedToCaller, BehaviorDiscarded, BehaviorNotWired}
 	if len(unusedBehaviors) != len(wantUnused) {
 		t.Errorf("behaviours used by no trigger point = %v, want exactly %v: any other unused value is a dead enum value",
 			unusedBehaviors, wantUnused)
@@ -275,51 +278,68 @@ func TestBehaviorGapsAreExplicit(t *testing.T) {
 
 	// ...and it must equal this fixed list. Editing a policy so that it no longer
 	// matches the code shows up here instead of being silently accepted.
-	// T1.07.b 第 2 组把 adapters 的两条收口了（HookPostResponse 与 HookOnStream
-	// 现在都是 logged-warn）：差距集合只剩 planner 的四个 task hook，归第 3 组。
-	want := []BehaviorGap{
-		{
-			Hook:            HookBeforeTaskExecute,
-			Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
-			Policy:          FailurePolicyWarn,
-			CurrentBehavior: BehaviorReturnedToCaller,
-			Owner:           TriggerPointOwnerT107B,
-		},
-		{
-			Hook:            HookAfterTaskExecute,
-			Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
-			Policy:          FailurePolicyRetry,
-			CurrentBehavior: BehaviorReturnedToCaller,
-			Owner:           TriggerPointOwnerT107B,
-		},
-		{
-			Hook:            HookOnTaskFailure,
-			Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
-			Policy:          FailurePolicyRetry,
-			CurrentBehavior: BehaviorReturnedToCaller,
-			Owner:           TriggerPointOwnerT107B,
-		},
-		{
-			Hook:            HookOnTaskComplete,
-			Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
-			Policy:          FailurePolicyRetry,
-			CurrentBehavior: BehaviorReturnedToCaller,
-			Owner:           TriggerPointOwnerT107B,
-		},
+	//
+	// T1.07.b 第 1 组接线了四个保留点，第 2 组收口了 adapters 的两条，第 3 组收口了
+	// planner 的四个 task hook：表里每一行的声明策略都由代码现状满足，所以差距集合
+	// 为空。这里钉住的就是「空」——任何一行再出现返还给调用方 / 丢弃 / 未接线的现状，
+	// 都必须同时在 GapClosure 里写明收口步骤，于是这个断言立刻失败而不是静默接受。
+	if len(gaps) != 0 {
+		t.Fatalf("BehaviorGaps() has %d entries, want none (every row's policy is satisfied by the code today):\n%+v", len(gaps), gaps)
 	}
-	if len(gaps) != len(want) {
-		t.Fatalf("BehaviorGaps() has %d entries, want %d:\n%+v", len(gaps), len(want), gaps)
-	}
-	for _, expected := range want {
-		key := expected.Site + "\x00" + string(expected.Hook)
-		got, ok := derived[key]
-		if !ok {
-			t.Errorf("missing expected gap %s (%q)", expected.Site, expected.Hook)
-			continue
+}
+
+// TestPlannerTaskHooksAreLoggedWarn pins the T1.07.b group-3 closure on the table
+// side: the four task-lifecycle hooks (one Site, four rows) no longer carry a gap,
+// and their rows say exactly what the code now does — the failure goes to the
+// planner warning sink and the task migration continues.
+//
+// The code side of the same claim lives in the planner package:
+// TestTaskHookFailuresDoNotChangeTaskMigration /
+// TestTaskHookRetryOnlyRerunsTheHandler.
+func TestPlannerTaskHooksAreLoggedWarn(t *testing.T) {
+	for _, hook := range []HookType{HookBeforeTaskExecute, HookAfterTaskExecute, HookOnTaskFailure, HookOnTaskComplete} {
+		rows := TriggerPointsForHook(hook)
+		if len(rows) != 1 {
+			t.Fatalf("%q has %d trigger points, want exactly 1", hook, len(rows))
 		}
-		if got.Policy != expected.Policy || got.CurrentBehavior != expected.CurrentBehavior {
-			t.Errorf("gap %s (%q) = policy %s / behaviour %s, want %s / %s",
-				expected.Site, expected.Hook, got.Policy, got.CurrentBehavior, expected.Policy, expected.CurrentBehavior)
+		point := rows[0]
+		if point.CurrentBehavior != BehaviorLoggedWarn {
+			t.Errorf("%q behaviour = %s, want %s", hook, point.CurrentBehavior, BehaviorLoggedWarn)
+		}
+		if point.GapClosure != "" {
+			t.Errorf("%q still declares a gap (%q): T1.07.b group 3 closed it", hook, point.GapClosure)
+		}
+		if point.Owner != TriggerPointOwnerExisting {
+			t.Errorf("%q owner = %q, want %q", hook, point.Owner, TriggerPointOwnerExisting)
+		}
+		if point.Category != TriggerCategoryTaskLifecycle || point.Source != ObservationSourceLegacyPlanner {
+			t.Errorf("%q point = %s/%s, want task_lifecycle/legacy_planner", hook, point.Category, point.Source)
+		}
+		if !strings.Contains(point.Note, "hook_warnings.go") {
+			t.Errorf("%q note does not name the planner warning sink: %q", hook, point.Note)
+		}
+		if !point.Policy.CompatibleWith(point.CurrentBehavior) {
+			t.Errorf("%q policy %s is not satisfied by behaviour %s", hook, point.Policy, point.CurrentBehavior)
+		}
+	}
+
+	// The Site is unchanged: the table still binds to the very function the
+	// scanner finds (TestTriggerTableIsBoundToCode checks both directions).
+	for _, hook := range []HookType{HookBeforeTaskExecute, HookAfterTaskExecute, HookOnTaskFailure, HookOnTaskComplete} {
+		got := TriggerPointsForHook(hook)[0].Site
+		if got != "internal/planner/memory_integration.go:emitGlobalTaskHook" {
+			t.Errorf("%q site = %s, want the planner dispatch function", hook, got)
+		}
+	}
+
+	// The declared policies are the frozen ones from §28: warn before the task
+	// runs, retry for the three after points (retry only re-runs the handler).
+	if got := TriggerPointsForHook(HookBeforeTaskExecute)[0].Policy; got != FailurePolicyWarn {
+		t.Errorf("HookBeforeTaskExecute policy = %s, want warn", got)
+	}
+	for _, hook := range []HookType{HookAfterTaskExecute, HookOnTaskFailure, HookOnTaskComplete} {
+		if got := TriggerPointsForHook(hook)[0].Policy; got != FailurePolicyRetry {
+			t.Errorf("%q policy = %s, want retry", hook, got)
 		}
 	}
 }

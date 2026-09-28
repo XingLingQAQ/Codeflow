@@ -12,11 +12,11 @@
 //     Guard/policy 的拒绝：policy.EnforceBoundary 在每次 hook 执行前运行
 //     （T0.09.c，manager.go Trigger/TriggerHook），本表不改变这个顺序。
 //   - warn：操作照常进行，错误必须被记录。今天的记录有两处：触发点把错误交给
-//     警告 sink（internal/execbackend 与 internal/adapters 各有一个同形实现：
-//     nil sink 时写一行固定格式日志，且都不打印被观察的内容），以及 hook 管理器
-//     自身的审计记录（失败写 OutcomeFailure）。警告的持久化（outbox / Run 时间线）
-//     需要新的事件类型，封闭的 run.ExecutionEventTypes 里没有，归 T1.04。绝不重做
-//     操作本身。
+//     警告 sink（internal/execbackend、internal/adapters 与 internal/planner 各有
+//     一个同形实现：nil sink 时写一行固定格式日志，且都不打印被观察的内容），以及
+//     hook 管理器自身的审计记录（失败写 OutcomeFailure）。警告的持久化（outbox /
+//     Run 时间线）需要新的事件类型，封闭的 run.ExecutionEventTypes 里没有，归
+//     T1.04。绝不重做操作本身。
 //   - retry：只重跑 hook handler（HookConfig.RetryCount / executeWithRetry），
 //     用尽后降级为 warn；绝不重做底层操作。只用于 handler 可安全重复的点
 //     （after 类：操作已经发生，重跑观察者不会重放它）。
@@ -45,7 +45,7 @@
 //   - Policy 与代码现状不一致的点必须出现在 BehaviorGaps() 里并写明收口步骤，
 //     不能静默接受。
 //
-// # 接线状态（T1.07.b 第 1 组）
+// # 接线状态（T1.07.b）
 //
 // HookPreToolUse / HookPostToolUse / HookRunStart / HookRunFinish 的调用点是
 // internal/runhooks/port.go 的 (*Port).BeforeTool / AfterTool / BeforeRunStart /
@@ -56,11 +56,18 @@
 // allowlist 因此同一步落地：allowlist 之外的 hook 类型 Trigger 会返回
 // (payload, nil)，reject 会静默变成放行（§26.30）。
 //
-// 仍未收口的 4 条差距——planner 的四个 task hook（HookBeforeTaskExecute、
-// HookAfterTaskExecute、HookOnTaskFailure、HookOnTaskComplete，同一个 Site：
-// internal/planner/memory_integration.go:emitGlobalTaskHook）——在 BehaviorGaps()
-// 里逐条写明，归 T1.07.b 第 3 组。adapters 的两条（HookPostResponse、HookOnStream）
-// 已由第 2 组收口：失败只进警告 sink，操作照常。
+// 没有未收口的差距：BehaviorGaps() 为空。
+//
+//   - 第 1 组接线了四个保留点（上面那四个 runhooks 调用点）；
+//   - 第 2 组收口了 adapters 的两条（HookPostResponse、HookOnStream）：失败只进
+//     adapters 的警告 sink，响应/分片照常；
+//   - 第 3 组收口了 planner 的四个 task hook（HookBeforeTaskExecute、
+//     HookAfterTaskExecute、HookOnTaskFailure、HookOnTaskComplete，同一个 Site：
+//     internal/planner/memory_integration.go:emitGlobalTaskHook）：触发点自己把
+//     失败交给 planner 的警告 sink（internal/planner/hook_warnings.go 的
+//     emitHookWarning），调用方（planner/service.go 的两个 emit 函数）不再依赖
+//     返回值、也不再各记一条日志。retry 只由管理器按 HookConfig.RetryCount 重跑
+//     handler，用尽后同样只记一条警告；任务状态迁移绝不重做。
 package hooks
 
 import (
@@ -221,12 +228,15 @@ const (
 	BehaviorLoggedWarn CurrentBehavior = "logged-warn"
 	// BehaviorReturnedToCaller：触发点只把错误交给调用方，自己不拒绝也不记录；
 	// 操作是否继续由调用方决定，而调用方之间可能并不一致。
+	//
+	// 今天没有行使用它：T1.07.b 第 3 组把最后四个 returned-to-caller 触发点（planner
+	// 的四个 task hook）改成在触发点自己记录的 logged-warn。
 	BehaviorReturnedToCaller CurrentBehavior = "returned-to-caller"
 	// BehaviorDiscarded：错误被完全丢弃，操作照常且没有任何记录。
 	//
 	// 今天没有行使用它：T1.07.b 第 2 组把唯一的 discarded 触发点（HookOnStream）
 	// 改成 logged-warn。值保留给将来新增触发点先用它描述现状（与 BehaviorNotWired
-	// 同理），trigger_points_test.go 断言"未被使用的取值恰好是这两个"。
+	// 同理），trigger_points_test.go 断言"未被使用的取值恰好是这三个"。
 	BehaviorDiscarded CurrentBehavior = "discarded"
 	// BehaviorNotWired：今天没有调用点（保留点的冻结契约），所以没有现状可对照。
 	// 只有 Owner="T1.07.b" 的行可以用它；保留机制仍在，今天没有行使用它。
@@ -268,8 +278,8 @@ func (b CurrentBehavior) Consequence() FailureConsequence {
 //
 //   - discarded 永远不兼容：错误消失了，没有任何记录；
 //   - returned-to-caller 永远不兼容：触发点自己既不拒绝也不记录，结果由调用方
-//     决定，而调用方可能互相矛盾（planner 的四个 task hook 正是这样：emitGlobalTaskHook
-//     把错误返回给调用方，planner 记一条 WARN 后继续，触发点自己什么都没留下）。
+//     决定，而调用方可能互相矛盾（今天没有行是这个现状：一个 warn/retry 类点把
+//     记录推给调用方，调用方之间就会出现"记不记、记什么"的分歧）。
 func (p FailurePolicy) CompatibleWith(c CurrentBehavior) bool {
 	switch p {
 	case FailurePolicyReject:
@@ -559,14 +569,17 @@ var triggerPoints = []TriggerPoint{
 		Observation:     "planner_task_before_execute",
 		Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
 		Policy:          FailurePolicyWarn,
-		CurrentBehavior: BehaviorReturnedToCaller,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
 		Owner:           TriggerPointOwnerExisting,
 		Note: "emitGlobalTaskHook 用 switch 分派四个 task hook，四条记录同 Site 不同 Hook。" +
-			"触发点把错误返回给调用方；planner/service.go 的 emitTaskLifecycleHooks 打 WARN 后继续，" +
-			"但触发点自己既不拒绝也不记录。",
-		GapClosure: "T1.07.b：任务 hook 的失败在触发点记录（outbox warning）并继续；" +
-			"不阻塞任务执行。调用方（planner）改成不依赖返回值。",
+			"T1.07.b 第 3 组收口：触发点自己把失败交给 planner 的警告 sink" +
+			"（internal/planner/hook_warnings.go 的 emitHookWarning，nil sink 写一行固定格式日志、" +
+			"只带 hook 类型与 task id、绝不打印任务标题/描述/元数据）。" +
+			"planner/service.go 的 emitTaskLifecycleHooks 不再依赖返回值、也不再打自己的 WARN——" +
+			"一次失败恰好一条记录。before 类点失败不阻塞任务执行：UpdateTask 的状态迁移、" +
+			"CompletedCount 与解除依赖照常。管理器仍写 OutcomeFailure 审计；" +
+			"警告持久化（outbox / Run 时间线）需要新事件类型，归 T1.04。",
 	},
 	{
 		Hook:            HookAfterTaskExecute,
@@ -575,11 +588,14 @@ var triggerPoints = []TriggerPoint{
 		Observation:     "planner_task_after_execute",
 		Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
 		Policy:          FailurePolicyRetry,
-		CurrentBehavior: BehaviorReturnedToCaller,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
 		Owner:           TriggerPointOwnerExisting,
-		Note:            "任务状态已经写进 plan，after 类点可以安全重跑 handler（retry），绝不重跑任务。",
-		GapClosure:      "T1.07.b：同 HookBeforeTaskExecute——记录 warning 并继续，不把错误当任务失败。",
+		Note: "任务状态已经写进 plan，after 类点可以安全重跑 handler（retry），绝不重跑任务。" +
+			"T1.07.b 第 3 组收口：重试只发生在管理器内部（HookConfig.RetryCount 只重跑 handler，" +
+			"用尽后返回错误），触发点把这个最终失败交给 planner 的警告 sink 记一条后继续" +
+			"（internal/planner/hook_warnings.go 的 emitHookWarning）；状态迁移绝不重做——" +
+			"CompletedCount 只 +1，一次 UpdateTask 只产生一条触发记录。",
 	},
 	{
 		Hook:            HookOnTaskFailure,
@@ -588,12 +604,13 @@ var triggerPoints = []TriggerPoint{
 		Observation:     "planner_task_failure",
 		Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
 		Policy:          FailurePolicyRetry,
-		CurrentBehavior: BehaviorReturnedToCaller,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
 		Owner:           TriggerPointOwnerExisting,
-		Note: "任务已经失败（payload 是 TaskFailureContext），观察者重跑是安全的；" +
-			"绝不能因为 hook 失败改变任务的失败结论。",
-		GapClosure: "T1.07.b：记录 warning 并继续；任务失败结论不受 hook 影响。",
+		Note: "任务已经失败（payload 是 TaskFailureContext，触发点从中取 TaskID 定位警告），" +
+			"观察者重跑是安全的。T1.07.b 第 3 组收口：管理器按 RetryCount 只重跑 handler，" +
+			"用尽后由触发点记一条警告（internal/planner/hook_warnings.go 的 emitHookWarning）并继续——" +
+			"绝不能因为 hook 失败改变任务的失败结论（UpdateTask 的 cancelled 迁移照常生效）。",
 	},
 	{
 		Hook:            HookOnTaskComplete,
@@ -602,11 +619,13 @@ var triggerPoints = []TriggerPoint{
 		Observation:     "planner_task_complete",
 		Site:            "internal/planner/memory_integration.go:emitGlobalTaskHook",
 		Policy:          FailurePolicyRetry,
-		CurrentBehavior: BehaviorReturnedToCaller,
+		CurrentBehavior: BehaviorLoggedWarn,
 		Retained:        true,
 		Owner:           TriggerPointOwnerExisting,
-		Note:            "任务已经完成，观察者重跑安全；hook 失败不能把已完成的任务改回去。",
-		GapClosure:      "T1.07.b：记录 warning 并继续。",
+		Note: "任务已经完成，观察者重跑安全。T1.07.b 第 3 组收口：管理器按 RetryCount 只重跑 " +
+			"handler，用尽后由触发点记一条警告（internal/planner/hook_warnings.go 的 " +
+			"emitHookWarning）并继续；" +
+			"hook 失败不能把已完成的任务改回去（CompletedCount / 计划完成判定只由状态迁移决定）。",
 	},
 	{
 		Hook:            "",
