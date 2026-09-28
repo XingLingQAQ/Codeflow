@@ -242,6 +242,53 @@ func computeManifestHash(m *Manifest) string {
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
+// ErrManifestHashMismatch means a manifest does not describe its own entries:
+// the recorded Hash is not the hash of the content it lists. Such a manifest
+// is a corrupted or tampered description of a tree.
+var ErrManifestHashMismatch = errors.New("manifest hash does not match its entries")
+
+// ErrManifestOrder means Entries or Excluded is not in ascending path order,
+// or contains a repeated path. The canonical hash is defined over a sorted
+// entry set, so an unsorted or duplicated list is malformed rather than merely
+// unusual.
+var ErrManifestOrder = errors.New("manifest entries are not sorted by path or contain duplicates")
+
+// Verify re-checks a manifest against itself before it is trusted as the
+// description of a tree. Capture always produces a manifest that passes, so a
+// failure means the manifest was modified after capture — a replay or an
+// external edit — and every hash derived from it would be built on a false
+// description. Root, Mode and HeadCommit are not covered here: callers compare
+// those between manifests, because equal content in two different roots is
+// legitimate and must still verify.
+func (m *Manifest) Verify() error {
+	if m == nil {
+		return errors.New("runworkspace: manifest is required")
+	}
+	if m.FormatVersion != FormatVersion {
+		return fmt.Errorf("runworkspace: unsupported manifest format version %d, want %d", m.FormatVersion, FormatVersion)
+	}
+	for i, e := range m.Entries {
+		if i > 0 && m.Entries[i-1].Path >= e.Path {
+			return fmt.Errorf("%w: entries[%d] %q after %q", ErrManifestOrder, i, e.Path, m.Entries[i-1].Path)
+		}
+	}
+	for i, x := range m.Excluded {
+		if x.Path == "" {
+			return fmt.Errorf("%w: excluded[%d] has an empty path", ErrManifestOrder, i)
+		}
+		if i > 0 {
+			prev := m.Excluded[i-1]
+			if prev.Path > x.Path || (prev.Path == x.Path && prev.Reason >= x.Reason) {
+				return fmt.Errorf("%w: excluded[%d] %q/%q after %q/%q", ErrManifestOrder, i, x.Path, x.Reason, prev.Path, prev.Reason)
+			}
+		}
+	}
+	if want := computeManifestHash(m); m.Hash != want {
+		return fmt.Errorf("%w: recorded %s, recomputed %s", ErrManifestHashMismatch, m.Hash, want)
+	}
+	return nil
+}
+
 // hashBytes returns the manifest content-hash form for a byte slice.
 func hashBytes(data []byte) string {
 	sum := sha256.Sum256(data)

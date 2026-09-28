@@ -566,6 +566,178 @@ func TestCaptureDifferentRootsSameContentHaveSameHash(t *testing.T) {
 	}
 }
 
+// TestVerifyAcceptsEveryCapture proves Verify is a self-check that Capture
+// always passes: a manifest straight from Capture can be trusted before it is
+// used as the description of a tree.
+func TestVerifyAcceptsEveryCapture(t *testing.T) {
+	policytesting.AllowForTest(t, policy.OperationProcessStart)
+	root, gm := newGitFixtureRepo(t)
+	writeFile(t, root, "a.txt", "A\n")
+	writeFile(t, root, ".env", "TOKEN=1\n")
+	writeFile(t, root, "b.pem", "KEY\n")
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "init")
+	writeFile(t, root, "a.txt", "A dirty\n")
+	writeFile(t, root, "c.txt", "C untracked\n")
+
+	for _, tc := range []struct {
+		name string
+		gm   *git.GitManager
+	}{
+		{"git mode", gm},
+		{"plain mode", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Capture(context.Background(), tc.gm, root, CaptureOptions{})
+			if err != nil {
+				t.Fatalf("capture: %v", err)
+			}
+			if err := m.Verify(); err != nil {
+				t.Fatalf("a fresh capture must verify: %v", err)
+			}
+		})
+	}
+}
+
+// TestVerifyRejectsTampering proves Verify catches each way a manifest can stop
+// describing its own content: an edited entry, an edited hash, an unsorted
+// list, a duplicate path, an empty exclusion path, and an unsupported format.
+func TestVerifyRejectsTampering(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "a.txt", "A\n")
+	writeFile(t, root, "b.txt", "B\n")
+	writeFile(t, root, ".env", "TOKEN=1\n")
+	writeFile(t, root, "b.pem", "KEY\n")
+
+	fresh, err := Capture(context.Background(), nil, root, CaptureOptions{})
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if err := fresh.Verify(); err != nil {
+		t.Fatalf("fixture does not verify: %v", err)
+	}
+	if len(fresh.Entries) < 2 || len(fresh.Excluded) < 2 {
+		t.Fatalf("fixture is too small: %d entries, %d exclusions", len(fresh.Entries), len(fresh.Excluded))
+	}
+
+	clone := func() *Manifest {
+		out := *fresh
+		out.Entries = append([]Entry(nil), fresh.Entries...)
+		out.Excluded = append([]Exclusion(nil), fresh.Excluded...)
+		return &out
+	}
+
+	t.Run("edited entry content hash", func(t *testing.T) {
+		m := clone()
+		m.Entries[0].ContentHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+		if err := m.Verify(); !errors.Is(err, ErrManifestHashMismatch) {
+			t.Fatalf("err = %v, want ErrManifestHashMismatch", err)
+		}
+	})
+
+	t.Run("edited entry size", func(t *testing.T) {
+		m := clone()
+		m.Entries[0].Size++
+		if err := m.Verify(); !errors.Is(err, ErrManifestHashMismatch) {
+			t.Fatalf("err = %v, want ErrManifestHashMismatch", err)
+		}
+	})
+
+	t.Run("edited manifest hash", func(t *testing.T) {
+		m := clone()
+		m.Hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+		if err := m.Verify(); !errors.Is(err, ErrManifestHashMismatch) {
+			t.Fatalf("err = %v, want ErrManifestHashMismatch", err)
+		}
+	})
+
+	t.Run("entries out of order", func(t *testing.T) {
+		m := clone()
+		m.Entries[0], m.Entries[1] = m.Entries[1], m.Entries[0]
+		if err := m.Verify(); !errors.Is(err, ErrManifestOrder) {
+			t.Fatalf("err = %v, want ErrManifestOrder", err)
+		}
+	})
+
+	t.Run("duplicate entry path", func(t *testing.T) {
+		m := clone()
+		m.Entries = append(m.Entries, m.Entries[0])
+		if err := m.Verify(); !errors.Is(err, ErrManifestOrder) {
+			t.Fatalf("err = %v, want ErrManifestOrder", err)
+		}
+	})
+
+	t.Run("exclusions out of order", func(t *testing.T) {
+		m := clone()
+		m.Excluded[0], m.Excluded[1] = m.Excluded[1], m.Excluded[0]
+		if err := m.Verify(); !errors.Is(err, ErrManifestOrder) {
+			t.Fatalf("err = %v, want ErrManifestOrder", err)
+		}
+	})
+
+	t.Run("duplicate exclusion", func(t *testing.T) {
+		m := clone()
+		m.Excluded = append(m.Excluded, m.Excluded[0])
+		if err := m.Verify(); !errors.Is(err, ErrManifestOrder) {
+			t.Fatalf("err = %v, want ErrManifestOrder", err)
+		}
+	})
+
+	t.Run("empty exclusion path", func(t *testing.T) {
+		m := clone()
+		m.Excluded = append([]Exclusion{{Reason: ReasonSecret}}, m.Excluded...)
+		if err := m.Verify(); !errors.Is(err, ErrManifestOrder) {
+			t.Fatalf("err = %v, want ErrManifestOrder", err)
+		}
+	})
+
+	t.Run("unsupported format version", func(t *testing.T) {
+		m := clone()
+		m.FormatVersion = FormatVersion + 1
+		if err := m.Verify(); err == nil || errors.Is(err, ErrManifestHashMismatch) {
+			t.Fatalf("err = %v, want a format version error", err)
+		}
+	})
+
+	t.Run("nil manifest", func(t *testing.T) {
+		var m *Manifest
+		if err := m.Verify(); err == nil {
+			t.Fatal("a nil manifest must not verify")
+		}
+	})
+}
+
+// TestVerifyIgnoresRootAndHead documents the deliberate scope of Verify: it
+// re-checks the content description, not where the content lives. Equal trees
+// in different roots are legitimate, so the caller compares roots explicitly.
+func TestVerifyIgnoresRootAndHead(t *testing.T) {
+	first := t.TempDir()
+	writeFile(t, first, "a.txt", "same\n")
+	second := t.TempDir()
+	writeFile(t, second, "a.txt", "same\n")
+
+	m1, err := Capture(context.Background(), nil, first, CaptureOptions{})
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	m2, err := Capture(context.Background(), nil, second, CaptureOptions{})
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if m1.Root == m2.Root {
+		t.Fatal("test setup is broken: both captures used the same root")
+	}
+	if err := m2.Verify(); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	head := "0123456789abcdef0123456789abcdef01234567"
+	moved := *m2
+	moved.HeadCommit = &head
+	if err := moved.Verify(); err != nil {
+		t.Fatalf("HeadCommit must not affect Verify: %v", err)
+	}
+}
+
 // --- helpers ---
 
 func requireGitCLI(t *testing.T) {
