@@ -1697,8 +1697,8 @@ func TestCommandMigration006Schema(t *testing.T) {
 	if len(res.Applied) != 0 {
 		t.Errorf("reopen applied %d migrations, want 0", len(res.Applied))
 	}
-	if res.ToVersion != 7 {
-		t.Errorf("reopen ToVersion = %d, want 7", res.ToVersion)
+	if want := latestEmbeddedMigrationVersion(t); res.ToVersion != want {
+		t.Errorf("reopen ToVersion = %d, want %d", res.ToVersion, want)
 	}
 	after, err := GetCommand(ctx, reopened.DB(), key)
 	if err != nil {

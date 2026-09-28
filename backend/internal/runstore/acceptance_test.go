@@ -425,8 +425,8 @@ func TestRunStoreReopen(t *testing.T) {
 	if len(res.Applied) != 0 {
 		t.Errorf("reopen applied %d migrations, want 0 (the schema is already current): %+v", len(res.Applied), res.Applied)
 	}
-	if res.FromVersion != 7 || res.ToVersion != 7 {
-		t.Errorf("reopen migration result = %d -> %d, want 7 -> 7", res.FromVersion, res.ToVersion)
+	if latest := latestEmbeddedMigrationVersion(t); res.FromVersion != latest || res.ToVersion != latest {
+		t.Errorf("reopen migration result = %d -> %d, want %d -> %d", res.FromVersion, res.ToVersion, latest, latest)
 	}
 	t.Logf("EVIDENCE reopen MigrationResult: applied=%d from=%d to=%d", len(res.Applied), res.FromVersion, res.ToVersion)
 

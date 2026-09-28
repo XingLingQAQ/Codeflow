@@ -53,6 +53,57 @@ func tableExists(t *testing.T, db *sql.DB, name string) bool {
 	return n > 0
 }
 
+// latestEmbeddedMigrationVersion returns the highest version in the embedded
+// migration set. It is how every test in this package asks "what is the current
+// schema version?" without naming a number, so appending a migration updates
+// this file (and TestMigrateFromEmpty's itemized list) instead of a dozen
+// unrelated fixtures.
+//
+// It fails the test rather than returning a zero value when the embedded set is
+// not a clean 1..N. A gap would make "the highest version" ambiguous — exactly
+// what the runner refuses to guess at (loadMigrations) — and a duplicate would
+// do the same; silently returning 0 would turn a broken migration set into a
+// confusing "want 0" failure somewhere far away from the cause.
+func latestEmbeddedMigrationVersion(t *testing.T) int {
+	t.Helper()
+	entries, err := fs.ReadDir(embeddedMigrations, migrationsDir)
+	if err != nil {
+		t.Fatalf("read embedded migrations: %v", err)
+	}
+
+	versions := map[int]string{}
+	highest := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			t.Fatalf("embedded migrations contain a directory %q", entry.Name())
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".sql") {
+			t.Fatalf("embedded migration %q does not end in .sql", name)
+		}
+		version, _, err := parseMigrationName(name)
+		if err != nil {
+			t.Fatalf("parse embedded migration %q: %v", name, err)
+		}
+		if previous, duplicate := versions[version]; duplicate {
+			t.Fatalf("embedded migrations %q and %q both claim version %d", previous, name, version)
+		}
+		versions[version] = name
+		if version > highest {
+			highest = version
+		}
+	}
+	if highest == 0 {
+		t.Fatal("no embedded migrations found")
+	}
+	for v := 1; v <= highest; v++ {
+		if _, ok := versions[v]; !ok {
+			t.Fatalf("embedded migrations have a gap at version %d (highest is %d)", v, highest)
+		}
+	}
+	return highest
+}
+
 // TestMigrateFromEmpty is §19.4 "empty database from zero": every business table
 // plus the runner's own bookkeeping table exist, the reported versions are
 // 0 -> 1, and the recorded checksum is the sha256 of the embedded file.
@@ -77,11 +128,11 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.FromVersion != 0 {
 		t.Errorf("FromVersion = %d, want 0", res.FromVersion)
 	}
-	if res.ToVersion != 7 {
-		t.Errorf("ToVersion = %d, want 7", res.ToVersion)
+	if res.ToVersion != 8 {
+		t.Errorf("ToVersion = %d, want 8", res.ToVersion)
 	}
-	if len(res.Applied) != 7 {
-		t.Fatalf("Applied = %v, want all seven migrations", res.Applied)
+	if len(res.Applied) != 8 {
+		t.Fatalf("Applied = %v, want all eight migrations", res.Applied)
 	}
 	if res.Applied[0].Version != 1 || res.Applied[0].Name != "runtime" {
 		t.Errorf("Applied[0] = %+v, want version 1 named runtime", res.Applied[0])
@@ -104,12 +155,23 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.Applied[6].Version != 7 || res.Applied[6].Name != "command_client_key_index" {
 		t.Errorf("Applied[6] = %+v, want version 7 named command_client_key_index", res.Applied[6])
 	}
+	if res.Applied[7].Version != 8 || res.Applied[7].Name != "artifact_versions" {
+		t.Errorf("Applied[7] = %+v, want version 8 named artifact_versions", res.Applied[7])
+	}
+	// The itemized list above is the one place that pins the whole migration
+	// set by hand; this keeps it in step with the files actually embedded, so a
+	// migration added without extending the list fails here rather than
+	// silently going unchecked.
+	if got := latestEmbeddedMigrationVersion(t); got != len(res.Applied) {
+		t.Errorf("latestEmbeddedMigrationVersion() = %d, itemized list has %d entries", got, len(res.Applied))
+	}
 
 	for _, table := range []string{
 		"project_refs", "legacy_resource_refs", "tasks", "runs", "attempts",
 		"input_snapshots", "events", "outbox", "scope_counters", "consumer_offsets",
 		"legacy_event_sources",
 		"command_records",
+		"artifact_versions",
 		"runstore_migrations",
 	} {
 		if !tableExists(t, db, table) {
@@ -161,6 +223,100 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if userVersion != 0 {
 		t.Errorf("PRAGMA user_version = %d, want 0 (runstore_migrations is the version record)", userVersion)
 	}
+}
+
+// TestMigrateUpgradesSevenToEight walks the "old database" path for the newest
+// migration: a database built from migrations 1..7 only must be upgraded to 8
+// exactly once, with the right checksum recorded, and a second open must be
+// idempotent. It is the evidence that 008 is an additive migration and not a
+// rewrite of what earlier binaries wrote.
+//
+// The 1..7 set is assembled from the embedded files rather than from a checked-in
+// copy, so this test cannot drift from the migrations it claims to replay.
+func TestMigrateUpgradesSevenToEight(t *testing.T) {
+	ctx := context.Background()
+	db, path := openTemp(t)
+
+	upToSeven := fstest.MapFS{}
+	for _, name := range []string{
+		"001_runtime.sql", "002_input_snapshots.sql", "003_events.sql",
+		"004_dispatch.sql", "005_legacy_sources.sql", "006_command_records.sql",
+		"007_command_client_key_index.sql",
+	} {
+		upToSeven["migrations/"+name] = &fstest.MapFile{Data: mustRead(t, embeddedMigrations, "migrations/"+name)}
+	}
+	res, err := migrateFS(ctx, db, upToSeven)
+	if err != nil {
+		t.Fatalf("migrate to 007: %v", err)
+	}
+	if res.ToVersion != 7 {
+		t.Fatalf("pre-upgrade ToVersion = %d, want 7", res.ToVersion)
+	}
+	if tableExists(t, db, "artifact_versions") {
+		t.Fatal("artifact_versions exists before 008 was applied")
+	}
+	seedRuntimeFixture(t, db)
+	before := runRow(t, db, "r-1")
+
+	// The full embedded set now applies 008 and nothing else.
+	upgraded, err := Migrate(ctx, db)
+	if err != nil {
+		t.Fatalf("Migrate to 008: %v", err)
+	}
+	if upgraded.FromVersion != 7 || upgraded.ToVersion != latestEmbeddedMigrationVersion(t) {
+		t.Errorf("upgrade versions = %d -> %d, want 7 -> %d",
+			upgraded.FromVersion, upgraded.ToVersion, latestEmbeddedMigrationVersion(t))
+	}
+	if len(upgraded.Applied) != 1 || upgraded.Applied[0].Version != 8 ||
+		upgraded.Applied[0].Name != "artifact_versions" {
+		t.Fatalf("upgrade applied %+v, want only version 8 named artifact_versions", upgraded.Applied)
+	}
+	if !tableExists(t, db, "artifact_versions") {
+		t.Error("artifact_versions is missing after the upgrade")
+	}
+	// The recorded checksum must be the sha256 of the embedded 008 file,
+	// computed independently here (LF-normalized, as loadMigrations does).
+	body := bytes.ReplaceAll(mustRead(t, embeddedMigrations, "migrations/008_artifact_versions.sql"),
+		[]byte("\r\n"), []byte("\n"))
+	sum := sha256.Sum256(body)
+	if want := "sha256:" + hex.EncodeToString(sum[:]); upgraded.Applied[0].Checksum != want {
+		t.Errorf("Applied[0].Checksum = %s, want %s", upgraded.Applied[0].Checksum, want)
+	}
+	var recorded string
+	if err := db.QueryRow(`SELECT checksum FROM runstore_migrations WHERE version=8`).Scan(&recorded); err != nil {
+		t.Fatalf("read recorded checksum: %v", err)
+	}
+	if recorded != upgraded.Applied[0].Checksum {
+		t.Errorf("recorded checksum = %s, recorded in the result = %s", recorded, upgraded.Applied[0].Checksum)
+	}
+	// The pre-existing rows are untouched by the upgrade.
+	assertRunUnchanged(t, db, "r-1", before)
+
+	// Idempotent: a second Migrate applies nothing, on the live handle and
+	// after a close/reopen of the file.
+	again, err := Migrate(ctx, db)
+	if err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+	if len(again.Applied) != 0 || again.ToVersion != latestEmbeddedMigrationVersion(t) {
+		t.Errorf("second Migrate = %+v, want nothing applied", again)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	reopened, err := dbx.Open(path)
+	if err != nil {
+		t.Fatalf("reopen %s: %v", path, err)
+	}
+	defer reopened.Close()
+	third, err := Migrate(ctx, reopened)
+	if err != nil {
+		t.Fatalf("Migrate after reopen: %v", err)
+	}
+	if len(third.Applied) != 0 || third.ToVersion != latestEmbeddedMigrationVersion(t) {
+		t.Errorf("reopen Migrate = %+v, want nothing applied", third)
+	}
+	assertRunUnchanged(t, reopened, "r-1", before)
 }
 
 // seedRuntimeFixture inserts one project_ref/task/snapshot/run set. Tests that
@@ -238,8 +394,8 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first Migrate: %v", err)
 	}
-	if first.ToVersion != 7 {
-		t.Fatalf("first Migrate ToVersion = %d, want 7", first.ToVersion)
+	if first.ToVersion != latestEmbeddedMigrationVersion(t) {
+		t.Fatalf("first Migrate ToVersion = %d, want the latest embedded version", first.ToVersion)
 	}
 
 	seedRuntimeFixture(t, db)
@@ -250,13 +406,13 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
-	if second.FromVersion != 7 || second.ToVersion != 7 {
-		t.Errorf("second Migrate versions = %d -> %d, want 7 -> 7", second.FromVersion, second.ToVersion)
+	if latest := latestEmbeddedMigrationVersion(t); second.FromVersion != latest || second.ToVersion != latest {
+		t.Errorf("second Migrate versions = %d -> %d, want %d -> %d", second.FromVersion, second.ToVersion, latest, latest)
 	}
 	if len(second.Applied) != 0 {
 		t.Errorf("second Migrate applied %v, want nothing", second.Applied)
 	}
-	assertMigrationRowCount(t, db, 7)
+	assertMigrationRowCount(t, db, latestEmbeddedMigrationVersion(t))
 	assertRunUnchanged(t, db, "r-1", before)
 
 	// Close and reopen the file: the recorded version must make the third call
@@ -274,10 +430,10 @@ func TestMigrateTwiceKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Migrate after reopen: %v", err)
 	}
-	if third.FromVersion != 7 || third.ToVersion != 7 || len(third.Applied) != 0 {
-		t.Errorf("reopen Migrate = %+v, want 7 -> 7 with nothing applied", third)
+	if latest := latestEmbeddedMigrationVersion(t); third.FromVersion != latest || third.ToVersion != latest || len(third.Applied) != 0 {
+		t.Errorf("reopen Migrate = %+v, want %d -> %d with nothing applied", third, latest, latest)
 	}
-	assertMigrationRowCount(t, reopened, 7)
+	assertMigrationRowCount(t, reopened, latestEmbeddedMigrationVersion(t))
 	assertRunUnchanged(t, reopened, "r-1", before)
 }
 
@@ -391,7 +547,7 @@ func TestMigrateChecksumMismatchFailsClosed(t *testing.T) {
 	if checksum != "sha256:0000" {
 		t.Errorf("checksum = %s, want the tampered value to be left alone", checksum)
 	}
-	assertMigrationRowCount(t, db, 7)
+	assertMigrationRowCount(t, db, latestEmbeddedMigrationVersion(t))
 
 	// A renamed file is the same class of mismatch and must also stop the run.
 	if _, err := db.Exec(`UPDATE runstore_migrations SET checksum=? WHERE version=1`,
@@ -493,9 +649,9 @@ func TestMigrateRejectsNewerSchema(t *testing.T) {
 	if !errors.Is(err, ErrSchemaTooNew) {
 		t.Fatalf("Migrate error = %v, want ErrSchemaTooNew", err)
 	}
-	// Nothing was applied and the future row is untouched (the seven real
+	// Nothing was applied and the future row is untouched (the real
 	// migrations plus the synthetic future row).
-	assertMigrationRowCount(t, db, 8)
+	assertMigrationRowCount(t, db, latestEmbeddedMigrationVersion(t)+1)
 }
 
 // TestMigrateRejectsCorruptHistory covers a hole in the recorded version set.
@@ -528,8 +684,8 @@ func TestOpenCreatesMigratedDatabase(t *testing.T) {
 	}
 	defer db.Close()
 
-	if res.FromVersion != 0 || res.ToVersion != 7 {
-		t.Errorf("Open migration result = %d -> %d, want 0 -> 7", res.FromVersion, res.ToVersion)
+	if latest := latestEmbeddedMigrationVersion(t); res.FromVersion != 0 || res.ToVersion != latest {
+		t.Errorf("Open migration result = %d -> %d, want 0 -> %d", res.FromVersion, res.ToVersion, latest)
 	}
 	if !tableExists(t, db, "runs") {
 		t.Error("runs table is missing after Open")
@@ -543,8 +699,8 @@ func TestOpenCreatesMigratedDatabase(t *testing.T) {
 		t.Fatalf("second Open: %v", err)
 	}
 	defer db2.Close()
-	if len(res2.Applied) != 0 || res2.ToVersion != 7 {
-		t.Errorf("second Open = %+v, want no applied migrations at version 7", res2)
+	if latest := latestEmbeddedMigrationVersion(t); len(res2.Applied) != 0 || res2.ToVersion != latest {
+		t.Errorf("second Open = %+v, want no applied migrations at version %d", res2, latest)
 	}
 	_ = runRow(t, db2, "r-1")
 }
@@ -578,7 +734,7 @@ func TestOpenClosesHandleOnMigrationFailure(t *testing.T) {
 		t.Fatalf("reopen after failed Open: %v", err)
 	}
 	defer verify.Close()
-	assertMigrationRowCount(t, verify, 8)
+	assertMigrationRowCount(t, verify, latestEmbeddedMigrationVersion(t)+1)
 }
 
 // TestLoadMigrationsRejectsBadNames pins the file naming contract, because a
