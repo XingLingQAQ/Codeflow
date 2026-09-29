@@ -475,6 +475,9 @@ func TestLegacyDeleteKeepsOutboxRows(t *testing.T) {
 func TestLegacyDueEventsOrdersAndBlocksPerFlow(t *testing.T) {
 	store, _ := newLegacyTestStore(t)
 
+	// The two Flows are task flows: the subject here is the outbox queue, and a
+	// project may hold one active project flow (T3.01.a), so the second of two
+	// flows of one project is a task flow.
 	for _, f := range []struct {
 		id    string
 		types []string
@@ -486,7 +489,9 @@ func TestLegacyDueEventsOrdersAndBlocksPerFlow(t *testing.T) {
 		for _, id := range f.types {
 			events = append(events, testLegacyEvent(id, "stage.done", "stage-1", id))
 		}
-		if err := store.Put(testLegacyFlow(f.id, "proj-1", events...)); err != nil {
+		flow := testLegacyFlow(f.id, "proj-1", events...)
+		flow.Kind = FlowKindTask
+		if err := store.Put(flow); err != nil {
 			t.Fatalf("put %s: %v", f.id, err)
 		}
 	}

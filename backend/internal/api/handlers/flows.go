@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,15 @@ import (
 )
 
 // CreateFlow handles POST /api/v1/flows
+//
+// T3.01.a: a project may hold one active project flow. A second one is a
+// conflict (409) whose message names the flow that holds the slot; the Flows
+// page lets whoever creates one, so the error has to carry enough to reach it.
+// The 409 comes from *floweng.ActiveProjectFlowExistsError, whose FlowID field
+// is the holder; nothing here reads the id out of the message.
+// A bad body is a bad request (400): an unknown kind, a task flow's
+// parent_project_flow_id that names nothing, a task flow or another project's
+// flow, like the other body errors.
 func CreateFlow(c *gin.Context) {
 	var req floweng.CreateFlowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -20,7 +30,13 @@ func CreateFlow(c *gin.Context) {
 	}
 	flow, err := floweng.GetEngine().Create(c.Request.Context(), &req)
 	if err != nil {
-		if strings.Contains(err.Error(), "unknown template") || strings.Contains(err.Error(), "required") {
+		if errors.Is(err, floweng.ErrActiveProjectFlowExists) {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+		if strings.Contains(err.Error(), "unknown template") || strings.Contains(err.Error(), "unknown kind") ||
+			strings.Contains(err.Error(), "required") ||
+			strings.Contains(err.Error(), "parent_project_flow_id") {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -323,6 +339,33 @@ func AbortFlow(c *gin.Context) {
 			return
 		}
 		respondInternalError(c, "abort flow", err)
+		return
+	}
+	respondOK(c, flow)
+}
+
+// ResumeFlow handles POST /api/v1/flows/:id/resume
+//
+// T3.01.a: a suspended flow (parked because its project's slot is held by
+// another project flow) goes back to active, provided nothing else holds the
+// slot. Unknown id → 404; not suspended (including active and aborted) → 409;
+// slot still taken → 409, whose body names the holder through the message of
+// *floweng.ActiveProjectFlowExistsError. The body is empty. The 404 uses the
+// same "not found" text test as the other handlers in this file, which is how
+// this package classifies the store's miss.
+func ResumeFlow(c *gin.Context) {
+	flowID := c.Param("id")
+	flow, err := floweng.GetEngine().Resume(c.Request.Context(), flowID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			respondError(c, http.StatusNotFound, err.Error())
+			return
+		}
+		if errors.Is(err, floweng.ErrFlowNotSuspended) || errors.Is(err, floweng.ErrActiveProjectFlowExists) {
+			respondError(c, http.StatusConflict, err.Error())
+			return
+		}
+		respondInternalError(c, "resume flow", err)
 		return
 	}
 	respondOK(c, flow)

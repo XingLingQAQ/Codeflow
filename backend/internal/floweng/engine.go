@@ -113,9 +113,25 @@ func (e *InMemoryEngine) SetGateEscalationHandler(h GateEscalationHandler) {
 }
 
 // Create instantiates a Flow from a built-in template.
+//
+// T3.01.a group 2 adds the kind and the one-active-project-flow rule. Kind
+// defaults to FlowKindProject, so every caller that predates this step creates
+// what it always created. A project may hold exactly one active project flow: a
+// second Create for the same project is refused with ErrActiveProjectFlowExists,
+// without writing anything, and the caller learns the id of the flow that holds
+// the slot. Task flows are not limited — a project may hold any number of them —
+// but a task flow's ParentProjectFlowID, when given, must name a Flow of the
+// same project whose kind is project.
 func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*Flow, error) {
 	if req == nil || req.ProjectID == "" {
 		return nil, fmt.Errorf("project_id is required")
+	}
+	kind := req.Kind
+	if kind == "" {
+		kind = FlowKindProject
+	}
+	if !kind.valid() {
+		return nil, fmt.Errorf("unknown kind %q", kind)
 	}
 	tmpl, ok := getTemplate(req.TemplateID)
 	if !ok {
@@ -130,14 +146,15 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 		TemplateID: tmpl.ID,
 		Status:     FlowStatusActive,
 		// T3.01.a: a flow created from a template is the project's flow of
-		// record. Task flows are created by a later step and carry
-		// FlowKindTask. Revision is not set here: the store owns it.
-		Kind:      FlowKindProject,
-		Loops:     append([]LoopEdge(nil), tmpl.Loops...),
-		Artifacts: make([]Artifact, 0),
-		Events:    make([]FlowEvent, 0),
-		CreatedAt: now,
-		UpdatedAt: now,
+		// record unless the caller asks for a task flow. Revision is not set
+		// here: the store owns it.
+		Kind:                kind,
+		ParentProjectFlowID: req.ParentProjectFlowID,
+		Loops:               append([]LoopEdge(nil), tmpl.Loops...),
+		Artifacts:           make([]Artifact, 0),
+		Events:              make([]FlowEvent, 0),
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 
 	stages := make([]Stage, 0, len(tmpl.Stages))
@@ -174,11 +191,99 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	if kind == FlowKindProject {
+		// The check and the write share e.mu, so two Creates racing for the
+		// same project's slot are serialized here and the store's partial
+		// unique index (or memoryStore's map scan) remains a backstop that
+		// never fires in a single engine.
+		if existing, err := e.activeProjectFlowLocked(req.ProjectID, ""); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return nil, activeProjectFlowError(existing.ID)
+		}
+	} else if req.ParentProjectFlowID != "" {
+		parent, err := e.store.Get(req.ParentProjectFlowID)
+		if err != nil {
+			return nil, fmt.Errorf("parent_project_flow_id %s: %w", req.ParentProjectFlowID, err)
+		}
+		if parent.Kind != FlowKindProject {
+			return nil, fmt.Errorf("parent_project_flow_id %s is a %s flow, want a project flow", req.ParentProjectFlowID, parent.Kind)
+		}
+		if parent.ProjectID != req.ProjectID {
+			return nil, fmt.Errorf("parent_project_flow_id %s belongs to project %s, not %s", req.ParentProjectFlowID, parent.ProjectID, req.ProjectID)
+		}
+	}
+
 	e.appendEvent(flow, "flow.created", "", fmt.Sprintf("created template=%s project=%s", tmpl.ID, req.ProjectID))
 	// Evaluate enter gates on the initially-active first stage: an unpassed
 	// human/agent enter gate starts the flow on waiting_gate.
 	e.applyEnterGates(flow, 0)
 
+	if err := e.store.Put(flow); err != nil {
+		return nil, err
+	}
+	return cloneFlow(flow), nil
+}
+
+// activeProjectFlowLocked returns the project's active project flow, or nil when
+// the project has none. excludeID is skipped, which is what lets Resume ask
+// "is anyone else active" about a flow that is not active yet and would keep
+// Create idempotent if it were ever asked about the flow it is writing.
+//
+// The store is scanned rather than filtered by a query because both stores
+// return every flow of the project from List and the number of flows a project
+// holds is small; the scan is inside e.mu, and the engine is the only writer of
+// both stores. The scan is deterministic: the store's own order is kept, so a
+// project that somehow holds two active project flows (a database a later build
+// wrote, a store that does not hold the invariant) names the same one on every
+// call — List orders by updated_at DESC, which is the flow the project page
+// shows.
+func (e *InMemoryEngine) activeProjectFlowLocked(projectID, excludeID string) (*Flow, error) {
+	items, err := e.store.List(projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range items {
+		if f == nil || f.ID == excludeID {
+			continue
+		}
+		if f.Kind == FlowKindProject && f.Status == FlowStatusActive {
+			return f, nil
+		}
+	}
+	return nil, nil
+}
+
+// Resume returns a suspended flow to active (T3.01.a, §28). A suspended flow is
+// a project flow that lost the project's active slot (the store migration
+// suspends the extras an older database holds; a later step suspends explicitly
+// when a project switches flows), so resuming it means taking the slot back:
+// a project whose slot is already held by another flow cannot resume one, and
+// the error names the flow that holds it.
+//
+// A flow that is not suspended is refused with ErrFlowNotSuspended — resuming an
+// active flow is a no-op nobody asked for and resuming a terminal one would
+// resurrect it.
+func (e *InMemoryEngine) Resume(ctx context.Context, flowID string) (*Flow, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	flow, err := e.store.Get(flowID)
+	if err != nil {
+		return nil, err
+	}
+	if flow.Status != FlowStatusSuspended {
+		return nil, fmt.Errorf("%w: %s is %s", ErrFlowNotSuspended, flowID, flow.Status)
+	}
+	if existing, err := e.activeProjectFlowLocked(flow.ProjectID, flowID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return nil, activeProjectFlowError(existing.ID)
+	}
+
+	flow.Status = FlowStatusActive
+	e.appendEvent(flow, "flow.resumed", "", "resumed suspended flow")
+	flow.UpdatedAt = time.Now().UTC()
 	if err := e.store.Put(flow); err != nil {
 		return nil, err
 	}
@@ -232,8 +337,8 @@ func (e *InMemoryEngine) Advance(ctx context.Context, flowID string, req *Advanc
 	if err != nil {
 		return nil, err
 	}
-	if flow.Status != FlowStatusActive {
-		return nil, fmt.Errorf("flow is not active: %s", flow.Status)
+	if err := requireActiveFlow(flow); err != nil {
+		return nil, err
 	}
 
 	activeIdx := activeStageIndex(flow)
@@ -309,8 +414,8 @@ func (e *InMemoryEngine) Skip(ctx context.Context, flowID string, req *SkipReque
 	if err != nil {
 		return nil, err
 	}
-	if flow.Status != FlowStatusActive {
-		return nil, fmt.Errorf("flow is not active: %s", flow.Status)
+	if err := requireActiveFlow(flow); err != nil {
+		return nil, err
 	}
 
 	idx := stageIndexByID(flow, req.StageID)
@@ -366,8 +471,8 @@ func (e *InMemoryEngine) Loop(ctx context.Context, flowID string, req *LoopReque
 	if err != nil {
 		return nil, err
 	}
-	if flow.Status != FlowStatusActive {
-		return nil, fmt.Errorf("flow is not active: %s", flow.Status)
+	if err := requireActiveFlow(flow); err != nil {
+		return nil, err
 	}
 
 	fromIdx := stageIndexByID(flow, req.FromStageID)
@@ -495,6 +600,9 @@ func (e *InMemoryEngine) decideGateLocked(flowID, gateID string, req *GateDecisi
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := requireActiveFlow(flow); err != nil {
+		return nil, nil, err
+	}
 	found := false
 	escalatedStageIdx := -1
 	for si := range flow.Stages {
@@ -557,7 +665,9 @@ func (e *InMemoryEngine) decideGateLocked(flowID, gateID string, req *GateDecisi
 	}, nil
 }
 
-// Abort terminates an active flow.
+// Abort terminates an active or suspended flow. A suspended flow has nothing
+// running, but aborting it is how it is discarded, so the operation is allowed
+// on it exactly as it is on an active one (T3.01.a group 2).
 func (e *InMemoryEngine) Abort(ctx context.Context, flowID, reason string) (*Flow, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -565,7 +675,7 @@ func (e *InMemoryEngine) Abort(ctx context.Context, flowID, reason string) (*Flo
 	if err != nil {
 		return nil, err
 	}
-	if flow.Status != FlowStatusActive {
+	if flow.Status != FlowStatusActive && flow.Status != FlowStatusSuspended {
 		return nil, fmt.Errorf("flow is not active: %s", flow.Status)
 	}
 	flow.Status = FlowStatusAborted
@@ -607,6 +717,9 @@ func (e *InMemoryEngine) AttachArtifactBy(ctx context.Context, flowID, stageID, 
 	defer e.mu.Unlock()
 	flow, err := e.store.Get(flowID)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireActiveFlow(flow); err != nil {
 		return nil, err
 	}
 	if stageIndexByID(flow, stageID) < 0 {
@@ -668,6 +781,9 @@ func (e *InMemoryEngine) SetArtifactStatus(ctx context.Context, flowID, artifact
 	if err != nil {
 		return nil, err
 	}
+	if err := requireActiveFlow(flow); err != nil {
+		return nil, err
+	}
 	var out *Artifact
 	for i := range flow.Artifacts {
 		if flow.Artifacts[i].ID == artifactID {
@@ -708,6 +824,18 @@ func (e *InMemoryEngine) appendEvent(flow *Flow, typ, stageID, msg string) {
 		// clone flow view for external bus without sharing mutable stages slice
 		e.notifier.OnFlowEvent(cloneFlow(flow), ev)
 	}
+}
+
+// requireActiveFlow refuses an operation that only makes sense on a running
+// flow. A suspended flow is a parked one: its stages, gates and artifacts are
+// frozen until it is resumed, so the stage machine and the artifact writes
+// refuse it exactly as they refuse a completed or aborted flow (T3.01.a group 2,
+// §28). The wording is the pool's: the handlers already map "not active" to 409.
+func requireActiveFlow(flow *Flow) error {
+	if flow.Status != FlowStatusActive {
+		return fmt.Errorf("flow is not active: %s", flow.Status)
+	}
+	return nil
 }
 
 func activeStageIndex(flow *Flow) int {

@@ -208,6 +208,7 @@ func (s *Server) setupRoutes() {
 			flows.POST("/:id/stages/:sid/artifacts", handlers.AttachFlowArtifact)
 			flows.POST("/:id/loop", handlers.LoopFlow)
 			flows.POST("/:id/abort", handlers.AbortFlow)
+			flows.POST("/:id/resume", handlers.ResumeFlow)
 			flows.POST("/:id/gates/:gid/decide", handlers.DecideFlowGate)
 		}
 

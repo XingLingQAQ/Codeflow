@@ -115,12 +115,18 @@ func archiveProject(ctx context.Context, projects IProjectService, flows floweng
 		}
 	}
 
+	// Archiving ends every flow the project could still be running: the active
+	// ones drive project work, and the suspended ones are parked flows that a
+	// restore could resume. Leaving a suspended flow behind would mean an
+	// archived project still holds a flow of record that one Resume away (after
+	// the active slot frees) becomes runnable. Terminal flows are history and
+	// stay as they are.
 	items, err := flows.List(ctx, id)
 	if err != nil {
 		return err
 	}
 	for _, f := range items {
-		if f == nil || f.Status != floweng.FlowStatusActive {
+		if f == nil || (f.Status != floweng.FlowStatusActive && f.Status != floweng.FlowStatusSuspended) {
 			continue
 		}
 		if _, err := flows.Abort(ctx, f.ID, "project archived"); err != nil {
@@ -196,6 +202,19 @@ func restoreProject(ctx context.Context, projects IProjectService, flows floweng
 		}
 	}
 
+	// The project's flow of record decides the session, not the other way round
+	// (T3.01.a group 2): when the restore reuses a flow that already carries a
+	// session, the runtime bindings must point at *that* session, or the
+	// restored project would name a flow and a session that do not belong
+	// together. The record is adopted before ensureProjectSession so the
+	// provisioner is asked for the session the flow runs on. A flow with no
+	// session leaves today's logic in place.
+	if existing, err := findActiveProjectFlow(ctx, flows, p.ID, record.FlowID); err != nil {
+		return nil, err
+	} else if existing != nil && existing.SessionID != "" {
+		record.FlowID = existing.ID
+		record.SessionID = existing.SessionID
+	}
 	session, err := ensureProjectSession(ctx, p, record)
 	if err != nil {
 		return nil, err
@@ -205,7 +224,13 @@ func restoreProject(ctx context.Context, projects IProjectService, flows floweng
 		return nil, err
 	}
 	record.FlowID = flow.ID
-	record.SessionID = session.ID
+	// A reused flow keeps its own session: updateRuntimeBindings must name the
+	// session the flow runs on, not the one record happened to carry.
+	if flow.SessionID != "" {
+		record.SessionID = flow.SessionID
+	} else {
+		record.SessionID = session.ID
+	}
 	record.State = lifecycleOperationRuntimeReady
 	if durable {
 		if err := journal.SaveLifecycleOperation(ctx, record); err != nil {
@@ -213,7 +238,7 @@ func restoreProject(ctx context.Context, projects IProjectService, flows floweng
 		}
 	}
 
-	p, err = projects.UpdateRuntimeBindings(ctx, p.ID, flow.ID, session.ID)
+	p, err = projects.UpdateRuntimeBindings(ctx, p.ID, flow.ID, record.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,14 +279,58 @@ func ensureProjectSession(ctx context.Context, p *Project, record *LifecycleOper
 	return &storage.Session{ID: sessionID, Title: p.Title + " session", CreatedAt: now, UpdatedAt: now}, nil
 }
 
+// ensureRunnableProjectFlow returns the project's active project flow, creating
+// one only when the project has none.
+//
+// T3.01.a makes "one active project flow per project" a rule of the engine, and
+// this function is the restore path that has to live with it. Before this step
+// the search matched on the session, so a project whose stored flow carried a
+// different session than the one the record named was answered with a second
+// flow — which the engine now refuses, and which made
+// RecoverIncompleteProjectLifecycles retry the same failing restore on every
+// start. The flow of record is a property of the project, not of a session, so
+// the search is by kind and status: the first (and, under the rule, only) active
+// project flow is reused whatever session it carries, and the session follows
+// the flow rather than the other way round.
+//
+// The store lists a project's flows by updated_at DESC, so the flow picked here
+// is the first active project flow the project page shows. preferredFlowID is
+// still consulted first, but only as a preference among active project flows of
+// this project: a stored id that is terminal, or of another project, is stale
+// and does not decide anything.
 func ensureRunnableProjectFlow(ctx context.Context, flows floweng.Engine, projectID, preferredFlowID, sessionID string) (*floweng.Flow, error) {
+	flow, err := findActiveProjectFlow(ctx, flows, projectID, preferredFlowID)
+	if err != nil {
+		return nil, err
+	}
+	if flow != nil {
+		return flow, nil
+	}
+	return flows.Create(ctx, &floweng.CreateFlowRequest{
+		ProjectID:  projectID,
+		TemplateID: floweng.TemplateNewProject,
+		SessionID:  sessionID,
+		Kind:       floweng.FlowKindProject,
+	})
+}
+
+// findActiveProjectFlow returns the active project flow ensureRunnableProjectFlow
+// would reuse, or nil when the project has none. preferredFlowID is consulted
+// first, but only as a preference: an id that names nothing, a terminal flow or
+// another project's flow does not decide anything. A missing preferred flow is
+// not an error (the id is a stale record, not a broken invariant), while a store
+// that cannot answer is.
+func findActiveProjectFlow(ctx context.Context, flows floweng.Engine, projectID, preferredFlowID string) (*floweng.Flow, error) {
 	if preferredFlowID != "" {
 		flow, err := flows.Get(ctx, preferredFlowID)
-		if err != nil {
+		if err == nil {
+			if isActiveProjectFlow(flow, projectID) {
+				return flow, nil
+			}
+		} else if !isNotFoundError(err) {
+			// A stored preferred id whose flow was deleted is stale, not fatal:
+			// the list below is the answer. Anything else is a real failure.
 			return nil, err
-		}
-		if flow != nil && flow.Status == floweng.FlowStatusActive && flow.ProjectID == projectID && flow.SessionID == sessionID {
-			return flow, nil
 		}
 	}
 	items, err := flows.List(ctx, projectID)
@@ -269,11 +338,30 @@ func ensureRunnableProjectFlow(ctx context.Context, flows floweng.Engine, projec
 		return nil, err
 	}
 	for _, flow := range items {
-		if flow != nil && flow.Status == floweng.FlowStatusActive && flow.SessionID == sessionID {
+		if isActiveProjectFlow(flow, projectID) {
 			return flow, nil
 		}
 	}
-	return flows.Create(ctx, &floweng.CreateFlowRequest{ProjectID: projectID, TemplateID: floweng.TemplateNewProject, SessionID: sessionID})
+	return nil, nil
+}
+
+// isActiveProjectFlow reports whether flow is the active project flow of
+// projectID: a flow document that exists, belongs to the project, is active and
+// is the project's flow of record (kind=project). A flow stored before T3.01
+// decodes as FlowKindProject, so an older database's active flow qualifies.
+func isActiveProjectFlow(flow *floweng.Flow, projectID string) bool {
+	return flow != nil &&
+		flow.ProjectID == projectID &&
+		flow.Status == floweng.FlowStatusActive &&
+		flow.Kind == floweng.FlowKindProject
+}
+
+// isNotFoundError reports whether err is the store's "flow not found". The
+// engine has no not-found sentinel yet (the handlers classify the same string),
+// so the check is local to this file and to the one place that has to tell a
+// stale stored id from a broken store.
+func isNotFoundError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "not found")
 }
 
 // RecoverIncompleteProjectLifecycles finishes archive and restore operations

@@ -5,6 +5,8 @@ package floweng
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -15,7 +17,55 @@ const (
 	FlowStatusActive    FlowStatus = "active"
 	FlowStatusCompleted FlowStatus = "completed"
 	FlowStatusAborted   FlowStatus = "aborted"
+	// FlowStatusSuspended is a non-terminal status a project flow lands in when
+	// it is not the project's flow of record (T3.01.a, §28): the project keeps
+	// exactly one active project flow, and the others are parked, with their
+	// stages, artifacts and events untouched, until they are resumed or aborted.
+	// A suspended flow drives nothing: every stage transition refuses it the way
+	// it refuses a completed or aborted flow.
+	FlowStatusSuspended FlowStatus = "suspended"
 )
+
+// The two errors the one-active-project-flow rule raises. They are sentinels so
+// the API layer and the project lifecycle can classify them without matching on
+// message text.
+var (
+	// ErrActiveProjectFlowExists is returned by Create (kind=project) and by
+	// Resume when the project already has an active project flow.
+	ErrActiveProjectFlowExists = errors.New("project already has an active project flow")
+	// ErrFlowNotSuspended is returned by Resume for a flow that is not
+	// suspended; resuming is only defined for a suspended flow.
+	ErrFlowNotSuspended = errors.New("flow is not suspended")
+)
+
+// ActiveProjectFlowExistsError is what Create (kind=project) and Resume return
+// when the project already has an active project flow. FlowID is the id of the
+// flow that holds the project's active slot — the flow the caller wanted to
+// reach, and the one the restore path adopts — as a field, so a caller reads it
+// instead of parsing it out of the message. errors.Is(err,
+// ErrActiveProjectFlowExists) holds, so existing classification keeps working.
+//
+// It is a struct rather than a plain fmt.Errorf("%w: %s", ...) because the id is
+// part of the answer, not decoration: the project lifecycle uses it to reuse the
+// flow of record without listing the project's flows again.
+type ActiveProjectFlowExistsError struct {
+	FlowID string
+}
+
+func (e *ActiveProjectFlowExistsError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrActiveProjectFlowExists, e.FlowID)
+}
+
+// Is matches the sentinel so errors.Is(err, ErrActiveProjectFlowExists) is true
+// for every value of this type, including a nil-receiver-free zero value.
+func (e *ActiveProjectFlowExistsError) Is(target error) bool {
+	return target == ErrActiveProjectFlowExists
+}
+
+// activeProjectFlowError builds the typed refusal for the flow holding the slot.
+func activeProjectFlowError(flowID string) error {
+	return &ActiveProjectFlowExistsError{FlowID: flowID}
+}
 
 // FlowKind is the level of a Flow (T3.01.a, §28): the project's flow of record,
 // or a short task flow. A project has one active project flow and any number of
@@ -225,7 +275,21 @@ type CreateFlowRequest struct {
 	ProjectID  string     `json:"project_id" binding:"required"`
 	TemplateID TemplateID `json:"template_id"`
 	SessionID  string     `json:"session_id,omitempty"` // optional: snapshot association
+	// Kind is the level of flow to create. Empty means FlowKindProject, which
+	// is what every caller before T3.01 meant, so an omitted kind keeps its old
+	// behavior. Only one active project flow may exist per project; task flows
+	// are not limited (T3.01.a group 2).
+	Kind FlowKind `json:"kind,omitempty"`
+	// ParentProjectFlowID is the project flow a task flow belongs to. It is
+	// optional here; when given it must name a Flow of the same project with
+	// kind=project, or Create refuses the request. The runtime-database foreign
+	// key that enforces it is T3.01.b.
+	ParentProjectFlowID string `json:"parent_project_flow_id,omitempty"`
 }
+
+// ResumeRequest resumes a suspended flow. It carries no fields yet; it exists so
+// the route has a documented body and can gain one without a breaking change.
+type ResumeRequest struct{}
 
 // AdvanceRequest completes the active stage and moves forward.
 type AdvanceRequest struct {
@@ -294,8 +358,13 @@ type Engine interface {
 	ListEvents(ctx context.Context, flowID string) ([]FlowEvent, error)
 	// DecideGate sets human/agent gate passed flag (approve/reject).
 	DecideGate(ctx context.Context, flowID, gateID string, req *GateDecisionRequest) (*Flow, error)
-	// Abort marks a flow aborted (terminal).
+	// Abort marks an active or suspended flow aborted (terminal).
 	Abort(ctx context.Context, flowID, reason string) (*Flow, error)
+	// Resume returns a suspended flow to active, provided no other project flow
+	// of the same project is active (T3.01.a, §28). A project whose slot is
+	// taken is refused with *ActiveProjectFlowExistsError, which names the
+	// holder in its FlowID field.
+	Resume(ctx context.Context, flowID string) (*Flow, error)
 	// AttachArtifact records a draft artifact on a stage (contentRef optional storage pointer).
 	AttachArtifact(ctx context.Context, flowID, stageID, artType, contentRef string) (*Artifact, error)
 	// SetArtifactStatus updates artifact status (draft/approved/stale).

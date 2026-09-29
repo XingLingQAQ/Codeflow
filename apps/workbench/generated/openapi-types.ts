@@ -213,6 +213,7 @@ export interface OpenApiOperationMap {
   'get_api_v1_flows_by_id_artifacts_by_aid': { method: 'GET'; path: '/api/v1/flows/{id}/artifacts/{aid}' };
   'patch_api_v1_flows_by_id_artifacts_by_aid': { method: 'PATCH'; path: '/api/v1/flows/{id}/artifacts/{aid}' };
   'post_api_v1_flows_by_id_abort': { method: 'POST'; path: '/api/v1/flows/{id}/abort' };
+  'post_api_v1_flows_by_id_resume': { method: 'POST'; path: '/api/v1/flows/{id}/resume' };
   'post_api_v1_flows_by_id_stages_by_sid_artifacts': { method: 'POST'; path: '/api/v1/flows/{id}/stages/{sid}/artifacts' };
   'get_api_v1_flows_by_id_stages_by_sid': { method: 'GET'; path: '/api/v1/flows/{id}/stages/{sid}' };
   'post_api_v1_flows_by_id_stages_by_sid_advance': { method: 'POST'; path: '/api/v1/flows/{id}/stages/{sid}/advance' };
@@ -2066,10 +2067,31 @@ export interface SnapshotDeleteResponse {
 
 export type SnapshotRestoreResponse = RestoreResult;
 
+export interface Flow {
+  id: string;
+  project_id: string;
+  session_id?: string;
+  template_id: string;
+  status: 'active' | 'completed' | 'aborted' | 'suspended';
+  kind: 'project' | 'task';
+  revision: number;
+  binding_id?: string;
+  template_revision?: number;
+  parent_project_flow_id?: string;
+  stages: Array<Record<string, unknown>>;
+  loops: Array<Record<string, unknown>>;
+  artifacts: Array<Record<string, unknown>>;
+  events: Array<Record<string, unknown>>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateFlowRequest {
   project_id: string;
   template_id?: string;
   session_id?: string;
+  kind?: 'project' | 'task';
+  parent_project_flow_id?: string;
 }
 
 export interface AdvanceFlowRequest {
@@ -2090,7 +2112,7 @@ export interface GateDecisionRequest {
 
 export interface FlowEnvelope {
   success?: boolean;
-  data?: Record<string, unknown>;
+  data?: Flow;
 }
 
 export interface WorkspaceWriteRequest {
@@ -2522,6 +2544,7 @@ export interface OpenApiSchemas {
   RestoreResult: RestoreResult;
   SnapshotDeleteResponse: SnapshotDeleteResponse;
   SnapshotRestoreResponse: SnapshotRestoreResponse;
+  Flow: Flow;
   CreateFlowRequest: CreateFlowRequest;
   AdvanceFlowRequest: AdvanceFlowRequest;
   LoopFlowRequest: LoopFlowRequest;

@@ -183,7 +183,12 @@ func TestRegisterTemplateConcurrent(t *testing.T) {
 				errCh <- err
 				return
 			}
-			if _, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p", TemplateID: id}); err != nil {
+			// A task flow: n goroutines create n flows of one project, and a
+			// project may hold one active project flow (T3.01.a). The subject
+			// here is the template registry under concurrency.
+			if _, err := e.Create(context.Background(), &CreateFlowRequest{
+				ProjectID: "p", TemplateID: id, Kind: FlowKindTask,
+			}); err != nil {
 				errCh <- err
 			}
 		}(ids[i])

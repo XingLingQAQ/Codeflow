@@ -3968,16 +3968,21 @@ paths:
             type: string
         - name: status
           in: query
-          description: Filter by flow status (active|completed|aborted)
+          description: Filter by flow status (active|completed|aborted|suspended)
           schema:
             type: string
-            enum: [active, completed, aborted]
+            enum: [active, completed, aborted, suspended]
       responses:
         '200':
           description: Flow list
     post:
       tags: [Flows]
       summary: Create flow from template
+      description: |
+        Creates a flow from a template. `kind` defaults to `project`. A project
+        holds at most one active project flow (T3.01.a): a second one is refused
+        with 409, whose message names the flow that holds the slot. Task flows
+        are not limited.
       x-codeflow-experimental: true
       requestBody:
         required: true
@@ -3992,6 +3997,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FlowEnvelope'
+        '400':
+          description: Invalid request (unknown kind/template, bad parent_project_flow_id)
+        '409':
+          description: The project already has an active project flow
 
   /api/v1/flows/{id}:
     get:
@@ -4195,7 +4204,31 @@ paths:
         '404':
           description: Not found
         '409':
-          description: Flow not active
+          description: Flow not active or suspended
+
+  /api/v1/flows/{id}/resume:
+    post:
+      tags: [Flows]
+      summary: Resume a suspended flow
+      description: |
+        Returns a suspended flow to active. Only a suspended flow can be
+        resumed, and only while no other project flow of its project is active
+        (T3.01.a): a taken slot is a 409 whose message names the flow holding
+        it. The request body is empty (or omitted).
+      x-codeflow-experimental: true
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Flow after resume
+        '404':
+          description: Not found
+        '409':
+          description: Flow is not suspended, or its project's slot is taken
 
   /api/v1/flows/{id}/stages/{sid}/artifacts:
     post:
@@ -8903,6 +8936,65 @@ components:
       $ref: '#/components/schemas/RestoreResult'
 
     # ==================== Flow / Workspace / Skill Schemas ====================
+    Flow:
+      type: object
+      description: |
+        A flow instance. `kind=project` is the project's flow of record (one
+        active one per project); `kind=task` is a short task flow.
+      required: [id, project_id, template_id, status, kind, revision, stages, loops, artifacts, events, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        session_id:
+          type: string
+        template_id:
+          type: string
+        status:
+          type: string
+          enum: [active, completed, aborted, suspended]
+        kind:
+          type: string
+          description: project (the project's flow of record) | task
+          enum: [project, task]
+        revision:
+          type: integer
+          format: int64
+          description: Assigned by the store; 1 on create and +1 per store write
+        binding_id:
+          type: string
+          description: Workspace binding this flow runs on (omitted while empty)
+        template_revision:
+          type: integer
+          format: int64
+          description: Template revision the flow was instantiated from; 0/absent means unknown (omitted)
+        parent_project_flow_id:
+          type: string
+          description: The project flow a task flow belongs to (task flows only, omitted when empty)
+        stages:
+          type: array
+          items:
+            type: object
+        loops:
+          type: array
+          items:
+            type: object
+        artifacts:
+          type: array
+          items:
+            type: object
+        events:
+          type: array
+          items:
+            type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     CreateFlowRequest:
       type: object
       required: [project_id]
@@ -8914,6 +9006,13 @@ components:
           description: new_project | import_project
         session_id:
           type: string
+        kind:
+          type: string
+          description: project (default when omitted) | task
+          enum: [project, task]
+        parent_project_flow_id:
+          type: string
+          description: For a task flow, the project flow of the same project it belongs to
 
     AdvanceFlowRequest:
       type: object
@@ -8951,7 +9050,7 @@ components:
         success:
           type: boolean
         data:
-          type: object
+          $ref: '#/components/schemas/Flow'
 
     WorkspaceWriteRequest:
       type: object

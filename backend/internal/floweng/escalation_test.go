@@ -49,7 +49,10 @@ func (h *captureEscalationHandler) count() int {
 
 func newEscalationTestFlow(t *testing.T, e *InMemoryEngine, projectID, gateID string) *Flow {
 	t.Helper()
-	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: projectID})
+	// A task flow: this fixture only needs a flow with a gate on it, and since
+	// T3.01.a a project may hold one active project flow, so several fixtures
+	// share the project as task flows.
+	flow, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: projectID, Kind: FlowKindTask})
 	if err != nil {
 		t.Fatal(err)
 	}

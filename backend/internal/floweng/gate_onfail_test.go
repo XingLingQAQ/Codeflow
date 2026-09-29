@@ -89,8 +89,14 @@ func TestAdvanceBlockedEscalateGateMentionsEscalation(t *testing.T) {
 		t.Fatalf("blocked-gate error should mention escalation, got %q", err.Error())
 	}
 
-	// A plain block gate error must NOT mention escalation.
-	flow2, _ := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p"})
+	// A plain block gate error must NOT mention escalation. The project's single
+	// active project flow is the one above, so this second fixture is a task
+	// flow (T3.01.a: a project holds one active project flow, any number of task
+	// flows).
+	flow2, err := e.Create(context.Background(), &CreateFlowRequest{ProjectID: "p", Kind: FlowKindTask})
+	if err != nil {
+		t.Fatal(err)
+	}
 	flow2.Stages[0].Gates = []Gate{{ID: "g-plain", Phase: GatePhaseExit, Kind: GateKindHumanApproval}}
 	if err := e.putRaw(flow2); err != nil {
 		t.Fatal(err)

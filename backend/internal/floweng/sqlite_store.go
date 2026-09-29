@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/codeflow/backend/internal/dbx"
@@ -72,9 +73,15 @@ func prepareFlowDBDir(dbPath string) error {
 // template_revision, parent_project_flow_id) to the CREATE and then, in
 // addFlowColumns, to any flows table that predates them. The payload stays the
 // document of record and these columns stay its mirror, exactly like status:
-// they exist so a later step can put a partial unique index on
-// (project_id) WHERE kind='project' AND status='active' without reading JSON,
-// and so a revision can be compared inside a transaction.
+// they exist so the partial unique index below can be built on kind without
+// reading JSON, and so a revision can be compared inside a transaction.
+//
+// The partial unique index idx_flows_one_active_project is group 2's rule "one
+// active project flow per project" expressed where it cannot be raced: the
+// engine checks the rule under its own lock, and this index is what keeps a
+// database written by a concurrent process — or a caller that goes straight to
+// the store — from holding two. It is created after the migration below, which
+// is what makes an older database able to satisfy it.
 func (s *SQLiteFlowStore) initSchema() error {
 	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS flows (
@@ -128,12 +135,55 @@ CREATE INDEX IF NOT EXISTS idx_flow_event_outbox_flow_pending
   ON flow_event_outbox(flow_id, seq) WHERE state = 'pending';
 CREATE INDEX IF NOT EXISTS idx_flow_event_outbox_due_pending
   ON flow_event_outbox(next_attempt_at, seq) WHERE state = 'pending';
+-- Receipts of the one-time, in-place data migrations this store has run
+-- (currently t301a_single_active_project_flow). A migration that has a row here
+-- is never run twice, so opening a database cannot repeat its effects. The
+-- receipt column keeps the JSON report of what that run changed.
+CREATE TABLE IF NOT EXISTS flow_store_migrations (
+  name       TEXT PRIMARY KEY,
+  applied_at INTEGER NOT NULL,
+  receipt    TEXT NOT NULL
+);
 `)
 	if err != nil {
 		return fmt.Errorf("init floweng schema: %w", err)
 	}
 	if err := s.addFlowColumns(); err != nil {
 		return err
+	}
+	// The migration comes before the index, and the order is the point: an
+	// existing database may hold several active project flows, and the index can
+	// only be created on one that does not. On a database this build has already
+	// opened, the migration is a receipt lookup and creates the index in the same
+	// statement it always did.
+	if err := s.migrateSingleActiveProjectFlow(); err != nil {
+		return err
+	}
+	if err := s.createSingleActiveProjectFlowIndex(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// createSingleActiveProjectFlowIndex creates the index that enforces
+// T3.01.a group 2's rule: one active project flow per project. It is partial, so
+// it constrains only the rows that are a project's flow of record and drive its
+// stages: any number of task flows, completed/aborted/suspended project flows
+// and flows of other projects are unconstrained, and a project with no active
+// project flow at all (archived, or mid-restore) is fine. The first active
+// project flow of a project can always be inserted; a second meets a UNIQUE
+// failure that Put reports as ErrActiveProjectFlowExists.
+//
+// It runs on its own, after the migration, so a database that still violates the
+// rule fails here with a message that says which rule and why, rather than
+// somewhere inside a schema script.
+func (s *SQLiteFlowStore) createSingleActiveProjectFlowIndex() error {
+	if _, err := s.db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS ` + oneActiveProjectFlowIndexName +
+			` ON flows(project_id) WHERE kind='project' AND status='active'`,
+	); err != nil {
+		return fmt.Errorf("create %s (a database with several active project flows in one project must be migrated first): %w",
+			oneActiveProjectFlowIndexName, err)
 	}
 	return nil
 }
@@ -322,6 +372,11 @@ func (s *SQLiteFlowStore) Close() error {
 // Kind, binding_id, template_revision and parent_project_flow_id are mirrored
 // into their columns from the document, the way status already is. Empty ones
 // are written as NULL, so "not set" stays distinguishable from a value.
+//
+// A write that would leave the project with two active project flows meets
+// idx_flows_one_active_project and comes back as ErrActiveProjectFlowExists —
+// no transaction is left half-written, and the id of the flow that holds the
+// slot is in the error.
 func (s *SQLiteFlowStore) Put(flow *Flow) error {
 	if flow == nil || flow.ID == "" {
 		return fmt.Errorf("flow id is required")
@@ -336,6 +391,31 @@ func (s *SQLiteFlowStore) Put(flow *Flow) error {
 	}
 	defer tx.Rollback()
 
+	if err := writeFlowDocument(tx, flow); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("put flow: commit: %w", err)
+	}
+	return nil
+}
+
+// writeFlowDocument writes one Flow inside the caller's transaction: it assigns
+// the document's revision from the stored row, upserts the row and its mirror
+// columns, and queues every event the stored document did not already have into
+// flow_event_outbox. The payload, the row and the outbox rows therefore land
+// together or not at all, which is the guarantee Put documents.
+//
+// It is a plain function on *sql.Tx, not a method, because two callers with
+// different lifetimes need exactly this sequence: Put, in a transaction that
+// lasts one write, and the one-time store migration, in a transaction that
+// rewrites many rows and records its receipt. Duplicating the sequence would
+// mean two places that decide what a stored Flow is, and the migration's
+// suspended flows would be the first documents written by the copy.
+//
+// The revision is written back into the caller's document, so the copy the
+// caller holds carries the revision that was just stored.
+func writeFlowDocument(tx *sql.Tx, flow *Flow) error {
 	stored, err := loadStoredEventIDs(tx, flow.ID)
 	if err != nil {
 		return err
@@ -371,6 +451,9 @@ ON CONFLICT(id) DO UPDATE SET
 		flow.CreatedAt.UTC().UnixMilli(), flow.UpdatedAt.UTC().UnixMilli(),
 		string(flow.Kind), revision, nullableText(flow.BindingID),
 		nullableInt(flow.TemplateRevision), nullableText(flow.ParentProjectFlowID)); err != nil {
+		if id, ok := conflictingActiveProjectFlowID(tx, flow, err); ok {
+			return activeProjectFlowError(id)
+		}
 		return fmt.Errorf("put flow: %w", err)
 	}
 
@@ -397,11 +480,45 @@ ON CONFLICT(source_event_id) DO NOTHING
 			return fmt.Errorf("put flow %s: queue event %s: %w", flow.ID, ev.ID, err)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("put flow: commit: %w", err)
-	}
 	return nil
+}
+
+// conflictingActiveProjectFlowID reports whether a failed flows write failed
+// because of idx_flows_one_active_project, and if so the id of the flow that
+// holds the slot. Returns ok=false for every other error, which must stay
+// whatever it was.
+//
+// Two spellings can be recognised. On this build the unique index reports itself
+// by the columns it is declared on — "UNIQUE constraint failed:
+// flows.project_id" — because SQLite names the indexed columns, not the index.
+// A database created by a build that used the constraint form (a UNIQUE ...
+// WHERE constraint, where SQLite does report the constraint name) explains
+// itself by the index/constraint name instead, so that spelling is accepted too.
+// Both checks are specific: an unrelated UNIQUE failure, or a CHECK/NOT NULL
+// failure, is not misreported as this rule.
+//
+// The holder's id is not in the driver's error, so it is read back. The
+// statement that failed was rolled back on its own (SQLite's default ABORT
+// conflict resolution aborts the statement, not the transaction), and the row
+// that blocks the write was committed before this transaction began, so the
+// read sees the holder.
+func conflictingActiveProjectFlowID(tx *sql.Tx, flow *Flow, err error) (string, bool) {
+	if err == nil || flow == nil {
+		return "", false
+	}
+	msg := err.Error()
+	named := strings.Contains(msg, oneActiveProjectFlowIndexName)
+	if !named && !(strings.Contains(msg, "UNIQUE constraint failed") && strings.Contains(msg, "flows.project_id")) {
+		return "", false
+	}
+	var existing string
+	q := `SELECT id FROM flows WHERE project_id = ? AND kind = 'project' AND status = 'active' AND id <> ?`
+	if err := tx.QueryRow(q, flow.ProjectID, flow.ID).Scan(&existing); err == nil && existing != "" {
+		return existing, true
+	}
+	// The rule is still the reason even when the holder cannot be named;
+	// naming the project is the honest answer.
+	return "another active project flow of " + flow.ProjectID, true
 }
 
 // nextRevision returns the revision the document being written must carry: 1

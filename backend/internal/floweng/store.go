@@ -33,6 +33,13 @@ func newMemoryStore() *memoryStore {
 // was just stored. Comparing the caller's revision against the stored one
 // (compare-and-set) is T3.01.b, not this step: here the incoming value is
 // ignored, exactly as it is on the SQLite side.
+//
+// Put also enforces the one-active-project-flow rule against the map it holds,
+// which is the in-process equivalent of the flows table's partial unique index:
+// a second active project flow of the same project is refused with
+// ErrActiveProjectFlowExists, and the refused document is not stored (the
+// engine checks the same rule before it starts building the document; this is
+// the backstop a caller that goes straight to the store meets).
 func (s *memoryStore) Put(flow *Flow) error {
 	if flow == nil || flow.ID == "" {
 		return fmt.Errorf("flow id is required")
@@ -42,9 +49,20 @@ func (s *memoryStore) Put(flow *Flow) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	prev, ok := s.flows[flow.ID]
 	rev := int64(1)
-	if prev, ok := s.flows[flow.ID]; ok {
+	if ok {
 		rev = prev.Revision + 1
+	}
+	if flow.Kind == FlowKindProject && flow.Status == FlowStatusActive {
+		for id, other := range s.flows {
+			if id == flow.ID || other.Kind != FlowKindProject || other.Status != FlowStatusActive {
+				continue
+			}
+			if other.ProjectID == flow.ProjectID {
+				return activeProjectFlowError(id)
+			}
+		}
 	}
 	flow.Revision = rev
 	s.flows[flow.ID] = cloneFlow(flow)
