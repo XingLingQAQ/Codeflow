@@ -227,6 +227,7 @@ func TestRequiredIdentityTable(t *testing.T) {
 	want := map[run.ExecutionEventType]run.IdentityRequirement{
 		"approval.approved":       {Run: true},
 		"approval.decided":        {},
+		"approval.denied":         {Run: true},
 		"approval.required":       {Run: true},
 		"budget.soft_exceeded":    {Run: true},
 		"budget.warning":          {Run: true},

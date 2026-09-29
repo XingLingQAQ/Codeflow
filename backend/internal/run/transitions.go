@@ -14,8 +14,8 @@ import "fmt"
 //
 //   - TriggerEvent: a type from the closed execution-event enum
 //     (scheduler.claimed, process.started, approval.required, approval.approved,
-//     budget.soft_exceeded, checkpoint.acknowledged, process.exited,
-//     process.terminated, server.restart).
+//     approval.denied (CA-3), budget.soft_exceeded, checkpoint.acknowledged,
+//     process.exited, process.terminated, server.restart).
 //   - TriggerCommand: run.cancel, run.resume, hard_deadline, merge. These are
 //     commands, not events, so they are absent from the event enum.
 //   - TriggerConclusion: the recoverer's own findings — process_verified,
@@ -296,6 +296,19 @@ var transitionRules = []transitionRule{
 		FailureCode: CodeApprovalInvalid,
 		StateEvent:  EventApprovalApproved,
 	},
+	// waiting_approval --approval.denied--> running (CA-3): the pending tool
+	// call was rejected, expired or invalidated and the backend was told, so the
+	// Run continues without the tool having run. Without this row a rejection
+	// would leave the Run in waiting_approval while its process keeps running,
+	// and the next approval.required (legal only from running) would fail.
+	{
+		From: RunStatusWaitingApproval, Kind: TriggerEvent, Name: string(EventApprovalDenied),
+		To: RunStatusRunning,
+		Condition: "拒绝/到期/失效已记录并已投递给后端，工具未执行 " +
+			"(rejection/expiry/invalidation recorded and delivered to the backend; the tool did not run)",
+		FailureCode: CodeApprovalInvalid,
+		StateEvent:  EventApprovalDenied,
+	},
 	// running --budget.soft_exceeded--> running (usage warning only; never a
 	// faked pause). The warning is what gets recorded.
 	{
@@ -437,6 +450,7 @@ var triggerFailureCodes = map[triggerKey]string{
 	{TriggerEvent, string(EventProcessStarted)}:         CodeProcessStartFailed,
 	{TriggerEvent, string(EventApprovalRequired)}:       CodeApprovalPersistFailed,
 	{TriggerEvent, string(EventApprovalApproved)}:       CodeApprovalInvalid,
+	{TriggerEvent, string(EventApprovalDenied)}:         CodeApprovalInvalid,
 	{TriggerEvent, string(EventCheckpointAcknowledged)}: CodeCapabilityUnavailable,
 	{TriggerEvent, string(EventProcessExited)}:          CodeOutputPersistFailed,
 	{TriggerEvent, string(EventProcessTerminated)}:      CodeProcessKillFailed,
@@ -581,6 +595,7 @@ func AllTriggers() []Trigger {
 		ProcessExitedTrigger(1),
 		EventTrigger(string(EventApprovalRequired)),
 		EventTrigger(string(EventApprovalApproved)),
+		EventTrigger(string(EventApprovalDenied)),
 		EventTrigger(string(EventBudgetSoftExceeded)),
 		EventTrigger(string(EventCheckpointAcknowledged)),
 		ProcessTerminatedTrigger(RunStatusCancelled),

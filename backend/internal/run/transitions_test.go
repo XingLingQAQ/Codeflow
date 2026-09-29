@@ -62,12 +62,15 @@ type planRow struct {
 // into one entry per combination). CA-1 changed three things: process.terminated
 // carries the expected terminal (a hard deadline ends expired, not cancelled),
 // a process that exits while its Run waits for approval fails the Run, and
-// every row names its state event.
+// every row names its state event. CA-3 (plan §26.35) added the row that takes a
+// waiting_approval Run back to running when its pending tool call is denied
+// (rejected, expired or invalidated).
 var planRows = []planRow{
 	{"queued + scheduler.claimed", stQueued, event("scheduler.claimed"), stStarting, "scheduler.claimed"},
 	{"starting + process.started", stStarting, event("process.started"), stRunning, "process.started"},
 	{"running + approval.required", stRunning, event("approval.required"), stWaitingApproval, "approval.required"},
 	{"waiting_approval + approval.approved", stWaitingApproval, event("approval.approved"), stRunning, "approval.approved"},
+	{"waiting_approval + approval.denied", stWaitingApproval, event("approval.denied"), stRunning, "approval.denied"},
 	{"running + budget.soft_exceeded", stRunning, event("budget.soft_exceeded"), stRunning, "budget.warning"},
 	{"running + checkpoint.acknowledged", stRunning, event("checkpoint.acknowledged"), stPaused, "checkpoint.acknowledged"},
 	{"paused + run.resume", stPaused, command("run.resume"), stRunning, "run.resumed"},
@@ -459,6 +462,7 @@ func TestNextStatusFailureCodes(t *testing.T) {
 		{"process.started from queued", stQueued, event("process.started"), run.CodeProcessStartFailed},
 		{"approval.required from paused", stPaused, event("approval.required"), run.CodeApprovalPersistFailed},
 		{"approval.approved from running", stRunning, event("approval.approved"), run.CodeApprovalInvalid},
+		{"approval.denied from running", stRunning, event("approval.denied"), run.CodeApprovalInvalid},
 		{"checkpoint from paused", stPaused, event("checkpoint.acknowledged"), run.CodeCapabilityUnavailable},
 		{"exit(0) from starting", stStarting, run.ProcessExitedTrigger(0), run.CodeOutputPersistFailed},
 		{"exit(1) from paused", stPaused, run.ProcessExitedTrigger(1), run.CodeInvalidTransition},

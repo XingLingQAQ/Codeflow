@@ -33,7 +33,9 @@ type ExecutionEventType string
 // amendment CA-1 (plan §26.31) added so that every §21.1 transition has an event
 // type to write in its CAS transaction (§19.3 item 1), plus legacy.flow_event,
 // which contract amendment CA-2 (plan §26.31) added for the T1.05.c projection
-// of pre-3.0 Flow timelines.
+// of pre-3.0 Flow timelines, plus approval.denied, which contract amendment CA-3
+// (plan §26.35) added so that a waiting_approval Run whose pending tool call
+// will not be authorized has a transition back to running.
 const (
 	// EventApprovalApproved: a waiting_approval Run is approved (§21.1).
 	EventApprovalApproved ExecutionEventType = "approval.approved"
@@ -41,6 +43,12 @@ const (
 	// the human decision event of a Gate or a manual document, which may exist
 	// without a Run.
 	EventApprovalDecided ExecutionEventType = "approval.decided"
+	// EventApprovalDenied: the pending tool call of a waiting_approval Run will
+	// not be authorized — the approval was rejected, expired or invalidated —
+	// and the backend has been told, so the Run returns to running without the
+	// tool having run (§21.1, CA-3). The payload names the approval and the
+	// reason.
+	EventApprovalDenied ExecutionEventType = "approval.denied"
 	// EventApprovalRequired: a running Run needs approval (§21.1).
 	EventApprovalRequired ExecutionEventType = "approval.required"
 	// EventBudgetSoftExceeded: the soft budget was exceeded; it never fakes a
@@ -99,7 +107,7 @@ const (
 
 // ExecutionEventTypes lists every valid ExecutionEventType in schema order.
 var ExecutionEventTypes = []ExecutionEventType{
-	EventApprovalApproved, EventApprovalDecided, EventApprovalRequired,
+	EventApprovalApproved, EventApprovalDecided, EventApprovalDenied, EventApprovalRequired,
 	EventBudgetSoftExceeded, EventBudgetWarning, EventCheckpointAcknowledged,
 	EventLegacyFlowEvent, EventMergeCompleted, EventProcessExited, EventProcessStarted,
 	EventProcessTerminated, EventRunCancelRequested, EventRunCancelled,
@@ -111,7 +119,7 @@ var ExecutionEventTypes = []ExecutionEventType{
 // Valid reports whether t is one of the enum values.
 func (t ExecutionEventType) Valid() bool {
 	switch t {
-	case EventApprovalApproved, EventApprovalDecided, EventApprovalRequired,
+	case EventApprovalApproved, EventApprovalDecided, EventApprovalDenied, EventApprovalRequired,
 		EventBudgetSoftExceeded, EventBudgetWarning, EventCheckpointAcknowledged,
 		EventLegacyFlowEvent, EventMergeCompleted, EventProcessExited, EventProcessStarted,
 		EventProcessTerminated, EventRunCancelRequested, EventRunCancelled,
@@ -291,6 +299,13 @@ var identityRules = []EventIdentityRule{
 		Requirement: IdentityRequirement{},
 		Reason: "§19.3 人工决定记录；§27.1 Gate/人工文档允许没有 Run，故 run_id 可空" +
 			" (Gate / manual-document decision: §27.1 allows no Run)",
+	},
+	{
+		Event:       EventApprovalDenied,
+		Requirement: IdentityRequirement{Run: true},
+		Reason: "§21.1 waiting_approval→running（CA-3）：待批工具调用被拒绝/到期/失效，是 Run 级结论，" +
+			"必须指明 Run；attempt 可缺省，与 approval.approved 相同" +
+			" (Run-level outcome of a pending tool approval; the attempt is optional detail)",
 	},
 	{
 		Event:       EventApprovalRequired,

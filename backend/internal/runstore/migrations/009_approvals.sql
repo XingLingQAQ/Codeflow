@@ -23,11 +23,12 @@
 --
 -- Time is Unix milliseconds (UTC) in INTEGER columns, as in 001-008.
 --
--- Amendment policy (plan §26.31, as recorded in 003, 006, 007 and 008): the
--- in-place amendment window closed at T1.04. Migrations are frozen; the runner
--- fails closed on a checksum mismatch (migrate.go verifyRecorded), so any
--- further change is a new, appended migration whose version is the next
--- integer.
+-- Amendment policy (plan §26.31, as recorded in 003, 006, 007 and 008): until
+-- T1.04 wires runstore into production start-up, the main agent may amend a
+-- committed migration in place and record it in the plan; no database outside
+-- of tests exists yet. From T1.04 on migrations are frozen: the runner fails
+-- closed on a checksum mismatch (migrate.go verifyRecorded), so any further
+-- change is a new, appended migration whose version is the next integer.
 
 -- One approval: the record of what was asked, and (after T2.02.b decides it)
 -- what was answered.

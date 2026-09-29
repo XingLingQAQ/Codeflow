@@ -30,9 +30,13 @@
 -- run.cancelled, run.expired, run.reattached, run.recovering, run.resumed).
 -- Amended in place again by contract amendment CA-2 (2026-09-26, plan section
 -- 26.31): the type CHECK gained legacy.flow_event, the project-scoped
--- projection of a pre-3.0 Flow timeline entry (T1.05.c). Both amendments are
--- allowed only because runstore is not wired into production start-up yet; from
--- T1.04 on, migrations are frozen and a change must be a new migration.
+-- projection of a pre-3.0 Flow timeline entry (T1.05.c). Amended in place a
+-- third time by contract amendment CA-3 (2026-09-29, plan section 26.35): the
+-- type CHECK gained approval.denied, the state event that takes a
+-- waiting_approval Run back to running when its pending tool call is rejected,
+-- expired or invalidated (T2.02.b). All three amendments are allowed only
+-- because runstore is not wired into production start-up yet; from T1.04 on,
+-- migrations are frozen and a change must be a new migration.
 -- This was done in place rather than as a table rebuild because runstore was
 -- not yet wired into production start-up (T1.04): no database outside of tests
 -- was ever created from the earlier text. From T1.04 on, migrations are frozen
@@ -106,6 +110,7 @@ CREATE TABLE events (
     type           TEXT    NOT NULL CHECK (type IN (
         'approval.approved',
         'approval.decided',
+        'approval.denied',
         'approval.required',
         'budget.soft_exceeded',
         'budget.warning',
