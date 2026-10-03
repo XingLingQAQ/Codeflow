@@ -128,11 +128,11 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.FromVersion != 0 {
 		t.Errorf("FromVersion = %d, want 0", res.FromVersion)
 	}
-	if res.ToVersion != 9 {
-		t.Errorf("ToVersion = %d, want 9", res.ToVersion)
+	if res.ToVersion != 10 {
+		t.Errorf("ToVersion = %d, want 10", res.ToVersion)
 	}
-	if len(res.Applied) != 9 {
-		t.Fatalf("Applied = %v, want all nine migrations", res.Applied)
+	if len(res.Applied) != 10 {
+		t.Fatalf("Applied = %v, want all ten migrations", res.Applied)
 	}
 	if res.Applied[0].Version != 1 || res.Applied[0].Name != "runtime" {
 		t.Errorf("Applied[0] = %+v, want version 1 named runtime", res.Applied[0])
@@ -161,6 +161,9 @@ func TestMigrateFromEmpty(t *testing.T) {
 	if res.Applied[8].Version != 9 || res.Applied[8].Name != "approvals" {
 		t.Errorf("Applied[8] = %+v, want version 9 named approvals", res.Applied[8])
 	}
+	if res.Applied[9].Version != 10 || res.Applied[9].Name != "merge_journal" {
+		t.Errorf("Applied[9] = %+v, want version 10 named merge_journal", res.Applied[9])
+	}
 	// The itemized list above is the one place that pins the whole migration
 	// set by hand; this keeps it in step with the files actually embedded, so a
 	// migration added without extending the list fails here rather than
@@ -176,6 +179,7 @@ func TestMigrateFromEmpty(t *testing.T) {
 		"command_records",
 		"artifact_versions",
 		"approvals", "approval_consumptions",
+		"merge_operations", "merge_files",
 		"runstore_migrations",
 	} {
 		if !tableExists(t, db, table) {
@@ -229,68 +233,69 @@ func TestMigrateFromEmpty(t *testing.T) {
 	}
 }
 
-// TestMigrateUpgradesEightToNine walks the "old database" path for the newest
-// migration: a database built from migrations 1..8 only must be upgraded to 9
+// TestMigrateUpgradesNineToTen walks the "old database" path for the newest
+// migration: a database built from migrations 1..9 only must be upgraded to 10
 // exactly once, with the right checksum recorded, and a second open must be
-// idempotent. It is the evidence that 009 is an additive migration and not a
+// idempotent. It is the evidence that 010 is an additive migration and not a
 // rewrite of what earlier binaries wrote.
 //
-// The 1..8 set is assembled from the embedded files rather than from a checked-in
+// The 1..9 set is assembled from the embedded files rather than from a checked-in
 // copy, so this test cannot drift from the migrations it claims to replay.
-func TestMigrateUpgradesEightToNine(t *testing.T) {
+func TestMigrateUpgradesNineToTen(t *testing.T) {
 	ctx := context.Background()
 	db, path := openTemp(t)
 
-	upToEight := fstest.MapFS{}
+	upToNine := fstest.MapFS{}
 	for _, name := range []string{
 		"001_runtime.sql", "002_input_snapshots.sql", "003_events.sql",
 		"004_dispatch.sql", "005_legacy_sources.sql", "006_command_records.sql",
 		"007_command_client_key_index.sql", "008_artifact_versions.sql",
+		"009_approvals.sql",
 	} {
-		upToEight["migrations/"+name] = &fstest.MapFile{Data: mustRead(t, embeddedMigrations, "migrations/"+name)}
+		upToNine["migrations/"+name] = &fstest.MapFile{Data: mustRead(t, embeddedMigrations, "migrations/"+name)}
 	}
-	res, err := migrateFS(ctx, db, upToEight)
+	res, err := migrateFS(ctx, db, upToNine)
 	if err != nil {
-		t.Fatalf("migrate to 008: %v", err)
+		t.Fatalf("migrate to 009: %v", err)
 	}
-	if res.ToVersion != 8 {
-		t.Fatalf("pre-upgrade ToVersion = %d, want 8", res.ToVersion)
+	if res.ToVersion != 9 {
+		t.Fatalf("pre-upgrade ToVersion = %d, want 9", res.ToVersion)
 	}
-	if tableExists(t, db, "approvals") {
-		t.Fatal("approvals exists before 009 was applied")
+	if tableExists(t, db, "merge_operations") || tableExists(t, db, "merge_files") {
+		t.Fatal("merge journal tables exist before 010 was applied")
 	}
 	seedRuntimeFixture(t, db)
 	before := runRow(t, db, "r-1")
 
-	// The full embedded set now applies 009 and nothing else.
+	// The full embedded set now applies 010 and nothing else.
 	upgraded, err := Migrate(ctx, db)
 	if err != nil {
-		t.Fatalf("Migrate to 009: %v", err)
+		t.Fatalf("Migrate to 010: %v", err)
 	}
-	if upgraded.FromVersion != 8 || upgraded.ToVersion != latestEmbeddedMigrationVersion(t) {
-		t.Errorf("upgrade versions = %d -> %d, want 8 -> %d",
+	if upgraded.FromVersion != 9 || upgraded.ToVersion != latestEmbeddedMigrationVersion(t) {
+		t.Errorf("upgrade versions = %d -> %d, want 9 -> %d",
 			upgraded.FromVersion, upgraded.ToVersion, latestEmbeddedMigrationVersion(t))
 	}
-	if len(upgraded.Applied) != 1 || upgraded.Applied[0].Version != 9 ||
-		upgraded.Applied[0].Name != "approvals" {
-		t.Fatalf("upgrade applied %+v, want only version 9 named approvals", upgraded.Applied)
+	if len(upgraded.Applied) != 1 || upgraded.Applied[0].Version != 10 ||
+		upgraded.Applied[0].Name != "merge_journal" {
+		t.Fatalf("upgrade applied %+v, want only version 10 named merge_journal", upgraded.Applied)
 	}
-	if !tableExists(t, db, "approvals") {
-		t.Error("approvals is missing after the upgrade")
+	if !tableExists(t, db, "merge_operations") {
+		t.Error("merge_operations is missing after the upgrade")
 	}
-	if !tableExists(t, db, "approval_consumptions") {
-		t.Error("approval_consumptions is missing after the upgrade")
+	if !tableExists(t, db, "merge_files") {
+		t.Error("merge_files is missing after the upgrade")
 	}
-	// The recorded checksum must be the sha256 of the embedded 009 file,
+	// The recorded checksum must be the sha256 of the embedded 010 file,
 	// computed independently here (LF-normalized, as loadMigrations does).
-	body := bytes.ReplaceAll(mustRead(t, embeddedMigrations, "migrations/009_approvals.sql"),
+	body := bytes.ReplaceAll(mustRead(t, embeddedMigrations, "migrations/010_merge_journal.sql"),
 		[]byte("\r\n"), []byte("\n"))
 	sum := sha256.Sum256(body)
 	if want := "sha256:" + hex.EncodeToString(sum[:]); upgraded.Applied[0].Checksum != want {
 		t.Errorf("Applied[0].Checksum = %s, want %s", upgraded.Applied[0].Checksum, want)
 	}
 	var recorded string
-	if err := db.QueryRow(`SELECT checksum FROM runstore_migrations WHERE version=9`).Scan(&recorded); err != nil {
+	if err := db.QueryRow(`SELECT checksum FROM runstore_migrations WHERE version=10`).Scan(&recorded); err != nil {
 		t.Fatalf("read recorded checksum: %v", err)
 	}
 	if recorded != upgraded.Applied[0].Checksum {
