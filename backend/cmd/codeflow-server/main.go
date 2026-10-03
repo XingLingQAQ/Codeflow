@@ -126,10 +126,12 @@ func run() error {
 		return err
 	}
 	defer projectClose()
-	allowedWorkspaceRoots := parseAllowedWorkspaceRoots()
+	// One read of the two root-policy environment variables; the same values go
+	// to the project binding service here and to the workspace file service
+	// below, so both sides apply one rule (T1.10.d).
+	workspaceRoots := loadWorkspaceRootConfig()
 	if svc, ok := projectSvc.(*project.SQLiteProjectService); ok {
-		svc.SetAllowedWorkspaceRoots(allowedWorkspaceRoots)
-		svc.SetAllowUnrestrictedWorkspaceRoots(os.Getenv("CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING") == "1")
+		applyWorkspaceRootPolicy(workspaceRoots, svc, nil)
 	}
 	sessionStore, err := storage.NewSessionStorage(durableDBPath("sessions.db"))
 	if err != nil {
@@ -223,12 +225,19 @@ func run() error {
 	wsSvc := workspace.NewFSService(guardEng)
 	defer handlers.ShutdownWorkspaceWatches()
 	defer handlers.ShutdownWorkspaceDevServers()
-	if roots := parseAllowedWorkspaceRoots(); len(roots) > 0 {
-		wsSvc.SetAllowedRoots(roots)
-		if svc, ok := projectSvc.(*project.SQLiteProjectService); ok {
-			svc.SetAllowedWorkspaceRoots(roots)
-		}
-		fmt.Printf("✓ Workspace roots restricted to %d path(s)\n", len(roots))
+	// Same values as the project service: the file service gets the same
+	// allow-list and the same switch, and the switch is ignored here too when an
+	// allow-list is configured.
+	if svc, ok := projectSvc.(*project.SQLiteProjectService); ok {
+		applyWorkspaceRootPolicy(workspaceRoots, svc, wsSvc)
+	} else {
+		applyWorkspaceRootPolicy(workspaceRoots, nil, wsSvc)
+	}
+	if len(workspaceRoots.AllowedRoots) > 0 {
+		fmt.Printf("✓ Workspace roots restricted to %d path(s)\n", len(workspaceRoots.AllowedRoots))
+	}
+	for _, warning := range workspaceRoots.Warnings {
+		log.Printf("[WARN] workspace roots: %s", warning)
 	}
 	debateMgr, debateClose := initDebateManager()
 	defer debateClose()

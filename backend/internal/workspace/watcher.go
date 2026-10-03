@@ -99,7 +99,8 @@ func WithNotifier(n Notifier) WatcherOption {
 
 // NewWatcher creates a watcher for root. svc supplies path-sandbox safety
 // (Resolve validates the root against allowedRoots and resolves symlinks); when
-// nil an unrestricted FSService is used.
+// nil the fail-closed default FSService is used, so a root the server was not
+// told about is refused at Start instead of watched silently.
 func NewWatcher(svc Service, root string, opts ...WatcherOption) *Watcher {
 	if svc == nil {
 		svc = NewFSService(nil)
@@ -128,6 +129,14 @@ func (w *Watcher) SetNotifier(n Notifier) {
 func (w *Watcher) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	// The root must be usable before a watcher starts: a service that refuses
+	// the root would otherwise poll an unscanned (empty) tree forever, which
+	// looks like "no changes" instead of "not configured". After Start, a root
+	// that disappears keeps the existing root-vanish semantics (scan returns an
+	// empty map and the watcher waits for the root to reappear).
+	if _, err := w.svc.Resolve(w.root, ""); err != nil {
+		return fmt.Errorf("watch root: %w", err)
 	}
 	w.mu.Lock()
 	if w.started {

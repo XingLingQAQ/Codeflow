@@ -13,7 +13,9 @@ import (
 
 // CanonicalizeWorkspaceRoot resolves a workspace root to the path the server
 // will use for all subsequent operations. It fails closed for missing roots,
-// files, and roots outside the configured allow-list.
+// files, roots outside the configured allow-list, and — since T1.10.d — any
+// root at all while CODEFLOW_WORKSPACE_ROOTS is empty, unless the explicit
+// temporary desktop migration switch is set.
 //
 // The returned path is the *final path* of the root: every link, symlink and
 // junction on the way is followed, and on Windows the name is the OS-normalized
@@ -24,6 +26,20 @@ func CanonicalizeWorkspaceRoot(root string, allowedRoots []string) (string, erro
 	return canonicalizeWorkspaceRoot(root, allowedRoots, false)
 }
 
+// canonicalizeWorkspaceRoot resolves and authorizes a workspace root under the
+// shared rule of T1.10.d (the same rule workspace.FSService.ensureRootAllowed
+// applies):
+//
+//   - a non-empty allowedRoots is always honored in full; the migration switch
+//     cannot widen it, so a root outside the list is refused even with the
+//     switch on;
+//   - an empty allowedRoots refuses every root unless allowUnrestricted is set
+//     (the explicit temporary desktop migration switch
+//     CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1), in which case any
+//     existing directory is accepted.
+//
+// An empty root is passed through (nil, nil): callers that allow "unbound"
+// projects rely on it, and it is not a root claim at all.
 func canonicalizeWorkspaceRoot(root string, allowedRoots []string, allowUnrestricted bool) (string, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -54,11 +70,11 @@ func canonicalizeWorkspaceRoot(root string, allowedRoots []string, allowUnrestri
 			return abs, nil
 		}
 	}
-	if allowUnrestricted {
-		return abs, nil
-	}
 	if len(allowedRoots) == 0 {
-		return "", fmt.Errorf("workspace root binding is disabled until CODEFLOW_WORKSPACE_ROOTS is configured")
+		if allowUnrestricted {
+			return abs, nil
+		}
+		return "", fmt.Errorf("workspace root binding is disabled until CODEFLOW_WORKSPACE_ROOTS is configured; %w", workspace.ErrRootsUnconfigured)
 	}
 	return "", fmt.Errorf("workspace root is outside allowed roots: %s", root)
 }

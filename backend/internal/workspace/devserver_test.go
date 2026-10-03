@@ -26,7 +26,7 @@ func TestDetectScripts_Sorted(t *testing.T) {
 	if err := writeTestPackageJSON(dir, scripts); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewFSService(nil)
+	svc := rootAllowed(dir)
 	got, err := DetectScripts(svc, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestDetectScripts_Sorted(t *testing.T) {
 
 func TestDetectScripts_MissingPackageJSON(t *testing.T) {
 	dir := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(dir)
 	got, err := DetectScripts(svc, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestDetectScripts_NoScripts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"x"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewFSService(nil)
+	svc := rootAllowed(dir)
 	got, err := DetectScripts(svc, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestDetectScripts_MalformedJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{bad json`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewFSService(nil)
+	svc := rootAllowed(dir)
 	_, err := DetectScripts(svc, dir)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON")
@@ -187,8 +187,7 @@ func newManagerWithRoot(t *testing.T, scripts map[string]string) (*DevServerMana
 	if err := writeTestPackageJSON(dir, scripts); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewFSService(nil)
-	mgr := NewDevServerManager(svc)
+	mgr := NewDevServerManager(rootAllowed(dir))
 	t.Cleanup(mgr.Shutdown)
 	return mgr, dir
 }
@@ -309,8 +308,7 @@ func TestDevServer_Cap(t *testing.T) {
 	if err := writeTestPackageJSON(dir, scripts); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewFSService(nil)
-	mgr := NewDevServerManager(svc)
+	mgr := NewDevServerManager(rootAllowed(dir))
 	t.Cleanup(mgr.Shutdown)
 
 	names := make([]string, 0, len(scripts))
@@ -361,8 +359,7 @@ func TestDevServer_RingBufferTruncation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	svc := NewFSService(nil)
-	mgr := NewDevServerManager(svc)
+	mgr := NewDevServerManager(rootAllowed(dir))
 	mgr.logCap = cap
 	t.Cleanup(mgr.Shutdown)
 

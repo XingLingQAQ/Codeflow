@@ -58,7 +58,7 @@ func waitFor(t *testing.T, cond func() bool, what string) {
 func TestWatcherDetectsCreateModifyDelete(t *testing.T) {
 	root := t.TempDir()
 	rec := &recordNotifier{}
-	w := NewWatcher(nil, root, WithInterval(25*time.Millisecond), WithNotifier(rec))
+	w := NewWatcher(rootAllowed(root), root, WithInterval(25*time.Millisecond), WithNotifier(rec))
 	if err := w.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestWatcherDetectsCreateModifyDelete(t *testing.T) {
 func TestWatcherIgnoresStaging(t *testing.T) {
 	root := t.TempDir()
 	rec := &recordNotifier{}
-	w := NewWatcher(nil, root, WithInterval(25*time.Millisecond), WithNotifier(rec))
+	w := NewWatcher(rootAllowed(root), root, WithInterval(25*time.Millisecond), WithNotifier(rec))
 	if err := w.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestWatcherRootVanishEmitsDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &recordNotifier{}
-	w := NewWatcher(nil, root, WithInterval(25*time.Millisecond), WithNotifier(rec))
+	w := NewWatcher(rootAllowed(root), root, WithInterval(25*time.Millisecond), WithNotifier(rec))
 	if err := w.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestWatcherRootVanishEmitsDeletes(t *testing.T) {
 
 func TestWatcherStopIdempotent(t *testing.T) {
 	root := t.TempDir()
-	w := NewWatcher(nil, root, WithInterval(20*time.Millisecond))
+	w := NewWatcher(rootAllowed(root), root, WithInterval(20*time.Millisecond))
 	if err := w.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestWatcherStopBeforeStart(t *testing.T) {
 
 func TestWatcherContextCancelStopsGoroutine(t *testing.T) {
 	root := t.TempDir()
-	w := NewWatcher(nil, root, WithInterval(20*time.Millisecond))
+	w := NewWatcher(rootAllowed(root), root, WithInterval(20*time.Millisecond))
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := w.Start(ctx); err != nil {
 		t.Fatal(err)

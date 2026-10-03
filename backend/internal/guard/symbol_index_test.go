@@ -58,6 +58,7 @@ func TestDuplicateBlocksWorkspaceWrite(t *testing.T) {
 	root := t.TempDir()
 	g := NewEngine(nil, nil)
 	svc := workspace.NewFSService(g)
+	svc.SetAllowedRoots([]string{root})
 
 	if _, err := svc.Write(context.Background(), &workspace.WriteRequest{
 		Root: root, Path: "one.ts",

@@ -15,8 +15,10 @@ import (
 	"github.com/codeflow/backend/internal/workspace"
 )
 
-// withWorkspaceService installs a fresh unrestricted workspace service for the
-// duration of one test and restores the previous one (or the unset state).
+// withWorkspaceService installs a fresh workspace service for the duration of
+// one test and restores the previous one (or the unset state). It allows no
+// root: tests that resolve a root must call allowRoot (the service is
+// fail-closed since T1.10.d).
 func withWorkspaceService(t *testing.T) *workspace.FSService {
 	t.Helper()
 	hadSvc := workspace.HasService()
@@ -36,6 +38,15 @@ func withWorkspaceService(t *testing.T) *workspace.FSService {
 	return svc
 }
 
+// allowRoot adds root to the installed workspace service's allow-list without
+// silently widening it: the caller names exactly the directories it uses.
+func allowRoot(t *testing.T, svc *workspace.FSService, roots ...string) {
+	t.Helper()
+	for _, r := range roots {
+		svc.SetAllowedRoots(append(svc.AllowedRoots(), r))
+	}
+}
+
 func topicSetOf(topics []string) map[string]bool {
 	set := make(map[string]bool, len(topics))
 	for _, topic := range topics {
@@ -48,9 +59,10 @@ func topicSetOf(topics []string) map[string]bool {
 // gets exactly its flow topic plus its own workspace topic — the same string the
 // watch API returns for that root.
 func TestProjectStreamTopicsIncludesOwnWorkspaceRoot(t *testing.T) {
-	withWorkspaceService(t)
+	svc := withWorkspaceService(t)
 
 	root := t.TempDir()
+	allowRoot(t, svc, root)
 	p := &project.Project{ID: "proj-a", WorkspaceRoot: root}
 
 	topics := projectStreamTopics(p)
@@ -81,9 +93,10 @@ func TestProjectStreamTopicsIncludesOwnWorkspaceRoot(t *testing.T) {
 // resolved root, so a project that stores a spelling of the same directory
 // (here: a trailing separator) still admits the topic of the resolved one.
 func TestProjectStreamTopicsNormalizesRootSpelling(t *testing.T) {
-	withWorkspaceService(t)
+	svc := withWorkspaceService(t)
 
 	root := t.TempDir()
+	allowRoot(t, svc, root)
 	absRoot, err := workspace.GetService().Resolve(root, ".")
 	if err != nil {
 		t.Fatalf("Resolve(%q, \".\") failed: %v", root, err)
@@ -130,10 +143,11 @@ func TestProjectStreamTopicsWithoutRootOrUnresolvableRoot(t *testing.T) {
 // TestProjectStreamTopicsExcludesOtherProjectsWorkspace: two projects with two
 // different roots share no workspace topic.
 func TestProjectStreamTopicsExcludesOtherProjectsWorkspace(t *testing.T) {
-	withWorkspaceService(t)
+	svc := withWorkspaceService(t)
 
 	rootA := t.TempDir()
 	rootB := t.TempDir()
+	allowRoot(t, svc, rootA, rootB)
 	absB, err := workspace.GetService().Resolve(rootB, ".")
 	if err != nil {
 		t.Fatalf("Resolve(%q, \".\") failed: %v", rootB, err)

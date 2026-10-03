@@ -13,7 +13,7 @@ import (
 
 func TestResolveRejectsEscape(t *testing.T) {
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 
 	if _, err := svc.Resolve(root, "../outside"); err == nil {
 		t.Fatal("expected escape error")
@@ -29,7 +29,7 @@ func TestResolveRejectsEscape(t *testing.T) {
 func TestListReadWrite(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 
 	// write with parents
@@ -90,9 +90,9 @@ func TestWriteGuardBlocks(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	blocked := errors.New("nope")
-	svc := NewFSService(guardFunc(func(ctx context.Context, abs string, content []byte) error {
+	svc := rootAllowedWithGuard(guardFunc(func(ctx context.Context, abs string, content []byte) error {
 		return blocked
-	}))
+	}), root)
 	_, err := svc.Write(context.Background(), &WriteRequest{
 		Root:    root,
 		Path:    "x.txt",
@@ -111,10 +111,10 @@ func TestWriteGuardAllows(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	called := false
-	svc := NewFSService(guardFunc(func(ctx context.Context, abs string, content []byte) error {
+	svc := rootAllowedWithGuard(guardFunc(func(ctx context.Context, abs string, content []byte) error {
 		called = true
 		return nil
-	}))
+	}), root)
 	_, err := svc.Write(context.Background(), &WriteRequest{
 		Root:    root,
 		Path:    "ok.txt",
@@ -131,7 +131,7 @@ func TestWriteGuardAllows(t *testing.T) {
 func TestStageAndPromote(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 	_, err := svc.Write(ctx, &WriteRequest{
 		Root: root, Path: "src/a.txt", Content: []byte("staged"),
@@ -202,7 +202,7 @@ func indexOf(s, sub string) int {
 func TestDiscardStaged(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 	_, err := svc.Write(ctx, &WriteRequest{
 		Root: root, Path: "tmp/x.txt", Content: []byte("x"),
@@ -223,7 +223,7 @@ func TestDiscardStaged(t *testing.T) {
 func TestPromoteAll(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 	for _, p := range []string{"a.txt", "b/c.txt"} {
 		if _, err := svc.Write(ctx, &WriteRequest{
@@ -246,7 +246,7 @@ func TestPromoteAll(t *testing.T) {
 func TestDiscardAllStaged(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 	_, _ = svc.Write(ctx, &WriteRequest{Root: root, Path: "x.txt", Content: []byte("x"), Mode: WriteModeStage, CreateParents: true})
 	_, _ = svc.Write(ctx, &WriteRequest{Root: root, Path: "y.txt", Content: []byte("y"), Mode: WriteModeStage, CreateParents: true})

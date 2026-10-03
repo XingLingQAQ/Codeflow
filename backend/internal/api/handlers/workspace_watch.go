@@ -126,6 +126,9 @@ func CreateWorkspaceWatch(c *gin.Context) {
 	svc := workspace.GetService()
 	absRoot, err := svc.Resolve(root, ".")
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		respondError(c, http.StatusBadRequest, err.Error())
 		return
 	}

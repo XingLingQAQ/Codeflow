@@ -42,8 +42,8 @@ func TestExecutionHostRejectsMissingPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("workspace write", func(t *testing.T) {
-		svc := NewFSService(nil)
 		root := t.TempDir()
+		svc := rootAllowed(root)
 		_, err := svc.Write(ctx, &WriteRequest{Root: root, Path: "note.txt", Content: []byte("hi")})
 		assertMissingPolicyDenied(t, err)
 		if _, statErr := os.Stat(filepath.Join(root, "note.txt")); !os.IsNotExist(statErr) {
@@ -52,8 +52,8 @@ func TestExecutionHostRejectsMissingPolicy(t *testing.T) {
 	})
 
 	t.Run("process start", func(t *testing.T) {
-		svc := NewFSService(nil)
 		root := t.TempDir()
+		svc := rootAllowed(root)
 		manifest := []byte(`{"scripts":{"dev":"node server.js"}}`)
 		if err := os.WriteFile(filepath.Join(root, "package.json"), manifest, 0o644); err != nil {
 			t.Fatalf("write package.json fixture: %v", err)

@@ -119,8 +119,10 @@ func TestServicesApplyInstallsInjectedPolicyEvaluator(t *testing.T) {
 func TestDirectHostEnforcesBootstrapInstalledPolicy(t *testing.T) {
 	clearPolicyGlobals(t)
 	t.Setenv("CODEFLOW_ALLOW_LOCAL_EXECUTION", "")
+	root := t.TempDir()
 	host := workspace.NewFSService(nil)
-	req := &workspace.WriteRequest{Root: t.TempDir(), Path: "note.txt", Content: []byte("hi")}
+	host.SetAllowedRoots([]string{root})
+	req := &workspace.WriteRequest{Root: root, Path: "note.txt", Content: []byte("hi")}
 
 	_, preApplyErr := host.Write(context.Background(), req)
 	var preApplyDenied *policy.DeniedError

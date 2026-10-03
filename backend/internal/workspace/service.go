@@ -18,12 +18,30 @@ import (
 type FSService struct {
 	mu           sync.RWMutex
 	guard        WriteGuard
-	allowedRoots []string // empty = unrestricted (tests / default desktop)
+	allowedRoots []string // empty = nothing configured; see ensureRootAllowed
+
+	// allowUnrestrictedRoots is the explicit temporary desktop migration switch
+	// (CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1). It only has an effect
+	// while allowedRoots is empty: a configured allow-list is always honored in
+	// full. See SetAllowUnrestrictedRoots and ensureRootAllowed.
+	allowUnrestrictedRoots bool
 }
 
 // NewFSService creates a workspace service. guard may be nil.
 func NewFSService(guard WriteGuard) *FSService {
 	return &FSService{guard: guard}
+}
+
+// SetAllowUnrestrictedRoots enables the explicit temporary desktop migration
+// mode (CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1): while no allow-list
+// is configured, any existing directory may be used as a root. The switch never
+// widens a configured allow-list; with roots configured only the list counts.
+// It is symmetric with project.InMemoryProjectService's
+// SetAllowUnrestrictedWorkspaceRoots and receives the same value from main.go.
+func (s *FSService) SetAllowUnrestrictedRoots(allow bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allowUnrestrictedRoots = allow
 }
 
 // SetGuard replaces the write guard (bootstrap / tests).
@@ -34,7 +52,9 @@ func (s *FSService) SetGuard(g WriteGuard) {
 }
 
 // SetAllowedRoots restricts workspace operations to the given absolute roots.
-// Empty list means unrestricted (backward compatible for unit tests).
+// An empty list means "nothing configured", which refuses every root unless the
+// explicit migration switch is on (SetAllowUnrestrictedRoots); it never means
+// "every path is allowed".
 //
 // Each root is stored as its final path when it exists (see FinalPath), so the
 // stored form is the real directory the OS routes to and not a link/junction
@@ -62,50 +82,63 @@ func (s *FSService) SetAllowedRoots(roots []string) {
 }
 
 // AllowedRoots returns a copy of the configured allowed roots (absolute,
-// cleaned, resolved to their final paths). An empty slice means unrestricted:
-// the caller must treat it as "nothing was configured", not as "every path is
-// allowed" (readiness probes and startup diagnostics need that distinction).
+// cleaned, resolved to their final paths). An empty slice means "nothing was
+// configured", not "every path is allowed": with no roots configured and the
+// migration switch off every operation is refused (readiness probes and startup
+// diagnostics need that distinction).
 func (s *FSService) AllowedRoots() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]string(nil), s.allowedRoots...)
 }
 
-// ensureRootAllowed reports whether root is inside the configured allow-list.
+// ensureRootAllowed reports whether root may be used by the service.
 //
-// The comparison is made on final paths: both the candidate root and every
-// configured root are resolved to the directory the OS actually routes to (see
-// FinalPath), so a junction inside an allowed root that points outside it is
-// rejected even though its path string looks allow-listed. A candidate that
+// The rule is shared with project.canonicalizeWorkspaceRoot (T1.10.d):
+//
+//   - with a configured allow-list, only the list is honored, compared on
+//     final paths: both the candidate root and every configured root are
+//     resolved to the directory the OS actually routes to (see FinalPath), so a
+//     junction inside an allowed root that points outside it is rejected even
+//     though its path string looks allow-listed;
+//   - with no allow-list configured, every root is refused
+//     (ErrRootsUnconfigured, classed by ErrRootNotAllowed) unless the explicit
+//     temporary migration switch SetAllowUnrestrictedRoots(true) is set, in
+//     which case any existing directory may be used.
+//
+// The migration switch never relaxes a configured allow-list. A candidate that
 // cannot be resolved at all is rejected as not allowed, and a configured root
 // that cannot be resolved is skipped.
-//
-// An empty allow-list still returns nil (unrestricted). That is the desktop
-// default and is deliberately left as is by this step; see the receipt of
-// T1.10.b group 1/2.
 func (s *FSService) ensureRootAllowed(root string) error {
 	s.mu.RLock()
 	allowed := append([]string(nil), s.allowedRoots...)
+	allowUnrestricted := s.allowUnrestrictedRoots
 	s.mu.RUnlock()
 	if len(allowed) == 0 {
-		return nil
+		if allowUnrestricted {
+			// Explicit temporary desktop migration mode: any existing directory
+			// may be used while nothing is configured. Resolve still requires
+			// the candidate to exist and be a directory.
+			return nil
+		}
+		return errRootNotConfigured(root)
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("resolve root: %w", err)
+		return errRootUnresolvable(root, err)
 	}
 	final, err := FinalPath(abs)
 	if err != nil {
 		// The candidate cannot be resolved, so there is no way to tell where it
 		// leads. Fail closed instead of comparing an unresolved spelling.
-		return fmt.Errorf("workspace root not allowed: %s", root)
+		return errRootUnresolvable(root, err)
 	}
 	for _, a := range allowed {
 		if final == a || strings.HasPrefix(final, a+string(filepath.Separator)) {
 			return nil
 		}
 	}
-	return fmt.Errorf("workspace root not allowed: %s", root)
+	return errRootOutsideAllowed(root)
 }
 
 // Resolve joins root+rel and ensures the result is inside root.
@@ -520,6 +553,12 @@ func (s *FSService) ListStaged(ctx context.Context, root string) ([]Entry, error
 	_ = ctx
 	if strings.TrimSpace(root) == "" {
 		return nil, fmt.Errorf("workspace root is required")
+	}
+	// The staging tree is inside the project root, so the root must be usable
+	// under the same allow-list rule as every other operation (fail closed when
+	// nothing is configured; the migration switch only relaxes the empty case).
+	if err := s.ensureRootAllowed(root); err != nil {
+		return nil, err
 	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {

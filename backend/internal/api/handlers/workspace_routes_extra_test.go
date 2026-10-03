@@ -23,7 +23,12 @@ func rexWorkspaceRouter(t *testing.T) (*gin.Engine, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	prev := workspace.GetService()
-	workspace.SetService(workspace.NewFSService(nil))
+	svc := workspace.NewFSService(nil)
+	// The harness serves a t.TempDir() chosen by each test; with no allow-list
+	// configured the fail-closed default would refuse it, so the harness uses
+	// the explicit migration switch.
+	svc.SetAllowUnrestrictedRoots(true)
+	workspace.SetService(svc)
 	t.Cleanup(func() { workspace.SetService(prev) })
 
 	r := gin.New()

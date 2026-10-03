@@ -144,7 +144,8 @@ type DevServerManager struct {
 }
 
 // NewDevServerManager creates a manager. svc provides Resolve for path safety;
-// nil falls back to an unrestricted FSService.
+// nil falls back to the fail-closed default FSService, so starting a dev-server
+// on a root the server was not told about is refused.
 func NewDevServerManager(svc Service) *DevServerManager {
 	if svc == nil {
 		svc = NewFSService(nil)

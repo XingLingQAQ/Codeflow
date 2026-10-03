@@ -60,6 +60,9 @@ func TestBackendCoreSmoke(t *testing.T) {
 	// workspace + guard + staging promote + exemption
 	g := guard.NewEngine(nil, nil)
 	ws := workspace.NewFSService(g)
+	// The smoke test drives its own t.TempDir() root against a directly
+	// constructed service; name it explicitly (fail-closed since T1.10.d).
+	ws.SetAllowedRoots([]string{root})
 	if _, err := ws.Write(ctx, &workspace.WriteRequest{
 		Root: root, Path: "src/ok.go", Content: []byte("package src\n\nfunc Ok() {}\n"), CreateParents: true,
 	}); err != nil {

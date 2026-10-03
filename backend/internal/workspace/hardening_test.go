@@ -71,7 +71,7 @@ func TestResolveRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlink unsupported (needs privilege / developer mode): %v", err)
 	}
 
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 
 	if _, err := svc.Resolve(root, "escape/secret.txt"); err == nil {
@@ -118,7 +118,7 @@ func TestResolveRejectsJunctionEscape(t *testing.T) {
 		t.Skipf("mklink /J unavailable: %v (%s)", err, out)
 	}
 
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 
 	if _, err := svc.Resolve(root, "escape/secret.txt"); err == nil {
@@ -141,7 +141,7 @@ func TestPromoteRerunsGuard(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := &toggleGuard{}
-	svc := NewFSService(g)
+	svc := rootAllowedWithGuard(g, root)
 	ctx := context.Background()
 
 	if _, err := svc.Write(ctx, &WriteRequest{Root: root, Path: "src/x.go", Content: []byte("pkg"), CreateParents: true, Mode: WriteModeStage}); err != nil {
@@ -167,7 +167,7 @@ func TestPromoteAllPartialGuardFailure(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := &pathDenyGuard{}
-	svc := NewFSService(g)
+	svc := rootAllowedWithGuard(g, root)
 	ctx := context.Background()
 
 	for _, p := range []string{"keep.txt", "block.txt"} {
@@ -204,7 +204,7 @@ func TestPromoteAllPartialGuardFailure(t *testing.T) {
 func TestConcurrentWriteSamePath(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 
 	const n = 12
@@ -249,7 +249,7 @@ func TestConcurrentWriteReservationBalance(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
 	g := &countingReserver{}
-	svc := NewFSService(g)
+	svc := rootAllowedWithGuard(g, root)
 	ctx := context.Background()
 
 	const n = 10
@@ -296,7 +296,7 @@ func TestBeforeWriteHookTransformsContent(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	if _, err := svc.Write(context.Background(), &WriteRequest{Root: root, Path: "a.txt", Content: []byte("original")}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestBeforeWriteHookFailsClosed(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	if _, err := svc.Write(context.Background(), &WriteRequest{Root: root, Path: "b.txt", Content: []byte("x")}); err == nil {
 		t.Fatal("write should fail when the before-write hook errors")
 	}
@@ -335,7 +335,7 @@ func TestBeforeWriteHookFailsClosed(t *testing.T) {
 func TestStagedReadViaService(t *testing.T) {
 	policytesting.AllowForTest(t, policy.OperationWorkspaceWrite)
 	root := t.TempDir()
-	svc := NewFSService(nil)
+	svc := rootAllowed(root)
 	ctx := context.Background()
 
 	if _, err := svc.Write(ctx, &WriteRequest{Root: root, Path: "notes/x.md", Content: []byte("draft"), CreateParents: true, Mode: WriteModeStage}); err != nil {

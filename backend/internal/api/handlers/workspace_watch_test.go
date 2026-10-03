@@ -46,7 +46,12 @@ func watchTestRouter(t *testing.T) *gin.Engine {
 	if hadSvc {
 		prev = workspace.GetService()
 	}
-	workspace.SetService(workspace.NewFSService(nil))
+	watchTestSvc := workspace.NewFSService(nil)
+	// The harness serves arbitrary t.TempDir() roots chosen per test; with no
+	// allow-list configured the fail-closed default would refuse them, so it
+	// uses the explicit migration switch (the documented escape hatch).
+	watchTestSvc.SetAllowUnrestrictedRoots(true)
+	workspace.SetService(watchTestSvc)
 	resetWatchRegistry(t)
 	t.Cleanup(func() {
 		resetWatchRegistry(t)

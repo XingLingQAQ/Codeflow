@@ -27,7 +27,7 @@ func TestDirectWorkspaceWriteDeniedAndAudited(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "denied.txt")
 
-	_, err := NewFSService(nil).Write(context.Background(), &WriteRequest{
+	_, err := rootAllowed(root).Write(context.Background(), &WriteRequest{
 		Root: root, Path: "denied.txt", Content: []byte("blocked"), ProjectID: "project-1", AgentID: "agent-1",
 	})
 	if err == nil {
@@ -49,7 +49,7 @@ func TestDirectDevServerStartDeniedBeforeProcessSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := audit.ContextWithTrace(context.Background(), &audit.AuditTrace{ProjectID: "project-1", AgentID: "agent-1"})
-	mgr := NewDevServerManager(NewFSService(nil))
+	mgr := NewDevServerManager(rootAllowed(root))
 	if _, err := mgr.StartContext(ctx, root, "dev"); err == nil {
 		t.Fatal("direct process start bypassed policy")
 	}

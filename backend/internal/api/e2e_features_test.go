@@ -81,7 +81,12 @@ func TestE2EFeatures_WorkspaceWatchLifecycle(t *testing.T) {
 	defer ts.Close()
 
 	prev := workspace.GetService()
-	workspace.SetService(workspace.NewFSService(nil))
+	// The test chooses its root with t.TempDir(), so it names the migration
+	// switch; the fail-closed default refuses any root while nothing is
+	// configured (T1.10.d).
+	e2fWS := workspace.NewFSService(nil)
+	e2fWS.SetAllowUnrestrictedRoots(true)
+	workspace.SetService(e2fWS)
 	t.Cleanup(func() { workspace.SetService(prev) })
 
 	client := ts.Client()
@@ -347,7 +352,9 @@ func TestE2EFeatures_GuardExemption(t *testing.T) {
 	t.Cleanup(func() { guard.SetService(prevGuard) })
 
 	prevWS := workspace.GetService()
-	workspace.SetService(workspace.NewFSService(guardEng))
+	e2fGuardWS := workspace.NewFSService(guardEng)
+	e2fGuardWS.SetAllowUnrestrictedRoots(true)
+	workspace.SetService(e2fGuardWS)
 	t.Cleanup(func() { workspace.SetService(prevWS) })
 
 	client := ts.Client()

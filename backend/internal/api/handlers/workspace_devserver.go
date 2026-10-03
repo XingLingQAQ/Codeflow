@@ -62,6 +62,9 @@ func DetectWorkspaceScripts(c *gin.Context) {
 	}
 	scripts, err := workspace.DetectScripts(workspace.GetService(), root)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "escapes") || strings.Contains(err.Error(), "not a directory") || strings.Contains(err.Error(), "not exist") {
 			respondError(c, http.StatusBadRequest, err.Error())
 			return
@@ -106,6 +109,9 @@ func StartWorkspaceDevServer(c *gin.Context) {
 	}
 	handle, err := mgr.StartContext(ctx, root, body.Script)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "limit reached") {
 			respondError(c, http.StatusConflict, err.Error())
 			return

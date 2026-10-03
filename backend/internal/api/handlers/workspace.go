@@ -48,6 +48,20 @@ func workspacePathFromRequest(c *gin.Context) string {
 	return path
 }
 
+// respondWorkspaceRootDenied answers a root refusal (T1.10.d) with 403 and the
+// error text, which names the repair (configure CODEFLOW_WORKSPACE_ROOTS, or
+// for the temporary desktop migration set
+// CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1). It reports whether the
+// error was a root refusal; callers must run it before any error-text matching
+// so "root not allowed" can never fall through to the 500 branch.
+func respondWorkspaceRootDenied(c *gin.Context, err error) bool {
+	if !errors.Is(err, workspace.ErrRootNotAllowed) {
+		return false
+	}
+	respondError(c, http.StatusForbidden, err.Error())
+	return true
+}
+
 // ListWorkspace handles GET /api/v1/workspace/list?root=&path=
 func ListWorkspace(c *gin.Context) {
 	root := workspaceRootFromRequest(c, "")
@@ -58,6 +72,9 @@ func ListWorkspace(c *gin.Context) {
 	}
 	entries, err := workspace.GetService().List(c.Request.Context(), &workspace.ListRequest{Root: root, Path: path})
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -86,6 +103,9 @@ func ReadWorkspaceFile(c *gin.Context) {
 	}
 	fc, err := workspace.GetService().Read(c.Request.Context(), &workspace.ReadRequest{Root: readRoot, Path: path})
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -176,6 +196,9 @@ func WriteWorkspaceFile(c *gin.Context) {
 		Mode:          mode,
 	})
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "blocked by guard") {
 			respondError(c, http.StatusForbidden, err.Error())
 			return
@@ -200,6 +223,9 @@ func StatWorkspaceFile(c *gin.Context) {
 	}
 	ent, err := workspace.GetService().Stat(c.Request.Context(), root, path)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -223,6 +249,9 @@ func ListWorkspaceStaged(c *gin.Context) {
 	}
 	entries, err := workspace.GetService().ListStaged(c.Request.Context(), root)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		respondInternalError(c, "list staged workspace", err)
 		return
 	}
@@ -253,6 +282,9 @@ func PromoteWorkspaceFile(c *gin.Context) {
 	}
 	ent, err := workspace.GetService().Promote(c.Request.Context(), root, body.Path)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "blocked by guard") {
 			respondError(c, http.StatusForbidden, err.Error())
 			return
@@ -286,6 +318,9 @@ func DiscardWorkspaceStaged(c *gin.Context) {
 		return
 	}
 	if err := workspace.GetService().DiscardStaged(c.Request.Context(), root, body.Path); err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) || os.IsNotExist(err) || strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
 			respondError(c, http.StatusNotFound, err.Error())
 			return
@@ -319,6 +354,9 @@ func PromoteAllWorkspace(c *gin.Context) {
 	}
 	items, err := workspace.GetService().PromoteAll(c.Request.Context(), root)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		// Always return items on partial success (including guard blocks) so
 		// clients see what landed; HTTP stays 200 with error detail.
 		blocked := strings.Contains(err.Error(), "blocked by guard")
@@ -356,6 +394,9 @@ func DiscardAllWorkspaceStaged(c *gin.Context) {
 	}
 	n, err := workspace.GetService().DiscardAllStaged(c.Request.Context(), root)
 	if err != nil {
+		if respondWorkspaceRootDenied(c, err) {
+			return
+		}
 		respondOK(c, gin.H{"discarded": n, "error": err.Error()})
 		return
 	}

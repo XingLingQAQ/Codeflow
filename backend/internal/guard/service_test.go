@@ -65,6 +65,7 @@ func TestImplementsWriteGuardAndBlocksWorkspace(t *testing.T) {
 	root := t.TempDir()
 	g := NewEngine(nil, nil)
 	svc := workspace.NewFSService(g)
+	svc.SetAllowedRoots([]string{root})
 	_, err := svc.Write(context.Background(), &workspace.WriteRequest{
 		Root:    root,
 		Path:    "helpers2.ts",

@@ -27,9 +27,13 @@ and retry windows where those resources could diverge.
   progress is persisted in a lifecycle journal; physical purge is deferred to
   retention-aware cleanup. Restore reuses the retained Session and creates a new
   runnable default Flow when the archived Flow is terminal.
-- New directory bindings fail closed when no server allow-list is configured.
-  `CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1` is an explicit, temporary
-  desktop migration switch.
+- New directory bindings and workspace file operations fail closed when no
+  server allow-list is configured; refusals surface as `403` from the workspace
+  APIs. `CODEFLOW_WORKSPACE_ROOTS` is the single allow-list shared by project
+  binding and the workspace file service, so a configured list is always
+  enforced. `CODEFLOW_ALLOW_UNRESTRICTED_WORKSPACE_BINDING=1` is an explicit,
+  temporary desktop migration switch that only decides while no allow-list is
+  configured and can never widen one.
 
 ## Consequences
 
