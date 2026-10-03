@@ -155,7 +155,14 @@ func startSupervised(spec Spec, filter SpoolFilter) (*procHandle, error) {
 
 	cmd := exec.Command(spec.Path, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Env = spec.Env
+	// Spec.Env 的零值语义是“空环境、不继承”，而 os/exec 的 nil Env 是“继承父进程”。
+	// 必须在这里把 nil 换成非 nil 的空切片，否则后端进程的凭据、代理与 PATH 会泄漏
+	// 给子进程——这正是 Env 白名单要挡的事（T1.08.c 卡片验收）。
+	env := spec.Env
+	if env == nil {
+		env = []string{}
+	}
+	cmd.Env = env
 	cmd.Stdin = devNull
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW

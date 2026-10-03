@@ -2,6 +2,7 @@ package process
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,9 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/codeflow/backend/internal/policy"
 )
 
 // 本文件是“测试二进制自我重入”夹具：TestMain 发现 CODEFLOW_PROCESS_HELPER 后不跑
@@ -77,7 +81,37 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv(helperModeEnv); mode != "" {
 		os.Exit(runHelper(mode))
 	}
+	// T1.08.c：角色也可以经 argv 选择。Env 为 nil（空环境）的测试里子进程没有任何
+	// 环境变量，角色只能从命令行得知——这是那条验收测试唯一可能的选择方式。
+	if mode, payload := helperModeFromArgs(os.Args[1:]); mode != "" {
+		os.Exit(runHelperArgMode(mode, payload))
+	}
 	os.Exit(m.Run())
+}
+
+// helperArgPrefix 是 argv 里选择 helper 角色的标记。
+const helperArgPrefix = "--codeflow-helper="
+
+// helperModeFromArgs 在 argv 里查找角色标记，返回角色名与它之后的参数。
+func helperModeFromArgs(args []string) (string, []string) {
+	for i, arg := range args {
+		if strings.HasPrefix(arg, helperArgPrefix) {
+			return strings.TrimPrefix(arg, helperArgPrefix), args[i+1:]
+		}
+	}
+	return "", nil
+}
+
+// runHelperArgMode 是经 argv 选择的角色入口（目前只有 canary-env：它的参数本来
+// 就走 argv，空环境不影响）。
+func runHelperArgMode(mode string, payload []string) int {
+	switch mode {
+	case helperModeCanaryEnv:
+		return helperCanaryEnvArg(payload)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown argv helper mode %q\n", mode)
+		return 2
+	}
 }
 
 // runHelper 是 helper 模式的入口：返回进程退出码，绝不调用 m.Run()。
@@ -106,6 +140,16 @@ func runHelper(mode string) int {
 		return helperSpawnAndExit()
 	case helperModeLines:
 		return helperLines()
+	case helperModeCancelTree:
+		return helperCancelTree()
+	case helperModeFloodBoth:
+		return helperFloodBoth()
+	case helperModeEchoArgs:
+		return helperEchoArgs()
+	case helperModeCanaryEnv:
+		return helperCanaryEnv()
+	case helperModeServer:
+		return helperServer()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown helper mode %q\n", mode)
 		return 2
@@ -609,4 +653,347 @@ func helperDir(t *testing.T) (report, release string) {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "report.jsonl"), filepath.Join(dir, "release")
+}
+
+// ---------------------------------------------------------------------------
+// T1.08.c 追加的 helper 角色（点名测试专用；上面已有的角色与断言一律不动）
+// ---------------------------------------------------------------------------
+
+const (
+	// helperModeCancelTree：与 tree 同形的进程树，但按 RESIST_DEPTHS 指定的层装上
+	// “软终止只计数不退出”的处理器——点名测试需要“一部分后代忽略软终止”。
+	helperModeCancelTree = "cancel-tree"
+	// helperModeFloodBoth：同时向 stdout 与 stderr 写分行洪峰（每行见 helperFloodLineBytes）。
+	helperModeFloodBoth = "flood-both"
+	// helperModeEchoArgs：把 argv[2:] 逐字节写成 JSON 文件（argv[1] 是输出路径）。
+	helperModeEchoArgs = "echo-args"
+	// helperModeCanaryEnv：把指定名字的环境变量与完整环境写成 JSON（argv[1]=输出路径，
+	// argv[2]=变量名）。变量名走 argv 而不是环境，空环境时也能读出来。
+	helperModeCanaryEnv = "canary-env"
+	// helperModeServer：扮演“后端进程”，自己建 supervisor 拉起一棵进程树、写 marker，
+	// 写就绪文件后永久阻塞，等测试直接强杀它（模拟后端崩溃）。
+	helperModeServer = "server"
+
+	// helperResistDepthsEnv 是 cancel-tree 中“忽略软终止”的层（逗号分隔的 depth）。
+	helperResistDepthsEnv = "CODEFLOW_HELPER_RESIST_DEPTHS"
+	// helperStderrBytesEnv 是 flood-both 向 stderr 写的字节数（stdout 用 helperBytesEnv）。
+	helperStderrBytesEnv = "CODEFLOW_HELPER_STDERR_BYTES"
+	// helperMarkerEnv / helperOwnerInstanceEnv / helperReadyEnv 是 server 角色的参数。
+	helperMarkerEnv        = "CODEFLOW_HELPER_MARKER"
+	helperOwnerInstanceEnv = "CODEFLOW_HELPER_OWNER_INSTANCE"
+	helperReadyEnv         = "CODEFLOW_HELPER_READY"
+
+	// helperFloodLineBytes 是 flood-both 每行的总字节数（含行尾 \n）：65535 个模式字节
+	// 加一个 '\n'。分行是必须的：无换行的洪峰要等到 EOF 才投递出唯一一行，
+	// 慢订阅者永远不会经历“行投递”路径，也就测不出溢出。
+	helperFloodLineBytes = 64 << 10
+
+	// t108cServerRunID / t108cServerAttemptID 是 server 角色扮演的那次执行的归属。
+	t108cServerRunID     = "run-t108c"
+	t108cServerAttemptID = "attempt-t108c"
+)
+
+// helperCancelTree 与 helperTree 同形（深度优先递归 + 报告行 + 阻塞），差别是：
+// RESIST_DEPTHS 列出的层会装上软终止处理器，收到软终止只计数不退出。
+//
+// 为什么不复用 ignore-term 的 signal.Ignore：Windows 上 Ignore 会让运行时的控制台
+// 处理器返回 0，默认处理器随即结束进程——反而变成“软终止立即生效”，测不出升级。
+func helperCancelTree() int {
+	depth := helperInt(helperDepthEnv, 0)
+	fanout := helperInt(helperFanoutEnv, 0)
+	if parseResistDepths(os.Getenv(helperResistDepthsEnv))[depth] {
+		registerSoftTermResist()
+	}
+	if err := appendHelperLine(depth); err != nil {
+		fmt.Fprintf(os.Stderr, "helper cancel-tree report: %v\n", err)
+		return 3
+	}
+	if depth > 0 {
+		for i := 0; i < fanout; i++ {
+			cmd := exec.Command(helperExecutable())
+			cmd.Env = cancelTreeChildEnv(depth-1, fanout)
+			if err := cmd.Start(); err != nil {
+				fmt.Fprintf(os.Stderr, "helper cancel-tree spawn: %v\n", err)
+				return 4
+			}
+		}
+	}
+	blockUntilReleased()
+	return 0
+}
+
+// cancelTreeChildEnv 构造 cancel-tree 子进程的显式环境白名单（不继承本进程环境），
+// 比 helperChildEnv 多带一份 RESIST_DEPTHS。
+func cancelTreeChildEnv(depth, fanout int) []string {
+	env := []string{
+		helperModeEnv + "=" + helperModeCancelTree,
+		helperDepthEnv + "=" + strconv.Itoa(depth),
+		helperFanoutEnv + "=" + strconv.Itoa(fanout),
+		helperReportEnv + "=" + os.Getenv(helperReportEnv),
+		helperReleaseEnv + "=" + os.Getenv(helperReleaseEnv),
+		helperResistDepthsEnv + "=" + os.Getenv(helperResistDepthsEnv),
+	}
+	if v := os.Getenv("SystemRoot"); v != "" {
+		env = append(env, "SystemRoot="+v)
+	}
+	return env
+}
+
+// registerSoftTermResist 装上“收到软终止只计数、不退出”的处理器。信号被运行时的
+// 控制台处理器接住并投进 channel，默认动作不会执行。
+func registerSoftTermResist() {
+	signals := make(chan os.Signal, 4)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.Signal(helperSigbreakNumber))
+	go func() {
+		for range signals {
+		}
+	}()
+}
+
+// parseResistDepths 解析逗号分隔的层号列表。
+func parseResistDepths(raw string) map[int]bool {
+	out := map[int]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(part); err == nil {
+			out[n] = true
+		}
+	}
+	return out
+}
+
+// helperFloodBoth 向 stdout 与 stderr 并发写各自字节数的分行洪峰，写完退出 0。
+// RELEASE 存在时先等 release 文件出现再写：测试可以先订阅、后放行，没有竞态。
+func helperFloodBoth() int {
+	if os.Getenv(helperReleaseEnv) != "" {
+		blockUntilReleased()
+	}
+	stdoutBytes := helperInt64(helperBytesEnv, 0)
+	stderrBytes := helperInt64(helperStderrBytesEnv, 0)
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		errs[0] = floodStream(os.Stdout, stdoutBytes)
+	}()
+	go func() {
+		defer wg.Done()
+		errs[1] = floodStream(os.Stderr, stderrBytes)
+	}()
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "helper flood-both: %v\n", err)
+			return 5
+		}
+	}
+	return 0
+}
+
+// floodStream 向 w 写 total 字节：每 helperFloodLineBytes 字节一行，行内前
+// helperFloodLineBytes-1 个字节是 'a'+j%26（与 helperFlood / helperFloodByte 同一模式，
+// 测试端据同一公式校验 spool 保留的是输出尾部），行末是 '\n'。total 必须是行长的整数倍。
+func floodStream(w io.Writer, total int64) error {
+	if total%helperFloodLineBytes != 0 {
+		return fmt.Errorf("total %d is not a multiple of %d", total, helperFloodLineBytes)
+	}
+	line := make([]byte, helperFloodLineBytes)
+	for j := 0; j < helperFloodLineBytes-1; j++ {
+		line[j] = byte('a' + j%26)
+	}
+	line[helperFloodLineBytes-1] = '\n'
+	for written := int64(0); written < total; written += helperFloodLineBytes {
+		if _, err := w.Write(line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// helperEchoArgs 把 argv[2:] 原样写成 JSON 数组文件（argv[1] 是输出路径）。
+// 测试端逐元素与传入的 Spec.Args 比较：任何 shell 解释都会让某个参数被拆分、展开或
+// 丢掉引号，比对必然失败。
+func helperEchoArgs() int {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "helper echo-args: missing output path argument")
+		return 9
+	}
+	payload := os.Args[2:]
+	if payload == nil {
+		payload = []string{}
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper echo-args: marshal: %v\n", err)
+		return 9
+	}
+	if err := os.WriteFile(os.Args[1], data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "helper echo-args: write %s: %v\n", os.Args[1], err)
+		return 9
+	}
+	return 0
+}
+
+// helperCanaryEnv 把 argv[2] 指定变量的取值、以及本进程的完整环境写成 JSON 文件
+// （argv[1] 是输出路径）。完整环境用于断言 canary 出现在任何一个变量里都算泄漏。
+func helperCanaryEnv() int {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "helper canary-env: want <out> <var> arguments")
+		return 9
+	}
+	report := map[string]any{
+		"pid":   os.Getpid(),
+		"var":   os.Args[2],
+		"value": os.Getenv(os.Args[2]),
+		"env":   os.Environ(),
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper canary-env: marshal: %v\n", err)
+		return 9
+	}
+	if err := os.WriteFile(os.Args[1], data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "helper canary-env: write %s: %v\n", os.Args[1], err)
+		return 9
+	}
+	return 0
+}
+
+// helperServer 是 T1.08.c 第 4 条点名测试的“后端进程”：它在自己进程里建 supervisor、
+// 拉起一棵 helper 进程树（树把报告写进工作目录）、往工作目录写若干文件、写就绪文件，
+// 然后永久阻塞。测试随后直接强杀它（不经任何 supervisor），模拟后端崩溃。
+//
+// 关键点：树被 supervisor 绑到本进程持有的 Windows Job Object 上（KILL_ON_JOB_CLOSE），
+// 本进程一死句柄关闭，整棵树随之被系统收掉——这是“崩溃后不留孤儿”的唯一机制，
+// 测试正是要证明它成立。
+func helperServer() int {
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper server: getwd: %v\n", err)
+		return 9
+	}
+	markerPath := strings.TrimSpace(os.Getenv(helperMarkerEnv))
+	readyPath := strings.TrimSpace(os.Getenv(helperReadyEnv))
+	if markerPath == "" || readyPath == "" {
+		fmt.Fprintln(os.Stderr, "helper server: marker/ready path is required")
+		return 9
+	}
+	owner := Ownership{
+		RunID:         t108cServerRunID,
+		AttemptID:     t108cServerAttemptID,
+		OwnerInstance: strings.TrimSpace(os.Getenv(helperOwnerInstanceEnv)),
+	}
+	if err := owner.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "helper server: %v\n", err)
+		return 9
+	}
+	// 本进程扮演独立的后端实例：自己装一份最小策略（只放行 process_start），
+	// 生产路径上这份策略由 bootstrap 安装，这里按测试口径显式给出。
+	policy.SetEvaluator(&policy.StaticEvaluator{
+		RuleVersion:       policy.RuleVersion,
+		AllowedOperations: map[string]bool{policy.OperationProcessStart: true},
+	})
+
+	depth := helperInt(helperDepthEnv, 0)
+	fanout := helperInt(helperFanoutEnv, 0)
+	h, err := NewSupervisor(SupervisorOptions{OwnerInstance: owner.OwnerInstance}).Start(context.Background(), Spec{
+		Path:          helperExecutable(),
+		Args:          []string{"--t108c-server-tree"},
+		Dir:           wd,
+		Env:           cancelTreeChildEnv(depth, fanout),
+		Owner:         owner,
+		GracePeriod:   DefaultGracePeriod,
+		MaxSpoolBytes: 1 << 20,
+		MarkerPath:    markerPath,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper server: start tree: %v\n", err)
+		return 10
+	}
+	if err := writeServerWorkdirFiles(wd); err != nil {
+		fmt.Fprintf(os.Stderr, "helper server: write workdir files: %v\n", err)
+		return 11
+	}
+	// 等树的根写出报告行：就绪文件必须意味着“树真的起来了”，否则测试无法先证明
+	// 后代活着、也就无法证明崩溃后它们都消失了。
+	if !waitForReportDepth(os.Getenv(helperReportEnv), depth, 20*time.Second) {
+		fmt.Fprintln(os.Stderr, "helper server: tree did not report in time")
+		return 11
+	}
+	ready, err := json.Marshal(map[string]any{
+		"server_pid":     os.Getpid(),
+		"root_pid":       h.Identity().PID,
+		"workdir":        wd,
+		"marker":         markerPath,
+		"report":         os.Getenv(helperReportEnv),
+		"owner_instance": owner.OwnerInstance,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper server: marshal ready: %v\n", err)
+		return 12
+	}
+	if err := os.WriteFile(readyPath, ready, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "helper server: write ready %s: %v\n", readyPath, err)
+		return 12
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+// writeServerWorkdirFiles 把 t108cWorkdirFiles 写进工作目录（含子目录）。
+func writeServerWorkdirFiles(dir string) error {
+	for rel, data := range t108cWorkdirFiles() {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// helperCanaryEnvArg 是把参数全部放在 argv 里的 canary-env（payload[0]=输出路径，
+// payload[1]=变量名）。空环境启动的子进程也能用它取证。
+func helperCanaryEnvArg(payload []string) int {
+	if len(payload) < 2 {
+		fmt.Fprintln(os.Stderr, "helper canary-env (argv): want <out> <var>")
+		return 9
+	}
+	report := map[string]any{
+		"pid":   os.Getpid(),
+		"var":   payload[1],
+		"value": os.Getenv(payload[1]),
+		"env":   os.Environ(),
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper canary-env (argv): marshal: %v\n", err)
+		return 9
+	}
+	if err := os.WriteFile(payload[0], data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "helper canary-env (argv): write %s: %v\n", payload[0], err)
+		return 9
+	}
+	return 0
+}
+
+// t108cWorkdirFiles 是 server 角色写进“本 Run 工作目录”的文件内容表：后端崩溃后这些
+// 文件必须原样保留。表只在这里定义一次，helper 端写、测试端按同一张表逐字节比对。
+func t108cWorkdirFiles() map[string][]byte {
+	data := make([]byte, 4096)
+	for i := range data {
+		data[i] = byte(i % 251)
+	}
+	return map[string][]byte{
+		"note.txt":                                 []byte("run workspace content must survive a backend crash\n"),
+		filepath.Join("sub", "data.bin"):           data,
+		filepath.Join("sub", "nested", "more.txt"): []byte("nested file written by the run\n"),
+	}
 }
