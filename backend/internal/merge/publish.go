@@ -215,8 +215,12 @@ type publisher struct {
 	fs    fsOps
 	files []MergeFile
 	op    MergeOperation
-	// leftoverDirs accumulates the directories a rollback could not remove.
-	leftoverDirs []string
+	// target is the file-system half of a rollback: the root, the blob store
+	// and the directories a rollback could not remove. It is a separate value
+	// because the crash recovery (T1.09.b group 4) performs the same per-file
+	// restores without a publisher, and the rules must be the same object, not
+	// the same prose.
+	target *targetFS
 	// takenOver is set when the journal says this process no longer holds the
 	// operation. It stops the loop *and* suppresses the rollback: the writes on
 	// disk belong to whoever holds the operation now.
@@ -236,7 +240,11 @@ func newPublisher(in PublishInput) (*publisher, error) {
 	if err := validatePublishInput(in); err != nil {
 		return nil, err
 	}
-	return &publisher{in: in, fs: in.fs()}, nil
+	return &publisher{
+		in:     in,
+		fs:     in.fs(),
+		target: &targetFS{fs: in.fs(), root: in.TargetRoot, blobs: in.Blobs},
+	}, nil
 }
 
 func (p *publisher) run(ctx context.Context) (PublishResult, error) {
@@ -770,52 +778,6 @@ func (p *publisher) checkPrecondition(f *MergeFile) error {
 	return nil
 }
 
-// checkRealAncestors refuses a path whose parent chain below the target root
-// holds anything but real directories.
-//
-// Every write, delete and restore of this publisher addresses a path by joining
-// it to the target root, and the OS resolves every intermediate component of
-// that join. A directory that was replaced by a symbolic link or a Windows
-// junction after the journal was planned would therefore redirect the write —
-// or the delete — to wherever the link points, outside the root: the root's own
-// identity check and the per-file lstat (which does not follow only the *last*
-// component) cannot see it. Measured on Go 1.26 / Windows: os.Lstat reports a
-// junction as ModeSymlink, and a file written through it lands in the
-// junction's target.
-//
-// With requireExist every ancestor must exist (the parent of a file about to be
-// written, deleted or restored always does). Without it a missing ancestor ends
-// the walk — nothing below a missing directory can be followed — which is what
-// a rollback needs for a create whose directories were never made.
-//
-// The check runs immediately before each file-system step, so what remains is
-// the window between this lstat walk and the step itself; closing that would
-// need handle-relative file operations Go does not offer portably.
-func (p *publisher) checkRealAncestors(rel string, requireExist bool) error {
-	for _, dir := range ancestorDirs(rel) {
-		local, err := targetPath(p.in.TargetRoot, dir)
-		if err != nil {
-			return err
-		}
-		entry, err := p.fs.lstat(local)
-		if err != nil {
-			return err
-		}
-		if !entry.Exists {
-			if requireExist {
-				return fmt.Errorf("%w: %s is missing; %s cannot be addressed under the target root",
-					ErrTargetChanged, dir, rel)
-			}
-			return nil
-		}
-		if entry.IsSymlink || !entry.IsDir {
-			return fmt.Errorf("%w: %s is %s, not a directory of the target root; writing %s through it could land outside the root",
-				ErrTargetChanged, dir, entryWord(entry), rel)
-		}
-	}
-	return nil
-}
-
 // writeFile performs one file's content step and records it.
 //
 // The write itself is the pair §27.5 item 4 asks for: the new content is staged
@@ -867,7 +829,7 @@ func (p *publisher) contentStep(ctx context.Context, f *MergeFile) error {
 	if err := p.hook(stepFor(p.op.ID, f, StageBeforeReplace)); err != nil {
 		return err
 	}
-	if err := p.checkRealAncestors(f.Path, true); err != nil {
+	if err := p.target.checkRealAncestors(f.Path, true); err != nil {
 		return err
 	}
 	switch f.Kind {
@@ -902,7 +864,7 @@ func (p *publisher) createDirs(f *MergeFile) error {
 		if err != nil {
 			return err
 		}
-		if err := p.checkRealAncestors(rel, true); err != nil {
+		if err := p.target.checkRealAncestors(rel, true); err != nil {
 			return err
 		}
 		if err := p.fs.mkdir(local, 0o755); err != nil {
@@ -1090,7 +1052,7 @@ func (p *publisher) commitApplied(ctx context.Context) (PublishResult, error) {
 		return p.rollback(ctx, fmt.Errorf("merge: complete operation %s: %w", p.op.ID, err))
 	}
 	p.op = op
-	return PublishResult{Operation: op, Files: p.files, LeftoverDirs: p.leftoverDirs, Event: &event}, nil
+	return PublishResult{Operation: op, Files: p.files, LeftoverDirs: p.target.leftover, Event: &event}, nil
 }
 
 // mergeActorID is the actor of the merge.completed event. The publisher runs
@@ -1146,7 +1108,7 @@ func (p *publisher) rollback(ctx context.Context, cause error) (PublishResult, e
 		f := &p.files[i]
 		// A link above the path means neither "is it still ours" nor "put it
 		// back" can be answered without following it out of the root: park.
-		if err := p.checkRealAncestors(f.Path, false); err != nil {
+		if err := p.target.checkRealAncestors(f.Path, false); err != nil {
 			return p.needsRecovery(rollbackCtx, fmt.Errorf("%w: %v (cause: %v)", ErrNeedsRecovery, err, cause))
 		}
 		ours, err := p.holdsOurWrite(f)
@@ -1159,7 +1121,7 @@ func (p *publisher) rollback(ctx context.Context, cause error) (PublishResult, e
 				// step either never happened or wrote nothing durable. Leave every
 				// byte of the path alone; only sweep directories this operation
 				// might have created for it.
-				if err := p.sweepCreatedDirs(rollbackCtx, f); err != nil {
+				if err := p.target.sweepCreatedDirs(rollbackCtx, f); err != nil {
 					return p.needsRecovery(rollbackCtx, fmt.Errorf("%w: %v (cause: %v)", ErrNeedsRecovery, err, cause))
 				}
 				continue
@@ -1170,7 +1132,7 @@ func (p *publisher) rollback(ctx context.Context, cause error) (PublishResult, e
 			return p.needsRecovery(rollbackCtx,
 				fmt.Errorf("%w: %s was edited after it was written (cause: %v)", ErrNeedsRecovery, f.Path, cause))
 		}
-		if err := p.restoreFile(rollbackCtx, f); err != nil {
+		if err := p.target.restoreFile(rollbackCtx, f); err != nil {
 			return p.needsRecovery(rollbackCtx, fmt.Errorf("%w: %v (cause: %v)", ErrNeedsRecovery, err, cause))
 		}
 		if f.State == FileStateWritten {
@@ -1185,17 +1147,6 @@ func (p *publisher) rollback(ctx context.Context, cause error) (PublishResult, e
 		return p.result(ctx, fmt.Errorf("%w (and the rollback could not be recorded: %v)", cause, err))
 	}
 	return p.result(ctx, cause)
-}
-
-// sweepCreatedDirs removes the directories this operation created for a path
-// whose content it never (visibly) wrote: the path's own empty parents, deepest
-// first, and only when they are empty. A directory somebody else filled is
-// reported, never deleted (see removeCreatedDirs).
-func (p *publisher) sweepCreatedDirs(ctx context.Context, f *MergeFile) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return p.removeCreatedDirs(f)
 }
 
 // beginRollback moves the operation to rolling_back, which is also how a second
@@ -1236,135 +1187,6 @@ func (p *publisher) holdsOurWrite(f *MergeFile) (bool, error) {
 		return false, err
 	}
 	return hash == *f.NewHash && size == contentSize(p.in.Candidate, f.Path), nil
-}
-
-// restoreFile puts the old content back for one path.
-//
-// For a create that means removing the file (when it is there at all — a create
-// whose content step failed before its replace has nothing to remove, and its
-// undo is still "the path must not exist") and then the directories this
-// operation created for it; for a modify or a delete it means streaming the
-// backup blob back over the path, with the old mode. The blob is verified while
-// it is read (see replaceFromBlob), so a backup that cannot be trusted cannot
-// be written back.
-func (p *publisher) restoreFile(ctx context.Context, f *MergeFile) error {
-	local, err := targetPath(p.in.TargetRoot, f.Path)
-	if err != nil {
-		return err
-	}
-	if err := p.checkRealAncestors(f.Path, f.Kind != KindCreate); err != nil {
-		return err
-	}
-	if f.Kind == KindCreate {
-		entry, err := p.fs.lstat(local)
-		if err != nil {
-			return err
-		}
-		if entry.Exists {
-			if err := p.fs.removeFile(local); err != nil {
-				return err
-			}
-		}
-		return p.removeCreatedDirs(f)
-	}
-
-	reader, err := p.in.Blobs.Open(*f.BackupHash)
-	if err != nil {
-		return fmt.Errorf("merge: open backup of %s: %w", f.Path, err)
-	}
-	defer reader.Close()
-
-	dir := filepath.Dir(local)
-	tmp, err := p.fs.createTemp(dir, ".codeflow-merge-restore-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	published := false
-	defer func() {
-		if !published {
-			_ = tmp.Close()
-			_ = discardStaging(tmpPath)
-		}
-	}()
-
-	sum, _, err := copyAndHash(tmp, reader, ctx)
-	if err != nil {
-		return fmt.Errorf("merge: restore %s: %w", f.Path, err)
-	}
-	if sum != *f.OldHash {
-		// The backup blob does not hold the content the journal says it does.
-		// Writing it would put an unknown version of the user's file in place of
-		// the known one, which is worse than leaving the wrong (but known) new
-		// content there for a human to look at.
-		return fmt.Errorf("merge: the backup of %s hashes to %s, the journal says %s", f.Path, sum, *f.OldHash)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("merge: sync restore of %s: %w", f.Path, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("merge: close restore staging file for %s: %w", f.Path, err)
-	}
-	perm := os.FileMode(0o644)
-	if f.OldMode != nil {
-		perm = os.FileMode(*f.OldMode)
-	}
-	if err := p.fs.replaceFile(tmpPath, local, perm); err != nil {
-		return err
-	}
-	published = true
-	syncDir(dir)
-	return nil
-}
-
-// removeCreatedDirs deletes the directories this operation created for a file
-// that is being un-created, deepest first, and only when they are empty.
-//
-// A directory that is no longer empty is left alone and reported: something
-// else is in it, and deleting it would destroy content this operation never
-// wrote. That is the difference between "undo my own work" and "restore a
-// backup over the user's tree", which §27.5 item 5 forbids.
-func (p *publisher) removeCreatedDirs(f *MergeFile) error {
-	dirs := append([]string(nil), f.CreatedDirs...)
-	for i := len(dirs) - 1; i >= 0; i-- {
-		local, err := targetPath(p.in.TargetRoot, dirs[i])
-		if err != nil {
-			return err
-		}
-		// A directory this operation created that is now a link, or that sits
-		// below one, is not the directory it created: report it, touch nothing.
-		if err := p.checkRealAncestors(dirs[i], false); err != nil {
-			p.leftoverDirs = append(p.leftoverDirs, dirs[i])
-			continue
-		}
-		if entry, err := p.fs.lstat(local); err == nil && entry.Exists && (entry.IsSymlink || !entry.IsDir) {
-			p.leftoverDirs = append(p.leftoverDirs, dirs[i])
-			continue
-		}
-		names, err := p.fs.readDir(local)
-		if err != nil {
-			// Already gone (somebody removed it, or an earlier file of this
-			// operation created it and a later rollback step removed it): the
-			// goal is met.
-			entry, statErr := p.fs.lstat(local)
-			if statErr == nil && !entry.Exists {
-				continue
-			}
-			return err
-		}
-		if len(names) > 0 {
-			p.leftoverDirs = append(p.leftoverDirs, dirs[i])
-			continue
-		}
-		if err := p.fs.removeDir(local); err != nil {
-			entry, statErr := p.fs.lstat(local)
-			if statErr == nil && !entry.Exists {
-				continue
-			}
-			return err
-		}
-	}
-	return nil
 }
 
 // needsRecovery parks the operation where only an explicit decision can move
@@ -1428,7 +1250,7 @@ func (p *publisher) result(ctx context.Context, cause error) (PublishResult, err
 	} else {
 		out.Files = p.files
 	}
-	out.LeftoverDirs = p.leftoverDirs
+	out.LeftoverDirs = p.target.leftover
 	return out, cause
 }
 

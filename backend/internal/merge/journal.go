@@ -378,6 +378,138 @@ func BlockingOperation(ctx context.Context, q runstore.Querier, rootKey string) 
 	}
 }
 
+// ListNonTerminalOperations lists every operation that still holds a root lock,
+// oldest first ("created_at, id", the same total order BlockingOperation uses).
+//
+// It is the read a process makes on start-up to find every interrupted publish
+// (T1.09.b group 4 hands one of these to Recover per root; T1.04 wires that
+// call). Only the four blocking states are returned — a terminal operation is
+// history and holds nothing — and the set is taken from blockingStatuses
+// rather than spelled again here, so it cannot drift from the partial unique
+// index the lock actually is.
+func ListNonTerminalOperations(ctx context.Context, q runstore.Querier) ([]MergeOperation, error) {
+	args := make([]any, 0, len(blockingStatuses))
+	for _, s := range blockingStatuses {
+		args = append(args, s)
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT id, project_id, run_id, candidate_hash, base_manifest_hash,
+		       target_manifest_hash, result_manifest_hash, root_key, target_root,
+		       fence, status, failure_code, created_at, updated_at, revision
+		FROM merge_operations
+		WHERE status IN (?, ?, ?, ?)
+		ORDER BY created_at, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("merge: list unfinished operations: %w", err)
+	}
+	defer rows.Close()
+
+	var out []MergeOperation
+	for rows.Next() {
+		op, err := scanOperation(rows)
+		if err != nil {
+			return nil, fmt.Errorf("merge: scan unfinished operation: %w", err)
+		}
+		out = append(out, op)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("merge: list unfinished operations: %w", err)
+	}
+	return out, nil
+}
+
+// TakeOverOperationTx moves an operation into the recoverer's hands: fence + 1,
+// revision + 1, and the taker's name in failure_code, all as one CAS on the
+// row the caller read.
+//
+// This is the fencing half of §27.5 item 6 ("先 fencing 禁止状态发布"): the
+// previous holder — a publisher still looping, a crashed process's successor —
+// re-reads (status, fence) before every single file and stops the moment either
+// moved, so after this statement commits the old holder cannot write one more
+// byte. The fence is the epoch that makes "my write" and "the previous holder's
+// write" distinguishable even though both rows have the same id.
+//
+// The taker is recorded in failure_code because the frozen 010 schema has no
+// owner column and adding one would mean amending a migration group 4 does not
+// own. The value is "recovery_takeover:<taker>"; the real failure code replaces
+// it when the recovery concludes, so it survives only if the recoverer itself
+// dies — which is exactly when a reader wants to know who held the row.
+//
+// A terminal operation is refused before any SQL runs (the trigger would refuse
+// it too, but the sentinel is the useful answer). Any other state may be taken
+// over, including needs_recovery: that state is a deliberate "a human or a
+// recoverer must decide", not a frozen one.
+func TakeOverOperationTx(ctx context.Context, tx runstore.Tx, op MergeOperation, taker string, now time.Time) (MergeOperation, error) {
+	if strings.TrimSpace(taker) == "" {
+		return MergeOperation{}, fmt.Errorf("%w: a recoverer identity is required to take over %s", ErrInvalidJournalInput, op.ID)
+	}
+	if Terminal(op.Status) {
+		return MergeOperation{}, fmt.Errorf("%w: operation %s is %s", ErrOperationTerminal, op.ID, op.Status)
+	}
+	code := takeoverCodePrefix + taker
+	res, err := tx.ExecContext(ctx, `
+		UPDATE merge_operations
+		SET fence = fence + 1, revision = revision + 1, failure_code = ?, updated_at = ?
+		WHERE id = ? AND revision = ? AND status = ? AND fence = ?`,
+		code, unixMilli(now), op.ID, op.Revision, op.Status, op.Fence,
+	)
+	if err != nil {
+		return MergeOperation{}, mapOperationWriteError("take over operation "+op.ID, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return MergeOperation{}, fmt.Errorf("merge: take over operation %s: %w", op.ID, err)
+	}
+	if affected == 0 {
+		return MergeOperation{}, fmt.Errorf("%w: operation %s was expected at revision %d in state %s with fence %d",
+			ErrOperationMoved, op.ID, op.Revision, op.Status, op.Fence)
+	}
+
+	updated := op
+	updated.Fence++
+	updated.Revision++
+	updated.FailureCode = &code
+	updated.UpdatedAt = fromUnixMilli(unixMilli(now))
+	return updated, nil
+}
+
+// takeoverCodePrefix marks the failure_code TakeOverOperationTx writes. It is a
+// prefix, not an enum value: the whole point is to name the taker.
+const takeoverCodePrefix = "recovery_takeover:"
+
+// SetOperationFailureCodeCAS changes only failure_code, as the same CAS tuple
+// the status transitions use (id, revision, status, fence).
+//
+// It exists for the one move a status CAS cannot express: keeping a
+// needs_recovery operation in needs_recovery while recording why a retry could
+// not finish (UpdateOperationStatusCAS refuses expected == next on purpose —
+// "no change" is not a transition). The revision still bumps, so a racing
+// writer loses exactly as it would to any other write.
+func SetOperationFailureCodeCAS(ctx context.Context, tx runstore.Tx, op MergeOperation, failureCode string, now time.Time) (MergeOperation, error) {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE merge_operations
+		SET failure_code = ?, revision = revision + 1, updated_at = ?
+		WHERE id = ? AND revision = ? AND status = ? AND fence = ?`,
+		failureCode, unixMilli(now), op.ID, op.Revision, op.Status, op.Fence,
+	)
+	if err != nil {
+		return MergeOperation{}, mapOperationWriteError("record failure code of "+op.ID, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return MergeOperation{}, fmt.Errorf("merge: record failure code of %s: %w", op.ID, err)
+	}
+	if affected == 0 {
+		return MergeOperation{}, fmt.Errorf("%w: operation %s was expected at revision %d in state %s with fence %d",
+			ErrOperationMoved, op.ID, op.Revision, op.Status, op.Fence)
+	}
+	updated := op
+	updated.FailureCode = &failureCode
+	updated.Revision++
+	updated.UpdatedAt = fromUnixMilli(unixMilli(now))
+	return updated, nil
+}
+
 // WriteFilesTx writes the operation's file list and moves the operation from
 // prepared to applying, in one transaction.
 //
