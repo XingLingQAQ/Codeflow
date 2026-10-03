@@ -11,10 +11,12 @@ package floweng
 // with rows written by hand, the way an older build wrote them.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -309,10 +311,12 @@ VALUES (?, 'd-done', 'proj-d', 'flow.created', '', 'created', 1, 'pending', 0, 1
 		// The write is one ordinary store write: the status leaves active, one
 		// event is appended, updated_at moves, and the document now names the
 		// kind and revision it is stored with (group 1's rule for every
-		// document this build writes). Everything else — including the member
-		// this build does not know — is byte for byte what the older build
-		// wrote.
-		written := map[string]bool{"status": true, "revision": true, "kind": true, "events": true, "updated_at": true}
+		// document this build writes). The group-3 template-revision backfill
+		// then writes each flow once more (it is written at open time, after
+		// the group-2 migration), which additionally sets template_revision and
+		// moves the revision to 3. Everything else — including the member this
+		// build does not know — is what the older build wrote.
+		written := map[string]bool{"status": true, "revision": true, "kind": true, "events": true, "updated_at": true, "template_revision": true}
 		for _, id := range []string{"a-old", "a-mid", "b-x", "c-2"} {
 			nowPayload, _ := upgradeStoredRow(t, upgraded, id)
 			beforeMembers := membersOf(t, payloadsBefore[id])
@@ -365,31 +369,82 @@ VALUES (?, 'd-done', 'proj-d', 'flow.created', '', 'created', 1, 'pending', 0, 1
 			if string(nowMembers["status"]) != `"suspended"` {
 				t.Fatalf("%s status = %s, want suspended", id, nowMembers["status"])
 			}
-		}
-	})
-
-	t.Run("the untouched rows are the bytes they were", func(t *testing.T) {
-		for _, id := range []string{"a-new", "b-y", "c-1", "d-1", "a-done", "d-done", "d-aborted"} {
-			payload, _ := upgradeStoredRow(t, upgraded, id)
-			if payload != string(payloadsBefore[id]) {
-				t.Fatalf("row %s was rewritten by the migration:\n now %s\nwas %s", id, payload, payloadsBefore[id])
+			if string(nowMembers["template_revision"]) != "1" {
+				t.Fatalf("%s template_revision = %s, want 1 (the template's migration-time revision)",
+					id, nowMembers["template_revision"])
 			}
 		}
 	})
 
-	t.Run("a suspended flow was written once, so its revision moved by one", func(t *testing.T) {
+	t.Run("the untouched rows keep their members and their updated_at", func(t *testing.T) {
+		// The template-revision backfill writes these rows once (they carry no
+		// revision), so only the members that backfill writes may differ:
+		// template_revision, the revision counter, and kind (the migration never
+		// touched these rows, so they never got group 1's kind member until the
+		// backfill re-encoded them). In particular updated_at — the tiebreak the
+		// group-2 migration above used to choose each project's flow of record —
+		// is exactly what the older build stored.
+		for _, id := range []string{"a-new", "b-y", "c-1", "d-1", "a-done", "d-done", "d-aborted"} {
+			payload, updatedAt := upgradeStoredRow(t, upgraded, id)
+			assertFlowPayloadPreservedExcept(t, payloadsBefore[id], []byte(payload), "revision", "template_revision", "kind")
+			doc := decodeSeedDocument(t, payloadsBefore[id])
+			if updatedAt != doc.UpdatedAt.UnixMilli() {
+				t.Fatalf("row %s updated_at = %d, want the stored %d", id, updatedAt, doc.UpdatedAt.UnixMilli())
+			}
+		}
+	})
+
+	t.Run("a suspended flow was written twice: the migration and the backfill", func(t *testing.T) {
 		for _, id := range []string{"a-old", "a-mid", "b-x", "c-2"} {
 			mirror := mirrorOf(t, upgraded, id)
-			if mirror.revision != 2 {
-				t.Fatalf("%s revision = %d, want 2", id, mirror.revision)
+			if mirror.revision != 3 {
+				t.Fatalf("%s revision = %d, want 3 (2 for the suspension, 3 for the template-revision backfill)", id, mirror.revision)
 			}
 			if mirror.kind != "project" {
 				t.Fatalf("%s kind = %q, want project", id, mirror.kind)
 			}
 		}
 		for _, id := range []string{"a-new", "b-y", "c-1", "d-1"} {
-			if got := mirrorOf(t, upgraded, id).revision; got != 1 {
-				t.Fatalf("%s revision = %d, want the untouched 1", id, got)
+			if got := mirrorOf(t, upgraded, id).revision; got != 2 {
+				t.Fatalf("%s revision = %d, want 2 (the template-revision backfill only)", id, got)
+			}
+		}
+	})
+
+	t.Run("every old row gained a template revision and kept its updated_at", func(t *testing.T) {
+		// The backfill must not move updated_at: it is the tiebreak the group-2
+		// migration above chose each project's flow of record by, and what the UI
+		// sorts by, so it must stay what the older build wrote. The rows the
+		// migration suspended are the documented exception — the suspension is
+		// user-visible activity from an earlier accepted step and stamped a new
+		// time — and what the backfill must leave alone there is that stamp. The
+		// suspension writes the flow and the flow.suspended event with the same
+		// instant in one transaction, so comparing the two shows whether anything
+		// after it moved the time.
+		for _, seed := range seeds {
+			flow, err := upgraded.Get(seed.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if flow.TemplateID == "" {
+				continue
+			}
+			if flow.TemplateRevision != 1 {
+				t.Fatalf("%s template_revision = %d, want 1", seed.id, flow.TemplateRevision)
+			}
+			if flow.Status == FlowStatusSuspended {
+				ev := flow.Events[len(flow.Events)-1]
+				if ev.Type != "flow.suspended" {
+					t.Fatalf("%s last event = %q, want flow.suspended", seed.id, ev.Type)
+				}
+				if !flow.UpdatedAt.Equal(ev.Timestamp) {
+					t.Fatalf("%s updated_at = %v but its suspension was written at %v: something after the suspension moved it",
+						seed.id, flow.UpdatedAt, ev.Timestamp)
+				}
+				continue
+			}
+			if flow.UpdatedAt.UnixMilli() != seed.updatedAt.UnixMilli() {
+				t.Fatalf("%s updated_at = %v, want the stored %v", seed.id, flow.UpdatedAt, seed.updatedAt)
 			}
 		}
 	})
@@ -588,12 +643,27 @@ func TestSingleActiveProjectFlowMigrationLeavesACleanDatabaseAlone(t *testing.T)
 	defer store.Close()
 
 	for _, seed := range seeds {
-		payload, _ := upgradeStoredRow(t, store, seed.id)
-		if payload != string(payloadsBefore[seed.id]) {
-			t.Fatalf("row %s was rewritten:\n now %s\nwas %s", seed.id, payload, payloadsBefore[seed.id])
+		payload, updatedAt := upgradeStoredRow(t, store, seed.id)
+		// The group-2 migration leaves this database alone entirely. The
+		// group-3 template-revision backfill writes each row once (none of
+		// them carries a revision yet), so only template_revision, the
+		// revision counter and kind — the member group 1 introduced, which
+		// nothing had reason to add to these rows until now — may differ;
+		// updated_at must not move.
+		assertFlowPayloadPreservedExcept(t, payloadsBefore[seed.id], []byte(payload), "revision", "template_revision", "kind")
+		doc := decodeSeedDocument(t, payloadsBefore[seed.id])
+		if updatedAt != doc.UpdatedAt.UnixMilli() {
+			t.Fatalf("%s updated_at = %d, want the stored %d", seed.id, updatedAt, doc.UpdatedAt.UnixMilli())
 		}
-		if got := mirrorOf(t, store, seed.id).revision; got != 1 {
-			t.Fatalf("%s revision = %d, want 1", seed.id, got)
+		if got := mirrorOf(t, store, seed.id).revision; got != 2 {
+			t.Fatalf("%s revision = %d, want 2 (the template-revision backfill)", seed.id, got)
+		}
+		flow, err := store.Get(seed.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if flow.TemplateRevision != 1 {
+			t.Fatalf("%s template_revision = %d, want 1", seed.id, flow.TemplateRevision)
 		}
 	}
 	if got := len(allOutboxRows(t, store)); got != 0 {
@@ -655,13 +725,206 @@ func TestMigratedSuspendedFlowResumesOrAbortsWithTheEngine(t *testing.T) {
 	if resumed.Status != FlowStatusActive || !flowHasEvent(resumed.Events, "flow.resumed") {
 		t.Fatalf("resumed flow = status %s events %v", resumed.Status, flowEventTypes(resumed.Events))
 	}
-	if got := mirrorOf(t, store, parked.ID).revision; got != 3 {
-		// revision 2 was the migration's write, 3 is the resume.
-		t.Fatalf("m-1 revision = %d, want 3", got)
+	if got := mirrorOf(t, store, parked.ID).revision; got != 4 {
+		// revision 2 was the migration's write, 3 the template-revision
+		// backfill, 4 the resume.
+		t.Fatalf("m-1 revision = %d, want 4", got)
+	}
+}
+
+// TestTemplateRevisionBackfillDoesNotDisturbThePrimaryChoice pins the ordering
+// between the two things that happen on the first open of an old database: the
+// group-2 migration chooses each project's flow of record by the updated_at the
+// old build wrote, and the group-3 template-revision backfill rewrites every
+// flow. If the backfill stamped a fresh time — or if the two ran in the other
+// order — the choice would be made on times the user never produced, and the
+// flow the user last worked on could lose its slot to one they did not.
+//
+// The fixture is built so the two orderings disagree: p-older has the later
+// created_at and the earlier updated_at, so "most recently updated" picks
+// p-newer while "most recently created" would pick p-older. A backfill that
+// moved updated_at to now would make the tiebreak meaningless; the test reads
+// both flows back afterwards and requires the migration's choice and both
+// original times to be exactly what the old build stored.
+func TestTemplateRevisionBackfillDoesNotDisturbThePrimaryChoice(t *testing.T) {
+	seeds := []migrationSeed{
+		// The later updated_at wins — despite the earlier created_at, which is
+		// the point: the rule is "most recently updated", not "most recent".
+		{id: "p-older", projectID: "proj-pick", status: "active",
+			createdAt: time.UnixMilli(9_000).UTC(), updatedAt: time.UnixMilli(10_000).UTC()},
+		{id: "p-newer", projectID: "proj-pick", status: "active",
+			createdAt: time.UnixMilli(1_000).UTC(), updatedAt: time.UnixMilli(20_000).UTC()},
+	}
+	path, payloadsBefore := newLegacyGroup2Database(t, seeds)
+
+	store, err := NewSQLiteFlowStore(path)
+	if err != nil {
+		t.Fatalf("open an older database: %v", err)
+	}
+	defer store.Close()
+
+	// The first open ran the group-2 migration and then the backfill. The
+	// project must be left with the flow the original updated_at chose.
+	active := activeProjectFlowsOf(t, store, "proj-pick")
+	if len(active) != 1 || active[0] != "p-newer" {
+		t.Fatalf("proj-pick active project flows after the first open = %v, want exactly [p-newer] (the greatest original updated_at)", active)
+	}
+	if suspended := suspendedFlowsOf(t, store, "proj-pick"); len(suspended) != 1 || suspended[0] != "p-older" {
+		t.Fatalf("proj-pick suspended = %v, want exactly [p-older]", suspended)
+	}
+
+	// Both flows kept the updated_at the old build wrote, on the row and in the
+	// document. p-newer was never written by the migration (it kept its slot),
+	// but the backfill did write it, so this is the assertion that the backfill
+	// is what preserves it; p-older's migration write moved the time, so what
+	// the backfill must not touch there is what the migration stamped, and the
+	// suspension event carries that same instant.
+	flowNewer, err := store.Get("p-newer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNewer := decodeSeedDocument(t, payloadsBefore["p-newer"]).UpdatedAt
+	if !flowNewer.UpdatedAt.Equal(wantNewer) {
+		t.Fatalf("p-newer updated_at = %v, want the stored %v: the backfill moved a time the migration chose by",
+			flowNewer.UpdatedAt, wantNewer)
+	}
+	_, rowNewerMS := upgradeStoredRow(t, store, "p-newer")
+	if rowNewerMS != wantNewer.UnixMilli() {
+		t.Fatalf("p-newer updated_at column = %d, want the stored %d", rowNewerMS, wantNewer.UnixMilli())
+	}
+
+	flowOlder, err := store.Get("p-older")
+	if err != nil {
+		t.Fatal(err)
+	}
+	suspension := flowOlder.Events[len(flowOlder.Events)-1]
+	if suspension.Type != "flow.suspended" {
+		t.Fatalf("p-older last event = %q, want flow.suspended", suspension.Type)
+	}
+	if !flowOlder.UpdatedAt.Equal(suspension.Timestamp) {
+		t.Fatalf("p-older updated_at = %v but its suspension was written at %v: something after the suspension moved it",
+			flowOlder.UpdatedAt, suspension.Timestamp)
+	}
+	_, rowOlderMS := upgradeStoredRow(t, store, "p-older")
+	if rowOlderMS != suspension.Timestamp.UnixMilli() {
+		t.Fatalf("p-older updated_at column = %d, but the suspension was written at %d",
+			rowOlderMS, suspension.Timestamp.UnixMilli())
+	}
+
+	// Both gained the revision the backfill fills in, which is what proves it
+	// actually ran (otherwise "updated_at did not move" would hold vacuously).
+	for _, id := range []string{"p-newer", "p-older"} {
+		flow, err := store.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if flow.TemplateRevision != 1 {
+			t.Fatalf("%s template_revision = %d, want 1 (the backfill ran)", id, flow.TemplateRevision)
+		}
 	}
 }
 
 // --- fixture helpers -------------------------------------------------------
+
+// assertFlowPayloadPreservedExcept fails when the two payloads differ in any
+// member other than the named ones. It is what the upgrade tests use instead of
+// a byte comparison once a backfill legitimately rewrites a row: the members
+// the backfill does not touch must still be exactly what the older build wrote,
+// and every other member must be there.
+//
+// A member the older document did not have may appear on the new one only when
+// it carries the zero value the backfill writes (kind/revision/template_revision):
+// the "changed" set names members whose presence and value may differ.
+func assertFlowPayloadPreservedExcept(t *testing.T, before, after []byte, changed ...string) {
+	t.Helper()
+	changedSet := map[string]bool{}
+	for _, k := range changed {
+		changedSet[k] = true
+	}
+	beforeMembers := membersOf(t, before)
+	afterMembers := membersOf(t, after)
+	for key, beforeRaw := range beforeMembers {
+		if changedSet[key] {
+			continue
+		}
+		afterRaw, ok := afterMembers[key]
+		if !ok {
+			if pruneEmptyJSONValue(t, beforeRaw) == nil {
+				// The member only held an empty value, which the codec's
+				// omitempty drops when it re-encodes: absent, not lost.
+				continue
+			}
+			t.Fatalf("member %q was lost; before %s, after %s", key, before, after)
+		}
+		if !preservedJSONValueEqual(t, beforeRaw, afterRaw) {
+			t.Fatalf("member %q changed:\n before %s\n  after %s", key, beforeRaw, afterRaw)
+		}
+	}
+	for key, afterRaw := range afterMembers {
+		if changedSet[key] {
+			continue
+		}
+		if _, existed := beforeMembers[key]; !existed && pruneEmptyJSONValue(t, afterRaw) != nil {
+			t.Fatalf("member %q was gained (value %s); before %s", key, afterRaw, before)
+		}
+	}
+}
+
+// preservedJSONValueEqual compares two encoded members by value after pruning
+// values the codec itself would not write back: a member encoded with omitempty
+// whose value is empty (a stage's "gates": [], which this fixture carries)
+// disappears when this build re-encodes the document, at any nesting depth.
+// Everything else must be deeply equal.
+func preservedJSONValueEqual(t *testing.T, a, b json.RawMessage) bool {
+	t.Helper()
+	return reflect.DeepEqual(pruneEmptyJSONValue(t, a), pruneEmptyJSONValue(t, b))
+}
+
+// pruneEmptyJSONValue decodes one encoded value and drops empty members
+// recursively, returning nil for a value that is empty altogether (an empty
+// object, an empty array, JSON null). A non-empty value keeps every member with
+// its decoded value, so two sides compare equal exactly when they differ only in
+// empty members the codec's omitempty would not have written.
+func pruneEmptyJSONValue(t *testing.T, raw json.RawMessage) any {
+	t.Helper()
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode value %s: %v", raw, err)
+	}
+	return pruneEmptyJSON(v)
+}
+
+func pruneEmptyJSON(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, item := range val {
+			if p := pruneEmptyJSON(item); p != nil {
+				out[k] = p
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	case []any:
+		out := make([]any, 0, len(val))
+		for _, item := range val {
+			out = append(out, pruneEmptyJSON(item))
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		return v
+	}
+}
 
 // decodeSeedDocument decodes one of the hand-written legacy payloads with this
 // build's codec, so a test can compare what the migration left against what the

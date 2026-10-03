@@ -144,6 +144,34 @@ CREATE TABLE IF NOT EXISTS flow_store_migrations (
   applied_at INTEGER NOT NULL,
   receipt    TEXT NOT NULL
 );
+-- Immutable template revisions (T3.01.a group 3): the frozen definition of a
+-- built-in or custom template. Append-only by construction: the table's
+-- triggers refuse UPDATE and DELETE, and the primary key makes a revision
+-- number unique per template. The UNIQUE (template_id, content_hash) is what
+-- makes saving the same custom template twice idempotent at the schema level.
+CREATE TABLE IF NOT EXISTS flow_template_revisions (
+  template_id  TEXT    NOT NULL,
+  revision     INTEGER NOT NULL CHECK (revision >= 1),
+  content_hash TEXT    NOT NULL,
+  payload      TEXT    NOT NULL,
+  source       TEXT    NOT NULL CHECK (source IN ('builtin','custom')),
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (template_id, revision),
+  UNIQUE (template_id, content_hash)
+);
+-- The refusals. A trigger message is stable text, and the stores map an error
+-- that contains it back to ErrTemplateRevisionImmutable, so a caller can
+-- classify a refused write without matching on SQLite's wording.
+CREATE TRIGGER IF NOT EXISTS trg_flow_template_revisions_no_update
+BEFORE UPDATE ON flow_template_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'template revisions are immutable (T3.01.a)');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_flow_template_revisions_no_delete
+BEFORE DELETE ON flow_template_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'template revisions are immutable (T3.01.a)');
+END;
 `)
 	if err != nil {
 		return fmt.Errorf("init floweng schema: %w", err)
@@ -161,6 +189,48 @@ CREATE TABLE IF NOT EXISTS flow_store_migrations (
 	}
 	if err := s.createSingleActiveProjectFlowIndex(); err != nil {
 		return err
+	}
+	// T3.01.a group 3, in this order and for these reasons: the built-in
+	// templates get the revisions of the code that is running; a custom template
+	// that predates revisions gets revision 1 from the payload the overwrite-only
+	// flow_templates table currently holds, so a deleted-then-missing template is
+	// told apart from one that simply was never saved; and only then are the
+	// legacy flows backfilled from the revisions those two steps produced.
+	if err := s.seedCustomTemplateRevisions(); err != nil {
+		return err
+	}
+	if _, err := s.seedBuiltinRevisions(); err != nil {
+		return err
+	}
+	if err := s.backfillTemplateRevisions(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// seedCustomTemplateRevisions freezes the current payload of every custom
+// template as revision 1 when it has no revision yet. It runs at open time so a
+// template that existed before revisions did — and whose overwrite-only row is
+// the only record of it — is not confused with a template that no longer
+// exists: only the latter has no revision after this, which is what the flow
+// backfill reports. A custom template re-saved through PutTemplate appends its
+// own revisions, so this writes nothing for it.
+func (s *SQLiteFlowStore) seedCustomTemplateRevisions() error {
+	defs, err := s.ListTemplateDefinitions()
+	if err != nil {
+		return fmt.Errorf("seed custom template revisions: %w", err)
+	}
+	for _, def := range defs {
+		latest, err := s.LatestTemplateRevision(def.ID)
+		if err != nil {
+			return err
+		}
+		if latest > 0 {
+			continue
+		}
+		if _, err := s.EnsureTemplateRevision(customTemplateDef(def), TemplateRevisionSourceCustom); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -272,19 +342,41 @@ func (s *SQLiteFlowStore) flowColumns() (map[string]bool, error) {
 	return cols, nil
 }
 
-// PutTemplate persists a reusable custom template definition.
+// PutTemplate persists a reusable custom template definition and, in the same
+// transaction, freezes it as an immutable revision (T3.01.a group 3).
+//
+// The two writes share one transaction so the current definition and its
+// revision history can never disagree about what was saved: a row whose
+// revision was lost would be a template whose history has a hole, and a
+// revision without its row would be a revision the registry does not load.
+//
+// The revision is appended by the canonical content rule: the same definition
+// saved again appends nothing (only updated_at moves, and this write is
+// idempotent in the history it keeps), and a changed one appends the next
+// revision. DeleteTemplate deletes the flow_templates row only; the revisions
+// stay, because flows point at them.
 func (s *SQLiteFlowStore) PutTemplate(def CustomTemplate) error {
 	payload, err := json.Marshal(def)
 	if err != nil {
 		return fmt.Errorf("marshal flow template: %w", err)
 	}
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("put flow template: begin: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`
 INSERT INTO flow_templates (id, payload, updated_at)
 VALUES (?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at
-`, string(def.ID), string(payload), time.Now().UTC().UnixMilli())
-	if err != nil {
+`, string(def.ID), string(payload), time.Now().UTC().UnixMilli()); err != nil {
 		return fmt.Errorf("put flow template: %w", err)
+	}
+	if _, err := ensureTemplateRevisionInTx(tx, customTemplateDef(def), TemplateRevisionSourceCustom); err != nil {
+		return fmt.Errorf("put flow template: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("put flow template: commit: %w", err)
 	}
 	return nil
 }
@@ -311,7 +403,10 @@ func (s *SQLiteFlowStore) ListTemplateDefinitions() ([]CustomTemplate, error) {
 	return out, rows.Err()
 }
 
-// DeleteTemplate removes a persisted custom template definition.
+// DeleteTemplate removes a persisted custom template definition. The template's
+// revisions are deliberately left in place: they are immutable facts, and a
+// stored Flow still names the revision it was created from even after the
+// template itself is gone (T3.01.a group 3).
 func (s *SQLiteFlowStore) DeleteTemplate(id TemplateID) error {
 	_, err := s.db.Exec(`DELETE FROM flow_templates WHERE id = ?`, string(id))
 	if err != nil {
@@ -416,9 +511,31 @@ func (s *SQLiteFlowStore) Put(flow *Flow) error {
 // The revision is written back into the caller's document, so the copy the
 // caller holds carries the revision that was just stored.
 func writeFlowDocument(tx *sql.Tx, flow *Flow) error {
-	stored, err := loadStoredEventIDs(tx, flow.ID)
-	if err != nil {
-		return err
+	return writeFlowDocumentWith(tx, flow, flowWriteOptions{})
+}
+
+// flowWriteOptions are the variations of writeFlowDocument that a system
+// migration needs, and only it. Every ordinary store write uses the zero value.
+type flowWriteOptions struct {
+	// skipOutbox appends no flow_event_outbox row. A backfill that fills a
+	// document member writes no event — nothing happened to the Flow — so it
+	// must not queue anything for the projector either.
+	skipOutbox bool
+}
+
+// writeFlowDocumentWith is writeFlowDocument with the options above. The
+// document's UpdatedAt is written exactly as the caller left it: this function
+// does not stamp the write time, so a migration that must preserve updated_at
+// (floweng's template-revision backfill does) preserves it by not touching the
+// field.
+func writeFlowDocumentWith(tx *sql.Tx, flow *Flow, opts flowWriteOptions) error {
+	var stored map[string]struct{}
+	if !opts.skipOutbox {
+		var err error
+		stored, err = loadStoredEventIDs(tx, flow.ID)
+		if err != nil {
+			return err
+		}
 	}
 	revision, err := nextRevision(tx, flow)
 	if err != nil {
@@ -457,6 +574,9 @@ ON CONFLICT(id) DO UPDATE SET
 		return fmt.Errorf("put flow: %w", err)
 	}
 
+	if opts.skipOutbox {
+		return nil
+	}
 	for i := range flow.Events {
 		ev := &flow.Events[i]
 		if _, seen := stored[ev.ID]; seen {

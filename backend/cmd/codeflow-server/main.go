@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -188,6 +189,29 @@ func run() error {
 	defer func() { _ = flowEngine.Close() }()
 	flowEngine.SetEventNotifier(floweng.NewWSNotifier(nil))
 	flowEngine.SetSnapshotRestorer(floweng.NewDefaultSnapshotRestorer(snapshotSvc))
+	// T3.01.a group 3: a Flow records the workspace binding (the project's
+	// primary one) it belongs to. The resolver is the project service — floweng
+	// cannot import project, because project imports floweng — so it is attached
+	// only when the service offers the reader; a project without a primary
+	// binding resolves to "", which is "unbound" rather than an error. The
+	// backfill then fills binding_id on the flows that are still running; a
+	// failure is fatal, like the recovery steps around it, because starting with
+	// unbound active flows would silently lose which directory they belong to.
+	if bindingSvc, ok := projectSvc.(interface {
+		ActivePrimaryBinding(ctx context.Context, projectID string) (project.WorkspaceBindingRecord, error)
+	}); ok {
+		flowEngine.SetBindingResolver(projectBindingResolver{svc: bindingSvc})
+		receipt, err := flowEngine.BackfillFlowBindings(context.Background())
+		if err != nil {
+			return fmt.Errorf("backfill flow bindings: %w", err)
+		}
+		if receipt != nil && (len(receipt.Backfilled) > 0 || len(receipt.Unresolved) > 0) {
+			log.Printf("flow binding backfill: %d flow(s) bound, %d project(s) without a primary binding",
+				len(receipt.Backfilled), len(receipt.Unresolved))
+		}
+	} else {
+		log.Printf("[WARN] project service offers no workspace binding reader; flow binding_id stays empty")
+	}
 	// Startup recovery is per-record: unrecoverable operations are reported as
 	// diagnostics (also queryable via project.CreateOperationRecoveryDiagnostics)
 	// and logged here without blocking startup; only an unreadable journal is fatal.
@@ -448,6 +472,29 @@ func closeFunc(c closer) func() {
 	return func() {
 		_ = c.Close()
 	}
+}
+
+// projectBindingResolver adapts the project service's ActivePrimaryBinding to
+// floweng's BindingResolver: the engine only needs the id, and "the project has
+// no primary binding" (project.ErrBindingNotFound) is the empty string — the
+// unbound state Create and BackfillFlowBindings already define — not an error.
+// Any other failure is returned as it is, which makes Create fail closed and
+// stops the backfill where it stands.
+type projectBindingResolver struct {
+	svc interface {
+		ActivePrimaryBinding(ctx context.Context, projectID string) (project.WorkspaceBindingRecord, error)
+	}
+}
+
+func (r projectBindingResolver) ActivePrimaryBindingID(ctx context.Context, projectID string) (string, error) {
+	record, err := r.svc.ActivePrimaryBinding(ctx, projectID)
+	if errors.Is(err, project.ErrBindingNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return record.Snapshot.BindingID, nil
 }
 
 func durableDBPath(filename string) string {

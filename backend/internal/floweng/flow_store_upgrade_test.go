@@ -232,10 +232,12 @@ func TestFlowStoreAssignsRevision(t *testing.T) {
 		}
 
 		t.Run("reopening does not move the counter", func(t *testing.T) {
-			// The document is written twice (so the stored revision is 2) and
-			// then written through a second connection to the same file. If
-			// opening a database reseeded anything, this write would come out
-			// as 1 or 2 instead of the stored value plus one.
+			// The document is written twice (so the stored revision is 2), then
+			// the database is reopened with this build — which runs the
+			// template-revision backfill and writes the row once more, to 3 —
+			// and written through the new connection. If opening a database
+			// reseeded anything, this write would not come out as the stored
+			// value plus one.
 			path := filepath.Join(t.TempDir(), "rev.db")
 			first, err := NewSQLiteFlowStore(path)
 			if err != nil {
@@ -257,11 +259,18 @@ func TestFlowStoreAssignsRevision(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer second.Close()
+			stored, err := second.Get(flow.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Revision != 3 {
+				t.Fatalf("stored revision after reopening = %d, want 3 (the backfill wrote it once)", stored.Revision)
+			}
 			if err := second.Put(flow); err != nil {
 				t.Fatal(err)
 			}
-			if flow.Revision != 3 {
-				t.Fatalf("revision after reopening and writing = %d, want 3", flow.Revision)
+			if flow.Revision != 4 {
+				t.Fatalf("revision after reopening and writing = %d, want 4", flow.Revision)
 			}
 		})
 	})
@@ -522,10 +531,23 @@ func TestFlowStoreUpgradeFromPreT301Database(t *testing.T) {
 
 	insertLegacyRow := func(id, projectID, status string, payload []byte) {
 		t.Helper()
+		// The old build mirrored the document into the row's timestamps, so the
+		// fixture does too: the columns carry the payload's own created_at and
+		// updated_at. (Hand-writing different values would produce a row no old
+		// build could have written, and the updated_at assertions below — that a
+		// migration does not move the time — would be measuring the fixture
+		// instead of the backfill.)
+		var doc struct {
+			CreatedAt time.Time `json:"created_at"`
+			UpdatedAt time.Time `json:"updated_at"`
+		}
+		if err := json.Unmarshal(payload, &doc); err != nil {
+			t.Fatalf("decode legacy payload %s: %v", id, err)
+		}
 		if _, err := store.db.Exec(`
 INSERT INTO flows (id, project_id, template_id, status, payload, created_at, updated_at)
-VALUES (?, ?, 'new_project', ?, ?, 1735689600000, 1735689600000)`,
-			id, projectID, status, string(payload)); err != nil {
+VALUES (?, ?, 'new_project', ?, ?, ?, ?)`,
+			id, projectID, status, string(payload), doc.CreatedAt.UnixMilli(), doc.UpdatedAt.UnixMilli()); err != nil {
 			t.Fatalf("insert legacy row %s: %v", id, err)
 		}
 	}
@@ -545,7 +567,13 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 		t.Fatalf("outbox rows before the upgrade = %d", outboxBefore)
 	}
 	payloadBefore := string(v0)
-	updatedAtBefore := int64(1735689600000)
+	var v0Doc struct {
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	if err := json.Unmarshal(v0, &v0Doc); err != nil {
+		t.Fatalf("decode the v0 fixture: %v", err)
+	}
+	updatedAtBefore := v0Doc.UpdatedAt.UnixMilli()
 	// Leave the write lock so the reopen below is a real second connection.
 	if err := store.Close(); err != nil {
 		t.Fatalf("close: %v", err)
@@ -567,22 +595,33 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 		}
 	})
 
-	t.Run("every old row is a project flow at revision 1", func(t *testing.T) {
-		rows, err := upgraded.db.Query(`SELECT id, kind, revision FROM flows ORDER BY id`)
+	t.Run("every old row is a project flow with its template revision", func(t *testing.T) {
+		// Opening on this build runs the group-2 migration (nothing to do
+		// here), then freezes the built-in templates, then the group-3
+		// template-revision backfill, which writes each legacy flow once: it
+		// gains template_revision and moves to revision 2. The kind is the
+		// project flow every old document means.
+		rows, err := upgraded.db.Query(`SELECT id, kind, revision, template_revision FROM flows ORDER BY id`)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer rows.Close()
 		seen := 0
 		for rows.Next() {
-			var id, kind string
-			var revision int64
-			if err := rows.Scan(&id, &kind, &revision); err != nil {
+			var (
+				id, kind    string
+				revision    int64
+				templateRev sql.NullInt64
+			)
+			if err := rows.Scan(&id, &kind, &revision, &templateRev); err != nil {
 				t.Fatal(err)
 			}
 			seen++
-			if kind != "project" || revision != 1 {
-				t.Fatalf("row %s = kind %q revision %d, want project at revision 1", id, kind, revision)
+			if kind != "project" || revision != 2 {
+				t.Fatalf("row %s = kind %q revision %d, want project at revision 2 (the backfill)", id, kind, revision)
+			}
+			if !templateRev.Valid || templateRev.Int64 != 1 {
+				t.Fatalf("row %s template_revision = %v, want 1", id, templateRev)
 			}
 		}
 		if seen != 2 {
@@ -595,8 +634,11 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 		if err != nil {
 			t.Fatalf("get v0 document: %v", err)
 		}
-		if loaded.Kind != FlowKindProject || loaded.Revision != 1 {
+		if loaded.Kind != FlowKindProject || loaded.Revision != 2 {
 			t.Fatalf("v0 document decoded as kind %q revision %d", loaded.Kind, loaded.Revision)
+		}
+		if loaded.TemplateRevision != 1 {
+			t.Fatalf("v0 document template_revision = %d, want 1", loaded.TemplateRevision)
 		}
 		if loaded.ProjectID != "proj-legacy" || loaded.Status != FlowStatusActive {
 			t.Fatalf("v0 document changed: %+v", loaded)
@@ -613,7 +655,7 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 			t.Fatalf("list returned %d flows, want 2", len(list))
 		}
 		for _, f := range list {
-			if f.Kind != FlowKindProject || f.Revision != 1 {
+			if f.Kind != FlowKindProject || f.Revision != 2 {
 				t.Fatalf("listed flow %s = kind %q revision %d", f.ID, f.Kind, f.Revision)
 			}
 		}
@@ -635,13 +677,24 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 		}
 	})
 
-	t.Run("the payload is the bytes it was", func(t *testing.T) {
+	t.Run("the payload changed only where the backfill had to", func(t *testing.T) {
+		// The template-revision backfill writes this row once: the document
+		// gains template_revision, the revision counter moves, and the row
+		// gains kind — the member group 1 introduced, which nothing had reason
+		// to add to this row until the backfill re-encoded it. Every other
+		// member is what the older build wrote, and updated_at is untouched —
+		// a system migration must not reorder the lists updated_at orders.
 		payload, updatedAt := upgradeStoredRow(t, upgraded, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-		if payload != payloadBefore {
-			t.Fatalf("opening the database rewrote the payload:\n before %s\n  after %s", payloadBefore, payload)
-		}
+		assertFlowPayloadPreservedExcept(t, []byte(payloadBefore), []byte(payload), "revision", "template_revision", "kind")
 		if updatedAt != updatedAtBefore {
 			t.Fatalf("opening the database changed updated_at: %d -> %d", updatedAtBefore, updatedAt)
+		}
+		members := membersOf(t, []byte(payload))
+		if string(members["template_revision"]) != "1" {
+			t.Fatalf("template_revision = %s, want 1", members["template_revision"])
+		}
+		if string(members["revision"]) != "2" {
+			t.Fatalf("revision = %s, want 2", members["revision"])
 		}
 	})
 
@@ -657,14 +710,15 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 			t.Fatalf("second open: %v", err)
 		}
 		defer second.Close()
+		first, _ := upgradeStoredRow(t, upgraded, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 		payload, _ := upgradeStoredRow(t, second, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-		if payload != payloadBefore {
-			t.Fatal("the second open rewrote the payload")
+		if payload != first {
+			t.Fatalf("the second open rewrote the payload:\n was %s\n now %s", first, payload)
 		}
 		if got := legacyOutboxCount(t, second); got != outboxBefore {
 			t.Fatalf("outbox rows after the second open = %d", got)
 		}
-		if got := mirrorOf(t, second, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"); got.kind != "project" || got.revision != 1 {
+		if got := mirrorOf(t, second, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"); got.kind != "project" || got.revision != 2 {
 			t.Fatalf("the second open changed the row: %+v", got)
 		}
 	})
@@ -682,17 +736,19 @@ VALUES ('ffffffff-ffff-4fff-8fff-ffffffffffff', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaa
 		}
 	})
 
-	t.Run("a document written after the upgrade is a revision 2", func(t *testing.T) {
+	t.Run("a document written after the upgrade is the stored revision plus one", func(t *testing.T) {
 		loaded, err := upgraded.Get("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 		if err != nil {
 			t.Fatal(err)
 		}
+		// The backfill wrote the row once at open time, so the stored revision
+		// is 2 and this ordinary write lands on 3.
 		loaded.Status = FlowStatusAborted
 		if err := upgraded.Put(loaded); err != nil {
 			t.Fatalf("put after upgrade: %v", err)
 		}
-		if loaded.Revision != 2 {
-			t.Fatalf("revision after the first write = %d, want 2", loaded.Revision)
+		if loaded.Revision != 3 {
+			t.Fatalf("revision after the first write = %d, want 3", loaded.Revision)
 		}
 		if got := legacyOutboxCount(t, upgraded); got != outboxBefore {
 			t.Fatalf("the write queued a row for history that was already there: %d -> %d", outboxBefore, got)

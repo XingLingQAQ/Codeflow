@@ -20,13 +20,16 @@ type InMemoryEngine struct {
 	notifier   EventNotifier         // optional
 	guard      ExecutionGuard        // optional
 	escalation GateEscalationHandler // optional
+	bindings   BindingResolver       // optional (T3.01.a group 3)
 }
 
 // NewInMemoryEngine creates an engine with an in-process memory store.
 // snapshots may be nil (no auto snapshot on advance).
 func NewInMemoryEngine(snapshots SnapshotCreator) *InMemoryEngine {
+	store := newMemoryStore()
+	ensureBuiltinRevisions(store)
 	return &InMemoryEngine{
-		store:     newMemoryStore(),
+		store:     store,
 		snapshots: snapshots,
 	}
 }
@@ -36,7 +39,29 @@ func NewEngineWithStore(store FlowStore, snapshots SnapshotCreator) *InMemoryEng
 	if store == nil {
 		store = newMemoryStore()
 	}
+	ensureBuiltinRevisions(store)
 	return &InMemoryEngine{store: store, snapshots: snapshots}
+}
+
+// ensureBuiltinRevisions freezes the current code definition of every built-in
+// template into the store when the store keeps template revisions, so a flow
+// created through an in-process engine names the same revision a durable engine
+// would (T3.01.a group 3). The durable store does its own seeding when the
+// database is opened; this call is then a no-op (the content already matches),
+// so both paths agree and neither writes twice.
+func ensureBuiltinRevisions(store FlowStore) {
+	rs, ok := store.(TemplateRevisionStore)
+	if !ok {
+		return
+	}
+	ids := make([]TemplateID, 0, len(builtinTemplates))
+	for id := range builtinTemplates {
+		ids = append(ids, id)
+	}
+	sortTemplateIDs(ids)
+	for _, id := range ids {
+		_, _ = rs.EnsureTemplateRevision(builtinTemplates[id], TemplateRevisionSourceBuiltin)
+	}
 }
 
 // NewSQLiteEngine opens a durable engine at dbPath (e.g. data/floweng.db).
@@ -187,6 +212,27 @@ func (e *InMemoryEngine) Create(ctx context.Context, req *CreateFlowRequest) (*F
 		})
 	}
 	flow.Stages = stages
+
+	// The template revision and the workspace binding are facts about the flow
+	// that the caller cannot supply and the store does not know: the revision is
+	// whatever the template's history says right now, and the binding is
+	// whatever the resolver says the project's primary binding is (T3.01.a
+	// group 3). Both are resolved before e.mu is taken, and a resolver error
+	// fails the Create before anything is written (fail closed).
+	revision := int64(0)
+	if rs, ok := e.store.(TemplateRevisionStore); ok {
+		latest, err := rs.LatestTemplateRevision(tmpl.ID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve template revision for %s: %w", tmpl.ID, err)
+		}
+		revision = latest
+	}
+	flow.TemplateRevision = revision
+	bindingID, err := e.resolveBinding(ctx, req.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve binding for project %s: %w", req.ProjectID, err)
+	}
+	flow.BindingID = bindingID
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
