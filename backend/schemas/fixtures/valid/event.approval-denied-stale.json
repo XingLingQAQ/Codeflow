@@ -1,0 +1,12 @@
+{
+  "id": "evt_9211",
+  "scope": "run:run_88",
+  "project_id": "p_123",
+  "run_id": "run_88",
+  "sequence": 15,
+  "type": "approval.denied",
+  "schema_version": 1,
+  "occurred_at": "2026-09-29T09:05:00Z",
+  "identity": {"project_id": "p_123", "run_id": "run_88", "attempt_id": "att_1", "agent_revision_id": "ar_12", "actor": {"type": "user", "id": "local-user", "source": "desktop"}},
+  "payload": {"approval_id": "ap_77", "tool_call_id": "toolu_01", "reason": "stale", "previous_status": "waiting_approval"}
+}

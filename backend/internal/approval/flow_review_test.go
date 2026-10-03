@@ -15,7 +15,9 @@ package approval_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -406,5 +408,145 @@ func TestDecidePendingRevisionMismatchIsAConflict(t *testing.T) {
 	})
 	if err != nil || decided.Status != approval.StatusApproved {
 		t.Fatalf("decide at the current revision: %s, %v; want approved", decided.Status, err)
+	}
+}
+
+// eventPayloads returns the decoded payloads of one run's events of a type, in
+// run order.
+func (fl *flow) eventPayloads(runID, eventType string) []map[string]any {
+	fl.t.Helper()
+	events, _, err := runstore.ListRunEvents(fl.f.ctx, fl.f.store.DB(), runID, 0, 1000)
+	if err != nil {
+		fl.t.Fatalf("list events of %s: %v", runID, err)
+	}
+	var out []map[string]any
+	for _, e := range events {
+		if e.Type != eventType {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(e.Payload, &payload); err != nil {
+			fl.t.Fatalf("decode %s payload: %v", eventType, err)
+		}
+		out = append(out, payload)
+	}
+	return out
+}
+
+// TestResolveDeniedReleasesTheRunForAStaleGrant is CA-4: an approved grant the
+// waiting call can no longer use. The target content changed after the human
+// approved, so ConsumeTx refuses (the old decision is unconsumable history,
+// §27.2.3). Once the refusal reached the backend, ResolveDeniedTx returns the
+// Run to running with reason "stale"; the old grant can never be spent
+// afterwards, and the changed call can ask for a new approval.
+func TestResolveDeniedReleasesTheRunForAStaleGrant(t *testing.T) {
+	fl := newFlow(t)
+	fl.running()
+	backend := run.Actor{Type: run.ActorTypeSystem, ID: "backend"}
+	userDecides := func(a approval.Approval, at time.Duration) approval.Approval {
+		t.Helper()
+		decided, err := fl.decide(approval.DecisionInput{
+			ApprovalID: a.ID, ExpectedRevision: a.Revision, Approved: true,
+			DecidedBy: "u-1", Actor: run.Actor{Type: run.ActorTypeUser, ID: "u-1"},
+			Now: fl.f.now.Add(at),
+		})
+		if err != nil {
+			t.Fatalf("DecideTx(%s): %v", a.ID, err)
+		}
+		return decided
+	}
+
+	oldIn := fl.toolRequest(t, "ap-old", "tc_old")
+	old := userDecides(fl.mustRequestTool(oldIn).Approval, 10*time.Second)
+
+	changed := oldIn.FingerprintInput
+	changed.BaseManifestHash = "sha256:manifest-after-an-edit"
+	if _, err := fl.consume(fl.consumeInput(t, old, changed), nil); !errors.Is(err, approval.ErrApprovalBindingChanged) {
+		t.Fatalf("consume with changed target content: error = %v, want ErrApprovalBindingChanged", err)
+	}
+	if got := fl.status(fxRun); got != run.RunStatusWaitingApproval {
+		t.Fatalf("run status = %s, want waiting_approval (still waiting for ap-old)", got)
+	}
+
+	_, moved, err := fl.resolveDenied(old.ID, backend, fl.f.now.Add(20*time.Second))
+	if err != nil {
+		t.Fatalf("ResolveDeniedTx(stale grant): %v", err)
+	}
+	if moved.From != run.RunStatusWaitingApproval || moved.To != run.RunStatusRunning {
+		t.Fatalf("transition = %s -> %s, want waiting_approval -> running", moved.From, moved.To)
+	}
+	denied := fl.eventPayloads(fxRun, string(run.EventApprovalDenied))
+	if len(denied) != 1 || denied[0]["reason"] != "stale" || denied[0]["approval_id"] != old.ID {
+		t.Fatalf("approval.denied payloads = %v, want one with reason stale for %s", denied, old.ID)
+	}
+	if status, _ := fl.approvalStatus(old.ID); status != approval.StatusApproved {
+		t.Fatalf("ap-old status = %s, want approved (the decision stays as history)", status)
+	}
+
+	// The old grant can never be spent now, not even with the original binding.
+	if _, err := fl.consume(fl.consumeInput(t, old, oldIn.FingerprintInput), nil); !errors.Is(err, approval.ErrApprovalRunNotConsumable) {
+		t.Fatalf("consume the stale grant after the denial: error = %v, want ErrApprovalRunNotConsumable", err)
+	}
+	if got := fl.f.countRows(t, "approval_consumptions"); got != 0 {
+		t.Fatalf("receipts = %d, want 0", got)
+	}
+
+	// The changed call asks again and is approved and spent normally.
+	newIn := fl.toolRequest(t, "ap-new", "tc_new")
+	newIn.FingerprintInput.BaseManifestHash = changed.BaseManifestHash
+	newer := userDecides(fl.mustRequestTool(newIn).Approval, 30*time.Second)
+	result, err := fl.consume(fl.consumeInput(t, newer, newIn.FingerprintInput), nil)
+	if err != nil || !result.Granted || !result.RunMoved {
+		t.Fatalf("consume the new approval: granted=%v moved=%v err=%v; want granted and the run released",
+			result.Granted, result.RunMoved, err)
+	}
+	if _, _, err := fl.resolveDenied(old.ID, backend, fl.f.now.Add(40*time.Second)); !errors.Is(err, approval.ErrApprovalConflict) {
+		t.Fatalf("resolving the old grant again: error = %v, want ErrApprovalConflict", err)
+	}
+}
+
+// TestResolveDeniedRefusesAPendingApproval: a request nobody answered yet is not
+// a denial; the Run keeps waiting.
+func TestResolveDeniedRefusesAPendingApproval(t *testing.T) {
+	fl := newFlow(t)
+	fl.running()
+	pending := fl.mustRequestTool(fl.toolRequest(t, "ap-pending", "tc_pending")).Approval
+	_, _, err := fl.resolveDenied(pending.ID, run.Actor{Type: run.ActorTypeSystem, ID: "backend"}, fl.f.now.Add(time.Second))
+	if !errors.Is(err, approval.ErrApprovalAlreadyDecided) {
+		t.Fatalf("error = %v, want ErrApprovalAlreadyDecided (pending is not a denial)", err)
+	}
+	if got := fl.status(fxRun); got != run.RunStatusWaitingApproval {
+		t.Fatalf("run status = %s, want waiting_approval", got)
+	}
+}
+
+// TestDecideCommentIsRecorded: the decider's note lands in the approval.decided
+// payload; an over-long note is refused before anything is written.
+func TestDecideCommentIsRecorded(t *testing.T) {
+	fl := newFlow(t)
+	fl.running()
+	pending := fl.mustRequestTool(fl.toolRequest(t, "ap-note", "tc_note")).Approval
+	in := approval.DecisionInput{
+		ApprovalID: pending.ID, ExpectedRevision: pending.Revision, Approved: false,
+		DecidedBy: "u-1", Actor: run.Actor{Type: run.ActorTypeUser, ID: "u-1"},
+		Now: fl.f.now.Add(time.Minute),
+	}
+
+	tooLong := in
+	tooLong.Comment = strings.Repeat("长", approval.MaxDecisionCommentRunes+1)
+	if _, err := fl.decide(tooLong); !errors.Is(err, approval.ErrInvalidApproval) {
+		t.Fatalf("over-long comment: error = %v, want ErrInvalidApproval", err)
+	}
+	if status, revision := fl.approvalStatus(pending.ID); status != approval.StatusPending || revision != pending.Revision {
+		t.Fatalf("after a refused decision: %s rev %d, want pending rev %d", status, revision, pending.Revision)
+	}
+
+	in.Comment = "  不要在发布分支上跑安装脚本  "
+	if _, err := fl.decide(in); err != nil {
+		t.Fatalf("DecideTx: %v", err)
+	}
+	decided := fl.eventPayloads(fxRun, string(run.EventApprovalDecided))
+	if len(decided) != 1 || decided[0]["comment"] != "不要在发布分支上跑安装脚本" || decided[0]["status"] != "rejected" {
+		t.Fatalf("approval.decided payloads = %v, want one rejected decision carrying the trimmed comment", decided)
 	}
 }

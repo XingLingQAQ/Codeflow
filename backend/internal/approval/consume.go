@@ -143,12 +143,14 @@ type ConsumeResult struct {
 //     difference is ErrApprovalBindingChanged: parameters, targets, base,
 //     agent revision or scope moved, so the old decision is history.
 //  4. The Run must be alive: running or waiting_approval. A terminal Run is
-//     ErrApprovalRunNotConsumable: the authorization died with it. When the Run
-//     is waiting, a low-risk (auto-approved) call is granted without touching
-//     the Run — it never made the Run wait, and a backend may run it in
-//     parallel with the call that did — while a medium/high approval must be
-//     the one the Run waits for (waitedToolApprovalID), with no other pending
-//     tool approval beside it; anything else is ErrApprovalRunNotConsumable.
+//     ErrApprovalRunNotConsumable: the authorization died with it. A low-risk
+//     (auto-approved) call is granted in either state without touching the Run
+//     — it never made the Run wait, and a backend may run it in parallel with
+//     the call that did. A medium/high approval is granted only while the Run
+//     waits for exactly it (waitedToolApprovalID), with no other pending tool
+//     approval beside it; anything else — including a running Run, whose wait
+//     for this approval already ended in a denial (CA-4) — is
+//     ErrApprovalRunNotConsumable.
 //  5. The attempt must be the Run's current attempt and not finished
 //     (ErrApprovalAttemptMismatch).
 //  6. RecordConsumptionTx writes the receipt — the one-shot mutex.
@@ -250,7 +252,16 @@ func ConsumeTx(ctx context.Context, tx runstore.Tx, in ConsumeInput) (ConsumeRes
 	releaseRun := false
 	switch runRow.Status {
 	case run.RunStatusRunning:
-		// Nothing waits, nothing to move.
+		// Nothing waits, nothing to move — for a low-risk call. A medium/high
+		// approval is spent only while its Run waits for it: once the Run is
+		// running again its wait ended without this approval being consumed,
+		// which happens only when the call was denied to the backend (CA-4,
+		// ResolveDeniedTx "stale"). Spending it now would run a call the backend
+		// was told would not run.
+		if stored.Risk != RiskLow {
+			return refuse(fmt.Errorf("%w: run %s is running; a %s-risk approval is consumed only while its run waits for it",
+				ErrApprovalRunNotConsumable, stored.RunID, stored.Risk))
+		}
 	case run.RunStatusWaitingApproval:
 		if stored.Risk == RiskLow {
 			// An auto-approved call never made the Run wait: it is granted, and

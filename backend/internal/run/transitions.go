@@ -298,14 +298,17 @@ var transitionRules = []transitionRule{
 	},
 	// waiting_approval --approval.denied--> running (CA-3): the pending tool
 	// call was rejected, expired or invalidated and the backend was told, so the
-	// Run continues without the tool having run. Without this row a rejection
+	// Run continues without the tool having run. CA-4 adds the approved grant
+	// the call can no longer use (arguments, target content, policy or deadline
+	// moved since the decision, so consumption refused it): also a denial of
+	// the waiting call, payload reason "stale". Without this row a rejection
 	// would leave the Run in waiting_approval while its process keeps running,
 	// and the next approval.required (legal only from running) would fail.
 	{
 		From: RunStatusWaitingApproval, Kind: TriggerEvent, Name: string(EventApprovalDenied),
 		To: RunStatusRunning,
-		Condition: "拒绝/到期/失效已记录并已投递给后端，工具未执行 " +
-			"(rejection/expiry/invalidation recorded and delivered to the backend; the tool did not run)",
+		Condition: "拒绝/到期/失效或已批准但不可消费（CA-4）已记录并已投递给后端，工具未执行 " +
+			"(rejection, expiry, invalidation or an unusable approved grant recorded and delivered to the backend; the tool did not run)",
 		FailureCode: CodeApprovalInvalid,
 		StateEvent:  EventApprovalDenied,
 	},

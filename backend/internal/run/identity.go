@@ -44,10 +44,11 @@ const (
 	// without a Run.
 	EventApprovalDecided ExecutionEventType = "approval.decided"
 	// EventApprovalDenied: the pending tool call of a waiting_approval Run will
-	// not be authorized — the approval was rejected, expired or invalidated —
-	// and the backend has been told, so the Run returns to running without the
-	// tool having run (§21.1, CA-3). The payload names the approval and the
-	// reason.
+	// not be authorized — the approval was rejected, expired or invalidated, or
+	// it was approved but can no longer be used for the call (CA-4, reason
+	// "stale") — and the backend has been told, so the Run returns to running
+	// without the tool having run (§21.1, CA-3). The payload names the approval
+	// and the reason.
 	EventApprovalDenied ExecutionEventType = "approval.denied"
 	// EventApprovalRequired: a running Run needs approval (§21.1).
 	EventApprovalRequired ExecutionEventType = "approval.required"

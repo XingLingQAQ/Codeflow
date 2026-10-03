@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/codeflow/backend/internal/run"
 	"github.com/codeflow/backend/internal/runstore"
@@ -512,7 +513,16 @@ type DecisionInput struct {
 	// Now is the decision instant, and the deadline it is compared against.
 	// Required.
 	Now time.Time
+	// Comment is the decider's optional note (§27.3's `reason` field of
+	// POST /approvals/:aid/decide). It is written into the approval.decided
+	// payload as "comment"; it never changes the decision. At most
+	// MaxDecisionCommentRunes runes after trimming.
+	Comment string
 }
+
+// MaxDecisionCommentRunes bounds a decision comment, so a note cannot push the
+// approval.decided event past the event size limit.
+const MaxDecisionCommentRunes = 1000
 
 // DecideTx answers a pending approval.
 //
@@ -567,6 +577,11 @@ func DecideTx(ctx context.Context, tx runstore.Tx, in DecisionInput) (Approval, 
 	}
 	if err := validateLifecycleActor(in.Actor); err != nil {
 		return Approval{}, err
+	}
+	comment := trimSpace(in.Comment)
+	if n := utf8.RuneCountInString(comment); n > MaxDecisionCommentRunes {
+		return Approval{}, fmt.Errorf("%w: Comment is %d runes, limit is %d",
+			ErrInvalidApproval, n, MaxDecisionCommentRunes)
 	}
 
 	current, err := GetApproval(ctx, tx, approvalID)
@@ -624,6 +639,7 @@ func DecideTx(ctx context.Context, tx runstore.Tx, in DecisionInput) (Approval, 
 		At:        now,
 		Actor:     in.Actor,
 		Reason:    reason,
+		Comment:   comment,
 	})
 	return decided, err
 }
@@ -640,6 +656,9 @@ type decisionWrite struct {
 	// Reason is the payload's reason: the answer itself, or why the request
 	// stopped applying.
 	Reason string
+	// Comment is the decider's note, written as the payload's "comment" when
+	// present.
+	Comment string
 }
 
 // writeDecisionTx is the one place a decision is written: the status change,
@@ -698,7 +717,7 @@ func writeDecisionTx(ctx context.Context, tx runstore.Tx, w decisionWrite) (Appr
 	stored.DecidedAt = now
 	stored.Revision = before.Revision + 1
 
-	event, err := appendDecisionEventTx(ctx, tx, stored, w.Actor, now, w.Reason)
+	event, err := appendDecisionEventTx(ctx, tx, stored, w.Actor, now, w.Reason, w.Comment)
 	if err != nil {
 		return Approval{}, runstore.Event{}, err
 	}
@@ -714,7 +733,7 @@ func writeDecisionTx(ctx context.Context, tx runstore.Tx, w decisionWrite) (Appr
 // fingerprint and the risk. An audit reader with only the event stream can tell
 // what was approved without joining a table a later retention job may have
 // trimmed.
-func appendDecisionEventTx(ctx context.Context, tx runstore.Tx, stored Approval, actor run.Actor, at time.Time, reason string) (runstore.Event, error) {
+func appendDecisionEventTx(ctx context.Context, tx runstore.Tx, stored Approval, actor run.Actor, at time.Time, reason, comment string) (runstore.Event, error) {
 	payload := map[string]any{
 		"approval_id":  stored.ID,
 		"subject_type": string(stored.SubjectType),
@@ -727,6 +746,9 @@ func appendDecisionEventTx(ctx context.Context, tx runstore.Tx, stored Approval,
 	}
 	if r := trimSpace(reason); r != "" {
 		payload["reason"] = r
+	}
+	if c := trimSpace(comment); c != "" {
+		payload["comment"] = c
 	}
 	if stored.RunID != "" {
 		payload["run_id"] = stored.RunID
@@ -871,7 +893,15 @@ func InvalidatePendingForRunTx(ctx context.Context, tx runstore.Tx, runID string
 //
 // It accepts an approval in any decided-but-unconsumed state (rejected,
 // expired, invalidated): the reason in the payload says which, and the Run's
-// move is the same. When the Run is no longer waiting_approval — a cancellation
+// move is the same. It also accepts an *approved* approval that was never
+// consumed (CA-4, reason "stale"): the grant could not be spent on the waiting
+// call — the arguments, the target content, the policy or the deadline moved
+// since the decision, so ConsumeTx refused it and §27.2.3 makes the old decision
+// unconsumable history — and the caller has told the backend no. Without this
+// the Run would wait forever for an approval nobody can use, and could not ask
+// for a new one (a waiting Run cannot request; S1). The row stays approved;
+// ConsumeTx never spends a medium/high approval its Run is not waiting for, so
+// the call cannot run afterwards on the old decision. When the Run is no longer waiting_approval — a cancellation
 // got there first, or this was already called — there is nothing to move and
 // the call reports ErrApprovalConflict naming the current status: idempotent,
 // and no state is resurrected (§27.2.5).
@@ -925,6 +955,18 @@ func ResolveDeniedTx(ctx context.Context, tx runstore.Tx, approvalID string, act
 			"%w: run %s is waiting for approval %q, not %s; nothing to move",
 			ErrApprovalConflict, runRow.ID, waited, current.ID)
 	}
+	if current.Status == StatusApproved {
+		// CA-4: a grant the waiting call cannot use. It must still be unspent —
+		// a spent grant already released the Run when it was consumed.
+		consumed, err := approvalConsumed(ctx, tx, current.ID)
+		if err != nil {
+			return current, run.Transition{}, err
+		}
+		if consumed {
+			return current, run.Transition{}, fmt.Errorf(
+				"%w: approval %s was already consumed; its call ran", ErrApprovalConflict, current.ID)
+		}
+	}
 
 	moved, err := moveRun(ctx, tx, moveRunInput{
 		RunID:          runRow.ID,
@@ -943,7 +985,9 @@ func ResolveDeniedTx(ctx context.Context, tx runstore.Tx, approvalID string, act
 }
 
 // denialReason maps a decided status to the approval.denied payload reason, or
-// "" when the status is not a denial of a waiting call.
+// "" when the status is not a denial of a waiting call. An approved row maps to
+// "stale" (CA-4): the decision stands as history, but the call it was made for
+// cannot use it, so for the waiting call it is a denial.
 func denialReason(status Status) string {
 	switch status {
 	case StatusRejected:
@@ -952,9 +996,26 @@ func denialReason(status Status) string {
 		return "expired"
 	case StatusInvalidated:
 		return "invalidated"
+	case StatusApproved:
+		return "stale"
 	default:
 		return ""
 	}
+}
+
+// approvalConsumed reports whether the approval already has its one-shot
+// consumption receipt.
+func approvalConsumed(ctx context.Context, tx runstore.Tx, approvalID string) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx,
+		`SELECT 1 FROM approval_consumptions WHERE approval_id = ? LIMIT 1`, approvalID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("approval: read the receipt of %s: %w", approvalID, err)
+	}
+	return true, nil
 }
 
 // moveRunInput is one Run move this package asks for.
