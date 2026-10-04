@@ -5307,6 +5307,103 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorEnvelope'
 
+  /api/v1/projects/{pid}/approvals/{approval_id}/decide:
+    post:
+      tags: [Runs]
+      summary: Decide a pending approval
+      description: Registered in the backend router (POST /api/v1/projects/:id/approvals/:approval_id/decide, handlers.DecideApproval; T2.02.c group 2). The human answer to a pending approval (§27.3's frozen request — approved, fingerprint, expected_revision, reason). `approved:false` is a decision that lands the row as rejected — never an omitted answer; a request that states no boolean is refused 422 approved_required rather than defaulted (§28 T2.02.c). A decision writes exactly one approval.decided event (payload carries the comment) and never moves the Run — a grant is applied when the approval is consumed and a denial only after it is delivered to the backend (§27.2 item 3). The write is a §20.4 command — the Idempotency-Key is claimed in the transaction that decides the approval, a retry with the same key and the same body is replayed byte for byte, and business refusals (fingerprint mismatch, revision conflict, already decided, expired) are recorded and replayed. The row must be decided against the revision the human saw; an If-Match header and a body expected_revision are both accepted and must agree. The decision-layer reasons (approved_required, fingerprint_required, fingerprint_mismatch, expected_revision_required, invalid_body, comment_too_long, approval_not_found, approval_already_decided, approval_expired, revision_conflict, precondition_failed) travel in error.details.reason and per the §15 T0.03 namespace ruling are not part of the closed error-code enum.
+      operationId: decideApproval
+      parameters:
+        - name: pid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: approval_id
+          in: path
+          required: true
+          description: The approval row being answered (§27.2)
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated command id; echoed as meta.command_id (§20.1/§20.4)
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: Strong ETag of the approval revision the decision was taken against ("N", §27.3). Alternative to the body expected_revision; when both are present they must agree (422 if_match_body_mismatch). A stale If-Match is answered 412 precondition_failed.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalDecisionRequest'
+      responses:
+        '200':
+          description: The approval as decided — data is the ApprovalDecision; meta carries command_id and the ETag header the new revision (§27.3 success instance). An idempotent repeat by the same decider with the same answer is this same response.
+          headers:
+            ETag:
+              description: Strong ETag of the revision this decision produced ("N")
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalDecisionEnvelope'
+        '400':
+          description: The path project is not a UUID — invalid_request with error.details.reason=invalid_project_id, in the same error envelope as every other answer of this endpoint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '401':
+          description: Missing or invalid process token — unauthorized (§27.3). Nothing is read or written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '404':
+          description: No approval with this id, or the approval belongs to another project — invalid_request with error.details.reason=approval_not_found. The two conditions are answered with the same body, so the endpoint is not an existence oracle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '409':
+          description: Business-state or idempotency conflict — conflict with error.details.reason one of fingerprint_mismatch (the body fingerprint differs from the stored one; nothing written), revision_conflict (the body expected_revision no longer matches; details carry expected_revision/current_revision/current_status), approval_already_decided (another decider answered first; details carry status/revision), or approval_expired (the deadline passed; the 409 is written through with status=expired so the expiry survives). The same Idempotency-Key with a different body is idempotency_key_reused; a request that raced another holder of the same key after that holder finished is command_already_completed (read the recorded result through GET /api/v1/projects/{pid}/commands/{command_id}).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '412':
+          description: The If-Match precondition no longer holds — conflict with error.details.reason=precondition_failed; details carry approval_id, expected_revision, current_revision and current_status. Only an If-Match expectation is answered 412; a body expected_revision conflict is 409 revision_conflict.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          description: The request is not a valid instance of the contract — invalid_request with error.details.reason one of approved_required (no boolean given; `false` is a decision, absence is not), fingerprint_required, expected_revision_required (neither If-Match nor expected_revision stated), invalid_body (unknown field, duplicate key, case-variant key, non-object or trailing content), comment_too_long (reason past the 1000-rune limit), if_match_body_mismatch (If-Match and expected_revision disagree), invalid_expected_revision, or idempotency_key_required / idempotency_key_invalid for the command header. Nothing is written and no idempotency key is claimed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '500':
+          description: The decision could not be read or written (a storage failure inside the command transaction) — backend_unavailable, retryable. The transaction rolled back and released the Idempotency-Key, so the same request may be retried with the same key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '503':
+          description: The run store is not configured (error.details.reason=run_store_unavailable), the Idempotency-Key was being claimed by a concurrent request, or the record a replay needs is unusable — backend_unavailable, retryable with the same key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+
 components:
   securitySchemes:
     SidecarBearer:
@@ -9428,6 +9525,76 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/CommandStatus'
+        meta:
+          $ref: '#/components/schemas/ApiMeta'
+
+    ApprovalDecisionRequest:
+      type: object
+      required: [approved, fingerprint]
+      additionalProperties: false
+      description: §27.3's frozen decision request (field set; field order insignificant). `approved` must be a JSON boolean — `false` is the decision "rejected", and an absent or null field is 422 approved_required, never defaulted (§28 T2.02.c). `fingerprint` must equal the stored approval fingerprint. One of expected_revision / the If-Match header must state the revision the decision was taken against; when both are present they must agree (422 if_match_body_mismatch).
+      properties:
+        approved:
+          type: boolean
+          description: The answer. false is a decision that lands the row as rejected.
+        fingerprint:
+          type: string
+          minLength: 1
+          description: The approval fingerprint the human saw ("sha256:" + 64 lowercase hex). A mismatch is 409 fingerprint_mismatch and writes nothing.
+        expected_revision:
+          type: integer
+          minimum: 1
+          description: The approval revision the decision was taken against (optimistic concurrency, §27.3). A stale value is 409 revision_conflict.
+        reason:
+          type: string
+          maxLength: 1000
+          description: Optional note, recorded as the approval.decided payload comment. Over the limit is 422 comment_too_long.
+
+    ApprovalDecision:
+      type: object
+      required: [id, project_id, subject_type, subject_id, risk, status, revision, expires_at, fingerprint]
+      description: The approval as returned by the decision endpoint (§27.2). status is the row state after the decision; decided_by/decided_at are present exactly when the row is decided; run_id is present for a tool approval and absent for a gate. A decision never moves the Run (§27.2 item 3).
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        run_id:
+          type: string
+          description: Present for a tool approval (a gate may have no Run).
+        subject_type:
+          type: string
+          enum: [tool, gate, merge]
+        subject_id:
+          type: string
+        risk:
+          type: string
+          enum: [low, medium, high]
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired, invalidated]
+        revision:
+          type: integer
+          minimum: 1
+        decided_by:
+          type: string
+          description: The deciding principal ("<type>:<id>"), or "system:expiry" when the deadline passed. Present exactly when the row is decided.
+        decided_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        fingerprint:
+          type: string
+
+    ApprovalDecisionEnvelope:
+      type: object
+      required: [data, meta]
+      description: Success branch of the unified envelope for an approval decision (§27.3; meta carries command_id and the ETag header names the new revision).
+      properties:
+        data:
+          $ref: '#/components/schemas/ApprovalDecision'
         meta:
           $ref: '#/components/schemas/ApiMeta'
 

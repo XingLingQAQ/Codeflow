@@ -261,6 +261,7 @@ export interface OpenApiOperationMap {
   'post_api_v1_projects_by_pid_runs': { method: 'POST'; path: '/api/v1/projects/{pid}/runs' };
   'get_api_v1_projects_by_pid_runs_by_rid_events': { method: 'GET'; path: '/api/v1/projects/{pid}/runs/{rid}/events' };
   'get_api_v1_projects_by_pid_commands_by_command_id': { method: 'GET'; path: '/api/v1/projects/{pid}/commands/{command_id}' };
+  'post_api_v1_projects_by_pid_approvals_by_approval_id_decide': { method: 'POST'; path: '/api/v1/projects/{pid}/approvals/{approval_id}/decide' };
 }
 
 export interface Response {
@@ -2269,6 +2270,33 @@ export interface CommandEnvelope {
   meta: ApiMeta;
 }
 
+export interface ApprovalDecisionRequest {
+  approved: boolean;
+  fingerprint: string;
+  expected_revision?: number;
+  reason?: string;
+}
+
+export interface ApprovalDecision {
+  id: string;
+  project_id: string;
+  run_id?: string;
+  subject_type: 'tool' | 'gate' | 'merge';
+  subject_id: string;
+  risk: 'low' | 'medium' | 'high';
+  status: 'pending' | 'approved' | 'rejected' | 'expired' | 'invalidated';
+  revision: number;
+  decided_by?: string;
+  decided_at?: string;
+  expires_at: string;
+  fingerprint: string;
+}
+
+export interface ApprovalDecisionEnvelope {
+  data: ApprovalDecision;
+  meta: ApiMeta;
+}
+
 export interface StreamSubscribeFrame {
   type: 'subscribe';
   data: { resource_type: 'run' | 'project'; resource_id: string; after: number; client_request_id: string; };
@@ -2572,6 +2600,9 @@ export interface OpenApiSchemas {
   CommandStatus: CommandStatus;
   CommandResourceRef: CommandResourceRef;
   CommandEnvelope: CommandEnvelope;
+  ApprovalDecisionRequest: ApprovalDecisionRequest;
+  ApprovalDecision: ApprovalDecision;
+  ApprovalDecisionEnvelope: ApprovalDecisionEnvelope;
   StreamSubscribeFrame: StreamSubscribeFrame;
 }
 

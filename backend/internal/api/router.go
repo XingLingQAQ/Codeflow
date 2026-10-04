@@ -469,6 +469,10 @@ func (s *Server) setupRoutes() {
 			// Command reconciliation (plan §20.4/§27.3, T1.11.b): a client whose response
 			// was lost asks about the Idempotency-Key it generated before sending.
 			projects.GET("/:id/commands/:command_id", handlers.GetCommand)
+			// Approval decision (§27.3 frozen request, §28 T2.02.c): the human answer
+			// to a pending approval. approved:false is a decision (rejected), not an
+			// empty answer.
+			projects.POST("/:id/approvals/:approval_id/decide", handlers.DecideApproval)
 		}
 
 		// Plan routes
