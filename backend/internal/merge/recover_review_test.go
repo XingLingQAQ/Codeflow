@@ -11,6 +11,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/codeflow/backend/internal/run"
 )
 
 func TestRecoverRefusesAReplacedRoot(t *testing.T) {
@@ -46,5 +48,56 @@ func TestRecoverRefusesAReplacedRoot(t *testing.T) {
 	if opAfter.Fence != opBefore.Fence || opAfter.Revision != opBefore.Revision || opAfter.Status != opBefore.Status {
 		t.Fatalf("operation after the refusal = %s fence %d rev %d, want it untouched (%s fence %d rev %d)",
 			opAfter.Status, opAfter.Fence, opAfter.Revision, opBefore.Status, opBefore.Fence, opBefore.Revision)
+	}
+}
+
+// TestRecoverRollbackMarksARestoreWhoseMarkWasSwallowed: a rollback put a
+// written file's old bytes back and crashed before recording it, so the row
+// still says written over the pre-publish content. Finishing the rollback must
+// record the restore — a rolled_back operation whose journal still claims a
+// written file describes a tree that does not exist. Added by the main agent's
+// acceptance review of T1.09.c: dropping that mark survived the whole package.
+func TestRecoverRollbackMarksARestoreWhoseMarkWasSwallowed(t *testing.T) {
+	specs := []recoverFileSpec{
+		{rel: "mod.txt", kind: KindModify, old: "old mod", neu: "new mod"},
+		{rel: "sub/new.txt", kind: KindCreate, neu: "created"},
+		{rel: "gone.txt", kind: KindDelete, old: "bye"},
+	}
+	for _, status := range []string{StatusApplying, StatusRollingBack} {
+		t.Run(status, func(t *testing.T) {
+			f := newRecoverFixture(t, specs)
+			f.writeNew("mod.txt")
+			f.mark(1, FileStatePending, FileStateWritten)
+			if status == StatusRollingBack {
+				f.status(StatusApplying, StatusRollingBack)
+			}
+			// The restore reached the disk; its mark did not.
+			f.writeRaw("mod.txt", "old mod")
+
+			res, err := f.recover()
+			if err != nil {
+				t.Fatalf("Recover: %v (report %+v)", err, res)
+			}
+			if res.Outcome != RecoverOutcomeRolledBack {
+				t.Fatalf("outcome = %s, want rolled_back", res.Outcome)
+			}
+			if op := f.op(); op.Status != StatusRolledBack {
+				t.Fatalf("operation status = %s, want rolled_back", op.Status)
+			}
+			if n := countEvents(t, f.store, string(run.EventMergeCompleted)); n != 0 {
+				t.Fatalf("merge.completed events = %d, want 0", n)
+			}
+			f.assertTree("the target after the recovery")
+			f.assertUnlocked()
+
+			for _, row := range f.rows() {
+				if row.State == FileStateWritten {
+					t.Errorf("%s (seq %d) is still marked written after the rollback finished", row.Path, row.Seq)
+				}
+				if row.Path == "mod.txt" && row.State != FileStateRestored {
+					t.Errorf("mod.txt state = %s, want %s", row.State, FileStateRestored)
+				}
+			}
+		})
 	}
 }
