@@ -1,0 +1,192 @@
+openapi: 3.0.3
+info:
+  title: fixture
+  version: '1.0'
+paths:
+  /api/v1/workspace/force-sync:
+    post:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/projects:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectList'
+    post:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /api/v1/projects/{id}:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+    delete:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/workspace/list:
+    get:
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/workspace/write:
+    post:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/workspace/upload:
+    post:
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/workspace/files:
+    delete:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/workspace/files/{id}/download:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/v1/agents/{id}/logs/stream:
+    get:
+      responses:
+        '200':
+          description: server-sent events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /api/v1/agents/{id}/logs/raw:
+    get:
+      responses:
+        '200':
+          description: chunked log body, read through response.body.getReader()
+          content:
+            application/json:
+              schema:
+                type: string
+  /api/v1/exports/{id}:
+    get:
+      responses:
+        '200':
+          description: server-rendered archive
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /api/v1/unregistered/only-in-contract:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/memory/atomic/{id}:
+    delete:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/memory/atomic/search:
+    post:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  schemas:
+    Project:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          enum: [alpha, beta]
+        note:
+          type: string
+          nullable: true
+        owner:
+          oneOf:
+            - $ref: '#/components/schemas/Project'
+            - type: string
+    ProjectList:
+      type: object
+      required: [projects]
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        next_cursor:
+          type: string
+          nullable: true
